@@ -1,0 +1,290 @@
+;; sqlite/db.tur -- database lifecycle and high-level query operations.
+;;
+;; Result values returned by public functions are compatible with stdlib/result.tur:
+;;   ok?  / ok-val  / err-val from (import result :refer [ok? ok-val err-val])
+;;
+;; db-query rows are alternating name/value alist cons lists.
+;; Use row-get from sqlite/row to access columns by name.
+
+(defmodule sqlite/db
+  (export db-open db-close db-exec db-query db-prepare)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;;; __ok? -- return true if a result is ok.
+(defn __ok? [r :ptr<void>] :bool
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res != NULL && res->is_ok;
+  ```)
+
+;;; __ok-val -- extract the ok value from a result.
+(defn __ok-val [r :ptr<void>] :int
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: cons list helpers (layout matches stdlib/list.tur)
+;; -------------------------------------------------------------------------
+
+;;; __nil -- return the empty list sentinel (0).
+(defn __nil [] :int
+  ```c
+  return 0;
+  ```)
+
+;;; __cons -- prepend a value to a cons list; returns new cell as :int.
+(defn __cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
+  cell->value = v; cell->next = n;
+  return (int64_t)(intptr_t)cell;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: raw SQLite3 C wrappers
+;; -------------------------------------------------------------------------
+
+;;; __db-open-raw -- open a database; returns sqlite3* as :int (0 on failure).
+(defn __db-open-raw [path :cstr] :int
+  ```c
+  #include <sqlite3.h>
+  sqlite3 *db = NULL;
+  if (sqlite3_open((const char *)path, &db) != SQLITE_OK) {
+    if (db) sqlite3_close(db);
+    return 0;
+  }
+  return (int64_t)(intptr_t)db;
+  ```)
+
+;;; __db-close-raw -- close a SQLite3 database handle.
+(defn __db-close-raw [db :int] :void
+  ```c
+  #include <sqlite3.h>
+  sqlite3_close((sqlite3 *)(intptr_t)db);
+  ```)
+
+;;; __db-exec-raw -- execute SQL; returns SQLITE error code (0 = SQLITE_OK).
+(defn __db-exec-raw [db :int sql :cstr] :int
+  ```c
+  #include <sqlite3.h>
+  return (int64_t)sqlite3_exec((sqlite3 *)(intptr_t)db,
+                               (const char *)sql, NULL, NULL, NULL);
+  ```)
+
+;;; __db-prepare-raw -- prepare SQL; returns sqlite3_stmt* as :int (0 on failure).
+(defn __db-prepare-raw [db :int sql :cstr] :int
+  ```c
+  #include <sqlite3.h>
+  sqlite3_stmt *stmt = NULL;
+  if (sqlite3_prepare_v2((sqlite3 *)(intptr_t)db,
+                         (const char *)sql, -1, &stmt, NULL) != SQLITE_OK)
+    return 0;
+  return (int64_t)(intptr_t)stmt;
+  ```)
+
+;;; __ncols -- return column count for a prepared statement.
+(defn __ncols [stmt :int] :int
+  ```c
+  #include <sqlite3.h>
+  return (int64_t)sqlite3_column_count((sqlite3_stmt *)(intptr_t)stmt);
+  ```)
+
+;;; __colname-dup -- return a heap-copied column name at index i as :int.
+(defn __colname-dup [stmt :int i :int] :int
+  ```c
+  #include <sqlite3.h>
+  #include <string.h>
+  const char *n = sqlite3_column_name((sqlite3_stmt *)(intptr_t)stmt, (int)i);
+  if (!n) return (int64_t)(intptr_t)"";
+  size_t len = strlen(n);
+  char *copy = malloc(len + 1);
+  memcpy(copy, n, len + 1);
+  return (int64_t)(intptr_t)copy;
+  ```)
+
+;;; __coltext-dup -- return a heap-copied column text value at index i as :int.
+(defn __coltext-dup [stmt :int i :int] :int
+  ```c
+  #include <sqlite3.h>
+  #include <string.h>
+  const char *v = (const char *)sqlite3_column_text(
+                      (sqlite3_stmt *)(intptr_t)stmt, (int)i);
+  if (!v) v = "";
+  size_t len = strlen(v);
+  char *copy = malloc(len + 1);
+  memcpy(copy, v, len + 1);
+  return (int64_t)(intptr_t)copy;
+  ```)
+
+;;; __step-raw -- step a statement; 1=row available, 0=done, -1=error.
+(defn __step-raw [stmt :int] :int
+  ```c
+  #include <sqlite3.h>
+  int rc = sqlite3_step((sqlite3_stmt *)(intptr_t)stmt);
+  if (rc == SQLITE_ROW)  return 1;
+  if (rc == SQLITE_DONE) return 0;
+  return -1;
+  ```)
+
+;;; __finalize-raw -- finalize a prepared statement.
+(defn __finalize-raw [stmt :int] :void
+  ```c
+  #include <sqlite3.h>
+  sqlite3_finalize((sqlite3_stmt *)(intptr_t)stmt);
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: row building
+;; -------------------------------------------------------------------------
+
+;; Build a single row as an alternating name/value alist in forward column
+;; order by counting down from i to 0, prepending each pair so column 0
+;; ends up at the head of the list.
+;;; __build-row -- build an alist from the current statement row position.
+(defn __build-row [stmt :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (__build-row stmt (- i 1)
+      (__cons (__colname-dup stmt i)
+              (__cons (__coltext-dup stmt i) acc)))))
+
+;; Step through remaining rows, prepending each to acc; finalize when done.
+;; Rows are returned in reverse SQLite output order (last row at list head).
+;;; __collect-rows -- collect all result rows from stmt into a cons list.
+(defn __collect-rows [stmt :int ncols :int acc :int] :int
+  (let [rc (__step-raw stmt)]
+    (if (= rc 1)
+      (__collect-rows stmt ncols
+        (__cons (__build-row stmt (- ncols 1) (__nil)) acc))
+      (do (__finalize-raw stmt) acc))))
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; db-open -- open a SQLite3 database file, creating it if it does not exist.
+;;;
+;;; Parameters:
+;;;   path -- filesystem path to the database file
+;;;
+;;; Returns:
+;;;   (ok db-handle) on success; (err 0) on failure.
+;;;   Use sqlite-errmsg from sqlite/error on the handle for details.
+;;;   Inspect with ok? / ok-val / err-val from stdlib/result.
+;;;
+;;; Example:
+;;;   (let [r (db-open "app.db")]
+;;;     (if (ok? r) (let [db (ok-val r)] ...) (println "open failed")))
+;;;
+;;; Since: P2
+(defn db-open [path :cstr] :ptr<void>
+  (let [raw (__db-open-raw path)]
+    (if (!= raw 0) (__ok raw) (__err 0))))
+
+;;; db-close -- close a database handle opened with db-open.
+;;;
+;;; Parameters:
+;;;   db -- database handle (ok-val from db-open)
+;;;
+;;; Returns:
+;;;   (ok 0) always.
+;;;
+;;; Example:
+;;;   (db-close db)
+;;;
+;;; Since: P2
+(defn db-close [db :int] :ptr<void>
+  (do (__db-close-raw db) (__ok 0)))
+
+;;; db-exec -- execute a SQL statement that returns no rows.
+;;;
+;;; Parameters:
+;;;   db  -- database handle
+;;;   sql -- DDL or DML SQL string
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;   Use sqlite-errmsg from sqlite/error on db for the error string.
+;;;
+;;; Example:
+;;;   (db-exec db "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)")
+;;;
+;;; Since: P2
+(defn db-exec [db :int sql :cstr] :ptr<void>
+  (let [rc (__db-exec-raw db sql)]
+    (if (= rc 0) (__ok 0) (__err 0))))
+
+;;; db-prepare -- compile a SQL string into a reusable prepared statement.
+;;;
+;;; Parameters:
+;;;   db  -- database handle
+;;;   sql -- SQL string with optional ?-placeholders for parameters
+;;;
+;;; Returns:
+;;;   (ok stmt-handle) on success; (err 0) on failure.
+;;;   Finalize with stmt-finalize from sqlite/stmt when done.
+;;;
+;;; Example:
+;;;   (let [r (db-prepare db "INSERT INTO users (name) VALUES (?)")]
+;;;     (if (ok? r)
+;;;       (let [stmt (ok-val r)]
+;;;         (stmt-bind-text stmt 1 "Alice")
+;;;         (stmt-step stmt)
+;;;         (stmt-finalize stmt))
+;;;       (println "prepare failed")))
+;;;
+;;; Since: P2
+(defn db-prepare [db :int sql :cstr] :ptr<void>
+  (let [raw (__db-prepare-raw db sql)]
+    (if (!= raw 0) (__ok raw) (__err 0))))
+
+;;; db-query -- execute a SELECT and collect all rows as a list of alists.
+;;;
+;;; Parameters:
+;;;   db  -- database handle
+;;;   sql -- SELECT SQL string (no ?-placeholders; use db-prepare for parameters)
+;;;
+;;; Returns:
+;;;   (ok row-list) on success; (err 0) on prepare failure.
+;;;   row-list is a cons list (nil if no rows).
+;;;   Each row is an alternating name/value alist; use row-get from sqlite/row.
+;;;   Rows are in reverse SQLite output order (last fetched row at list head).
+;;;
+;;; Example:
+;;;   (let [r (db-query db "SELECT id, name FROM users")]
+;;;     (if (ok? r)
+;;;       (let [rows (ok-val r)]
+;;;         (for [row rows] (println (row-get row "name"))))
+;;;       (println "query failed")))
+;;;
+;;; Since: P2
+(defn db-query [db :int sql :cstr] :ptr<void>
+  (let [pr (db-prepare db sql)]
+    (if (__ok? pr)
+      (let [stmt (__ok-val pr)]
+        (__ok (__collect-rows stmt (__ncols stmt) (__nil))))
+      pr)))
+
+) ;; end defmodule sqlite/db
