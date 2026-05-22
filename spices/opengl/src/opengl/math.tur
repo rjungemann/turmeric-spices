@@ -1,0 +1,313 @@
+;; opengl/math.tur -- column-major mat4 helpers for the OpenGL pipeline.
+;;
+;; All mat4 values are heap-allocated arrays of 16 floats in column-major order,
+;; returned as opaque :int handles.  Pass them to set-uniform-mat4 via mat4-ptr.
+;;
+;; Column-major layout (OpenGL convention):
+;;   [m0 m1 m2 m3]  [m4 m5 m6 m7]  [m8 m9 m10 m11]  [m12 m13 m14 m15]
+;;   ^ col 0          ^ col 1         ^ col 2            ^ col 3
+;;
+;; mat[col*4 + row]  (row varies fastest within a column)
+
+(defmodule opengl/math
+  (export mat4-identity mat4-perspective mat4-look-at
+          mat4-translate mat4-rotate-x mat4-rotate-y mat4-rotate-z
+          mat4-mul mat4-ptr normal-mat4)
+
+;;; mat4-identity -- return a 4x4 identity matrix.
+;;;
+;;; Returns:
+;;;   Opaque :int handle to a heap-allocated 16-float identity matrix.
+;;;
+;;; Example:
+;;;   (mat4-identity)  ; => :int mat4 handle
+;;;
+;;; Since: v0.1.0
+(defn mat4-identity [] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  float *m = calloc(16, sizeof(float));
+  m[0] = 1.0f; m[5] = 1.0f; m[10] = 1.0f; m[15] = 1.0f;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-perspective -- build a perspective projection matrix.
+;;;
+;;; Parameters:
+;;;   fovy   -- vertical field-of-view in radians (e.g. 0.785 = 45 degrees)
+;;;   aspect -- viewport width / height ratio
+;;;   near   -- near clip plane distance (positive)
+;;;   far    -- far clip plane distance (positive, > near)
+;;;
+;;; Returns:
+;;;   Opaque :int mat4 handle.
+;;;
+;;; Example:
+;;;   (mat4-perspective 0.785 (/ 800.0 600.0) 0.1 100.0)
+;;;
+;;; Since: v0.1.0
+(defn mat4-perspective [fovy :float aspect :float near :float far :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  float *m = calloc(16, sizeof(float));
+  float tan_half = tanf((float)fovy * 0.5f);
+  float fn = (float)far - (float)near;
+  m[0]  =  1.0f / ((float)aspect * tan_half);
+  m[5]  =  1.0f / tan_half;
+  m[10] = -((float)far + (float)near) / fn;
+  m[11] = -1.0f;
+  m[14] = -2.0f * (float)far * (float)near / fn;
+  /* m[15] stays 0 (not identity for projection) */
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-look-at -- build a view matrix using eye/center/up vectors.
+;;;
+;;; Parameters:
+;;;   ex ey ez -- eye position
+;;;   cx cy cz -- look-at target position
+;;;   ux uy uz -- world up vector (usually 0 1 0)
+;;;
+;;; Returns:
+;;;   Opaque :int mat4 handle.
+;;;
+;;; Example:
+;;;   (mat4-look-at 0.0 0.0 3.0  0.0 0.0 0.0  0.0 1.0 0.0)
+;;;
+;;; Since: v0.1.0
+(defn mat4-look-at [ex :float ey :float ez :float
+                     cx :float cy :float cz :float
+                     ux :float uy :float uz :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  /* forward = normalize(center - eye) */
+  float fx = (float)cx - (float)ex;
+  float fy = (float)cy - (float)ey;
+  float fz = (float)cz - (float)ez;
+  float flen = sqrtf(fx*fx + fy*fy + fz*fz);
+  fx /= flen; fy /= flen; fz /= flen;
+  /* right = normalize(forward x up) */
+  float rx = fy*(float)uz - fz*(float)uy;
+  float ry = fz*(float)ux - fx*(float)uz;
+  float rz = fx*(float)uy - fy*(float)ux;
+  float rlen = sqrtf(rx*rx + ry*ry + rz*rz);
+  rx /= rlen; ry /= rlen; rz /= rlen;
+  /* recomputed up = right x forward */
+  float vx = ry*fz - rz*fy;
+  float vy = rz*fx - rx*fz;
+  float vz = rx*fy - ry*fx;
+  float *m = calloc(16, sizeof(float));
+  /* col 0 */
+  m[0] = rx; m[1] = vx; m[2] = -fx; m[3] = 0.0f;
+  /* col 1 */
+  m[4] = ry; m[5] = vy; m[6] = -fy; m[7] = 0.0f;
+  /* col 2 */
+  m[8] = rz; m[9] = vz; m[10] = -fz; m[11] = 0.0f;
+  /* col 3 (translation) */
+  m[12] = -(rx*(float)ex + ry*(float)ey + rz*(float)ez);
+  m[13] = -(vx*(float)ex + vy*(float)ey + vz*(float)ez);
+  m[14] =   fx*(float)ex + fy*(float)ey + fz*(float)ez;
+  m[15] = 1.0f;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-translate -- build a translation matrix.
+;;;
+;;; Parameters:
+;;;   tx ty tz -- translation vector
+;;;
+;;; Returns:
+;;;   Opaque :int mat4 handle.
+;;;
+;;; Example:
+;;;   (mat4-translate 0.0 0.0 -5.0)
+;;;
+;;; Since: v0.1.0
+(defn mat4-translate [tx :float ty :float tz :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  float *m = calloc(16, sizeof(float));
+  m[0] = 1.0f; m[5] = 1.0f; m[10] = 1.0f; m[15] = 1.0f;
+  m[12] = (float)tx;
+  m[13] = (float)ty;
+  m[14] = (float)tz;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-rotate-x -- build a rotation matrix around the X axis.
+;;;
+;;; Parameters:
+;;;   angle -- rotation angle in radians
+;;;
+;;; Returns:
+;;;   Opaque :int mat4 handle.
+;;;
+;;; Since: v0.1.0
+(defn mat4-rotate-x [angle :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  float c = cosf((float)angle);
+  float s = sinf((float)angle);
+  float *m = calloc(16, sizeof(float));
+  m[0] = 1.0f;
+  m[5] = c;   m[6] = -s;
+  m[9] = s;   m[10] = c;
+  m[15] = 1.0f;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-rotate-y -- build a rotation matrix around the Y axis.
+;;;
+;;; Parameters:
+;;;   angle -- rotation angle in radians
+;;;
+;;; Returns:
+;;;   Opaque :int mat4 handle.
+;;;
+;;; Example:
+;;;   (mat4-rotate-y (ref-get angle))
+;;;
+;;; Since: v0.1.0
+(defn mat4-rotate-y [angle :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  float c = cosf((float)angle);
+  float s = sinf((float)angle);
+  float *m = calloc(16, sizeof(float));
+  m[0] = c;   m[2] = s;
+  m[5] = 1.0f;
+  m[8] = -s;  m[10] = c;
+  m[15] = 1.0f;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-rotate-z -- build a rotation matrix around the Z axis.
+;;;
+;;; Parameters:
+;;;   angle -- rotation angle in radians
+;;;
+;;; Since: v0.1.0
+(defn mat4-rotate-z [angle :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  float c = cosf((float)angle);
+  float s = sinf((float)angle);
+  float *m = calloc(16, sizeof(float));
+  m[0] = c;   m[1] = -s;
+  m[4] = s;   m[5] = c;
+  m[10] = 1.0f;
+  m[15] = 1.0f;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-mul -- multiply two mat4 matrices (result = a * b).
+;;;
+;;; Parameters:
+;;;   a -- left mat4 handle
+;;;   b -- right mat4 handle
+;;;
+;;; Returns:
+;;;   New heap-allocated mat4 handle with the product.
+;;;
+;;; Example:
+;;;   (mat4-mul projection (mat4-mul view model))
+;;;
+;;; Since: v0.1.0
+(defn mat4-mul [a :int b :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const float *ma = (const float*)(intptr_t)a;
+  const float *mb = (const float*)(intptr_t)b;
+  float *out = calloc(16, sizeof(float));
+  for (int col = 0; col < 4; col++) {
+    for (int row = 0; row < 4; row++) {
+      float sum = 0.0f;
+      for (int k = 0; k < 4; k++)
+        sum += ma[k * 4 + row] * mb[col * 4 + k];
+      out[col * 4 + row] = sum;
+    }
+  }
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;;; mat4-ptr -- return the raw float* pointer to a mat4 for uniform upload.
+;;;
+;;; Parameters:
+;;;   mat -- mat4 handle from any mat4-* function
+;;;
+;;; Returns:
+;;;   Opaque :int raw float pointer (pass directly to set-uniform-mat4).
+;;;
+;;; Example:
+;;;   (set-uniform-mat4 prog "model" (mat4-ptr model))
+;;;
+;;; Since: v0.1.0
+(defn mat4-ptr [mat :int] :int mat)
+
+;;; normal-mat4 -- compute the normal matrix from a model matrix.
+;;;
+;;; The normal matrix is the transpose of the inverse of the upper-left
+;;; 3x3 of the model matrix, then extended back to a 4x4.  For pure
+;;; rotation matrices this equals the model matrix.
+;;;
+;;; Parameters:
+;;;   model -- model mat4 handle
+;;;
+;;; Returns:
+;;;   New heap-allocated mat4 handle for use as the normal matrix uniform.
+;;;
+;;; Example:
+;;;   (set-uniform-mat4 prog "normalMatrix" (mat4-ptr (normal-mat4 model)))
+;;;
+;;; Since: v0.1.0
+(defn normal-mat4 [model :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  const float *m = (const float*)(intptr_t)model;
+  /* Extract upper-left 3x3 (column-major) */
+  float a00=m[0], a10=m[1], a20=m[2];
+  float a01=m[4], a11=m[5], a21=m[6];
+  float a02=m[8], a12=m[9], a22=m[10];
+  /* Compute cofactor matrix (adjugate) of 3x3 */
+  float c00 =  a11*a22 - a12*a21;
+  float c10 = -(a10*a22 - a12*a20);
+  float c20 =  a10*a21 - a11*a20;
+  float c01 = -(a01*a22 - a02*a21);
+  float c11 =  a00*a22 - a02*a20;
+  float c21 = -(a00*a21 - a01*a20);
+  float c02 =  a01*a12 - a02*a11;
+  float c12 = -(a00*a12 - a02*a10);
+  float c22 =  a00*a11 - a01*a10;
+  float det = a00*c00 + a01*c10 + a02*c20;
+  /* Build 4x4 normal matrix as transpose(cofactor/det) = adjugate^T / det */
+  float *out = calloc(16, sizeof(float));
+  if (fabsf(det) > 1e-8f) {
+    float inv_det = 1.0f / det;
+    /* Transpose of cofactor = normal mat 3x3 */
+    out[0]  = c00 * inv_det; out[1]  = c01 * inv_det; out[2]  = c02 * inv_det;
+    out[4]  = c10 * inv_det; out[5]  = c11 * inv_det; out[6]  = c12 * inv_det;
+    out[8]  = c20 * inv_det; out[9]  = c21 * inv_det; out[10] = c22 * inv_det;
+  } else {
+    /* Degenerate: fall back to identity */
+    out[0] = 1.0f; out[5] = 1.0f; out[10] = 1.0f;
+  }
+  out[15] = 1.0f;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+) ;; end defmodule opengl/math

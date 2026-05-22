@@ -1,0 +1,188 @@
+;; opengl/types.tur -- GL enum keyword converters.
+;;
+;; All public modules import from here rather than hard-coding GL constants,
+;; so adding a new keyword variant only requires one change.
+
+(defmodule opengl/types
+  (export draw-usage->gl shader-stage->gl draw-mode->gl index-type->gl
+          wrap-mode->gl filter-mode->gl attrib-type->gl gl-cap->gl)
+
+;;; draw-usage->gl -- map a draw-usage keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   usage -- :static-draw | :dynamic-draw | :stream-draw
+;;;
+;;; Returns:
+;;;   The GL_* constant as :int.
+;;;
+;;; Example:
+;;;   (draw-usage->gl ":static-draw")   ; => GL_STATIC_DRAW (35044)
+;;;
+;;; Since: v0.1.0
+(defn draw-usage->gl [usage :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)usage;
+  if (!strcmp(s, ":static-draw"))  return GL_STATIC_DRAW;
+  if (!strcmp(s, ":dynamic-draw")) return GL_DYNAMIC_DRAW;
+  if (!strcmp(s, ":stream-draw"))  return GL_STREAM_DRAW;
+  fprintf(stderr, "opengl: unknown draw-usage '%s'\n", s);
+  return GL_STATIC_DRAW;
+  ```)
+
+;;; shader-stage->gl -- map a shader-stage keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   stage -- :vertex | :fragment | :geometry | :compute
+;;;
+;;; Returns:
+;;;   The GL_*_SHADER constant as :int.
+;;;
+;;; Example:
+;;;   (shader-stage->gl ":vertex")    ; => GL_VERTEX_SHADER
+;;;   (shader-stage->gl ":fragment")  ; => GL_FRAGMENT_SHADER
+;;;
+;;; Since: v0.1.0
+(defn shader-stage->gl [stage :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)stage;
+  if (!strcmp(s, ":vertex"))   return GL_VERTEX_SHADER;
+  if (!strcmp(s, ":fragment")) return GL_FRAGMENT_SHADER;
+  if (!strcmp(s, ":geometry")) return GL_GEOMETRY_SHADER;
+  if (!strcmp(s, ":compute"))  return GL_COMPUTE_SHADER;
+  fprintf(stderr, "opengl: unknown shader-stage '%s'\n", s);
+  return GL_VERTEX_SHADER;
+  ```)
+
+;;; draw-mode->gl -- map a draw-mode keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   mode -- :triangles | :lines | :points | :triangle-strip |
+;;;           :triangle-fan | :line-strip | :line-loop
+;;;
+;;; Returns:
+;;;   The GL_* draw mode constant.
+;;;
+;;; Since: v0.1.0
+(defn draw-mode->gl [mode :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)mode;
+  if (!strcmp(s, ":triangles"))      return GL_TRIANGLES;
+  if (!strcmp(s, ":lines"))          return GL_LINES;
+  if (!strcmp(s, ":points"))         return GL_POINTS;
+  if (!strcmp(s, ":triangle-strip")) return GL_TRIANGLE_STRIP;
+  if (!strcmp(s, ":triangle-fan"))   return GL_TRIANGLE_FAN;
+  if (!strcmp(s, ":line-strip"))     return GL_LINE_STRIP;
+  if (!strcmp(s, ":line-loop"))      return GL_LINE_LOOP;
+  fprintf(stderr, "opengl: unknown draw-mode '%s'\n", s);
+  return GL_TRIANGLES;
+  ```)
+
+;;; index-type->gl -- map an index-type keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   idx-type -- :unsigned-int | :unsigned-short | :unsigned-byte
+;;;
+;;; Returns:
+;;;   The GL_UNSIGNED_* constant.
+;;;
+;;; Since: v0.1.0
+(defn index-type->gl [idx-type :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)idx_type;
+  if (!strcmp(s, ":unsigned-int"))   return GL_UNSIGNED_INT;
+  if (!strcmp(s, ":unsigned-short")) return GL_UNSIGNED_SHORT;
+  if (!strcmp(s, ":unsigned-byte"))  return GL_UNSIGNED_BYTE;
+  fprintf(stderr, "opengl: unknown index-type '%s'\n", s);
+  return GL_UNSIGNED_INT;
+  ```)
+
+;;; wrap-mode->gl -- map a texture wrap-mode keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   mode -- :repeat | :clamp-to-edge | :mirrored-repeat | :clamp-to-border
+;;;
+;;; Since: v0.1.0
+(defn wrap-mode->gl [mode :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)mode;
+  if (!strcmp(s, ":repeat"))            return GL_REPEAT;
+  if (!strcmp(s, ":clamp-to-edge"))     return GL_CLAMP_TO_EDGE;
+  if (!strcmp(s, ":mirrored-repeat"))   return GL_MIRRORED_REPEAT;
+  if (!strcmp(s, ":clamp-to-border"))   return GL_CLAMP_TO_BORDER;
+  fprintf(stderr, "opengl: unknown wrap-mode '%s'\n", s);
+  return GL_REPEAT;
+  ```)
+
+;;; filter-mode->gl -- map a texture filter-mode keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   mode -- :nearest | :linear | :nearest-mipmap-nearest |
+;;;           :linear-mipmap-nearest | :nearest-mipmap-linear |
+;;;           :linear-mipmap-linear
+;;;
+;;; Since: v0.1.0
+(defn filter-mode->gl [mode :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)mode;
+  if (!strcmp(s, ":nearest"))                 return GL_NEAREST;
+  if (!strcmp(s, ":linear"))                  return GL_LINEAR;
+  if (!strcmp(s, ":nearest-mipmap-nearest"))  return GL_NEAREST_MIPMAP_NEAREST;
+  if (!strcmp(s, ":linear-mipmap-nearest"))   return GL_LINEAR_MIPMAP_NEAREST;
+  if (!strcmp(s, ":nearest-mipmap-linear"))   return GL_NEAREST_MIPMAP_LINEAR;
+  if (!strcmp(s, ":linear-mipmap-linear"))    return GL_LINEAR_MIPMAP_LINEAR;
+  fprintf(stderr, "opengl: unknown filter-mode '%s'\n", s);
+  return GL_LINEAR;
+  ```)
+
+;;; attrib-type->gl -- map a vertex attribute type keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   type -- :float | :int | :uint | :byte | :ubyte | :short | :ushort
+;;;
+;;; Since: v0.1.0
+(defn attrib-type->gl [type :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)type;
+  if (!strcmp(s, ":float"))  return GL_FLOAT;
+  if (!strcmp(s, ":int"))    return GL_INT;
+  if (!strcmp(s, ":uint"))   return GL_UNSIGNED_INT;
+  if (!strcmp(s, ":byte"))   return GL_BYTE;
+  if (!strcmp(s, ":ubyte"))  return GL_UNSIGNED_BYTE;
+  if (!strcmp(s, ":short"))  return GL_SHORT;
+  if (!strcmp(s, ":ushort")) return GL_UNSIGNED_SHORT;
+  if (!strcmp(s, ":double")) return GL_DOUBLE;
+  fprintf(stderr, "opengl: unknown attrib-type '%s'\n", s);
+  return GL_FLOAT;
+  ```)
+
+;;; gl-cap->gl -- map a GL capability keyword to the GL enum integer.
+;;;
+;;; Parameters:
+;;;   cap -- :depth-test | :blend | :cull-face | :stencil-test |
+;;;          :scissor-test | :multisample | :line-smooth | :polygon-smooth
+;;;
+;;; Since: v0.1.0
+(defn gl-cap->gl [cap :cstr] :int
+  ```c
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)cap;
+  if (!strcmp(s, ":depth-test"))    return GL_DEPTH_TEST;
+  if (!strcmp(s, ":blend"))         return GL_BLEND;
+  if (!strcmp(s, ":cull-face"))     return GL_CULL_FACE;
+  if (!strcmp(s, ":stencil-test"))  return GL_STENCIL_TEST;
+  if (!strcmp(s, ":scissor-test"))  return GL_SCISSOR_TEST;
+  if (!strcmp(s, ":multisample"))   return GL_MULTISAMPLE;
+  if (!strcmp(s, ":line-smooth"))   return GL_LINE_SMOOTH;
+  if (!strcmp(s, ":polygon-smooth"))return GL_POLYGON_SMOOTH;
+  fprintf(stderr, "opengl: unknown gl-cap '%s'\n", s);
+  return GL_DEPTH_TEST;
+  ```)
+
+) ;; end defmodule opengl/types

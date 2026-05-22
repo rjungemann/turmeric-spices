@@ -1,0 +1,141 @@
+;; opengl/draw.tur -- draw call dispatch and GL state toggles.
+
+(defmodule opengl/draw
+  (export draw-arrays draw-elements enable disable depth-test blending)
+
+;;; draw-arrays -- render primitives from currently-bound VAO vertex data.
+;;;
+;;; Parameters:
+;;;   mode  -- primitive type keyword: :triangles | :lines | :points |
+;;;            :triangle-strip | :triangle-fan | :line-strip | :line-loop
+;;;   first -- index of the first vertex to render
+;;;   count -- number of vertices to render
+;;;
+;;; Example:
+;;;   (draw-arrays ":triangles" 0 3)   ; render one triangle
+;;;
+;;; Since: v0.1.0
+(defn draw-arrays [mode :cstr first :int count :int] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *m = (const char*)(intptr_t)mode;
+  GLenum gl_mode;
+  if (!strcmp(m, ":lines"))          gl_mode = GL_LINES;
+  else if (!strcmp(m, ":points"))    gl_mode = GL_POINTS;
+  else if (!strcmp(m, ":triangle-strip")) gl_mode = GL_TRIANGLE_STRIP;
+  else if (!strcmp(m, ":triangle-fan"))   gl_mode = GL_TRIANGLE_FAN;
+  else if (!strcmp(m, ":line-strip"))     gl_mode = GL_LINE_STRIP;
+  else if (!strcmp(m, ":line-loop"))      gl_mode = GL_LINE_LOOP;
+  else gl_mode = GL_TRIANGLES;
+  glDrawArrays(gl_mode, (GLint)first, (GLsizei)count);
+  ```)
+
+;;; draw-elements -- render indexed primitives from the bound VAO and EBO.
+;;;
+;;; Parameters:
+;;;   mode      -- primitive type keyword (same as draw-arrays)
+;;;   count     -- number of indices to render
+;;;   idx-type  -- index element type keyword:
+;;;                :unsigned-int | :unsigned-short | :unsigned-byte
+;;;
+;;; Example:
+;;;   (draw-elements ":triangles" 36 ":unsigned-int")   ; cube (12 tris)
+;;;
+;;; Since: v0.1.0
+(defn draw-elements [mode :cstr count :int idx-type :cstr] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *m  = (const char*)(intptr_t)mode;
+  const char *it = (const char*)(intptr_t)idx_type;
+  GLenum gl_mode;
+  if (!strcmp(m, ":lines"))               gl_mode = GL_LINES;
+  else if (!strcmp(m, ":points"))         gl_mode = GL_POINTS;
+  else if (!strcmp(m, ":triangle-strip")) gl_mode = GL_TRIANGLE_STRIP;
+  else if (!strcmp(m, ":triangle-fan"))   gl_mode = GL_TRIANGLE_FAN;
+  else if (!strcmp(m, ":line-strip"))     gl_mode = GL_LINE_STRIP;
+  else                                    gl_mode = GL_TRIANGLES;
+  GLenum gl_idx;
+  if (!strcmp(it, ":unsigned-short"))    gl_idx = GL_UNSIGNED_SHORT;
+  else if (!strcmp(it, ":unsigned-byte"))gl_idx = GL_UNSIGNED_BYTE;
+  else                                   gl_idx = GL_UNSIGNED_INT;
+  glDrawElements(gl_mode, (GLsizei)count, gl_idx, NULL);
+  ```)
+
+;;; enable -- enable a GL server-side capability.
+;;;
+;;; Parameters:
+;;;   cap -- capability keyword:
+;;;          :depth-test | :blend | :cull-face | :stencil-test |
+;;;          :scissor-test | :multisample
+;;;
+;;; Example:
+;;;   (enable ":depth-test")
+;;;
+;;; Since: v0.1.0
+(defn enable [cap :cstr] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)cap;
+  GLenum c;
+  if (!strcmp(s, ":blend"))          c = GL_BLEND;
+  else if (!strcmp(s, ":cull-face")) c = GL_CULL_FACE;
+  else if (!strcmp(s, ":stencil-test"))  c = GL_STENCIL_TEST;
+  else if (!strcmp(s, ":scissor-test"))  c = GL_SCISSOR_TEST;
+  else if (!strcmp(s, ":multisample"))   c = GL_MULTISAMPLE;
+  else                               c = GL_DEPTH_TEST;
+  glEnable(c);
+  ```)
+
+;;; disable -- disable a GL server-side capability.
+;;;
+;;; Parameters:
+;;;   cap -- capability keyword (same as enable)
+;;;
+;;; Since: v0.1.0
+(defn disable [cap :cstr] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *s = (const char*)(intptr_t)cap;
+  GLenum c;
+  if (!strcmp(s, ":blend"))          c = GL_BLEND;
+  else if (!strcmp(s, ":cull-face")) c = GL_CULL_FACE;
+  else if (!strcmp(s, ":stencil-test"))  c = GL_STENCIL_TEST;
+  else if (!strcmp(s, ":scissor-test"))  c = GL_SCISSOR_TEST;
+  else if (!strcmp(s, ":multisample"))   c = GL_MULTISAMPLE;
+  else                               c = GL_DEPTH_TEST;
+  glDisable(c);
+  ```)
+
+;;; depth-test -- enable depth testing (GL_DEPTH_TEST with GL_LESS).
+;;;
+;;; Call once after window creation for any 3D scene.
+;;;
+;;; Example:
+;;;   (depth-test)
+;;;
+;;; Since: v0.1.0
+(defn depth-test [] :void
+  ```c
+  #include <glad/gl.h>
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  ```)
+
+;;; blending -- enable standard alpha blending (src-alpha / one-minus-src-alpha).
+;;;
+;;; Example:
+;;;   (blending)
+;;;
+;;; Since: v0.1.0
+(defn blending [] :void
+  ```c
+  #include <glad/gl.h>
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  ```)
+
+) ;; end defmodule opengl/draw

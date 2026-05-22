@@ -1,0 +1,163 @@
+;; c-dsl/types.tur -- Turmeric type keyword to C type string mapping.
+
+(defmodule c-dsl/types
+  (export c-type c-ptr-type c-arr-type c-fn-type c-const-type c-volatile-type)
+
+  (import c-dsl/codegen :refer [c-cat2 c-cat3 c-join c-int->str])
+
+;;; c-type -- map a Turmeric type keyword string to a C99 type string.
+;;;
+;;; Parameters:
+;;;   t -- type keyword (e.g. ":int", ":float", ":cstr", ":void")
+;;;
+;;; Returns:
+;;;   The corresponding C type string.  Unknown keywords with a leading
+;;;   colon have the colon stripped; others are returned as-is.
+;;;
+;;; Example:
+;;;   (c-type ":int")    ; => "int32_t"
+;;;   (c-type ":float")  ; => "float"
+;;;   (c-type ":cstr")   ; => "char*"
+;;;   (c-type ":void")   ; => "void"
+;;;
+;;; Since: P1
+(defn c-type [t :cstr] :cstr
+  ```c
+  #include <string.h>
+  const char *s = (const char*)(intptr_t)t;
+  if (!strcmp(s, ":void"))                             return (int64_t)(intptr_t)"void";
+  if (!strcmp(s, ":bool") || !strcmp(s, ":cbool"))     return (int64_t)(intptr_t)"bool";
+  if (!strcmp(s, ":int8"))                             return (int64_t)(intptr_t)"int8_t";
+  if (!strcmp(s, ":uint8"))                            return (int64_t)(intptr_t)"uint8_t";
+  if (!strcmp(s, ":int16"))                            return (int64_t)(intptr_t)"int16_t";
+  if (!strcmp(s, ":uint16"))                           return (int64_t)(intptr_t)"uint16_t";
+  if (!strcmp(s, ":int") || !strcmp(s, ":int32"))      return (int64_t)(intptr_t)"int32_t";
+  if (!strcmp(s, ":uint") || !strcmp(s, ":uint32"))    return (int64_t)(intptr_t)"uint32_t";
+  if (!strcmp(s, ":int64"))                            return (int64_t)(intptr_t)"int64_t";
+  if (!strcmp(s, ":uint64"))                           return (int64_t)(intptr_t)"uint64_t";
+  if (!strcmp(s, ":float"))                            return (int64_t)(intptr_t)"float";
+  if (!strcmp(s, ":double"))                           return (int64_t)(intptr_t)"double";
+  if (!strcmp(s, ":char"))                             return (int64_t)(intptr_t)"char";
+  if (!strcmp(s, ":cstr"))                             return (int64_t)(intptr_t)"char*";
+  if (!strcmp(s, ":size-t"))                           return (int64_t)(intptr_t)"size_t";
+  if (!strcmp(s, ":ssize-t"))                          return (int64_t)(intptr_t)"ssize_t";
+  if (!strcmp(s, ":intptr"))                           return (int64_t)(intptr_t)"intptr_t";
+  if (!strcmp(s, ":uintptr"))                          return (int64_t)(intptr_t)"uintptr_t";
+  if (!strcmp(s, ":ptrdiff-t"))                        return (int64_t)(intptr_t)"ptrdiff_t";
+  if (!strcmp(s, ":time-t"))                           return (int64_t)(intptr_t)"time_t";
+  if (!strcmp(s, ":FILE*"))                            return (int64_t)(intptr_t)"FILE*";
+  /* Unknown keyword: strip leading colon; bare identifiers pass through */
+  if (s[0] == ':') return (int64_t)(intptr_t)(s + 1);
+  return (int64_t)(intptr_t)s;
+  ```)
+
+;;; c-ptr-type -- create a C pointer type string.
+;;;
+;;; Parameters:
+;;;   inner -- Turmeric type keyword or bare C type string
+;;;
+;;; Returns:
+;;;   "<C-type>*"
+;;;
+;;; Example:
+;;;   (c-ptr-type ":int")   ; => "int32_t*"
+;;;   (c-ptr-type ":void")  ; => "void*"
+;;;
+;;; Since: P1
+(defn c-ptr-type [inner :cstr] :cstr
+  (c-cat2 (c-type inner) "*"))
+
+;;; c-arr-type -- create a C fixed-size array type fragment.
+;;;
+;;; Parameters:
+;;;   inner -- element type keyword or bare C type string
+;;;   n     -- array length
+;;;
+;;; Returns:
+;;;   "<C-type>[n]"
+;;;
+;;; Example:
+;;;   (c-arr-type ":uint8" 16)  ; => "uint8_t[16]"
+;;;
+;;; Since: P1
+(defn c-arr-type [inner :cstr n :int] :cstr
+  (c-cat3 (c-type inner) "[" (c-cat2 (c-int->str n) "]")))
+
+;;; c-fn-type -- create a C function-pointer type string.
+;;;
+;;; Parameters:
+;;;   param-types -- cons list of type keyword or C type strings
+;;;   ret         -- return type keyword or C type string
+;;;
+;;; Returns:
+;;;   "<ret>(*)(p1, p2, ...)"
+;;;
+;;; Example:
+;;;   (c-fn-type (cons ":int" (cons ":int" 0)) ":int")
+;;;   ; => "int32_t(*)(int32_t, int32_t)"
+;;;
+;;; Since: P1
+(defn c-fn-type [param-types :int ret :cstr] :cstr
+  ```c
+  #include <string.h>
+  #include <stdlib.h>
+  struct __cdsl_cons { int64_t value; int64_t next; };
+  /* param-types values are already mapped C strings from caller */
+  const char *rct = (const char*)(intptr_t)ret;
+  size_t total = 0;
+  int count = 0;
+  struct __cdsl_cons *cur = (void*)(intptr_t)param_types;
+  while (cur) {
+    total += strlen((const char*)(intptr_t)cur->value);
+    count++;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  if (count > 1) total += 2 * (size_t)(count - 1);
+  size_t rlen = strlen(rct);
+  /* rct + "(*)" + "(" + params + ")" */
+  char *out = malloc(rlen + total + 8);
+  char *p = out;
+  memcpy(p, rct, rlen); p += rlen;
+  memcpy(p, "(*)(", 4); p += 4;
+  cur = (void*)(intptr_t)param_types;
+  int first = 1;
+  while (cur) {
+    if (!first) { *p++ = ','; *p++ = ' '; }
+    const char *s = (const char*)(intptr_t)cur->value;
+    size_t slen = strlen(s);
+    memcpy(p, s, slen); p += slen;
+    first = 0;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  *p++ = ')'; *p = '\0';
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;;; c-const-type -- prepend "const " to a type string.
+;;;
+;;; Parameters:
+;;;   t -- C type string (already mapped via c-type if needed)
+;;;
+;;; Returns:
+;;;   "const <t>"
+;;;
+;;; Example:
+;;;   (c-const-type "char*")  ; => "const char*"
+;;;
+;;; Since: P1
+(defn c-const-type [t :cstr] :cstr
+  (c-cat2 "const " t))
+
+;;; c-volatile-type -- prepend "volatile " to a type string.
+;;;
+;;; Parameters:
+;;;   t -- C type string
+;;;
+;;; Returns:
+;;;   "volatile <t>"
+;;;
+;;; Since: P1
+(defn c-volatile-type [t :cstr] :cstr
+  (c-cat2 "volatile " t))
+
+) ;; end defmodule c-dsl/types

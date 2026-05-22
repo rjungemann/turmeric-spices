@@ -1,0 +1,66 @@
+;; tests/opengl/shaders_test.tur -- smoke tests for opengl/shaders.
+;;
+;; Shader compilation requires a live GL context so these tests open a
+;; 1x1 hidden window to satisfy GLAD initialisation.  Skip gracefully
+;; when no display is available.
+
+(import opengl/window  :refer [make-window destroy-window])
+(import opengl/shaders :refer [compile-shader shader-program use-program])
+(import test/assert    :refer [assert-true])
+(import test/suite     :refer [describe it])
+(import test/runner    :refer [run-all])
+
+(defn __has-display [] :bool
+  ```c
+  #include <stdlib.h>
+  return (getenv("DISPLAY") != NULL || getenv("WAYLAND_DISPLAY") != NULL);
+  ```)
+
+(def __vert-src
+  "#version 330 core\nlayout(location=0) in vec3 aPos;\nvoid main() { gl_Position = vec4(aPos, 1.0); }")
+
+(def __frag-src
+  "#version 330 core\nout vec4 FragColor;\nvoid main() { FragColor = vec4(1.0); }")
+
+(describe "compile-shader"
+
+  (it "compiles a vertex shader and returns a non-zero handle"
+    (if (__has-display)
+      (let [w  (make-window 1 1 "test")
+            sh (compile-shader ":vertex" __vert-src)
+            ok (!= sh 0)]
+        (destroy-window w)
+        (assert-true ok))
+      (do (println "# SKIP: no display available") true)))
+
+  (it "compiles a fragment shader and returns a non-zero handle"
+    (if (__has-display)
+      (let [w  (make-window 1 1 "test")
+            sh (compile-shader ":fragment" __frag-src)
+            ok (!= sh 0)]
+        (destroy-window w)
+        (assert-true ok))
+      (do (println "# SKIP: no display available") true))))
+
+(describe "shader-program"
+
+  (it "links vertex + fragment shaders into a non-zero program"
+    (if (__has-display)
+      (let [w    (make-window 1 1 "test")
+            vs   (compile-shader ":vertex"   __vert-src)
+            fs   (compile-shader ":fragment" __frag-src)
+            prog (shader-program vs fs)
+            ok   (!= prog 0)]
+        (destroy-window w)
+        (assert-true ok))
+      (do (println "# SKIP: no display available") true)))
+
+  (it "use-program with 0 does not crash"
+    (if (__has-display)
+      (let [w (make-window 1 1 "test")]
+        (use-program 0)
+        (destroy-window w)
+        (assert-true true))
+      (do (println "# SKIP: no display available") true))))
+
+(run-all)

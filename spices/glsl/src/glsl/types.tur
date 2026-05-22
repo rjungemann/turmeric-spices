@@ -1,0 +1,60 @@
+;; glsl/types.tur -- GLSL type keyword mapping.
+
+(defmodule glsl/types
+  (export glsl-type)
+
+;;; glsl-type -- map a Turmeric type keyword to a GLSL type string.
+;;;
+;;; Parameters:
+;;;   kw -- Turmeric type keyword, e.g. ":float", ":vec3", ":mat4", ":sampler-2d"
+;;;
+;;; Returns:
+;;;   GLSL type string, e.g. "float", "vec3", "mat4", "sampler2D".
+;;;   Returns kw with the leading ':' stripped for unknown keywords.
+;;;
+;;; Example:
+;;;   (glsl-type ":vec3")      ; => "vec3"
+;;;   (glsl-type ":sampler-2d") ; => "sampler2D"
+;;;
+;;; Since: v0.1.0
+(defn glsl-type [kw :cstr] :cstr
+  ```c
+  #include <string.h>
+  if (!strcmp(kw, ":float"))            return (char *)"float";
+  if (!strcmp(kw, ":double"))           return (char *)"double";
+  if (!strcmp(kw, ":int"))              return (char *)"int";
+  if (!strcmp(kw, ":uint"))             return (char *)"uint";
+  if (!strcmp(kw, ":bool"))             return (char *)"bool";
+  if (!strcmp(kw, ":void"))             return (char *)"void";
+  if (!strcmp(kw, ":vec2"))             return (char *)"vec2";
+  if (!strcmp(kw, ":vec3"))             return (char *)"vec3";
+  if (!strcmp(kw, ":vec4"))             return (char *)"vec4";
+  if (!strcmp(kw, ":ivec2"))            return (char *)"ivec2";
+  if (!strcmp(kw, ":ivec3"))            return (char *)"ivec3";
+  if (!strcmp(kw, ":ivec4"))            return (char *)"ivec4";
+  if (!strcmp(kw, ":uvec2"))            return (char *)"uvec2";
+  if (!strcmp(kw, ":uvec3"))            return (char *)"uvec3";
+  if (!strcmp(kw, ":uvec4"))            return (char *)"uvec4";
+  if (!strcmp(kw, ":bvec2"))            return (char *)"bvec2";
+  if (!strcmp(kw, ":bvec3"))            return (char *)"bvec3";
+  if (!strcmp(kw, ":bvec4"))            return (char *)"bvec4";
+  if (!strcmp(kw, ":mat2"))             return (char *)"mat2";
+  if (!strcmp(kw, ":mat3"))             return (char *)"mat3";
+  if (!strcmp(kw, ":mat4"))             return (char *)"mat4";
+  if (!strcmp(kw, ":mat2x3"))           return (char *)"mat2x3";
+  if (!strcmp(kw, ":mat3x2"))           return (char *)"mat3x2";
+  if (!strcmp(kw, ":mat2x4"))           return (char *)"mat2x4";
+  if (!strcmp(kw, ":mat4x2"))           return (char *)"mat4x2";
+  if (!strcmp(kw, ":mat3x4"))           return (char *)"mat3x4";
+  if (!strcmp(kw, ":mat4x3"))           return (char *)"mat4x3";
+  if (!strcmp(kw, ":sampler-2d"))       return (char *)"sampler2D";
+  if (!strcmp(kw, ":sampler-3d"))       return (char *)"sampler3D";
+  if (!strcmp(kw, ":sampler-cube"))     return (char *)"samplerCube";
+  if (!strcmp(kw, ":sampler-2d-shadow")) return (char *)"sampler2DShadow";
+  if (!strcmp(kw, ":usampler-2d"))      return (char *)"usampler2D";
+  if (!strcmp(kw, ":isampler-2d"))      return (char *)"isampler2D";
+  /* Strip leading ':' for unknown keywords */
+  return (char *)(kw[0] == ':' ? kw + 1 : kw);
+  ```)
+
+) ;; end defmodule glsl/types

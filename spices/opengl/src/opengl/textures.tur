@@ -1,0 +1,159 @@
+;; opengl/textures.tur -- 2D texture creation, upload, and parameter control.
+;;
+;; Texture handles are opaque :int values storing GLuint texture object IDs.
+;; A newly created texture must be bound before upload and parameter calls.
+
+(defmodule opengl/textures
+  (export make-texture bind-texture upload-texture-rgba
+          set-texture-wrap set-texture-filter
+          generate-mipmaps active-texture)
+
+;;; make-texture -- generate a GL texture object.
+;;;
+;;; Returns:
+;;;   Opaque :int texture handle.
+;;;
+;;; Example:
+;;;   (let [t (make-texture)] (bind-texture t) ...)
+;;;
+;;; Since: v0.1.0
+(defn make-texture [] :int
+  ```c
+  #include <glad/gl.h>
+  GLuint tex;
+  glGenTextures(1, &tex);
+  return (int64_t)tex;
+  ```)
+
+;;; bind-texture -- bind a 2D texture as the current GL_TEXTURE_2D target.
+;;;
+;;; Parameters:
+;;;   t -- texture handle from make-texture, or 0 to unbind
+;;;
+;;; Example:
+;;;   (bind-texture t)
+;;;
+;;; Since: v0.1.0
+(defn bind-texture [t :int] :void
+  ```c
+  #include <glad/gl.h>
+  glBindTexture(GL_TEXTURE_2D, (GLuint)t);
+  ```)
+
+;;; upload-texture-rgba -- upload raw RGBA8 pixel data to the bound texture.
+;;;
+;;; Parameters:
+;;;   data -- pointer to RGBA pixel data (4 bytes per pixel, row-major)
+;;;   w    -- image width in pixels
+;;;   h    -- image height in pixels
+;;;
+;;; Example:
+;;;   (upload-texture-rgba pixels 512 512)
+;;;
+;;; Since: v0.1.0
+(defn upload-texture-rgba [data :int w :int h :int] :void
+  ```c
+  #include <glad/gl.h>
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+               (GLsizei)w, (GLsizei)h, 0,
+               GL_RGBA, GL_UNSIGNED_BYTE,
+               (const void*)(intptr_t)data);
+  ```)
+
+;;; set-texture-wrap -- set the S and T wrap modes for the bound texture.
+;;;
+;;; Parameters:
+;;;   s -- wrap mode for horizontal axis:
+;;;        :repeat | :clamp-to-edge | :mirrored-repeat | :clamp-to-border
+;;;   t -- wrap mode for vertical axis (same keywords)
+;;;
+;;; Example:
+;;;   (set-texture-wrap ":repeat" ":repeat")
+;;;
+;;; Since: v0.1.0
+(defn set-texture-wrap [s :cstr t :cstr] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *ss = (const char*)(intptr_t)s;
+  const char *ts = (const char*)(intptr_t)t;
+  GLint wrap_s, wrap_t;
+  /* map s */
+  if (!strcmp(ss, ":clamp-to-edge"))     wrap_s = GL_CLAMP_TO_EDGE;
+  else if (!strcmp(ss, ":mirrored-repeat")) wrap_s = GL_MIRRORED_REPEAT;
+  else if (!strcmp(ss, ":clamp-to-border")) wrap_s = GL_CLAMP_TO_BORDER;
+  else                                   wrap_s = GL_REPEAT;
+  /* map t */
+  if (!strcmp(ts, ":clamp-to-edge"))     wrap_t = GL_CLAMP_TO_EDGE;
+  else if (!strcmp(ts, ":mirrored-repeat")) wrap_t = GL_MIRRORED_REPEAT;
+  else if (!strcmp(ts, ":clamp-to-border")) wrap_t = GL_CLAMP_TO_BORDER;
+  else                                   wrap_t = GL_REPEAT;
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
+  ```)
+
+;;; set-texture-filter -- set the minification and magnification filter modes.
+;;;
+;;; Parameters:
+;;;   min-filter -- minification filter:
+;;;                 :nearest | :linear | :nearest-mipmap-nearest |
+;;;                 :linear-mipmap-nearest | :nearest-mipmap-linear |
+;;;                 :linear-mipmap-linear
+;;;   mag-filter -- magnification filter: :nearest | :linear
+;;;
+;;; Example:
+;;;   (set-texture-filter ":linear-mipmap-linear" ":linear")
+;;;
+;;; Since: v0.1.0
+(defn set-texture-filter [min-filter :cstr mag-filter :cstr] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *mn = (const char*)(intptr_t)min_filter;
+  const char *mg = (const char*)(intptr_t)mag_filter;
+  GLint gl_min, gl_mag;
+  /* map min filter */
+  if (!strcmp(mn, ":nearest"))                  gl_min = GL_NEAREST;
+  else if (!strcmp(mn, ":nearest-mipmap-nearest")) gl_min = GL_NEAREST_MIPMAP_NEAREST;
+  else if (!strcmp(mn, ":linear-mipmap-nearest"))  gl_min = GL_LINEAR_MIPMAP_NEAREST;
+  else if (!strcmp(mn, ":nearest-mipmap-linear"))  gl_min = GL_NEAREST_MIPMAP_LINEAR;
+  else if (!strcmp(mn, ":linear-mipmap-linear"))   gl_min = GL_LINEAR_MIPMAP_LINEAR;
+  else gl_min = GL_LINEAR;
+  /* map mag filter (mipmaps are invalid for magnification) */
+  gl_mag = (!strcmp(mg, ":nearest")) ? GL_NEAREST : GL_LINEAR;
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_min);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_mag);
+  ```)
+
+;;; generate-mipmaps -- auto-generate mipmaps for the currently-bound texture.
+;;;
+;;; Call after upload-texture-rgba when using a mipmap min-filter.
+;;;
+;;; Example:
+;;;   (generate-mipmaps)
+;;;
+;;; Since: v0.1.0
+(defn generate-mipmaps [] :void
+  ```c
+  #include <glad/gl.h>
+  glGenerateMipmap(GL_TEXTURE_2D);
+  ```)
+
+;;; active-texture -- select the active texture unit before binding.
+;;;
+;;; Parameters:
+;;;   unit -- texture unit index (0-based; most hardware supports 0-15)
+;;;
+;;; Example:
+;;;   (active-texture 0)
+;;;   (bind-texture diffuse-tex)
+;;;   (set-uniform-int prog "diffuse" 0)
+;;;
+;;; Since: v0.1.0
+(defn active-texture [unit :int] :void
+  ```c
+  #include <glad/gl.h>
+  glActiveTexture(GL_TEXTURE0 + (GLenum)unit);
+  ```)
+
+) ;; end defmodule opengl/textures

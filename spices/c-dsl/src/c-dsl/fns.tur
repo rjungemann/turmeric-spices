@@ -1,0 +1,247 @@
+;; c-dsl/fns.tur -- function definition, declaration, and call forms.
+
+(defmodule c-dsl/fns
+  (export c-param c-defn c-defn-static c-defn-inline c-call c-declare c-extern)
+
+  (import c-dsl/codegen :refer [c-cat2 c-cat3 c-cat4 c-sprintf1 c-sprintf2
+                                 c-sprintf3 c-sprintf4 c-join c-indent])
+  (import c-dsl/types   :refer [c-type])
+
+;;; c-param -- format a single function parameter declaration.
+;;;
+;;; Parameters:
+;;;   name -- parameter name string
+;;;   type -- Turmeric type keyword or C type string
+;;;
+;;; Returns:
+;;;   "C-type name"
+;;;
+;;; Example:
+;;;   (c-param "x" ":int")    ; => "int32_t x"
+;;;   (c-param "s" ":cstr")   ; => "char* s"
+;;;
+;;; Since: P1
+(defn c-param [name :cstr type :cstr] :cstr
+  (c-sprintf2 "%s %s" (c-type type) name))
+
+;;; __c-defn-impl -- build a function definition with an optional prefix.
+;;; prefix: "" for normal, "static " for static, "static inline " for inline.
+(defn __c-defn-impl [prefix :cstr name :cstr params :int ret :cstr body :cstr] :cstr
+  ```c
+  #include <stdio.h>
+  #include <string.h>
+  #include <stdlib.h>
+  struct __cdsl_cons { int64_t value; int64_t next; };
+  const char *spre   = (const char*)(intptr_t)prefix;
+  const char *sname  = (const char*)(intptr_t)name;
+  const char *sret   = (const char*)(intptr_t)ret;
+  const char *sbody  = (const char*)(intptr_t)body;
+  /* Join params with ", " */
+  size_t total = 0;
+  int count = 0;
+  struct __cdsl_cons *cur = (void*)(intptr_t)params;
+  while (cur) {
+    total += strlen((const char*)(intptr_t)cur->value);
+    count++;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  if (count > 1) total += 2 * (size_t)(count - 1);
+  char *params_str = malloc(total + 1);
+  char *p = params_str;
+  cur = (void*)(intptr_t)params;
+  int first = 1;
+  while (cur) {
+    if (!first) { *p++ = ','; *p++ = ' '; }
+    const char *s = (const char*)(intptr_t)cur->value;
+    size_t slen = strlen(s);
+    memcpy(p, s, slen); p += slen;
+    first = 0;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  *p = '\0';
+  /* Indent body */
+  size_t blen = strlen(sbody);
+  int blines = 1;
+  for (size_t i = 0; i < blen; i++) if (sbody[i] == '\n') blines++;
+  char *ibody = malloc(blen + (size_t)blines * 4 + 1);
+  char *ib = ibody;
+  int at_start = 1;
+  for (size_t i = 0; i < blen; i++) {
+    if (at_start) { memcpy(ib, "    ", 4); ib += 4; at_start = 0; }
+    *ib++ = sbody[i];
+    if (sbody[i] == '\n') at_start = 1;
+  }
+  *ib = '\0';
+  /* Assemble: prefix ret name(params) {\n    body\n} */
+  int n = snprintf(NULL, 0, "%s%s %s(%s) {\n%s\n}",
+                   spre, sret, sname, params_str, ibody);
+  char *out = malloc(n + 1);
+  snprintf(out, n + 1, "%s%s %s(%s) {\n%s\n}",
+           spre, sret, sname, params_str, ibody);
+  free(params_str);
+  free(ibody);
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;;; c-defn -- emit a C function definition.
+;;;
+;;; Parameters:
+;;;   name   -- function name string
+;;;   params -- cons list of parameter strings (from c-param)
+;;;   ret    -- return type keyword or C type string
+;;;   body   -- function body string (use c-stmts for multi-statement bodies)
+;;;
+;;; Returns:
+;;;   Complete C function definition string.
+;;;
+;;; Example:
+;;;   (c-defn "square"
+;;;     (cons (c-param "x" ":int") 0)
+;;;     ":int"
+;;;     (c-return (c-binop "*" "x" "x")))
+;;;   ; => "int32_t square(int32_t x) {\n    return (x * x);\n}"
+;;;
+;;; Since: P1
+(defn c-defn [name :cstr params :int ret :cstr body :cstr] :cstr
+  (__c-defn-impl "" name params (c-type ret) body))
+
+;;; c-defn-static -- emit a static C function definition.
+;;;
+;;; Parameters:
+;;;   name   -- function name string
+;;;   params -- cons list of parameter strings
+;;;   ret    -- return type keyword or C type string
+;;;   body   -- function body string
+;;;
+;;; Since: P1
+(defn c-defn-static [name :cstr params :int ret :cstr body :cstr] :cstr
+  (__c-defn-impl "static " name params (c-type ret) body))
+
+;;; c-defn-inline -- emit a static inline C function definition.
+;;;
+;;; Parameters:
+;;;   name   -- function name string
+;;;   params -- cons list of parameter strings
+;;;   ret    -- return type keyword or C type string
+;;;   body   -- function body string
+;;;
+;;; Since: P1
+(defn c-defn-inline [name :cstr params :int ret :cstr body :cstr] :cstr
+  (__c-defn-impl "static inline " name params (c-type ret) body))
+
+;;; c-call -- emit a C function call expression.
+;;;
+;;; Parameters:
+;;;   fn-name -- function name string
+;;;   args    -- cons list of argument expression strings
+;;;
+;;; Returns:
+;;;   "fn_name(arg1, arg2, ...)"
+;;;
+;;; Example:
+;;;   (c-call "printf" (cons "\"%d\\n\"" (cons "x" 0)))
+;;;   ; => "printf(\"%d\\n\", x)"
+;;;
+;;; Since: P1
+(defn c-call [fn-name :cstr args :int] :cstr
+  ```c
+  #include <string.h>
+  #include <stdlib.h>
+  struct __cdsl_cons { int64_t value; int64_t next; };
+  const char *sfn = (const char*)(intptr_t)fn_name;
+  size_t fnlen = strlen(sfn);
+  size_t total = 0;
+  int count = 0;
+  struct __cdsl_cons *cur = (void*)(intptr_t)args;
+  while (cur) {
+    total += strlen((const char*)(intptr_t)cur->value);
+    count++;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  if (count > 1) total += 2 * (size_t)(count - 1);
+  /* sfn + "(" + args + ")" */
+  char *out = malloc(fnlen + total + 3);
+  char *p = out;
+  memcpy(p, sfn, fnlen); p += fnlen;
+  *p++ = '(';
+  cur = (void*)(intptr_t)args;
+  int first = 1;
+  while (cur) {
+    if (!first) { *p++ = ','; *p++ = ' '; }
+    const char *s = (const char*)(intptr_t)cur->value;
+    size_t slen = strlen(s);
+    memcpy(p, s, slen); p += slen;
+    first = 0;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  *p++ = ')'; *p = '\0';
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;;; c-declare -- emit a forward declaration for a C function.
+;;;
+;;; Parameters:
+;;;   ret    -- return type keyword or C type string
+;;;   name   -- function name string
+;;;   params -- cons list of type strings (types only, no names required)
+;;;
+;;; Returns:
+;;;   "ret name(params);"
+;;;
+;;; Example:
+;;;   (c-declare ":int" "add" (cons "int32_t" (cons "int32_t" 0)))
+;;;   ; => "int32_t add(int32_t, int32_t);"
+;;;
+;;; Since: P1
+(defn c-declare [ret :cstr name :cstr params :int] :cstr
+  ```c
+  #include <string.h>
+  #include <stdlib.h>
+  struct __cdsl_cons { int64_t value; int64_t next; };
+  const char *sret  = (const char*)(intptr_t)ret;
+  const char *sname = (const char*)(intptr_t)name;
+  size_t total = 0;
+  int count = 0;
+  struct __cdsl_cons *cur = (void*)(intptr_t)params;
+  while (cur) {
+    total += strlen((const char*)(intptr_t)cur->value);
+    count++;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  if (count > 1) total += 2 * (size_t)(count - 1);
+  size_t rlen = strlen(sret), nlen = strlen(sname);
+  char *out = malloc(rlen + nlen + total + 5);
+  char *p = out;
+  memcpy(p, sret, rlen); p += rlen;
+  *p++ = ' ';
+  memcpy(p, sname, nlen); p += nlen;
+  *p++ = '(';
+  cur = (void*)(intptr_t)params;
+  int first = 1;
+  while (cur) {
+    if (!first) { *p++ = ','; *p++ = ' '; }
+    const char *s = (const char*)(intptr_t)cur->value;
+    size_t slen = strlen(s);
+    memcpy(p, s, slen); p += slen;
+    first = 0;
+    cur = (void*)(intptr_t)cur->next;
+  }
+  *p++ = ')'; *p++ = ';'; *p = '\0';
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;;; c-extern -- emit an extern declaration for a C function.
+;;;
+;;; Parameters:
+;;;   ret    -- return type keyword or C type string
+;;;   name   -- function name string
+;;;   params -- cons list of type strings
+;;;
+;;; Returns:
+;;;   "extern ret name(params);"
+;;;
+;;; Since: P1
+(defn c-extern [ret :cstr name :cstr params :int] :cstr
+  (c-cat2 "extern " (c-declare ret name params)))
+
+) ;; end defmodule c-dsl/fns

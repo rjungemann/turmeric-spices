@@ -1,0 +1,56 @@
+;; tests/opengl/window_test.tur -- smoke tests for opengl/window.
+;;
+;; These tests require a display environment.  In headless CI set the
+;; DISPLAY or WAYLAND_DISPLAY environment variable, or use a virtual
+;; framebuffer (Xvfb).  The test skips gracefully when GLFW cannot open
+;; a window by printing a TAP skip line.
+
+(import opengl/window  :refer [make-window destroy-window window-should-close?
+                                poll-events swap-buffers set-clear-color clear])
+(import test/assert    :refer [assert-true assert-false])
+(import test/suite     :refer [describe it])
+(import test/runner    :refer [run-all])
+
+;;; __has-display -- return true if a windowing environment seems available.
+(defn __has-display [] :bool
+  ```c
+  #include <stdlib.h>
+  return (getenv("DISPLAY") != NULL || getenv("WAYLAND_DISPLAY") != NULL);
+  ```)
+
+(describe "make-window / destroy-window"
+
+  (it "make-window returns a non-zero handle when a display is available"
+    (if (__has-display)
+      (let [w (make-window 1 1 "test")]
+        (let [ok (!= w 0)]
+          (destroy-window w)
+          (assert-true ok)))
+      (do
+        (println "# SKIP: no display available")
+        true)))
+
+  (it "window-should-close? returns false on a newly created window"
+    (if (__has-display)
+      (let [w (make-window 1 1 "test")]
+        (let [ok (not (window-should-close? w))]
+          (destroy-window w)
+          (assert-true ok)))
+      (do
+        (println "# SKIP: no display available")
+        true)))
+
+  (it "set-clear-color and clear do not crash"
+    (if (__has-display)
+      (let [w (make-window 1 1 "test")]
+        (set-clear-color 0.0 0.0 0.0 1.0)
+        (clear)
+        (swap-buffers w)
+        (poll-events)
+        (destroy-window w)
+        (assert-true true))
+      (do
+        (println "# SKIP: no display available")
+        true))))
+
+(run-all)

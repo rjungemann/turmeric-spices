@@ -1,0 +1,206 @@
+;; opengl/buffers.tur -- VAO, VBO, and EBO creation, binding, and data upload.
+;;
+;; VAO, VBO, and EBO handles are opaque :int values storing GLuint object IDs.
+;; Always bind the VAO before binding VBOs, uploading data, or setting attribs.
+
+(defmodule opengl/buffers
+  (export make-vao make-vbo make-ebo
+          bind-vao bind-vbo bind-ebo
+          upload-vertices upload-indices
+          vertex-attrib with-vao)
+
+  (import opengl/types :refer [draw-usage->gl attrib-type->gl])
+
+;;; make-vao -- generate a Vertex Array Object.
+;;;
+;;; Returns:
+;;;   Opaque :int VAO handle (GLuint stored as int64).
+;;;
+;;; Example:
+;;;   (let [vao (make-vao)] ...)
+;;;
+;;; Since: v0.1.0
+(defn make-vao [] :int
+  ```c
+  #include <glad/gl.h>
+  GLuint vao;
+  glGenVertexArrays(1, &vao);
+  return (int64_t)vao;
+  ```)
+
+;;; make-vbo -- generate a Vertex Buffer Object.
+;;;
+;;; Returns:
+;;;   Opaque :int VBO handle.
+;;;
+;;; Since: v0.1.0
+(defn make-vbo [] :int
+  ```c
+  #include <glad/gl.h>
+  GLuint vbo;
+  glGenBuffers(1, &vbo);
+  return (int64_t)vbo;
+  ```)
+
+;;; make-ebo -- generate an Element Buffer Object (index buffer).
+;;;
+;;; Returns:
+;;;   Opaque :int EBO handle.
+;;;
+;;; Since: v0.1.0
+(defn make-ebo [] :int
+  ```c
+  #include <glad/gl.h>
+  GLuint ebo;
+  glGenBuffers(1, &ebo);
+  return (int64_t)ebo;
+  ```)
+
+;;; bind-vao -- make a VAO current (or unbind with 0).
+;;;
+;;; Parameters:
+;;;   vao -- VAO handle from make-vao, or 0 to unbind
+;;;
+;;; Example:
+;;;   (bind-vao vao)
+;;;   ...
+;;;   (bind-vao 0)
+;;;
+;;; Since: v0.1.0
+(defn bind-vao [vao :int] :void
+  ```c
+  #include <glad/gl.h>
+  glBindVertexArray((GLuint)vao);
+  ```)
+
+;;; bind-vbo -- bind a VBO to GL_ARRAY_BUFFER (or unbind with 0).
+;;;
+;;; Parameters:
+;;;   vbo -- VBO handle from make-vbo, or 0 to unbind
+;;;
+;;; Since: v0.1.0
+(defn bind-vbo [vbo :int] :void
+  ```c
+  #include <glad/gl.h>
+  glBindBuffer(GL_ARRAY_BUFFER, (GLuint)vbo);
+  ```)
+
+;;; bind-ebo -- bind an EBO to GL_ELEMENT_ARRAY_BUFFER (or unbind with 0).
+;;;
+;;; Parameters:
+;;;   ebo -- EBO handle from make-ebo, or 0 to unbind
+;;;
+;;; Since: v0.1.0
+(defn bind-ebo [ebo :int] :void
+  ```c
+  #include <glad/gl.h>
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint)ebo);
+  ```)
+
+;;; upload-vertices -- stream a float array into the currently-bound VBO.
+;;;
+;;; Parameters:
+;;;   data  -- pointer to vertex data (opaque :int from float-array or malloc)
+;;;   size  -- byte size of the data
+;;;   usage -- draw usage keyword: :static-draw | :dynamic-draw | :stream-draw
+;;;
+;;; Example:
+;;;   (upload-vertices verts (* 9 4) ":static-draw")
+;;;
+;;; Since: v0.1.0
+(defn upload-vertices [data :int size :int usage :cstr] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *us = (const char*)(intptr_t)usage;
+  GLenum gl_usage;
+  if (!strcmp(us, ":dynamic-draw"))     gl_usage = GL_DYNAMIC_DRAW;
+  else if (!strcmp(us, ":stream-draw")) gl_usage = GL_STREAM_DRAW;
+  else                                  gl_usage = GL_STATIC_DRAW;
+  glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)size,
+               (const void*)(intptr_t)data, gl_usage);
+  ```)
+
+;;; upload-indices -- stream an integer index array into the currently-bound EBO.
+;;;
+;;; Parameters:
+;;;   data  -- pointer to index data (opaque :int)
+;;;   size  -- byte size of the data
+;;;   usage -- draw usage keyword
+;;;
+;;; Example:
+;;;   (upload-indices idx-data (* 36 4) ":static-draw")
+;;;
+;;; Since: v0.1.0
+(defn upload-indices [data :int size :int usage :cstr] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  const char *us = (const char*)(intptr_t)usage;
+  GLenum gl_usage;
+  if (!strcmp(us, ":dynamic-draw"))     gl_usage = GL_DYNAMIC_DRAW;
+  else if (!strcmp(us, ":stream-draw")) gl_usage = GL_STREAM_DRAW;
+  else                                  gl_usage = GL_STATIC_DRAW;
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)size,
+               (const void*)(intptr_t)data, gl_usage);
+  ```)
+
+;;; vertex-attrib -- describe a vertex attribute pointer and enable it.
+;;;
+;;; Parameters:
+;;;   index      -- attribute location (matches layout(location=N) in GLSL)
+;;;   components -- number of components per vertex (1-4)
+;;;   type       -- component type keyword: :float | :int | :uint | :byte
+;;;   normalized -- true to normalise integer values to [-1,1] or [0,1]
+;;;   stride     -- byte distance between the start of consecutive vertices
+;;;   offset     -- byte offset of this attribute within the stride
+;;;
+;;; Example:
+;;;   ;; attribute 0: xyz position (3 floats), tightly packed stride=12
+;;;   (vertex-attrib 0 3 ":float" false 12 0)
+;;;   ;; attribute 1: uv coords (2 floats), interleaved after xyz, stride=20
+;;;   (vertex-attrib 1 2 ":float" false 20 12)
+;;;
+;;; Since: v0.1.0
+(defn vertex-attrib [index :int components :int type :cstr
+                     normalized :bool stride :int offset :int] :void
+  ```c
+  #include <string.h>
+  #include <glad/gl.h>
+  /* map type keyword to GL enum */
+  const char *ts = (const char*)(intptr_t)type;
+  GLenum gl_type;
+  if (!strcmp(ts, ":float"))  gl_type = GL_FLOAT;
+  else if (!strcmp(ts, ":int"))  gl_type = GL_INT;
+  else if (!strcmp(ts, ":uint")) gl_type = GL_UNSIGNED_INT;
+  else if (!strcmp(ts, ":byte")) gl_type = GL_BYTE;
+  else if (!strcmp(ts, ":ubyte"))gl_type = GL_UNSIGNED_BYTE;
+  else gl_type = GL_FLOAT;
+  glVertexAttribPointer(
+      (GLuint)index, (GLint)components, gl_type,
+      normalized ? GL_TRUE : GL_FALSE,
+      (GLsizei)stride,
+      (const void*)(intptr_t)offset);
+  glEnableVertexAttribArray((GLuint)index);
+  ```)
+
+;;; with-vao -- bind a new VAO for the duration of body, then unbind it.
+;;;
+;;; Parameters:
+;;;   v    -- symbol to bind the :int VAO handle
+;;;   body -- one or more expressions executed with v in scope
+;;;
+;;; Example:
+;;;   (with-vao v
+;;;     (bind-vbo vbo)
+;;;     (upload-vertices data size ":static-draw")
+;;;     (vertex-attrib 0 3 ":float" false 12 0))
+;;;
+;;; Since: v0.1.0
+(defmacro with-vao [v & body]
+  `(let [~v (make-vao)]
+     (bind-vao ~v)
+     ~@body
+     (bind-vao 0)))
+
+) ;; end defmodule opengl/buffers
