@@ -1,0 +1,140 @@
+;; http/response.tur -- HTTP response accessors.
+;;
+;; A response handle is an opaque :int wrapping a heap-allocated struct
+;; produced by http/client.  All accessors below take the unwrapped handle
+;; (the ok-val of the result returned by http-get / http-request).
+
+(defmodule http/response
+  (export response-status response-header response-body response-json)
+
+;;; response-status -- HTTP status code of a response.
+;;;
+;;; Parameters:
+;;;   resp -- :int response handle (unwrapped ok-val)
+;;;
+;;; Returns:
+;;;   :int -- HTTP status code (e.g. 200, 404)
+;;;
+;;; Example:
+;;;   (response-status resp)  ; => 200
+;;;
+;;; Since: P5
+(defn response-status [resp :int] :int
+  ```c
+  struct __resp {
+    int    status;
+    char  *body;
+    char **hdr_keys;
+    char **hdr_vals;
+    int    hdr_count;
+  };
+  struct __resp *r = (struct __resp *)(intptr_t)resp;
+  return (int64_t)r->status;
+  ```)
+
+;;; response-header -- look up a response header by name (case-insensitive).
+;;;
+;;; Parameters:
+;;;   resp -- :int response handle
+;;;   name -- header name, e.g. "Content-Type"
+;;;
+;;; Returns:
+;;;   :cstr -- header value, or "" if not found
+;;;
+;;; Example:
+;;;   (response-header resp "Content-Type")
+;;;
+;;; Since: P5
+(defn response-header [resp :int name :cstr] :cstr
+  ```c
+  #include <string.h>
+  #include <strings.h>
+  struct __resp {
+    int    status;
+    char  *body;
+    char **hdr_keys;
+    char **hdr_vals;
+    int    hdr_count;
+  };
+  struct __resp *r = (struct __resp *)(intptr_t)resp;
+  for (int i = 0; i < r->hdr_count; i++) {
+    if (strcasecmp(r->hdr_keys[i], (const char *)name) == 0)
+      return r->hdr_vals[i];
+  }
+  return (char *)"";
+  ```)
+
+;;; response-body -- raw body string of a response.
+;;;
+;;; Parameters:
+;;;   resp -- :int response handle
+;;;
+;;; Returns:
+;;;   :cstr -- NUL-terminated response body
+;;;
+;;; Example:
+;;;   (println (response-body resp))
+;;;
+;;; Since: P5
+(defn response-body [resp :int] :cstr
+  ```c
+  struct __resp {
+    int    status;
+    char  *body;
+    char **hdr_keys;
+    char **hdr_vals;
+    int    hdr_count;
+  };
+  struct __resp *r = (struct __resp *)(intptr_t)resp;
+  return r->body;
+  ```)
+
+;;; response-json -- parse the response body as JSON, returning a doc handle.
+;;;
+;;; Parameters:
+;;;   resp -- :int response handle
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(doc-handle) or err(:cstr message).
+;;;   Use json-emit / json-get-in from json/emit and json/patch to inspect.
+;;;
+;;; Example:
+;;;   (let [jr (response-json resp)]
+;;;     (when (ok? jr) (json-get-in (ok-val jr) "data.id")))
+;;;
+;;; Since: P5
+(defn response-json [resp :int] :ptr<void>
+  ```c
+  #include <yyjson.h>
+  #include <string.h>
+  #include <stdlib.h>
+  struct __resp {
+    int    status;
+    char  *body;
+    char **hdr_keys;
+    char **hdr_vals;
+    int    hdr_count;
+  };
+  struct __resp *r = (struct __resp *)(intptr_t)resp;
+  const char *body = r->body ? r->body : "";
+
+  yyjson_read_err err;
+  yyjson_doc *doc = yyjson_read_opts((char *)body, strlen(body),
+                                     YYJSON_READ_NOFLAG, NULL, &err);
+  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __pr *res = malloc(sizeof(*res));
+  if (!doc) {
+    const char *msg = err.msg ? err.msg : "JSON parse error";
+    size_t mlen = strlen(msg);
+    char *mbuf = malloc(mlen + 1);
+    memcpy(mbuf, msg, mlen + 1);
+    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)mbuf;
+    return res;
+  }
+  yyjson_doc **np = malloc(sizeof(yyjson_doc *));
+  *np = doc;
+  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)np; res->err_val = 0;
+  return res;
+  ```)
+
+) ;; end defmodule http/response

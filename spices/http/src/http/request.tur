@@ -1,0 +1,45 @@
+;; http/request.tur -- HTTP request record constructor.
+;;
+;; A request is a heap-allocated struct { method, url, body, headers } where
+;; method/url/body are char* and headers is an opaque cons-list handle
+;; (int64_t) of alternating key/value strings.  Pass to http-request.
+
+(defmodule http/request
+  (export request)
+
+;;; request -- create an HTTP request handle.
+;;;
+;;; Parameters:
+;;;   method  -- HTTP method string ("GET", "POST", ...)
+;;;   url     -- full URL including scheme, e.g. "https://example.com/api"
+;;;   body    -- request body string ("" for no body)
+;;;   headers -- cons-list of alternating header-name / header-value strings.
+;;;              Pass (nil-value) for no extra headers.
+;;;
+;;; Returns:
+;;;   :int -- opaque request handle; pass to http-request
+;;;
+;;; Example:
+;;;   (let [req (request "GET" "https://example.com" "" (nil-value))]
+;;;     (http-request req))
+;;;
+;;; Since: P5
+(defn request [method :cstr url :cstr body :cstr headers :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __req {
+    char    *method;
+    char    *url;
+    char    *body;
+    int64_t  headers; /* opaque cons-list handle */
+  };
+  struct __req *req = malloc(sizeof(*req));
+  req->method  = strdup((const char *)method);
+  req->url     = strdup((const char *)url);
+  req->body    = strdup((const char *)body);
+  req->headers = headers;
+  return (int64_t)(intptr_t)req;
+  ```)
+
+) ;; end defmodule http/request

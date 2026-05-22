@@ -1,0 +1,119 @@
+;; regex/capture.tur -- capture group accessors for regex-match results.
+;;
+;; A match-data handle is an opaque :int wrapping a heap-allocated struct
+;; { pcre2_match_data*, const char* subject, size_t subject_len }.
+;; The handle is produced by regex-match / regex-match-all and must be freed
+;; by the caller (or left for GC).
+
+(defmodule regex/capture
+  (export capture-count capture-at capture-named)
+
+;;; capture-count -- number of captured substrings in a match result.
+;;;
+;;; Parameters:
+;;;   match -- :int match handle from regex-match
+;;;
+;;; Returns:
+;;;   :int -- number of captured groups (0 = only full match in group 0)
+;;;
+;;; Example:
+;;;   (capture-count m)  ; => 2
+;;;
+;;; Since: P6
+(defn capture-count [match :int] :int
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  struct __match {
+    pcre2_match_data *md;
+    const char       *subject;
+    size_t            subject_len;
+    int               match_count;
+    pcre2_code       *re;
+  };
+  struct __match *m = (struct __match *)(intptr_t)match;
+  return (int64_t)(m->match_count - 1); /* exclude group 0 (full match) */
+  ```)
+
+;;; capture-at -- substring captured by a numbered group.
+;;;
+;;; Parameters:
+;;;   match -- :int match handle from regex-match
+;;;   idx   -- group index (0 = full match, 1 = first capture group, ...)
+;;;
+;;; Returns:
+;;;   :cstr -- captured substring (malloc'd copy), or "" if group did not participate
+;;;
+;;; Example:
+;;;   (capture-at m 0)  ; full match
+;;;   (capture-at m 1)  ; first capture group
+;;;
+;;; Since: P6
+(defn capture-at [match :int idx :int] :cstr
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  #include <stdlib.h>
+  #include <string.h>
+  struct __match {
+    pcre2_match_data *md;
+    const char       *subject;
+    size_t            subject_len;
+    int               match_count;
+    pcre2_code       *re;
+  };
+  struct __match *m = (struct __match *)(intptr_t)match;
+  PCRE2_SIZE *ov = pcre2_get_ovector_pointer(m->md);
+  int i = (int)idx;
+  if (i < 0 || i >= m->match_count) return (char *)"";
+  PCRE2_SIZE start = ov[2 * i];
+  PCRE2_SIZE end   = ov[2 * i + 1];
+  if (start == PCRE2_UNSET) return (char *)"";
+  size_t len = end - start;
+  char *out = malloc(len + 1);
+  memcpy(out, m->subject + start, len);
+  out[len] = '\0';
+  return out;
+  ```)
+
+;;; capture-named -- substring captured by a named group.
+;;;
+;;; Parameters:
+;;;   match -- :int match handle from regex-match
+;;;   name  -- group name as it appears in the pattern (e.g. "year")
+;;;
+;;; Returns:
+;;;   :cstr -- captured substring (malloc'd copy), or "" if not found / did not participate
+;;;
+;;; Example:
+;;;   (capture-named m "year")
+;;;
+;;; Since: P6
+(defn capture-named [match :int name :cstr] :cstr
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  #include <stdlib.h>
+  #include <string.h>
+  struct __match {
+    pcre2_match_data *md;
+    const char       *subject;
+    size_t            subject_len;
+    int               match_count;
+    pcre2_code       *re;
+  };
+  struct __match *m = (struct __match *)(intptr_t)match;
+  int idx = pcre2_substring_number_from_name(m->re, (PCRE2_SPTR8)name);
+  if (idx < 0) return (char *)"";
+  PCRE2_SIZE *ov = pcre2_get_ovector_pointer(m->md);
+  PCRE2_SIZE start = ov[2 * idx];
+  PCRE2_SIZE end   = ov[2 * idx + 1];
+  if (start == PCRE2_UNSET) return (char *)"";
+  size_t len = end - start;
+  char *out = malloc(len + 1);
+  memcpy(out, m->subject + start, len);
+  out[len] = '\0';
+  return out;
+  ```)
+
+) ;; end defmodule regex/capture

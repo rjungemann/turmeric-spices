@@ -1,0 +1,262 @@
+;; json/patch.tur -- JSON path access and structural mutation via yyjson.
+;;
+;; json-get-in walks a dot-separated key path through an object tree and
+;; returns the matched value serialized as a :cstr.
+;;
+;; json-set-in and json-merge use yyjson's mutable API: they copy the
+;; immutable doc into a mutable doc, modify it, re-serialize, and re-parse
+;; into a new immutable doc handle.  The original doc handle is left intact.
+
+(defmodule json/patch
+  (export json-get-in json-set-in json-merge)
+
+;; Private: result helpers matching stdlib/result.tur layout
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __pr *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0;
+  return r;
+  ```)
+
+(defn __err [msg :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __pr *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = (int64_t)(intptr_t)msg;
+  return r;
+  ```)
+
+;;; json-get-in -- look up a value at a dot-separated path.
+;;;
+;;; Parameters:
+;;;   doc  -- :int doc handle from json-parse
+;;;   path -- dot-separated key path, e.g. "user.address.city"
+;;;
+;;; Returns:
+;;;   :cstr -- the matched value serialized as JSON, or "" if not found
+;;;
+;;; Example:
+;;;   (json-get-in doc "user.name")  ; => "\"Alice\""
+;;;
+;;; Since: P4
+(defn json-get-in [doc :int path :cstr] :cstr
+  ```c
+  #include <yyjson.h>
+  #include <stdlib.h>
+  #include <string.h>
+  yyjson_doc **pp = (yyjson_doc **)(intptr_t)doc;
+  yyjson_val *cur = yyjson_doc_get_root(*pp);
+  if (!cur) return (char *)"";
+
+  char *p = strdup((const char *)path);
+  char *tok = strtok(p, ".");
+  while (tok && cur) {
+    if (yyjson_is_obj(cur))
+      cur = yyjson_obj_get(cur, tok);
+    else
+      cur = NULL;
+    tok = strtok(NULL, ".");
+  }
+  free(p);
+  if (!cur) return (char *)"";
+
+  size_t len = 0;
+  char *out = yyjson_val_write(cur, YYJSON_WRITE_NOFLAG, &len);
+  if (!out) return (char *)"";
+  char *buf = malloc(len + 1);
+  memcpy(buf, out, len);
+  buf[len] = '\0';
+  free(out);
+  return buf;
+  ```)
+
+;;; json-set-in -- return a new doc with the value at a dot-separated path replaced.
+;;;
+;;; Parameters:
+;;;   doc   -- :int doc handle from json-parse
+;;;   path  -- dot-separated key path, e.g. "user.name"
+;;;   value -- JSON string for the new value, e.g. "\"Bob\""
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(new-doc-handle) on success, err(:cstr message) on failure.
+;;;   The original doc handle is unchanged.  The caller must json-free the new handle.
+;;;
+;;; Example:
+;;;   (let [r (json-set-in doc "x" "42")]
+;;;     (when (ok? r) (println (json-emit (ok-val r)))))
+;;;
+;;; Since: P4
+(defn json-set-in [doc :int path :cstr value :cstr] :ptr<void>
+  ```c
+  #include <yyjson.h>
+  #include <stdlib.h>
+  #include <string.h>
+  yyjson_doc **pp = (yyjson_doc **)(intptr_t)doc;
+
+  /* Parse the new value */
+  yyjson_doc *vdoc = yyjson_read((const char *)value, strlen((const char *)value),
+                                  YYJSON_READ_NOFLAG);
+  if (!vdoc) {
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"invalid value JSON";
+    return r;
+  }
+
+  /* Copy source doc into mutable doc */
+  yyjson_mut_doc *mdoc = yyjson_doc_mut_copy(*pp, NULL);
+  if (!mdoc) {
+    yyjson_doc_free(vdoc);
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"failed to copy doc";
+    return r;
+  }
+
+  /* Walk path and set the last key */
+  yyjson_mut_val *cur = yyjson_mut_doc_get_root(mdoc);
+  char *p = strdup((const char *)path);
+  char *last_dot = strrchr(p, '.');
+  char *last_key;
+  if (last_dot) {
+    *last_dot = '\0';
+    last_key = last_dot + 1;
+    char *tok = strtok(p, ".");
+    while (tok && cur) {
+      if (yyjson_mut_is_obj(cur))
+        cur = yyjson_mut_obj_get(cur, tok);
+      else
+        cur = NULL;
+      tok = strtok(NULL, ".");
+    }
+  } else {
+    last_key = p;
+  }
+
+  if (cur && yyjson_mut_is_obj(cur)) {
+    yyjson_mut_val *mv = yyjson_val_mut_copy(mdoc, yyjson_doc_get_root(vdoc));
+    yyjson_mut_obj_put(cur, yyjson_mut_strcpy(mdoc, last_key), mv);
+  }
+  free(p);
+  yyjson_doc_free(vdoc);
+
+  /* Serialize and re-parse as immutable */
+  size_t len = 0;
+  char *out = yyjson_mut_write(mdoc, YYJSON_WRITE_NOFLAG, &len);
+  yyjson_mut_doc_free(mdoc);
+  if (!out) {
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"failed to serialize";
+    return r;
+  }
+
+  yyjson_doc *newdoc = yyjson_read(out, len, YYJSON_READ_NOFLAG);
+  free(out);
+  if (!newdoc) {
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"failed to re-parse";
+    return r;
+  }
+
+  yyjson_doc **np = malloc(sizeof(yyjson_doc *));
+  *np = newdoc;
+  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __pr *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)np; r->err_val = 0;
+  return r;
+  ```)
+
+;;; json-merge -- shallow-merge two JSON objects, returning a new doc.
+;;;
+;;; Parameters:
+;;;   base    -- :int doc handle for the base object
+;;;   overlay -- :int doc handle whose keys overwrite base keys
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(new-doc-handle) with merged object, or err(:cstr).
+;;;   The original handles are unchanged.  Caller must json-free the new handle.
+;;;
+;;; Example:
+;;;   (let [r (json-merge base overlay)]
+;;;     (when (ok? r) (println (json-emit (ok-val r)))))
+;;;
+;;; Since: P4
+(defn json-merge [base :int overlay :int] :ptr<void>
+  ```c
+  #include <yyjson.h>
+  #include <stdlib.h>
+  #include <string.h>
+  yyjson_doc **bp = (yyjson_doc **)(intptr_t)base;
+  yyjson_doc **op = (yyjson_doc **)(intptr_t)overlay;
+
+  yyjson_val *broot = yyjson_doc_get_root(*bp);
+  yyjson_val *oroot = yyjson_doc_get_root(*op);
+  if (!yyjson_is_obj(broot) || !yyjson_is_obj(oroot)) {
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"both docs must be JSON objects";
+    return r;
+  }
+
+  yyjson_mut_doc *mdoc = yyjson_doc_mut_copy(*bp, NULL);
+  if (!mdoc) {
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"failed to copy base doc";
+    return r;
+  }
+
+  yyjson_mut_val *mroot = yyjson_mut_doc_get_root(mdoc);
+
+  /* Iterate overlay keys and put/replace in mutable base */
+  yyjson_obj_iter iter;
+  yyjson_obj_iter_init(oroot, &iter);
+  yyjson_val *key;
+  while ((key = yyjson_obj_iter_next(&iter))) {
+    yyjson_val *val = yyjson_obj_iter_get_val(key);
+    yyjson_mut_val *mk = yyjson_mut_strcpy(mdoc, yyjson_get_str(key));
+    yyjson_mut_val *mv = yyjson_val_mut_copy(mdoc, val);
+    yyjson_mut_obj_put(mroot, mk, mv);
+  }
+
+  size_t len = 0;
+  char *out = yyjson_mut_write(mdoc, YYJSON_WRITE_NOFLAG, &len);
+  yyjson_mut_doc_free(mdoc);
+  if (!out) {
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"failed to serialize merged doc";
+    return r;
+  }
+
+  yyjson_doc *newdoc = yyjson_read(out, len, YYJSON_READ_NOFLAG);
+  free(out);
+  if (!newdoc) {
+    struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    struct __pr *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)"failed to re-parse merged doc";
+    return r;
+  }
+
+  yyjson_doc **np = malloc(sizeof(yyjson_doc *));
+  *np = newdoc;
+  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __pr *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)np; r->err_val = 0;
+  return r;
+  ```)
+
+) ;; end defmodule json/patch

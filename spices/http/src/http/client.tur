@@ -1,0 +1,332 @@
+;; http/client.tur -- HTTP/HTTPS client via mbedTLS.
+;;
+;; All five public functions return result<response-handle>.
+;; TLS certificate verification is disabled (MBEDTLS_SSL_VERIFY_NONE).
+;; TODO: expose verify-peer in a future milestone.
+
+(defmodule http/client
+  (export http-get http-post http-put http-delete http-request)
+
+;; Private request-struct accessors
+(defn __req-method [req :int] :cstr
+  ```c
+  struct __req { char *method; char *url; char *body; int64_t headers; };
+  return ((struct __req *)(intptr_t)req)->method;
+  ```)
+
+(defn __req-url [req :int] :cstr
+  ```c
+  struct __req { char *method; char *url; char *body; int64_t headers; };
+  return ((struct __req *)(intptr_t)req)->url;
+  ```)
+
+(defn __req-body [req :int] :cstr
+  ```c
+  struct __req { char *method; char *url; char *body; int64_t headers; };
+  return ((struct __req *)(intptr_t)req)->body;
+  ```)
+
+(defn __req-hdrs [req :int] :int
+  ```c
+  struct __req { char *method; char *url; char *body; int64_t headers; };
+  return ((struct __req *)(intptr_t)req)->headers;
+  ```)
+
+;; Private: perform a raw HTTP/HTTPS request.
+;; headers is a cons-list of alternating key/value :cstr strings (or 0 = nil).
+(defn __do-request [method :cstr url :cstr body :cstr headers :int] :ptr<void>
+  ```c
+  #include <mbedtls/net_sockets.h>
+  #include <mbedtls/ssl.h>
+  #include <mbedtls/entropy.h>
+  #include <mbedtls/ctr_drbg.h>
+  #include <mbedtls/error.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdio.h>
+
+  struct __cons { int64_t value; int64_t next; };
+  struct __cr   { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __resp {
+    int    status;
+    char  *body;
+    char **hdr_keys;
+    char **hdr_vals;
+    int    hdr_count;
+  };
+
+  /* --- Parse URL --- */
+  const char *raw = (const char *)url;
+  int use_tls = (strncmp(raw, "https://", 8) == 0);
+  if (!use_tls && strncmp(raw, "http://", 7) != 0) {
+    struct __cr *res = malloc(sizeof(*res));
+    res->is_ok = false; res->ok_val = 0;
+    res->err_val = (int64_t)(intptr_t)"unsupported scheme";
+    return res;
+  }
+  const char *hoststart = raw + (use_tls ? 8 : 7);
+  char host[512]; char port_str[8]; char path[4096];
+  const char *slash = strchr(hoststart, '/');
+  const char *colon = strchr(hoststart, ':');
+  if (slash && colon && colon < slash) {
+    size_t hl = (size_t)(colon - hoststart);
+    memcpy(host, hoststart, hl); host[hl] = '\0';
+    size_t pl = (size_t)(slash - colon - 1);
+    memcpy(port_str, colon + 1, pl); port_str[pl] = '\0';
+    strncpy(path, slash, sizeof(path) - 1); path[sizeof(path) - 1] = '\0';
+  } else if (slash) {
+    size_t hl = (size_t)(slash - hoststart);
+    memcpy(host, hoststart, hl); host[hl] = '\0';
+    snprintf(port_str, sizeof(port_str), "%s", use_tls ? "443" : "80");
+    strncpy(path, slash, sizeof(path) - 1); path[sizeof(path) - 1] = '\0';
+  } else {
+    strncpy(host, hoststart, sizeof(host) - 1); host[sizeof(host) - 1] = '\0';
+    snprintf(port_str, sizeof(port_str), "%s", use_tls ? "443" : "80");
+    strcpy(path, "/");
+  }
+
+  /* --- Build HTTP request --- */
+  char req_buf[16384];
+  int  req_len = snprintf(req_buf, sizeof(req_buf),
+    "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n",
+    (const char *)method, path, host);
+
+  struct __cons *hc = (struct __cons *)(intptr_t)headers;
+  while (hc) {
+    const char *k = (const char *)(intptr_t)hc->value;
+    hc = (struct __cons *)(intptr_t)hc->next;
+    if (!hc) break;
+    const char *v = (const char *)(intptr_t)hc->value;
+    hc = (struct __cons *)(intptr_t)hc->next;
+    req_len += snprintf(req_buf + req_len, sizeof(req_buf) - (size_t)req_len,
+                        "%s: %s\r\n", k, v);
+  }
+
+  size_t body_len = body ? strlen((const char *)body) : 0;
+  if (body_len > 0)
+    req_len += snprintf(req_buf + req_len, sizeof(req_buf) - (size_t)req_len,
+                        "Content-Length: %zu\r\n", body_len);
+  req_len += snprintf(req_buf + req_len, sizeof(req_buf) - (size_t)req_len, "\r\n");
+  if (body_len > 0 && req_len + (int)body_len < (int)sizeof(req_buf)) {
+    memcpy(req_buf + req_len, (const char *)body, body_len);
+    req_len += (int)body_len;
+  }
+
+  /* --- Response buffer --- */
+  size_t resp_cap = 65536;
+  char  *resp_buf = malloc(resp_cap);
+  size_t resp_len = 0;
+  int ret;
+
+  if (use_tls) {
+    mbedtls_net_context      server_fd;
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    mbedtls_ssl_context      ssl;
+    mbedtls_ssl_config       conf;
+
+    mbedtls_net_init(&server_fd);
+    mbedtls_ssl_init(&ssl);
+    mbedtls_ssl_config_init(&conf);
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+
+    const char *pers = "tur_http";
+    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                           (const unsigned char *)pers, strlen(pers));
+
+    if ((ret = mbedtls_net_connect(&server_fd, host, port_str,
+                                   MBEDTLS_NET_PROTO_TCP)) != 0) {
+      free(resp_buf);
+      char *emsg = malloc(128); mbedtls_strerror(ret, emsg, 128);
+      struct __cr *res = malloc(sizeof(*res));
+      res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+      mbedtls_net_free(&server_fd);
+      return res;
+    }
+    mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT,
+                                 MBEDTLS_SSL_TRANSPORT_STREAM,
+                                 MBEDTLS_SSL_PRESET_DEFAULT);
+    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_NONE);
+    mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
+    mbedtls_ssl_setup(&ssl, &conf);
+    mbedtls_ssl_set_hostname(&ssl, host);
+    mbedtls_ssl_set_bio(&ssl, &server_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
+    while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
+      if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        free(resp_buf);
+        char *emsg = malloc(128); mbedtls_strerror(ret, emsg, 128);
+        struct __cr *res = malloc(sizeof(*res));
+        res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+        mbedtls_ssl_free(&ssl); mbedtls_ssl_config_free(&conf);
+        mbedtls_net_free(&server_fd);
+        return res;
+      }
+    }
+    size_t wr = 0;
+    while (wr < (size_t)req_len) {
+      ret = mbedtls_ssl_write(&ssl, (const unsigned char *)req_buf + wr,
+                               (size_t)req_len - wr);
+      if (ret < 0 && ret != MBEDTLS_ERR_SSL_WANT_WRITE) break;
+      if (ret > 0) wr += (size_t)ret;
+    }
+    while (1) {
+      if (resp_len + 4096 > resp_cap) { resp_cap *= 2; resp_buf = realloc(resp_buf, resp_cap); }
+      ret = mbedtls_ssl_read(&ssl, (unsigned char *)resp_buf + resp_len, 4096);
+      if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == 0) break;
+      if (ret < 0) { if (ret != MBEDTLS_ERR_SSL_WANT_READ) break; continue; }
+      resp_len += (size_t)ret;
+    }
+    mbedtls_ssl_close_notify(&ssl);
+    mbedtls_ssl_free(&ssl); mbedtls_ssl_config_free(&conf);
+    mbedtls_ctr_drbg_free(&ctr_drbg); mbedtls_entropy_free(&entropy);
+    mbedtls_net_free(&server_fd);
+  } else {
+    mbedtls_net_context server_fd;
+    mbedtls_net_init(&server_fd);
+    if ((ret = mbedtls_net_connect(&server_fd, host, port_str,
+                                   MBEDTLS_NET_PROTO_TCP)) != 0) {
+      free(resp_buf);
+      char *emsg = malloc(128); mbedtls_strerror(ret, emsg, 128);
+      struct __cr *res = malloc(sizeof(*res));
+      res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+      mbedtls_net_free(&server_fd);
+      return res;
+    }
+    size_t wr = 0;
+    while (wr < (size_t)req_len) {
+      ret = mbedtls_net_send(&server_fd, (const unsigned char *)req_buf + wr,
+                              (size_t)req_len - wr);
+      if (ret < 0) break;
+      wr += (size_t)ret;
+    }
+    while (1) {
+      if (resp_len + 4096 > resp_cap) { resp_cap *= 2; resp_buf = realloc(resp_buf, resp_cap); }
+      ret = mbedtls_net_recv(&server_fd, (unsigned char *)resp_buf + resp_len, 4096);
+      if (ret <= 0) break;
+      resp_len += (size_t)ret;
+    }
+    mbedtls_net_free(&server_fd);
+  }
+
+  resp_buf[resp_len] = '\0';
+
+  /* --- Parse response --- */
+  int status = 0;
+  sscanf(resp_buf, "HTTP/%*s %d", &status);
+  char *hdr_end    = strstr(resp_buf, "\r\n\r\n");
+  char *body_start = hdr_end ? hdr_end + 4 : resp_buf + resp_len;
+  size_t blen      = (size_t)(resp_buf + resp_len - body_start);
+
+  int    max_hdrs = 64;
+  char **rkeys = malloc(sizeof(char *) * (size_t)max_hdrs);
+  char **rvals = malloc(sizeof(char *) * (size_t)max_hdrs);
+  int    rcount = 0;
+  char  *hdr_cursor = strchr(resp_buf, '\n');
+  if (hdr_cursor) hdr_cursor++;
+  char *hdr_limit = hdr_end ? hdr_end : resp_buf + resp_len;
+  while (hdr_cursor && hdr_cursor < hdr_limit && rcount < max_hdrs) {
+    char *cp = strchr(hdr_cursor, ':');
+    char *nl = strchr(hdr_cursor, '\n');
+    if (!cp || (nl && cp > nl)) { if (nl) hdr_cursor = nl + 1; else break; continue; }
+    size_t kl = (size_t)(cp - hdr_cursor);
+    rkeys[rcount] = malloc(kl + 1);
+    memcpy(rkeys[rcount], hdr_cursor, kl); rkeys[rcount][kl] = '\0';
+    char *vs = cp + 1; while (*vs == ' ') vs++;
+    char *ve = nl ? nl : hdr_limit;
+    if (ve > vs && *(ve - 1) == '\r') ve--;
+    size_t vl = (size_t)(ve - vs);
+    rvals[rcount] = malloc(vl + 1);
+    memcpy(rvals[rcount], vs, vl); rvals[rcount][vl] = '\0';
+    rcount++;
+    hdr_cursor = nl ? nl + 1 : NULL;
+  }
+
+  struct __resp *resp = malloc(sizeof(*resp));
+  resp->status    = status;
+  resp->body      = malloc(blen + 1);
+  memcpy(resp->body, body_start, blen); resp->body[blen] = '\0';
+  resp->hdr_keys  = rkeys;
+  resp->hdr_vals  = rvals;
+  resp->hdr_count = rcount;
+  free(resp_buf);
+
+  struct __cr *res = malloc(sizeof(*res));
+  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)resp; res->err_val = 0;
+  return res;
+  ```)
+
+;;; http-get -- perform an HTTP GET request.
+;;;
+;;; Parameters:
+;;;   url -- full URL, e.g. "https://api.example.com/items"
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(response-handle) or err(:cstr message)
+;;;
+;;; Example:
+;;;   (let [r (http-get "https://httpbin.org/get")]
+;;;     (when (ok? r) (println (response-body (ok-val r)))))
+;;;
+;;; Since: P5
+(defn http-get [url :cstr] :ptr<void>
+  (__do-request "GET" url "" 0))
+
+;;; http-post -- perform an HTTP POST request with a string body.
+;;;
+;;; Parameters:
+;;;   url  -- full URL
+;;;   body -- request body string
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(response-handle) or err(:cstr message)
+;;;
+;;; Example:
+;;;   (http-post "https://httpbin.org/post" "{\"x\":1}")
+;;;
+;;; Since: P5
+(defn http-post [url :cstr body :cstr] :ptr<void>
+  (__do-request "POST" url body 0))
+
+;;; http-put -- perform an HTTP PUT request with a string body.
+;;;
+;;; Parameters:
+;;;   url  -- full URL
+;;;   body -- request body string
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(response-handle) or err(:cstr message)
+;;;
+;;; Since: P5
+(defn http-put [url :cstr body :cstr] :ptr<void>
+  (__do-request "PUT" url body 0))
+
+;;; http-delete -- perform an HTTP DELETE request.
+;;;
+;;; Parameters:
+;;;   url -- full URL
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(response-handle) or err(:cstr message)
+;;;
+;;; Since: P5
+(defn http-delete [url :cstr] :ptr<void>
+  (__do-request "DELETE" url "" 0))
+
+;;; http-request -- perform a fully custom HTTP request from a request handle.
+;;;
+;;; Parameters:
+;;;   req -- :int request handle from (request method url body headers)
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(response-handle) or err(:cstr message)
+;;;
+;;; Example:
+;;;   (let [req (request "POST" "https://api.example.com" "{}" (nil-value))]
+;;;     (http-request req))
+;;;
+;;; Since: P5
+(defn http-request [req :int] :ptr<void>
+  (__do-request (__req-method req) (__req-url req) (__req-body req) (__req-hdrs req)))
+
+) ;; end defmodule http/client

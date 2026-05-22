@@ -1,0 +1,307 @@
+;; regex/regex.tur -- PCRE2 regex compile, match, and replace.
+;;
+;; Pattern handles are heap-allocated pcre2_code* wrapped in a thin struct.
+;; Match handles carry the match-data, subject string, and the compiled re
+;; (for named-group lookup in regex/capture).
+;;
+;; regex-match-all returns a cons-list of match handles (one per match).
+
+(defmodule regex/regex
+  (export regex-compile regex-free regex-match regex-match-all regex-replace)
+
+;; Private result helpers matching stdlib/result.tur layout
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __rr *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0;
+  return r;
+  ```)
+
+(defn __err [msg :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __rr *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = (int64_t)(intptr_t)msg;
+  return r;
+  ```)
+
+;; Private cons helpers matching stdlib/list.tur layout
+(defn __cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  struct __lc { int64_t value; int64_t next; };
+  struct __lc *c = malloc(sizeof(*c));
+  c->value = v; c->next = n;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;;; regex-compile -- compile a PCRE2 pattern into a reusable regex handle.
+;;;
+;;; Parameters:
+;;;   pattern -- PCRE2 pattern string, e.g. "(?P<year>\\d{4})-(?P<month>\\d{2})"
+;;;   flags   -- option flags as :int (0 for defaults, or PCRE2_CASELESS = 0x00000008)
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(regex-handle) on success, err(:cstr message) on failure.
+;;;   Free with regex-free when done.
+;;;
+;;; Example:
+;;;   (let [r (regex-compile "\\d+" 0)]
+;;;     (when (ok? r) (regex-match (ok-val r) "abc123")))
+;;;
+;;; Since: P6
+(defn regex-compile [pattern :cstr flags :int] :ptr<void>
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  #include <stdlib.h>
+  #include <string.h>
+  int errcode;
+  PCRE2_SIZE erroffset;
+  pcre2_code *re = pcre2_compile(
+    (PCRE2_SPTR8)(const char *)pattern,
+    PCRE2_ZERO_TERMINATED,
+    (uint32_t)flags,
+    &errcode, &erroffset, NULL);
+  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __rr *res = malloc(sizeof(*res));
+  if (!re) {
+    char buf[256];
+    pcre2_get_error_message(errcode, (PCRE2_UCHAR8 *)buf, sizeof(buf));
+    size_t blen = strlen(buf) + 32;
+    char *emsg = malloc(blen);
+    snprintf(emsg, blen, "offset %zu: %s", erroffset, buf);
+    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+    return res;
+  }
+  struct __re_wrap { pcre2_code *re; } *w = malloc(sizeof(*w));
+  w->re = re;
+  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)w; res->err_val = 0;
+  return res;
+  ```)
+
+;;; regex-free -- free a compiled regex handle.
+;;;
+;;; Parameters:
+;;;   re -- :int regex handle (unwrapped ok-val from regex-compile)
+;;;
+;;; Example:
+;;;   (regex-free (ok-val r))
+;;;
+;;; Since: P6
+(defn regex-free [re :int] :void
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  #include <stdlib.h>
+  struct __re_wrap { pcre2_code *re; } *w = (struct __re_wrap *)(intptr_t)re;
+  pcre2_code_free(w->re);
+  free(w);
+  ```)
+
+;;; regex-match -- match a compiled regex against a subject string (first match only).
+;;;
+;;; Parameters:
+;;;   re      -- :int regex handle from regex-compile
+;;;   subject -- string to search
+;;;
+;;; Returns:
+;;;   result<:int> -- ok(match-handle) on match, err(:cstr) on no-match or error.
+;;;   Use capture-at / capture-named from regex/capture to inspect.
+;;;
+;;; Example:
+;;;   (let [m (regex-match re "hello 42 world")]
+;;;     (when (ok? m) (capture-at (ok-val m) 0)))
+;;;
+;;; Since: P6
+(defn regex-match [re :int subject :cstr] :ptr<void>
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  #include <stdlib.h>
+  #include <string.h>
+  struct __re_wrap { pcre2_code *re; };
+  struct __match {
+    pcre2_match_data *md;
+    const char       *subject;
+    size_t            subject_len;
+    int               match_count;
+    pcre2_code       *re;
+  };
+  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
+
+  struct __re_wrap *w = (struct __re_wrap *)(intptr_t)re;
+  const char *sub = (const char *)subject;
+  size_t sub_len  = strlen(sub);
+
+  pcre2_match_data *md = pcre2_match_data_create_from_pattern(w->re, NULL);
+  int rc = pcre2_match(w->re, (PCRE2_SPTR8)sub, sub_len, 0, 0, md, NULL);
+
+  struct __rr *res = malloc(sizeof(*res));
+  if (rc < 0) {
+    pcre2_match_data_free(md);
+    char buf[128];
+    pcre2_get_error_message(rc, (PCRE2_UCHAR8 *)buf, sizeof(buf));
+    size_t bl = strlen(buf);
+    char *emsg = malloc(bl + 1);
+    memcpy(emsg, buf, bl + 1);
+    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+    return res;
+  }
+
+  char *sub_copy = malloc(sub_len + 1);
+  memcpy(sub_copy, sub, sub_len + 1);
+
+  struct __match *m = malloc(sizeof(*m));
+  m->md          = md;
+  m->subject     = sub_copy;
+  m->subject_len = sub_len;
+  m->match_count = rc;
+  m->re          = w->re;
+
+  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)m; res->err_val = 0;
+  return res;
+  ```)
+
+;;; regex-match-all -- find all non-overlapping matches in a subject string.
+;;;
+;;; Parameters:
+;;;   re      -- :int regex handle from regex-compile
+;;;   subject -- string to search
+;;;
+;;; Returns:
+;;;   :int -- cons-list of match handles (may be empty / nil-value if no matches).
+;;;   Each element is a match handle usable with capture-at / capture-named.
+;;;
+;;; Example:
+;;;   (let [ms (regex-match-all re "one 1 two 2")]
+;;;     (for [m ms] (println (capture-at m 0))))
+;;;
+;;; Since: P6
+(defn regex-match-all [re :int subject :cstr] :int
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  #include <stdlib.h>
+  #include <string.h>
+  struct __re_wrap { pcre2_code *re; };
+  struct __match {
+    pcre2_match_data *md;
+    const char       *subject;
+    size_t            subject_len;
+    int               match_count;
+    pcre2_code       *re;
+  };
+  struct __lc { int64_t value; int64_t next; };
+
+  struct __re_wrap *w = (struct __re_wrap *)(intptr_t)re;
+  const char *sub = (const char *)subject;
+  size_t sub_len  = strlen(sub);
+
+  /* Collect matches into a temporary array, then reverse into cons-list */
+  int cap = 16; int count = 0;
+  struct __match **arr = malloc(sizeof(*arr) * (size_t)cap);
+
+  size_t offset = 0;
+  while (offset <= sub_len) {
+    pcre2_match_data *md = pcre2_match_data_create_from_pattern(w->re, NULL);
+    int rc = pcre2_match(w->re, (PCRE2_SPTR8)sub, sub_len, offset, 0, md, NULL);
+    if (rc < 0) { pcre2_match_data_free(md); break; }
+
+    PCRE2_SIZE *ov = pcre2_get_ovector_pointer(md);
+    size_t match_end = ov[1];
+    if (match_end == offset) { pcre2_match_data_free(md); offset++; continue; }
+
+    char *sub_copy = malloc(sub_len + 1);
+    memcpy(sub_copy, sub, sub_len + 1);
+
+    struct __match *m = malloc(sizeof(*m));
+    m->md = md; m->subject = sub_copy; m->subject_len = sub_len;
+    m->match_count = rc; m->re = w->re;
+
+    if (count >= cap) { cap *= 2; arr = realloc(arr, sizeof(*arr) * (size_t)cap); }
+    arr[count++] = m;
+    offset = match_end;
+  }
+
+  /* Build cons-list in reverse so head = first match */
+  int64_t acc = 0;
+  for (int i = count - 1; i >= 0; i--) {
+    struct __lc *cell = malloc(sizeof(*cell));
+    cell->value = (int64_t)(intptr_t)arr[i];
+    cell->next  = acc;
+    acc = (int64_t)(intptr_t)cell;
+  }
+  free(arr);
+  return acc;
+  ```)
+
+;;; regex-replace -- replace matches of a pattern with a replacement string.
+;;;
+;;; Parameters:
+;;;   re          -- :int regex handle from regex-compile
+;;;   subject     -- input string
+;;;   replacement -- replacement string; use $1, $2 for backreferences
+;;;   global      -- if non-zero, replace all matches; otherwise replace first only
+;;;
+;;; Returns:
+;;;   result<:cstr> -- ok(result-string) or err(:cstr message)
+;;;
+;;; Example:
+;;;   (regex-replace re "hello world" "there" 0)  ; replace first
+;;;   (regex-replace re "aaa" "b" 1)              ; replace all
+;;;
+;;; Since: P6
+(defn regex-replace [re :int subject :cstr replacement :cstr global :int] :ptr<void>
+  ```c
+  #define PCRE2_CODE_UNIT_WIDTH 8
+  #include <pcre2.h>
+  #include <stdlib.h>
+  #include <string.h>
+  struct __re_wrap { pcre2_code *re; };
+  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
+
+  struct __re_wrap *w = (struct __re_wrap *)(intptr_t)re;
+  const char *sub  = (const char *)subject;
+  const char *repl = (const char *)replacement;
+  size_t sub_len   = strlen(sub);
+
+  uint32_t sub_flags = PCRE2_SUBSTITUTE_EXTENDED;
+  if (global) sub_flags |= PCRE2_SUBSTITUTE_GLOBAL;
+
+  size_t out_len = sub_len * 4 + 256;
+  char *out_buf  = malloc(out_len);
+
+  int rc = pcre2_substitute(
+    w->re,
+    (PCRE2_SPTR8)sub, sub_len,
+    0, sub_flags, NULL, NULL,
+    (PCRE2_SPTR8)repl, strlen(repl),
+    (PCRE2_UCHAR8 *)out_buf, &out_len);
+
+  struct __rr *res = malloc(sizeof(*res));
+  if (rc < 0) {
+    free(out_buf);
+    char buf[128];
+    pcre2_get_error_message(rc, (PCRE2_UCHAR8 *)buf, sizeof(buf));
+    size_t bl = strlen(buf);
+    char *emsg = malloc(bl + 1);
+    memcpy(emsg, buf, bl + 1);
+    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+    return res;
+  }
+
+  /* out_len is updated by pcre2_substitute to the output length */
+  char *final = malloc(out_len + 1);
+  memcpy(final, out_buf, out_len);
+  final[out_len] = '\0';
+  free(out_buf);
+
+  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)final; res->err_val = 0;
+  return res;
+  ```)
+
+) ;; end defmodule regex/regex
