@@ -1,0 +1,31 @@
+;; test/runner.tur -- TAP output runner.
+
+(defmodule test/runner
+  (export run-all)
+
+  (import test/suite :refer [__ts])
+
+;;; __runner-print -- emit the TAP plan and summary to stdout/stderr.
+(defn __runner-print [n :int p :int f :int] :void
+  ```c
+  #include <stdio.h>
+  printf("1..%lld\n", (long long)n);
+  if (f == 0)
+    fprintf(stderr, "# All %lld tests passed.\n", (long long)p);
+  else
+    fprintf(stderr, "# %lld passed, %lld failed.\n",
+            (long long)p, (long long)f);
+  ```)
+
+;;; run-all -- emit the TAP plan line and a summary to stderr.
+;;;
+;;; Call this after all describe/it blocks have been evaluated.
+;;;
+;;; Example:
+;;;   (run-all)
+;;;
+;;; Since: P1
+(defn run-all [] :void
+  (__runner-print (__ts 4) (__ts 0) (__ts 2)))
+
+) ;; end defmodule test/runner

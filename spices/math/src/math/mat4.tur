@@ -1,0 +1,167 @@
+;; math/mat4.tur -- 4x4 column-major matrix type and operations.
+;;
+;; Layout: m[col*4+row], so m[0..3]=col0, m[4..7]=col1, etc.
+
+(defmodule math/mat4
+  (export mat4-identity mat4-translate mat4-rotate-x mat4-rotate-y mat4-rotate-z
+          mat4-scale mat4-mul mat4-invert mat4-perspective mat4-look-at)
+
+(extern-c malloc [^int size] :int)
+
+;;; mat4-identity -- return the 4x4 identity matrix. Since: P1
+(defn mat4-identity [] :int
+  ```c
+  double *m=malloc(16*sizeof(double));
+  for(int i=0;i<16;i++) m[i]=0.0;
+  m[0]=m[5]=m[10]=m[15]=1.0;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-translate -- return a translation matrix. Since: P1
+(defn mat4-translate [tx :float ty :float tz :float] :int
+  ```c
+  double *m=malloc(16*sizeof(double));
+  for(int i=0;i<16;i++) m[i]=0.0;
+  m[0]=m[5]=m[10]=m[15]=1.0;
+  m[12]=tx; m[13]=ty; m[14]=tz;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-rotate-x -- rotation matrix around X axis (angle in radians). Since: P1
+(defn mat4-rotate-x [angle :float] :int
+  ```c
+  double sin(double), cos(double);
+  double c=cos(angle), s=sin(angle);
+  double *m=malloc(16*sizeof(double));
+  for(int i=0;i<16;i++) m[i]=0.0;
+  m[0]=1.0; m[5]=c; m[6]=s; m[9]=-s; m[10]=c; m[15]=1.0;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-rotate-y -- rotation matrix around Y axis (angle in radians). Since: P1
+(defn mat4-rotate-y [angle :float] :int
+  ```c
+  double sin(double), cos(double);
+  double c=cos(angle), s=sin(angle);
+  double *m=malloc(16*sizeof(double));
+  for(int i=0;i<16;i++) m[i]=0.0;
+  m[0]=c; m[2]=-s; m[5]=1.0; m[8]=s; m[10]=c; m[15]=1.0;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-rotate-z -- rotation matrix around Z axis (angle in radians). Since: P1
+(defn mat4-rotate-z [angle :float] :int
+  ```c
+  double sin(double), cos(double);
+  double c=cos(angle), s=sin(angle);
+  double *m=malloc(16*sizeof(double));
+  for(int i=0;i<16;i++) m[i]=0.0;
+  m[0]=c; m[1]=s; m[4]=-s; m[5]=c; m[10]=1.0; m[15]=1.0;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-scale -- return a scale matrix. Since: P1
+(defn mat4-scale [sx :float sy :float sz :float] :int
+  ```c
+  double *m=malloc(16*sizeof(double));
+  for(int i=0;i<16;i++) m[i]=0.0;
+  m[0]=sx; m[5]=sy; m[10]=sz; m[15]=1.0;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-mul -- multiply two 4x4 matrices (column-major). Since: P1
+(defn mat4-mul [a :int b :int] :int
+  ```c
+  double *ma=(double*)(intptr_t)a, *mb=(double*)(intptr_t)b;
+  double *r=malloc(16*sizeof(double));
+  for(int col=0;col<4;col++)
+    for(int row=0;row<4;row++){
+      double s=0.0;
+      for(int k=0;k<4;k++) s+=ma[k*4+row]*mb[col*4+k];
+      r[col*4+row]=s;
+    }
+  return (int64_t)(intptr_t)r;
+  ```)
+
+;;; mat4-invert -- invert a 4x4 matrix. Returns identity if singular. Since: P1
+(defn mat4-invert [src :int] :int
+  ```c
+  double fabs(double), sqrt(double);
+  double *m=(double*)(intptr_t)src;
+  double inv[16], det;
+  inv[0]= m[5]*m[10]*m[15]-m[5]*m[11]*m[14]-m[9]*m[6]*m[15]+m[9]*m[7]*m[14]+m[13]*m[6]*m[11]-m[13]*m[7]*m[10];
+  inv[4]=-m[4]*m[10]*m[15]+m[4]*m[11]*m[14]+m[8]*m[6]*m[15]-m[8]*m[7]*m[14]-m[12]*m[6]*m[11]+m[12]*m[7]*m[10];
+  inv[8]= m[4]*m[9]*m[15]-m[4]*m[11]*m[13]-m[8]*m[5]*m[15]+m[8]*m[7]*m[13]+m[12]*m[5]*m[11]-m[12]*m[7]*m[9];
+  inv[12]=-m[4]*m[9]*m[14]+m[4]*m[10]*m[13]+m[8]*m[5]*m[14]-m[8]*m[6]*m[13]-m[12]*m[5]*m[10]+m[12]*m[6]*m[9];
+  inv[1]=-m[1]*m[10]*m[15]+m[1]*m[11]*m[14]+m[9]*m[2]*m[15]-m[9]*m[3]*m[14]-m[13]*m[2]*m[11]+m[13]*m[3]*m[10];
+  inv[5]= m[0]*m[10]*m[15]-m[0]*m[11]*m[14]-m[8]*m[2]*m[15]+m[8]*m[3]*m[14]+m[12]*m[2]*m[11]-m[12]*m[3]*m[10];
+  inv[9]=-m[0]*m[9]*m[15]+m[0]*m[11]*m[13]+m[8]*m[1]*m[15]-m[8]*m[3]*m[13]-m[12]*m[1]*m[11]+m[12]*m[3]*m[9];
+  inv[13]=m[0]*m[9]*m[14]-m[0]*m[10]*m[13]-m[8]*m[1]*m[14]+m[8]*m[2]*m[13]+m[12]*m[1]*m[10]-m[12]*m[2]*m[9];
+  inv[2]= m[1]*m[6]*m[15]-m[1]*m[7]*m[14]-m[5]*m[2]*m[15]+m[5]*m[3]*m[14]+m[13]*m[2]*m[7]-m[13]*m[3]*m[6];
+  inv[6]=-m[0]*m[6]*m[15]+m[0]*m[7]*m[14]+m[4]*m[2]*m[15]-m[4]*m[3]*m[14]-m[12]*m[2]*m[7]+m[12]*m[3]*m[6];
+  inv[10]=m[0]*m[5]*m[15]-m[0]*m[7]*m[13]-m[4]*m[1]*m[15]+m[4]*m[3]*m[13]+m[12]*m[1]*m[7]-m[12]*m[3]*m[5];
+  inv[14]=-m[0]*m[5]*m[14]+m[0]*m[6]*m[13]+m[4]*m[1]*m[14]-m[4]*m[2]*m[13]-m[12]*m[1]*m[6]+m[12]*m[2]*m[5];
+  inv[3]=-m[1]*m[6]*m[11]+m[1]*m[7]*m[10]+m[5]*m[2]*m[11]-m[5]*m[3]*m[10]-m[9]*m[2]*m[7]+m[9]*m[3]*m[6];
+  inv[7]= m[0]*m[6]*m[11]-m[0]*m[7]*m[10]-m[4]*m[2]*m[11]+m[4]*m[3]*m[10]+m[8]*m[2]*m[7]-m[8]*m[3]*m[6];
+  inv[11]=-m[0]*m[5]*m[11]+m[0]*m[7]*m[9]+m[4]*m[1]*m[11]-m[4]*m[3]*m[9]-m[8]*m[1]*m[7]+m[8]*m[3]*m[5];
+  inv[15]=m[0]*m[5]*m[10]-m[0]*m[6]*m[9]-m[4]*m[1]*m[10]+m[4]*m[2]*m[9]+m[8]*m[1]*m[6]-m[8]*m[2]*m[5];
+  det=m[0]*inv[0]+m[1]*inv[4]+m[2]*inv[8]+m[3]*inv[12];
+  double *r=malloc(16*sizeof(double));
+  if(fabs(det)<1e-12){for(int i=0;i<16;i++)r[i]=0.0;r[0]=r[5]=r[10]=r[15]=1.0;return (int64_t)(intptr_t)r;}
+  det=1.0/det;
+  for(int i=0;i<16;i++) r[i]=inv[i]*det;
+  return (int64_t)(intptr_t)r;
+  ```)
+
+;;; mat4-perspective -- perspective projection matrix.
+;;;
+;;; Parameters:
+;;;   fovy   -- vertical field of view in radians
+;;;   aspect -- width / height
+;;;   near   -- near clip plane distance
+;;;   far    -- far clip plane distance
+;;;
+;;; Since: P1
+(defn mat4-perspective [fovy :float aspect :float near :float far :float] :int
+  ```c
+  double tan(double);
+  double f=1.0/tan(fovy*0.5);
+  double *m=malloc(16*sizeof(double));
+  for(int i=0;i<16;i++) m[i]=0.0;
+  m[0]=f/aspect;
+  m[5]=f;
+  m[10]=(far+near)/(near-far);
+  m[11]=-1.0;
+  m[14]=(2.0*far*near)/(near-far);
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; mat4-look-at -- view matrix looking from eye toward center. Since: P1
+(defn mat4-look-at [eye :int center :int up :int] :int
+  ```c
+  double sqrt(double);
+  double *e=(double*)(intptr_t)eye;
+  double *c=(double*)(intptr_t)center;
+  double *u=(double*)(intptr_t)up;
+  /* forward = normalize(eye - center) */
+  double fx=e[0]-c[0], fy=e[1]-c[1], fz=e[2]-c[2];
+  double fl=sqrt(fx*fx+fy*fy+fz*fz);
+  if(fl>1e-12){fx/=fl;fy/=fl;fz/=fl;}
+  /* right = normalize(up x forward) */
+  double rx=u[1]*fz-u[2]*fy, ry=u[2]*fx-u[0]*fz, rz=u[0]*fy-u[1]*fx;
+  double rl=sqrt(rx*rx+ry*ry+rz*rz);
+  if(rl>1e-12){rx/=rl;ry/=rl;rz/=rl;}
+  /* true_up = forward x right */
+  double ux=fy*rz-fz*ry, uy=fz*rx-fx*rz, uz=fx*ry-fy*rx;
+  double *m=malloc(16*sizeof(double));
+  m[0]=rx;  m[1]=ux;  m[2]=fx;  m[3]=0.0;
+  m[4]=ry;  m[5]=uy;  m[6]=fy;  m[7]=0.0;
+  m[8]=rz;  m[9]=uz;  m[10]=fz; m[11]=0.0;
+  m[12]=-(rx*e[0]+ry*e[1]+rz*e[2]);
+  m[13]=-(ux*e[0]+uy*e[1]+uz*e[2]);
+  m[14]=-(fx*e[0]+fy*e[1]+fz*e[2]);
+  m[15]=1.0;
+  return (int64_t)(intptr_t)m;
+  ```)
+
+) ;; end defmodule math/mat4

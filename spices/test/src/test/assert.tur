@@ -1,0 +1,177 @@
+;; test/assert.tur -- assertion helpers for the tur-test framework.
+
+(defmodule test/assert
+  (export assert-eq assert-ne assert-true assert-false
+          assert-some assert-none assert-ok assert-err)
+
+;;; assert-eq -- assert two integer values are equal.
+;;;
+;;; Parameters:
+;;;   expected -- the expected value
+;;;   actual   -- the actual value
+;;;
+;;; Returns:
+;;;   true if equal, false with a diagnostic if not.
+;;;
+;;; Example:
+;;;   (assert-eq (+ 1 2) 3)  ; => true
+;;;
+;;; Since: P1
+(defn assert-eq [expected :int actual :int] :bool
+  (if (= expected actual)
+    true
+    (do
+      (println "  FAIL assert-eq: expected")
+      (println expected)
+      (println "  got")
+      (println actual)
+      false)))
+
+;;; assert-ne -- assert two integer values are not equal.
+;;;
+;;; Parameters:
+;;;   a -- first value
+;;;   b -- second value
+;;;
+;;; Returns:
+;;;   true if different, false with a diagnostic if equal.
+;;;
+;;; Example:
+;;;   (assert-ne 1 2)  ; => true
+;;;
+;;; Since: P1
+(defn assert-ne [a :int b :int] :bool
+  (if (!= a b)
+    true
+    (do
+      (println "  FAIL assert-ne: expected values to differ, both")
+      (println a)
+      false)))
+
+;;; assert-true -- assert a value is truthy.
+;;;
+;;; Parameters:
+;;;   x -- the condition to check
+;;;
+;;; Returns:
+;;;   true if truthy, false with a diagnostic otherwise.
+;;;
+;;; Example:
+;;;   (assert-true (> 3 2))  ; => true
+;;;
+;;; Since: P1
+(defn assert-true [x :bool] :bool
+  (if x
+    true
+    (do (println "  FAIL assert-true: expected true, got false") false)))
+
+;;; assert-false -- assert a value is falsy.
+;;;
+;;; Parameters:
+;;;   x -- the condition to check
+;;;
+;;; Returns:
+;;;   true if falsy, false with a diagnostic otherwise.
+;;;
+;;; Example:
+;;;   (assert-false (= 1 2))  ; => true
+;;;
+;;; Since: P1
+(defn assert-false [x :bool] :bool
+  (if (not x)
+    true
+    (do (println "  FAIL assert-false: expected false, got true") false)))
+
+;;; assert-some -- assert an option value is some (non-NULL with is_some=true).
+;;;
+;;; Parameters:
+;;;   o -- option value (opaque :int handle)
+;;;
+;;; Returns:
+;;;   true if some, false with a diagnostic if none.
+;;;
+;;; Example:
+;;;   (assert-some (some 42))  ; => true
+;;;
+;;; Since: P1
+(defn assert-some [o :int] :bool
+  ```c
+  #include <stdio.h>
+  #include <stdint.h>
+  if (!o) { printf("  FAIL assert-some: expected some, got none (null)\n"); return 0; }
+  struct { int64_t is_some; int64_t value; } *opt =
+      (void*)(intptr_t)o;
+  if (opt->is_some) return 1;
+  printf("  FAIL assert-some: expected some, got none\n"); return 0;
+  ```)
+
+;;; assert-none -- assert an option value is none (NULL or is_some=false).
+;;;
+;;; Parameters:
+;;;   o -- option value (opaque :int handle)
+;;;
+;;; Returns:
+;;;   true if none, false with a diagnostic if some.
+;;;
+;;; Example:
+;;;   (assert-none (none))  ; => true
+;;;
+;;; Since: P1
+(defn assert-none [o :int] :bool
+  ```c
+  #include <stdio.h>
+  #include <stdint.h>
+  if (!o) return 1;
+  struct { int64_t is_some; int64_t value; } *opt =
+      (void*)(intptr_t)o;
+  if (!opt->is_some) return 1;
+  printf("  FAIL assert-none: expected none, got some\n"); return 0;
+  ```)
+
+;;; assert-ok -- assert a result value is ok.
+;;;
+;;; Parameters:
+;;;   r -- result value (opaque :int handle)
+;;;
+;;; Returns:
+;;;   true if ok, false with a diagnostic if err.
+;;;
+;;; Example:
+;;;   (assert-ok (ok 42))  ; => true
+;;;
+;;; Since: P1
+(defn assert-ok [r :int] :bool
+  ```c
+  #include <stdio.h>
+  #include <stdint.h>
+  if (!r) { printf("  FAIL assert-ok: got null result\n"); return 0; }
+  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
+      (void*)(intptr_t)r;
+  if (res->is_ok) return 1;
+  printf("  FAIL assert-ok: expected ok, got err\n"); return 0;
+  ```)
+
+;;; assert-err -- assert a result value is err.
+;;;
+;;; Parameters:
+;;;   r -- result value (opaque :int handle)
+;;;
+;;; Returns:
+;;;   true if err, false with a diagnostic if ok.
+;;;
+;;; Example:
+;;;   (assert-err (err 1))  ; => true
+;;;
+;;; Since: P1
+(defn assert-err [r :int] :bool
+  ```c
+  #include <stdio.h>
+  #include <stdint.h>
+  if (!r) { printf("  FAIL assert-err: got null result\n"); return 0; }
+  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
+      (void*)(intptr_t)r;
+  if (!res->is_ok) return 1;
+  printf("  FAIL assert-err: expected err, got ok\n"); return 0;
+  ```)
+
+) ;; end defmodule test/assert
