@@ -1,0 +1,454 @@
+;; plutovg/path.tur -- standalone path objects for reuse, transformation, and
+;; geometric queries.  Paired with plutovg/canvas via canvas-add-path /
+;; canvas-fill-path / canvas-stroke-path.
+;;
+;; Path handles are opaque :int (cast from plutovg_path_t* via intptr_t).
+;; The extents accessors return a heap-allocated `rect` (4 packed floats);
+;; release with rect-destroy when done.
+;;
+;; Results are compatible with stdlib/result.tur:
+;;   ok? / ok-val / err-val are auto-loaded stdlib globals.
+
+(defmodule plutovg/path
+  (export path-create path-destroy
+          ;; Construction
+          path-move-to path-line-to path-quad-to path-cubic-to
+          path-arc-to path-close
+          ;; Shape helpers
+          path-add-rect path-add-round-rect path-add-ellipse
+          path-add-circle path-add-arc
+          ;; Cloning + flattening
+          path-clone path-clone-flatten path-clone-dashed
+          ;; Bounding-box & length
+          path-extents path-length
+          ;; SVG path-data parsing
+          path-parse
+          ;; Rect accessors (also used by font/canvas extents)
+          rect-destroy rect-x rect-y rect-w rect-h)
+
+;; -------------------------------------------------------------------------
+;; Private: result-type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Path object construction
+;; -------------------------------------------------------------------------
+
+;;; path-create -- allocate a new empty path.
+;;;
+;;; Returns:
+;;;   (ok handle) on success; (err 0) on allocation failure.
+;;;   Free with path-destroy when done.
+;;;
+;;; Example:
+;;;   (let [r (path-create)] (if (ok? r) (let [p (ok-val r)] ...)))
+;;;
+;;; Since: PV2
+(defn path-create [] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <plutovg.h>
+  plutovg_path_t *p = plutovg_path_create();
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!p) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)p; r->err_val = 0;
+  return r;
+  ```)
+
+;;; path-destroy -- release a path allocated by path-create or path-clone.
+;;;
+;;; Parameters:
+;;;   p -- path handle
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (path-destroy p)
+;;;
+;;; Since: PV2
+(defn path-destroy [p :int] :void
+  ```c
+  #include <plutovg.h>
+  if (p) plutovg_path_destroy((plutovg_path_t *)(intptr_t)p);
+  ```)
+
+;;; path-move-to -- begin a new subpath at (x, y).
+;;;
+;;; Parameters:
+;;;   p -- path handle
+;;;   x -- destination x
+;;;   y -- destination y
+;;;
+;;; Returns: void
+;;;
+;;; Example:
+;;;   (path-move-to p 10.0 10.0)
+;;;
+;;; Since: PV2
+(defn path-move-to [p :int x :float y :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_move_to((plutovg_path_t *)(intptr_t)p, (float)x, (float)y);
+  ```)
+
+;;; path-line-to -- append a straight line to (x, y).
+;;;
+;;; Since: PV2
+(defn path-line-to [p :int x :float y :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_line_to((plutovg_path_t *)(intptr_t)p, (float)x, (float)y);
+  ```)
+
+;;; path-quad-to -- append a quadratic Bezier to (x, y) via control (x1, y1).
+;;;
+;;; Since: PV2
+(defn path-quad-to [p :int x1 :float y1 :float x :float y :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_quad_to((plutovg_path_t *)(intptr_t)p,
+                       (float)x1, (float)y1, (float)x, (float)y);
+  ```)
+
+;;; path-cubic-to -- append a cubic Bezier with controls (x1,y1)/(x2,y2).
+;;;
+;;; Since: PV2
+(defn path-cubic-to [p :int x1 :float y1 :float x2 :float y2 :float
+                     x :float y :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_cubic_to((plutovg_path_t *)(intptr_t)p,
+                        (float)x1, (float)y1,
+                        (float)x2, (float)y2,
+                        (float)x,  (float)y);
+  ```)
+
+;;; path-arc-to -- append an SVG-style elliptical arc to (x, y).
+;;;
+;;; Parameters:
+;;;   p           -- path handle
+;;;   rx          -- horizontal radius
+;;;   ry          -- vertical radius
+;;;   rotation    -- x-axis rotation in radians
+;;;   large-arc?  -- :bool, choose the large (true) or small (false) arc sweep
+;;;   sweep?      -- :bool, sweep direction (true = clockwise)
+;;;   x           -- destination x
+;;;   y           -- destination y
+;;;
+;;; Since: PV2
+(defn path-arc-to [p :int rx :float ry :float rotation :float
+                   large-arc? :bool sweep? :bool
+                   x :float y :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_arc_to((plutovg_path_t *)(intptr_t)p,
+                      (float)rx, (float)ry, (float)rotation,
+                      large_arc, sweep,
+                      (float)x, (float)y);
+  ```)
+
+;;; path-close -- close the current subpath with a straight line to its origin.
+;;;
+;;; Since: PV2
+(defn path-close [p :int] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_close((plutovg_path_t *)(intptr_t)p);
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Shape helpers
+;; -------------------------------------------------------------------------
+
+;;; path-add-rect -- append an axis-aligned rectangle as a closed subpath.
+;;;
+;;; Since: PV2
+(defn path-add-rect [p :int x :float y :float w :float h :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_add_rect((plutovg_path_t *)(intptr_t)p,
+                        (float)x, (float)y, (float)w, (float)h);
+  ```)
+
+;;; path-add-round-rect -- append a rounded-corner rectangle as a closed subpath.
+;;;
+;;; Parameters:
+;;;   p  -- path handle
+;;;   x  -- top-left x
+;;;   y  -- top-left y
+;;;   w  -- width
+;;;   h  -- height
+;;;   rx -- horizontal corner radius
+;;;   ry -- vertical corner radius
+;;;
+;;; Since: PV2
+(defn path-add-round-rect [p :int x :float y :float w :float h :float
+                           rx :float ry :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_add_round_rect((plutovg_path_t *)(intptr_t)p,
+                              (float)x, (float)y, (float)w, (float)h,
+                              (float)rx, (float)ry);
+  ```)
+
+;;; path-add-ellipse -- append an axis-aligned ellipse as a closed subpath.
+;;;
+;;; Since: PV2
+(defn path-add-ellipse [p :int cx :float cy :float rx :float ry :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_add_ellipse((plutovg_path_t *)(intptr_t)p,
+                           (float)cx, (float)cy,
+                           (float)rx, (float)ry);
+  ```)
+
+;;; path-add-circle -- convenience: append a circle subpath.
+;;;
+;;; Since: PV2
+(defn path-add-circle [p :int cx :float cy :float r :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_add_circle((plutovg_path_t *)(intptr_t)p,
+                          (float)cx, (float)cy, (float)r);
+  ```)
+
+;;; path-add-arc -- append a circular arc centered at (cx, cy).
+;;;
+;;; Parameters:
+;;;   p           -- path handle
+;;;   cx          -- center x
+;;;   cy          -- center y
+;;;   r           -- radius
+;;;   start-angle -- start angle in radians
+;;;   sweep-angle -- end angle in radians (interpreted by plutovg)
+;;;
+;;; The plutovg helper expects start and end angles plus a `ccw` flag;
+;;; we expose the simpler "start + sweep" form by interpreting sweep-angle
+;;; as the end angle and defaulting ccw to false (clockwise sweep).  Callers
+;;; that need counter-clockwise sweeps should construct the arc manually
+;;; with arc-to.
+;;;
+;;; Since: PV2
+(defn path-add-arc [p :int cx :float cy :float r :float
+                    start-angle :float sweep-angle :float] :void
+  ```c
+  #include <plutovg.h>
+  plutovg_path_add_arc((plutovg_path_t *)(intptr_t)p,
+                       (float)cx, (float)cy, (float)r,
+                       (float)start_angle, (float)sweep_angle,
+                       false);
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Cloning, flattening, parsing
+;; -------------------------------------------------------------------------
+
+;;; path-clone -- create an independent copy of a path.
+;;;
+;;; Returns:
+;;;   (ok handle) on success; (err 0) on allocation failure.
+;;;
+;;; Since: PV2
+(defn path-clone [p :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <plutovg.h>
+  plutovg_path_t *c = plutovg_path_clone((plutovg_path_t *)(intptr_t)p);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!c) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)c; r->err_val = 0;
+  return r;
+  ```)
+
+;;; path-clone-flatten -- copy a path with all curves approximated by line segments.
+;;;
+;;; The fidelity is fixed by plutovg's internal flattening tolerance; no
+;;; user-supplied tolerance argument is accepted by the underlying API.
+;;;
+;;; Returns:
+;;;   (ok handle) on success; (err 0) on allocation failure.
+;;;
+;;; Since: PV2
+(defn path-clone-flatten [p :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <plutovg.h>
+  plutovg_path_t *c = plutovg_path_clone_flatten((plutovg_path_t *)(intptr_t)p);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!c) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)c; r->err_val = 0;
+  return r;
+  ```)
+
+;;; path-clone-dashed -- copy a path, replacing every segment with the
+;;; alternating "on" / "off" lengths from a dash-array buffer.
+;;;
+;;; Parameters:
+;;;   p      -- source path handle
+;;;   offset -- phase offset into the dash pattern
+;;;   dashes -- dash-array handle (from plutovg/canvas dash-array-create /
+;;;             dash-array-add); empty buffer disables dashing
+;;;
+;;; Returns:
+;;;   (ok handle) on success; (err 0) on allocation failure.  Release the
+;;;   returned path with path-destroy.
+;;;
+;;; Example:
+;;;   (let [da (ok-val (dash-array-create))]
+;;;     (dash-array-add da 4.0)  ; 4 on
+;;;     (dash-array-add da 2.0)  ; 2 off
+;;;     (let [r (path-clone-dashed p 0.0 da)] ...)
+;;;     (dash-array-destroy da))
+;;;
+;;; Since: PV6
+(defn path-clone-dashed [p :int offset :float dashes :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <plutovg.h>
+  char *buf = (char *)(intptr_t)dashes;
+  int n = buf ? ((int *)buf)[1] : 0;
+  const float *arr = buf ? (const float *)(buf + sizeof(int) * 2) : NULL;
+  plutovg_path_t *c = plutovg_path_clone_dashed(
+      (const plutovg_path_t *)(intptr_t)p,
+      (float)offset, arr, n);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!c) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)c; r->err_val = 0;
+  return r;
+  ```)
+
+;;; path-parse -- populate p with an SVG path-data string.
+;;;
+;;; Parameters:
+;;;   p  -- destination path (existing contents are preserved; new commands
+;;;          are appended after the current point)
+;;;   svg -- SVG path-data, e.g. "M 10 20 L 30 40 Z"
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) if plutovg rejected the string.
+;;;
+;;; Example:
+;;;   (path-parse p "M 0 0 L 4 0 L 4 4 Z")
+;;;
+;;; Since: PV2
+(defn path-parse [p :int svg :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <plutovg.h>
+  bool ok = plutovg_path_parse((plutovg_path_t *)(intptr_t)p,
+                               (const char *)(intptr_t)svg, -1);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = ok; r->ok_val = 0; r->err_val = ok ? 0 : 1;
+  return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Bounding-box (`rect`) and length
+;; -------------------------------------------------------------------------
+
+;; The `rect` heap type used by path-extents (and later by font/canvas text
+;; extents) is just 4 packed floats: x, y, w, h.
+
+;;; path-extents -- compute the bounding box of a path.
+;;;
+;;; Parameters:
+;;;   p -- path handle
+;;;
+;;; Returns:
+;;;   (ok rect-handle) holding x/y/w/h floats accessible via rect-x etc.
+;;;   Release with rect-destroy.
+;;;
+;;; Example:
+;;;   (let [r (path-extents p)]
+;;;     (let [box (ok-val r)]
+;;;       (println (rect-w box))
+;;;       (rect-destroy box)))
+;;;
+;;; Since: PV2
+(defn path-extents [p :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <plutovg.h>
+  plutovg_rect_t ext;
+  plutovg_path_extents((plutovg_path_t *)(intptr_t)p, &ext, /*tight=*/false);
+  float *out = malloc(sizeof(float) * 4);
+  out[0] = ext.x; out[1] = ext.y; out[2] = ext.w; out[3] = ext.h;
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)out; r->err_val = 0;
+  return r;
+  ```)
+
+;;; path-length -- compute the total length of all path segments in pixels.
+;;;
+;;; Parameters:
+;;;   p -- path handle
+;;;
+;;; Returns:
+;;;   Total path length as :float.
+;;;
+;;; Example:
+;;;   (println (path-length p))
+;;;
+;;; Since: PV2
+(defn path-length [p :int] :float
+  ```c
+  #include <plutovg.h>
+  return (double)plutovg_path_length((plutovg_path_t *)(intptr_t)p);
+  ```)
+
+;;; rect-destroy -- release a rect allocated by path-extents / text-extents.
+;;;
+;;; Since: PV2
+(defn rect-destroy [box :int] :void
+  ```c
+  #include <stdlib.h>
+  if (box) free((void *)(intptr_t)box);
+  ```)
+
+;;; rect-x -- read the x component of a rect.
+;;; Since: PV2
+(defn rect-x [box :int] :float
+  ```c
+  return (double)((float *)(intptr_t)box)[0];
+  ```)
+
+;;; rect-y -- read the y component of a rect.
+;;; Since: PV2
+(defn rect-y [box :int] :float
+  ```c
+  return (double)((float *)(intptr_t)box)[1];
+  ```)
+
+;;; rect-w -- read the width of a rect.
+;;; Since: PV2
+(defn rect-w [box :int] :float
+  ```c
+  return (double)((float *)(intptr_t)box)[2];
+  ```)
+
+;;; rect-h -- read the height of a rect.
+;;; Since: PV2
+(defn rect-h [box :int] :float
+  ```c
+  return (double)((float *)(intptr_t)box)[3];
+  ```)
+
+) ;; end defmodule plutovg/path

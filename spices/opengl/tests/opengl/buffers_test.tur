@@ -2,76 +2,79 @@
 ;;
 ;; Buffer object creation requires a live GL context. Tests open a
 ;; 1x1 hidden window for initialisation, and skip when no display is found.
+(defmodule opengl/tests/buffers
+  (import opengl/window  :refer [make-window destroy-window])
+  (import opengl/buffers :refer [make-vao make-vbo make-ebo
+                                  bind-vao bind-vbo bind-ebo
+                                  vertex-attrib])
+  (import test/assert    :refer [assert-true])
+  (import test/suite     :refer [describe it])
+  (import test/runner    :refer [run-all])
 
-(import opengl/window  :refer [make-window destroy-window])
-(import opengl/buffers :refer [make-vao make-vbo make-ebo
-                                bind-vao bind-vbo bind-ebo
-                                vertex-attrib])
-(import test/assert    :refer [assert-true])
-(import test/suite     :refer [describe it])
-(import test/runner    :refer [run-all])
+  (defn __has-display [] :bool
+    ```c
+    #include <stdlib.h>
+    return (getenv("DISPLAY") != NULL || getenv("WAYLAND_DISPLAY") != NULL);
+    ```)
 
-(defn __has-display [] :bool
-  ```c
-  #include <stdlib.h>
-  return (getenv("DISPLAY") != NULL || getenv("WAYLAND_DISPLAY") != NULL);
-  ```)
+  (describe "make-vao / make-vbo / make-ebo"
 
-(describe "make-vao / make-vbo / make-ebo"
+    (it "make-vao returns a non-zero handle"
+      (if (__has-display)
+        (let [w   (make-window 1 1 "test")
+              vao (make-vao)
+              ok  (!= vao 0)]
+          (destroy-window w)
+          (assert-true ok))
+        (do (println "# SKIP: no display available") true)))
 
-  (it "make-vao returns a non-zero handle"
-    (if (__has-display)
-      (let [w   (make-window 1 1 "test")
-            vao (make-vao)
-            ok  (!= vao 0)]
-        (destroy-window w)
-        (assert-true ok))
-      (do (println "# SKIP: no display available") true)))
+    (it "make-vbo returns a non-zero handle"
+      (if (__has-display)
+        (let [w   (make-window 1 1 "test")
+              vbo (make-vbo)
+              ok  (!= vbo 0)]
+          (destroy-window w)
+          (assert-true ok))
+        (do (println "# SKIP: no display available") true)))
 
-  (it "make-vbo returns a non-zero handle"
-    (if (__has-display)
-      (let [w   (make-window 1 1 "test")
-            vbo (make-vbo)
-            ok  (!= vbo 0)]
-        (destroy-window w)
-        (assert-true ok))
-      (do (println "# SKIP: no display available") true)))
+    (it "make-ebo returns a non-zero handle"
+      (if (__has-display)
+        (let [w   (make-window 1 1 "test")
+              ebo (make-ebo)
+              ok  (!= ebo 0)]
+          (destroy-window w)
+          (assert-true ok))
+        (do (println "# SKIP: no display available") true))))
 
-  (it "make-ebo returns a non-zero handle"
-    (if (__has-display)
-      (let [w   (make-window 1 1 "test")
-            ebo (make-ebo)
-            ok  (!= ebo 0)]
-        (destroy-window w)
-        (assert-true ok))
-      (do (println "# SKIP: no display available") true))))
+  (describe "bind and vertex-attrib"
 
-(describe "bind and vertex-attrib"
+    (it "bind-vao + bind-vbo + vertex-attrib do not crash"
+      (if (__has-display)
+        (let [w   (make-window 1 1 "test")
+              vao (make-vao)
+              vbo (make-vbo)]
+          (bind-vao vao)
+          (bind-vbo vbo)
+          ;; Describe a 3-float position attribute at location 0, stride 12 bytes
+          (vertex-attrib 0 3 ":float" false 12 0)
+          (bind-vao 0)
+          (destroy-window w)
+          (assert-true true))
+        (do (println "# SKIP: no display available") true)))
 
-  (it "bind-vao + bind-vbo + vertex-attrib do not crash"
-    (if (__has-display)
-      (let [w   (make-window 1 1 "test")
-            vao (make-vao)
-            vbo (make-vbo)]
-        (bind-vao vao)
-        (bind-vbo vbo)
-        ;; Describe a 3-float position attribute at location 0, stride 12 bytes
-        (vertex-attrib 0 3 ":float" false 12 0)
-        (bind-vao 0)
-        (destroy-window w)
-        (assert-true true))
-      (do (println "# SKIP: no display available") true)))
+    (it "bind-ebo does not crash"
+      (if (__has-display)
+        (let [w   (make-window 1 1 "test")
+              vao (make-vao)
+              ebo (make-ebo)]
+          (bind-vao vao)
+          (bind-ebo ebo)
+          (bind-vao 0)
+          (destroy-window w)
+          (assert-true true))
+        (do (println "# SKIP: no display available") true))))
 
-  (it "bind-ebo does not crash"
-    (if (__has-display)
-      (let [w   (make-window 1 1 "test")
-            vao (make-vao)
-            ebo (make-ebo)]
-        (bind-vao vao)
-        (bind-ebo ebo)
-        (bind-vao 0)
-        (destroy-window w)
-        (assert-true true))
-      (do (println "# SKIP: no display available") true))))
 
-(run-all)
+  (defn main [] :int
+    (run-all)
+    0))

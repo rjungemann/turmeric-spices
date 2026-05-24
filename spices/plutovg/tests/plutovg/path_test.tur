@@ -1,0 +1,98 @@
+;; tests/plutovg/path_test.tur -- PV1 tests for canvas path recording.
+;;
+;; Builds a small triangle path with move-to/line-to/close-path, fills it
+;; with opaque red on a 4x4 surface, then samples pixels to verify:
+;;   - the corner inside the triangle is red (4 bytes B,G,R,A = 0,0,255,255)
+;;   - a corner outside the triangle is the surface clear value
+;;     (premultiplied ARGB 0x00000000 -- all 4 bytes zero).
+
+(defmodule plutovg/tests/path
+  (import test/suite      :refer [describe it])
+  (import test/assert     :refer [assert-eq assert-ok])
+  (import test/runner     :refer [run-all])
+  (import plutovg/surface :refer [surface-create surface-destroy])
+  (import plutovg/canvas  :refer [canvas-create canvas-destroy
+                                  canvas-set-source-color
+                                  canvas-move-to canvas-line-to
+                                  canvas-close-path canvas-fill
+                                  canvas-rect canvas-stroke
+                                  canvas-circle canvas-clip])
+
+  ;; Read byte at offset n from a plutovg surface's pixel buffer.
+  (defn surface-byte [s :int n :int] :int
+    ```c
+    #include <plutovg.h>
+    unsigned char *p = plutovg_surface_get_data((plutovg_surface_t *)(intptr_t)s);
+    return (int64_t)p[(int)n];
+    ```)
+
+  (describe "plutovg/canvas path recording"
+    (it "fills a triangle traced with move-to + line-to + close-path"
+      (let [sr (surface-create 4 4)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)]
+          (assert-ok cr)
+          (let [c (ok-val cr)]
+            (canvas-set-source-color c 1.0 0.0 0.0 1.0)
+            ;; Triangle covering (0,0)-(0,3)-(3,3); the (0,0) pixel is the
+            ;; only one we sample as "inside" with confidence.  Pixel (3,0)
+            ;; is on the opposite corner, outside the triangle.
+            (canvas-move-to c 0.0 0.0)
+            (canvas-line-to c 0.0 4.0)
+            (canvas-line-to c 4.0 4.0)
+            (canvas-close-path c)
+            (canvas-fill c)
+            ;; Inside pixel (0,0): premultiplied 0xFFFF0000 -> B G R A
+            (assert-eq 0   (surface-byte s 0))
+            (assert-eq 0   (surface-byte s 1))
+            (assert-eq 255 (surface-byte s 2))
+            (assert-eq 255 (surface-byte s 3))
+            ;; Outside pixel (3,0): row stride 16; byte offset 12..15
+            (assert-eq 0 (surface-byte s 12))
+            (assert-eq 0 (surface-byte s 13))
+            (assert-eq 0 (surface-byte s 14))
+            (assert-eq 0 (surface-byte s 15))
+            (canvas-destroy c))
+          (surface-destroy s)))))
+
+  (describe "plutovg/canvas shape helpers"
+    (it "fills a rect helper-traced subpath"
+      (let [sr (surface-create 4 4)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)]
+          (assert-ok cr)
+          (let [c (ok-val cr)]
+            (canvas-set-source-color c 0.0 1.0 0.0 1.0)  ; opaque green
+            (canvas-rect c 0.0 0.0 4.0 4.0)
+            (canvas-fill c)
+            ;; 0xFF00FF00 -> B G R A in memory: 0, 255, 0, 255
+            (assert-eq 0   (surface-byte s 0))
+            (assert-eq 255 (surface-byte s 1))
+            (assert-eq 0   (surface-byte s 2))
+            (assert-eq 255 (surface-byte s 3))
+            (canvas-destroy c))
+          (surface-destroy s)))))
+
+  (describe "plutovg/canvas stroke and clip"
+    (it "strokes a thin rect outline and clips to a circle"
+      ;; Smoke check only: the operations should not crash and should
+      ;; produce a non-zero surface buffer.  Exact pixel layout depends on
+      ;; plutovg's stroke rasterization.
+      (let [sr (surface-create 8 8)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)]
+          (assert-ok cr)
+          (let [c (ok-val cr)]
+            (canvas-set-source-color c 0.0 0.0 1.0 1.0)  ; opaque blue
+            ;; Clip to a circle covering the center
+            (canvas-circle c 4.0 4.0 3.0)
+            (canvas-clip c)
+            ;; Stroke an inset rect; the stroke should be clipped to the circle.
+            (canvas-rect c 1.0 1.0 6.0 6.0)
+            (canvas-stroke c)
+            (canvas-destroy c))
+          (surface-destroy s)))))
+
+  (defn main [] :int
+    (run-all)
+    0))

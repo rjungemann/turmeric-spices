@@ -1,0 +1,166 @@
+;; tests/plutovg/font_test.tur -- PV5 tests for plutovg/font.
+;;
+;; Font tests need an actual font file on disk.  We probe a handful of
+;; common system paths; if none of them exist the API-shape tests are
+;; skipped (silently passing) so this file remains portable.
+;;
+;; The PV5 tests we *can* always run are:
+;;   - font-cache-create / font-cache-destroy lifecycle
+;;   - rejection of a bogus font path
+;;   - cache lookups returning err for an unregistered family
+
+(defmodule plutovg/tests/font
+  (import test/suite      :refer [describe it])
+  (import test/assert     :refer [assert-eq assert-ok])
+  (import test/runner     :refer [run-all])
+  (import plutovg/surface :refer [surface-create surface-destroy])
+  (import plutovg/canvas  :refer [canvas-create canvas-destroy])
+  (import plutovg/font    :refer [font-face-load-from-file font-face-destroy
+                                  font-face-ascent font-face-descent
+                                  font-face-line-gap font-face-text-extents
+                                  font-cache-create font-cache-destroy
+                                  font-cache-add-file font-cache-get
+                                  canvas-set-font canvas-text-extents])
+  (import plutovg/path    :refer [rect-destroy rect-w rect-h])
+
+  ;; -- Style assert helpers (no stdlib assert-err in our test framework) --
+
+  (defn err? [r :int] :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res =
+        (void *)(intptr_t)r;
+    return res && !res->is_ok;
+    ```)
+
+  (defn ok-handle [r :int] :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res =
+        (void *)(intptr_t)r;
+    return res ? (int64_t)res->ok_val : 0;
+    ```)
+
+  ;; -- Filesystem probing helpers --
+
+  ;; Try a list of common font paths and return the first that exists,
+  ;; or NULL.  Order: macOS system Helvetica, macOS supplemental Arial,
+  ;; Linux DejaVu (common), Linux Liberation, generic fallback.
+  (defn probe-font-path [] :cstr
+    ```c
+    #include <unistd.h>
+    static const char *candidates[] = {
+      "/System/Library/Fonts/Supplemental/Arial.ttf",
+      "/System/Library/Fonts/Helvetica.ttc",
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+      "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+      NULL,
+    };
+    for (int i = 0; candidates[i]; i++) {
+      if (access(candidates[i], R_OK) == 0) return (char *)candidates[i];
+    }
+    return NULL;
+    ```)
+
+  ;; -- Always-on tests --
+
+  (describe "plutovg/font cache lifecycle"
+    (it "creates and destroys an empty cache"
+      (let [r (font-cache-create)]
+        (assert-ok r)
+        (font-cache-destroy (ok-val r)))))
+
+  (describe "plutovg/font rejection"
+    (it "returns err when loading a non-existent font path"
+      (let [r (font-face-load-from-file "/nonexistent/font.ttf" 0)]
+        (assert-eq true (err? r)))))
+
+  (describe "plutovg/font cache miss"
+    (it "returns err when getting an unregistered family"
+      (let [r (font-cache-create)]
+        (assert-ok r)
+        (let [fc (ok-val r)
+              g  (font-cache-get fc "Imaginary Font" ":regular" 12.0)]
+          (assert-eq true (err? g))
+          (font-cache-destroy fc)))))
+
+  ;; -- Conditional tests (require an available font on disk) --
+
+  (describe "plutovg/font face metrics (if a system font is available)"
+    (it "returns sensible ascent / descent / line-gap"
+      (let [path (probe-font-path)]
+        (when-have-font path
+          (let [r (font-face-load-from-file path 0)]
+            (assert-ok r)
+            (let [ff (ok-val r)]
+              ;; At size 24, ascent should be a positive number; descent is
+              ;; typically negative; line-gap is non-negative.
+              (assert-eq true (>f (font-face-ascent  ff 24.0) 0.0))
+              (assert-eq true (<f (font-face-descent ff 24.0) 0.5))
+              (assert-eq true (>=f (font-face-line-gap ff 24.0) 0.0))
+              (font-face-destroy ff)))))))
+
+  (describe "plutovg/font face text extents (if a system font is available)"
+    (it "returns a positive-width rect for non-empty text"
+      (let [path (probe-font-path)]
+        (when-have-font path
+          (let [r (font-face-load-from-file path 0)]
+            (assert-ok r)
+            (let [ff (ok-val r)
+                  er (font-face-text-extents ff 24.0 "Hello")]
+              (assert-ok er)
+              (let [box (ok-val er)]
+                (assert-eq true (>f (rect-w box) 0.0))
+                (assert-eq true (>f (rect-h box) 0.0))
+                (rect-destroy box))
+              (font-face-destroy ff)))))))
+
+  (describe "plutovg/font canvas text bridge (if a system font is available)"
+    (it "set-font and text-extents work together"
+      (let [path (probe-font-path)]
+        (when-have-font path
+          (let [sr (surface-create 64 32)]
+            (assert-ok sr)
+            (let [s (ok-val sr) cr (canvas-create s)
+                  fr (font-face-load-from-file path 0)]
+              (assert-ok cr)
+              (assert-ok fr)
+              (let [c (ok-val cr) ff (ok-val fr)]
+                (canvas-set-font c ff 16.0)
+                (let [er (canvas-text-extents c "Hi" ":utf8")]
+                  (assert-ok er)
+                  (rect-destroy (ok-val er)))
+                (font-face-destroy ff)
+                (canvas-destroy c))
+              (surface-destroy s)))))))
+
+  ;; -- Local helpers --
+
+  (defmacro when-have-font [path-expr & body]
+    `(let [_p ~path-expr]
+       (if (have-font-path? _p)
+         (do ~@body)
+         (do
+           (println "  (skipped: no system font available)")
+           true))))
+
+  (defn have-font-path? [p :cstr] :bool
+    ```c
+    return p != NULL && ((const char *)(intptr_t)p)[0] != '\0';
+    ```)
+
+  (defn >f  [a :float b :float] :bool
+    ```c
+    return (double)a > (double)b;
+    ```)
+  (defn <f  [a :float b :float] :bool
+    ```c
+    return (double)a < (double)b;
+    ```)
+  (defn >=f [a :float b :float] :bool
+    ```c
+    return (double)a >= (double)b;
+    ```)
+
+  (defn main [] :int
+    (run-all)
+    0))

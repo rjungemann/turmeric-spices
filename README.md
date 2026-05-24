@@ -17,6 +17,7 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 | [`tur-opengl`](spices/opengl/) | OpenGL 3.3 Core + GLFW + GLAD bindings | 2 -- cmake-dep | glfw 3.4, glad v2.0.6 |
 | [`tur-sqlite`](spices/sqlite/) | SQLite3 database bindings | 2 -- cmake-dep | sqlite 3.47.2 |
 | [`tur-raylib`](spices/raylib/) | Raylib 5.5 graphics and input | 2 -- cmake-dep | raylib 5.5 |
+| [`tur-plutovg`](spices/plutovg/) | 2D vector graphics rendering via plutovg | 2 -- cmake-dep | plutovg 1.3 |
 | [`tur-json`](spices/json/) | JSON parsing and serialization | 3 -- cmake-dep | yyjson 0.10.0 |
 | [`tur-http`](spices/http/) | HTTP/HTTPS client | 3 -- cmake-dep | mbedTLS 3.6.2 |
 | [`tur-regex`](spices/regex/) | PCRE2 regex bindings | 3 -- cmake-dep | PCRE2 10.44 |
@@ -282,6 +283,44 @@ tur add https://github.com/rjungemann/turmeric-spices \
 
 ---
 
+### tur-plutovg -- 2D vector graphics
+
+Exports: `plutovg/surface`, `plutovg/canvas`, `plutovg/path`, `plutovg/paint`,
+`plutovg/font`
+
+Off-screen 2D rendering: paths, fills, strokes, gradients, textures, text,
+and PNG/JPEG export -- the same engine that backs LunaSVG / PlutoSVG.
+A natural companion to `tur-png` when you need pixel-level access to the
+rasterised output.
+
+```turmeric
+(import plutovg/surface :refer [surface-create surface-write-png surface-destroy])
+(import plutovg/canvas  :refer [canvas-create canvas-destroy
+                                canvas-set-source-color
+                                canvas-circle canvas-fill])
+
+(let [s (ok-val (surface-create 256 256))
+      c (ok-val (canvas-create s))]
+  (canvas-set-source-color c 0.9 0.2 0.2 1.0)
+  (canvas-circle c 128.0 128.0 96.0)
+  (canvas-fill c)
+  (surface-write-png s "circle.png")
+  (canvas-destroy c)
+  (surface-destroy s))
+```
+
+For the full tour (paths, gradients, fonts, image composition) see
+[`docs/guides/plutovg-guide.md`](docs/guides/plutovg-guide.md).
+
+Add to your project:
+
+```sh
+tur add https://github.com/rjungemann/turmeric-spices \
+  --ref plutovg-v0.1.0 --subdir spices/plutovg --name plutovg
+```
+
+---
+
 ### tur-json -- JSON parsing and serialization
 
 Exports: `json/parse`, `json/emit`, `json/patch`
@@ -371,6 +410,7 @@ glsl-v0.1.0
 opengl-v0.1.0
 sqlite-v0.1.0
 raylib-v0.1.0
+plutovg-v0.1.0
 json-v0.1.0
 http-v0.1.0
 regex-v0.1.0

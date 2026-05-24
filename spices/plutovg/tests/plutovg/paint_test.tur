@@ -1,0 +1,177 @@
+;; tests/plutovg/paint_test.tur -- PV3 tests for plutovg/paint.
+;;
+;; Exercises solid colors, hex parsing, the gradient-stops builder, the
+;; linear/radial gradient constructors, and the canvas-set-source bridge.
+;; The gradient renders are smoke checks (no exact pixel assertions on the
+;; gradient interpolation, just that the calls don't crash and the surface
+;; ends up non-blank).
+
+(defmodule plutovg/tests/paint
+  (import test/suite      :refer [describe it])
+  (import test/assert     :refer [assert-eq assert-ok])
+  (import test/runner     :refer [run-all])
+  (import plutovg/surface :refer [surface-create surface-destroy])
+  (import plutovg/canvas  :refer [canvas-create canvas-destroy
+                                  canvas-rect canvas-fill])
+  (import plutovg/paint   :refer [paint-create-color paint-create-color-hex
+                                  paint-destroy
+                                  gradient-stops-create gradient-stops-add
+                                  gradient-stops-destroy gradient-stops-count
+                                  paint-create-linear-gradient
+                                  paint-create-radial-gradient
+                                  paint-create-texture
+                                  canvas-set-source])
+
+  (defn surface-byte [s :int n :int] :int
+    ```c
+    #include <plutovg.h>
+    unsigned char *p = plutovg_surface_get_data((plutovg_surface_t *)(intptr_t)s);
+    return (int64_t)p[(int)n];
+    ```)
+
+  (describe "plutovg/paint solid color"
+    (it "fills a rect via canvas-set-source with a solid-color paint"
+      (let [sr (surface-create 4 4)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)]
+          (assert-ok cr)
+          (let [c (ok-val cr) pr (paint-create-color 1.0 0.0 0.0 1.0)]
+            (assert-ok pr)
+            (let [paint (ok-val pr)]
+              (canvas-set-source c paint)
+              (canvas-rect c 0.0 0.0 4.0 4.0)
+              (canvas-fill c)
+              ;; pixel (0,0): premultiplied 0xFFFF0000 -> B G R A
+              (assert-eq 0   (surface-byte s 0))
+              (assert-eq 0   (surface-byte s 1))
+              (assert-eq 255 (surface-byte s 2))
+              (assert-eq 255 (surface-byte s 3))
+              (paint-destroy paint)))
+          (canvas-destroy (ok-val cr))
+          (surface-destroy s)))))
+
+  (describe "plutovg/paint hex-string color"
+    (it "parses '#0000ff' as opaque blue"
+      (let [sr (surface-create 4 4)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)]
+          (assert-ok cr)
+          (let [c (ok-val cr) pr (paint-create-color-hex "#0000ff")]
+            (assert-ok pr)
+            (let [paint (ok-val pr)]
+              (canvas-set-source c paint)
+              (canvas-rect c 0.0 0.0 4.0 4.0)
+              (canvas-fill c)
+              ;; opaque blue = 0xFF0000FF -> B G R A in memory: 255 0 0 255
+              (assert-eq 255 (surface-byte s 0))
+              (assert-eq 0   (surface-byte s 1))
+              (assert-eq 0   (surface-byte s 2))
+              (assert-eq 255 (surface-byte s 3))
+              (paint-destroy paint)))
+          (canvas-destroy (ok-val cr))
+          (surface-destroy s)))))
+
+  (describe "plutovg/paint hex-string rejection"
+    (it "returns err on a malformed color string"
+      (let [pr (paint-create-color-hex "not a color")]
+        (assert-eq 0
+          ```c
+          /* assert-ok would assert ok; we want assert-err equivalence
+           * without pulling in assert-err. Result layout:
+           *   { bool is_ok; int64_t ok_val; int64_t err_val; } */
+          struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r =
+              (void *)(intptr_t)pr;
+          return r && !r->is_ok ? 0 : 1;
+          ```))))
+
+  (describe "plutovg/paint gradient-stops builder"
+    (it "counts the stops added to a buffer"
+      (let [sr (gradient-stops-create)]
+        (assert-ok sr)
+        (let [s (ok-val sr)]
+          (assert-eq 0 (gradient-stops-count s))
+          (gradient-stops-add s 0.0 1.0 0.0 0.0 1.0)
+          (gradient-stops-add s 1.0 0.0 0.0 1.0 1.0)
+          (assert-eq 2 (gradient-stops-count s))
+          (gradient-stops-destroy s)))))
+
+  (describe "plutovg/paint linear gradient"
+    (it "constructs a 2-stop linear gradient and paints a rect (smoke)"
+      (let [sr (surface-create 8 8)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)
+              stops-r (gradient-stops-create)]
+          (assert-ok cr)
+          (assert-ok stops-r)
+          (let [stops (ok-val stops-r)]
+            (gradient-stops-add stops 0.0 1.0 0.0 0.0 1.0)  ; red
+            (gradient-stops-add stops 1.0 0.0 0.0 1.0 1.0)  ; blue
+            (let [pr (paint-create-linear-gradient
+                        0.0 0.0 8.0 0.0 ":pad" stops)]
+              (assert-ok pr)
+              (let [paint (ok-val pr)]
+                (canvas-set-source (ok-val cr) paint)
+                (canvas-rect (ok-val cr) 0.0 0.0 8.0 8.0)
+                (canvas-fill (ok-val cr))
+                ;; Smoke: the leftmost pixel column should have a non-zero
+                ;; red component (stop 0 is red).
+                (let [r0 (surface-byte s 2)]
+                  (assert-eq true (>i r0 0)))
+                (paint-destroy paint)))
+            (gradient-stops-destroy stops))
+          (canvas-destroy (ok-val cr))
+          (surface-destroy s)))))
+
+  (describe "plutovg/paint radial gradient"
+    (it "constructs a radial gradient and paints without crashing"
+      (let [sr (surface-create 8 8)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)
+              stops-r (gradient-stops-create)]
+          (assert-ok cr)
+          (assert-ok stops-r)
+          (let [stops (ok-val stops-r)]
+            (gradient-stops-add stops 0.0 0.0 1.0 0.0 1.0)
+            (gradient-stops-add stops 1.0 0.0 0.0 1.0 1.0)
+            (let [pr (paint-create-radial-gradient
+                        4.0 4.0 4.0 4.0 4.0 0.0 ":pad" stops)]
+              (assert-ok pr)
+              (paint-destroy (ok-val pr)))
+            (gradient-stops-destroy stops))
+          (canvas-destroy (ok-val cr))
+          (surface-destroy s)))))
+
+  (describe "plutovg/paint texture"
+    (it "constructs a texture paint backed by a 2x2 source surface"
+      ;; Source surface that we paint solid green into, then use as a tiled
+      ;; texture.  The texture-construction path is what's under test; we
+      ;; do not assert specific output pixels.
+      (let [src-r (surface-create 2 2)
+            dst-r (surface-create 4 4)]
+        (assert-ok src-r)
+        (assert-ok dst-r)
+        (let [src (ok-val src-r) dst (ok-val dst-r)
+              src-cr (canvas-create src)]
+          (assert-ok src-cr)
+          (let [src-c (ok-val src-cr)
+                green (paint-create-color 0.0 1.0 0.0 1.0)]
+            (assert-ok green)
+            (canvas-set-source src-c (ok-val green))
+            (canvas-rect src-c 0.0 0.0 2.0 2.0)
+            (canvas-fill src-c)
+            (paint-destroy (ok-val green))
+            (canvas-destroy src-c))
+          (let [tex-r (paint-create-texture src ":tiled" 1.0)]
+            (assert-ok tex-r)
+            (paint-destroy (ok-val tex-r)))
+          (surface-destroy src)
+          (surface-destroy dst)))))
+
+  (defn >i [a :int b :int] :bool
+    ```c
+    return (int)a > (int)b;
+    ```)
+
+  (defn main [] :int
+    (run-all)
+    0))

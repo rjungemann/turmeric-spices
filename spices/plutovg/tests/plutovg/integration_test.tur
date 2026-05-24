@@ -1,0 +1,177 @@
+;; tests/plutovg/integration_test.tur -- PV7 integration smoke test.
+;;
+;; Walks the full pipeline: create a surface, draw a gradient background,
+;; draw a stroked rounded rect, fill a path, render text (if a system font
+;; is available), export to PNG, then verify file size and that a pixel
+;; near the gradient's expected color came out non-zero.
+;;
+;; This is the "off-screen render, compare pixel output" deliverable from
+;; the PV7 plan, run as a single end-to-end scenario.
+
+(defmodule plutovg/tests/integration
+  (import test/suite      :refer [describe it])
+  (import test/assert     :refer [assert-eq assert-ok])
+  (import test/runner     :refer [run-all])
+  (import plutovg/surface :refer [surface-create surface-destroy
+                                  surface-write-png])
+  (import plutovg/canvas  :refer [canvas-create canvas-destroy
+                                  canvas-set-source-color
+                                  canvas-rect canvas-round-rect canvas-circle
+                                  canvas-fill canvas-stroke
+                                  canvas-set-line-width
+                                  canvas-save canvas-restore])
+  (import plutovg/paint   :refer [paint-create-color paint-create-color-hex
+                                  paint-destroy canvas-set-source
+                                  gradient-stops-create gradient-stops-add
+                                  gradient-stops-destroy
+                                  paint-create-linear-gradient])
+  (import plutovg/path    :refer [path-create path-destroy
+                                  path-move-to path-line-to path-close
+                                  path-length])
+  (import plutovg/font    :refer [font-face-load-from-file font-face-destroy
+                                  canvas-set-font canvas-fill-text])
+
+  (defn surface-byte [s :int n :int] :int
+    ```c
+    #include <plutovg.h>
+    unsigned char *p = plutovg_surface_get_data((plutovg_surface_t *)(intptr_t)s);
+    return (int64_t)p[(int)n];
+    ```)
+
+  (defn file-exists? [path :cstr] :bool
+    ```c
+    #include <unistd.h>
+    return access((const char *)(intptr_t)path, F_OK) == 0;
+    ```)
+
+  (defn file-size [path :cstr] :int
+    ```c
+    #include <sys/stat.h>
+    struct stat st;
+    if (stat((const char *)(intptr_t)path, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+    ```)
+
+  (defn unlink-file [path :cstr] :void
+    ```c
+    #include <unistd.h>
+    unlink((const char *)(intptr_t)path);
+    ```)
+
+  (defn probe-font-path [] :cstr
+    ```c
+    #include <unistd.h>
+    static const char *candidates[] = {
+      "/System/Library/Fonts/Supplemental/Arial.ttf",
+      "/System/Library/Fonts/Helvetica.ttc",
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+      "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+      NULL,
+    };
+    for (int i = 0; candidates[i]; i++) {
+      if (access(candidates[i], R_OK) == 0) return (char *)candidates[i];
+    }
+    return NULL;
+    ```)
+
+  (defn have-font? [p :cstr] :bool
+    ```c
+    return p != NULL && ((const char *)(intptr_t)p)[0] != '\0';
+    ```)
+
+  ;; Helper: paint a horizontal red->blue linear gradient over the whole
+  ;; surface and then fill an opaque rounded rect on top.  Returns void.
+  (defn paint-gradient-background [c :int w :float h :float] :void
+    (unsafe
+      (let [stops (ok-val (gradient-stops-create))]
+        (gradient-stops-add stops 0.0  1.0 0.0 0.0 1.0)  ; red
+        (gradient-stops-add stops 1.0  0.0 0.0 1.0 1.0)  ; blue
+        (let [paint (ok-val (paint-create-linear-gradient
+                              0.0 0.0  w 0.0  ":pad" stops))]
+          (canvas-set-source c paint)
+          (canvas-rect c 0.0 0.0 w h)
+          (canvas-fill c)
+          (paint-destroy paint))
+        (gradient-stops-destroy stops))))
+
+  (describe "plutovg end-to-end render"
+    (it "draws a gradient + shapes + (optional) text and writes a PNG"
+      (let [sr (surface-create 64 32)]
+        (assert-ok sr)
+        (let [s (ok-val sr) cr (canvas-create s)
+              png "/tmp/plutovg-integration.png"]
+          (assert-ok cr)
+          (unlink-file png)
+          (let [c (ok-val cr)]
+            ;; 1. Gradient background.
+            (paint-gradient-background c 64.0 32.0)
+
+            ;; 2. White rounded-rect outline near the center.
+            (canvas-save c)
+            (canvas-set-source-color c 1.0 1.0 1.0 1.0)
+            (canvas-set-line-width c 1.0)
+            (canvas-round-rect c 8.0 8.0 48.0 16.0 4.0 4.0)
+            (canvas-stroke c)
+            (canvas-restore c)
+
+            ;; 3. A standalone path: a small triangle filled with the
+            ;;    paint-create-color-hex helper.
+            (let [pr (path-create)]
+              (assert-ok pr)
+              (let [p   (ok-val pr)
+                    tri (ok-val (paint-create-color-hex "#22aa22"))]
+                (path-move-to p 4.0 28.0)
+                (path-line-to p 12.0 16.0)
+                (path-line-to p 20.0 28.0)
+                (path-close p)
+                ;; sanity: closed triangle perimeter > 0
+                (assert-eq true (>f (path-length p) 0.0))
+                (canvas-set-source c tri)
+                (canvas-rect c 4.0 16.0 16.0 12.0)
+                (canvas-fill c)
+                (paint-destroy tri)
+                (path-destroy p)))
+
+            ;; 4. Text rendering (only if a system font is reachable).
+            (let [path (probe-font-path)]
+              (if (have-font? path)
+                (let [fr (font-face-load-from-file path 0)]
+                  (assert-ok fr)
+                  (let [ff (ok-val fr)]
+                    (canvas-set-font c ff 10.0)
+                    (canvas-set-source-color c 1.0 1.0 1.0 1.0)
+                    (canvas-fill-text c "hi" ":utf8" 28.0 20.0)
+                    (font-face-destroy ff)))
+                (println "  (skipped: no system font available for text test)")))
+
+            (canvas-destroy c))
+
+          ;; 5. Export and verify.
+          (let [wr (surface-write-png s png)]
+            (assert-ok wr)
+            (assert-eq true (file-exists? png))
+            (assert-eq true (>i (file-size png) 50)))
+
+          ;; 6. Pixel sanity: pixel (0, 0) sits on the red end of the
+          ;;    gradient.  Premultiplied ARGB => memory layout B G R A.
+          ;;    The exact value depends on rasterisation but the R byte
+          ;;    should dominate the B byte at the left edge.
+          (let [b0 (surface-byte s 0)
+                r0 (surface-byte s 2)]
+            (assert-eq true (>i r0 b0))
+            ;; And the rightmost-column pixel (col 63 on row 0) should
+            ;; have its B byte dominate R.  Offset = 63*4 = 252..255.
+            (let [b1 (surface-byte s 252)
+                  r1 (surface-byte s 254)]
+              (assert-eq true (>i b1 r1))))
+
+          (unlink-file png)
+          (surface-destroy s)))))
+
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn >f [a :float b :float] :bool ```c return (double)a > (double)b; ```)
+
+  (defn main [] :int
+    (run-all)
+    0))

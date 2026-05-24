@@ -6,1249 +6,1252 @@
 ;; Self-contained: embeds all needed primitives without nested C functions.
 
 ;; ---- minimal cons list primitives ----
+(defmodule tidal/tests/tidal
+  (defn nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
 
-(defn nil-value [] #{Unsafe} :int
-  ```c
-  return 0;
-  ```)
+  (defn list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
 
-(defn list-nil? [lst :int] #{Unsafe} :bool
-  ```c
-  return lst == 0;
-  ```)
+  (defn cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
+    cell->value = value; cell->next = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
 
-(defn cons [value :int next :int] #{Unsafe} :int
-  ```c
-  struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
-  cell->value = value; cell->next = next;
-  return (int64_t)(intptr_t)cell;
-  ```)
+  (defn head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
+    return cell->value;
+    ```)
 
-(defn head [lst :int] #{Unsafe} :int
-  ```c
-  struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
-  if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
-  return cell->value;
-  ```)
+  (defn tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
+    return cell->next;
+    ```)
 
-(defn tail [lst :int] #{Unsafe} :int
-  ```c
-  struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
-  if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
-  return cell->next;
-  ```)
+  ;; ---- minimal result primitives ----
 
-;; ---- minimal result primitives ----
+  (defn ok [x :int] #{Unsafe} :ptr<void>
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = true; r->ok_val = x; r->err_val = 0;
+    return (void*)r;
+    ```)
 
-(defn ok [x :int] #{Unsafe} :ptr<void>
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = x; r->err_val = 0;
-  return (void*)r;
-  ```)
+  (defn err [e :int] #{Unsafe} :ptr<void>
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = e;
+    return (void*)r;
+    ```)
 
-(defn err [e :int] #{Unsafe} :ptr<void>
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e;
-  return (void*)r;
-  ```)
+  (defn ok? [r :ptr<void>] #{Unsafe} :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+    return res != NULL && res->is_ok;
+    ```)
 
-(defn ok? [r :ptr<void>] #{Unsafe} :bool
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
-  return res != NULL && res->is_ok;
-  ```)
+  (defn err? [r :ptr<void>] #{Unsafe} :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+    return res == NULL || !res->is_ok;
+    ```)
 
-(defn err? [r :ptr<void>] #{Unsafe} :bool
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
-  return res == NULL || !res->is_ok;
-  ```)
+  (defn ok-val [r :ptr<void>] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+    return res->ok_val;
+    ```)
 
-(defn ok-val [r :ptr<void>] #{Unsafe} :int
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
-  return res->ok_val;
-  ```)
+  (defn err-val [r :ptr<void>] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+    return res->err_val;
+    ```)
 
-(defn err-val [r :ptr<void>] #{Unsafe} :int
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
-  return res->err_val;
-  ```)
+  ;; ---- string equality helper ----
 
-;; ---- string equality helper ----
+  (defn scscm-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *ca = (const char*)(intptr_t)a;
+    const char *cb = (const char*)(intptr_t)b;
+    if (!ca || !cb) return ca == cb;
+    return strcmp(ca, cb) == 0;
+    ```)
 
-(defn scscm-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
-  ```c
-  const char *ca = (const char*)(intptr_t)a;
-  const char *cb = (const char*)(intptr_t)b;
-  if (!ca || !cb) return ca == cb;
-  return strcmp(ca, cb) == 0;
-  ```)
+  ;; tidal-void -- no-op helper.
+  (defn tidal-void [] #{Unsafe} :void
+    ```c
+    return;
+    ```)
 
-;; tidal-void -- no-op helper.
-(defn tidal-void [] #{Unsafe} :void
-  ```c
-  return;
-  ```)
+  ;; list-length -- count elements in a cons list.
+  (defn list-length [lst :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t value; int64_t next; } ConsCell;
+    int n = 0;
+    int64_t cur = (int64_t)lst;
+    while (cur != 0) { n++; ConsCell *c = (ConsCell*)(intptr_t)cur; cur = c->next; }
+    return n;
+    ```)
 
-;; list-length -- count elements in a cons list.
-(defn list-length [lst :int] #{Unsafe} :int
-  ```c
-  typedef struct { int64_t value; int64_t next; } ConsCell;
-  int n = 0;
-  int64_t cur = (int64_t)lst;
-  while (cur != 0) { n++; ConsCell *c = (ConsCell*)(intptr_t)cur; cur = c->next; }
-  return n;
-  ```)
+  ;; tidal-cstr-as-int -- cast a :cstr to :int.
+  (defn tidal-cstr-as-int [s :cstr] #{Unsafe} :int
+    ```c
+    return (int64_t)(intptr_t)s;
+    ```)
 
-;; tidal-cstr-as-int -- cast a :cstr to :int.
-(defn tidal-cstr-as-int [s :cstr] #{Unsafe} :int
-  ```c
-  return (int64_t)(intptr_t)s;
-  ```)
+  ;; ---- test helper ----
 
-;; ---- test helper ----
+  ;; tidal-print -- print a cstr without trailing newline (no `print` builtin exists).
+  (defn tidal-print [s :cstr] #{Unsafe} :void
+    ```c
+    const char *str = (const char*)(intptr_t)s;
+    if (str) fputs(str, stdout);
+    ```)
 
-;; tidal-print -- print a cstr without trailing newline (no `print` builtin exists).
-(defn tidal-print [s :cstr] #{Unsafe} :void
-  ```c
-  const char *str = (const char*)(intptr_t)s;
-  if (str) fputs(str, stdout);
-  ```)
+  (defn print-bool [label :cstr b :bool] #{Unsafe} :void
+    (if b
+      (do (tidal-print label) (println " PASS"))
+      (do (tidal-print label) (println " FAIL"))))
 
-(defn print-bool [label :cstr b :bool] #{Unsafe} :void
-  (if b
-    (do (tidal-print label) (println " PASS"))
-    (do (tidal-print label) (println " FAIL"))))
+  ;; ---- tidal/event inline ----
 
-;; ---- tidal/event inline ----
+  (defn event-new [onset :float dur :float value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *e = malloc(sizeof(TidalEvent));
+    e->onset = (double)onset; e->dur = (double)dur;
+    e->value = value ? strdup((const char*)(intptr_t)value) : strdup("");
+    return (int64_t)(intptr_t)e;
+    ```)
 
-(defn event-new [onset :float dur :float value :cstr] #{Unsafe} :int
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *e = malloc(sizeof(TidalEvent));
-  e->onset = (double)onset; e->dur = (double)dur;
-  e->value = value ? strdup((const char*)(intptr_t)value) : strdup("");
-  return (int64_t)(intptr_t)e;
-  ```)
+  (defn event-onset [e :int] #{Unsafe} :float
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *ev = (TidalEvent*)(intptr_t)e;
+    return ev ? (float)ev->onset : 0.0f;
+    ```)
 
-(defn event-onset [e :int] #{Unsafe} :float
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *ev = (TidalEvent*)(intptr_t)e;
-  return ev ? (float)ev->onset : 0.0f;
-  ```)
+  (defn event-dur [e :int] #{Unsafe} :float
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *ev = (TidalEvent*)(intptr_t)e;
+    return ev ? (float)ev->dur : 0.0f;
+    ```)
 
-(defn event-dur [e :int] #{Unsafe} :float
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *ev = (TidalEvent*)(intptr_t)e;
-  return ev ? (float)ev->dur : 0.0f;
-  ```)
+  (defn event-value [e :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *ev = (TidalEvent*)(intptr_t)e;
+    return ev && ev->value ? ev->value : "";
+    ```)
 
-(defn event-value [e :int] #{Unsafe} :cstr
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *ev = (TidalEvent*)(intptr_t)e;
-  return ev && ev->value ? ev->value : "";
-  ```)
+  (defn event-free [e :int] #{Unsafe} :void
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *ev = (TidalEvent*)(intptr_t)e;
+    if (ev) { free(ev->value); free(ev); }
+    ```)
 
-(defn event-free [e :int] #{Unsafe} :void
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *ev = (TidalEvent*)(intptr_t)e;
-  if (ev) { free(ev->value); free(ev); }
-  ```)
-
-(defn note->midi [value :cstr] #{Unsafe} :int
-  ```c
-  const char *s = (const char*)(intptr_t)value;
-  if (!s || !*s) return -1;
-  if (strcmp(s, "~") == 0) return -1;
-  int si = 0; if (s[0] == '-') si = 1;
-  int ad = 1; for (int i = si; s[i]; i++) { if (s[i]<'0'||s[i]>'9') { ad=0; break; } }
-  if (ad && s[si] != '\0') return atoi(s);
-  char ch = s[0]; if (ch >= 'A' && ch <= 'Z') ch = ch - 'A' + 'a';
-  int pc = -1;
-  switch (ch) {
-    case 'c': pc=0; break; case 'd': pc=2; break; case 'e': pc=4; break;
-    case 'f': pc=5; break; case 'g': pc=7; break; case 'a': pc=9; break;
-    case 'b': pc=11; break; default: return -1;
-  }
-  int pos = 1, acc = 0;
-  while (s[pos]=='#' || s[pos]=='b') { if (s[pos]=='#') acc++; else acc--; pos++; }
-  if (s[pos]<'0' || s[pos]>'9') return -1;
-  int octave = s[pos] - '0';
-  int midi = (octave + 1) * 12 + pc + acc;
-  return (midi >= 0 && midi <= 127) ? midi : -1;
-  ```)
-
-;; ---- misc helpers from notation.tur ----
-
-(defn tidal-cstr-is-rest? [s :cstr] #{Unsafe} :bool
-  ```c
-  const char *str = (const char*)(intptr_t)s;
-  return str && strcmp(str, "~") == 0;
-  ```)
-
-(defn tidal-int-to-float [n :int] #{Unsafe} :float
-  ```c
-  return (float)(int)n;
-  ```)
-
-(defn tidal-float-to-int [f :float] #{Unsafe} :int
-  ```c
-  return (int64_t)(int)(double)f;
-  ```)
-
-(defn tidal-int-div [a :int b :int] #{Unsafe} :int
-  ```c
-  if (b <= 0) return 0;
-  return (int64_t)((int)a / (int)b);
-  ```)
-
-(defn tidal-int-mod [a :int b :int] #{Unsafe} :int
-  ```c
-  if (b <= 0) return 0;
-  return (int64_t)((int)a % (int)b);
-  ```)
-
-(defn tidal-int-max [a :int b :int] #{Unsafe} :int
-  ```c
-  return a > b ? a : b;
-  ```)
-
-;; ---- PatNode struct helpers ----
-
-(defn tidal-pat-alloc [kind :int] #{Unsafe} :int
-  ```c
-  typedef struct PatNode {
-    int kind; char *value; double param_f; int param_n; int param_k;
-    double *weights; struct PatNode **children; int child_count; int child_cap;
-  } PatNode;
-  PatNode *n = calloc(1, sizeof(PatNode));
-  n->kind    = (int)kind;
-  n->param_f = 1.0;
-  n->child_cap = 4;
-  n->children = malloc(4 * sizeof(PatNode*));
-  n->weights  = malloc(4 * sizeof(double));
-  return (int64_t)(intptr_t)n;
-  ```)
-
-(defn tidal-pat-add-child [pat :int child :int w :float] #{Unsafe} :void
-  ```c
-  typedef struct PatNode {
-    int kind; char *value; double param_f; int param_n; int param_k;
-    double *weights; struct PatNode **children; int child_count; int child_cap;
-  } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (!n) return;
-  if (n->child_count >= n->child_cap) {
-    n->child_cap *= 2;
-    n->children = realloc(n->children, n->child_cap * sizeof(PatNode*));
-    n->weights  = realloc(n->weights,  n->child_cap * sizeof(double));
-  }
-  n->children[n->child_count] = (PatNode*)(intptr_t)child;
-  n->weights[n->child_count]  = (double)w;
-  n->child_count++;
-  ```)
-
-(defn tidal-pat-kind [pat :int] #{Unsafe} :int
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  return n ? (int64_t)n->kind : 0;
-  ```)
-
-(defn tidal-pat-value [pat :int] #{Unsafe} :cstr
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  return (n && n->value) ? n->value : "";
-  ```)
-
-(defn tidal-pat-set-value [pat :int v :cstr] #{Unsafe} :void
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (!n) return;
-  free(n->value);
-  n->value = v ? strdup((const char*)(intptr_t)v) : NULL;
-  ```)
-
-(defn tidal-pat-count [pat :int] #{Unsafe} :int
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  return n ? (int64_t)n->child_count : 0;
-  ```)
-
-(defn tidal-pat-child [pat :int i :int] #{Unsafe} :int
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (!n || (int)i < 0 || (int)i >= n->child_count) return 0;
-  return (int64_t)(intptr_t)n->children[(int)i];
-  ```)
-
-(defn tidal-pat-weight [pat :int i :int] #{Unsafe} :float
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (!n || (int)i < 0 || (int)i >= n->child_count) return 1.0f;
-  return (float)n->weights[(int)i];
-  ```)
-
-(defn tidal-pat-param-f [pat :int] #{Unsafe} :float
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  return n ? (float)n->param_f : 1.0f;
-  ```)
-
-(defn tidal-pat-param-n [pat :int] #{Unsafe} :int
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  return n ? (int64_t)n->param_n : 0;
-  ```)
-
-(defn tidal-pat-param-k [pat :int] #{Unsafe} :int
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  return n ? (int64_t)n->param_k : 0;
-  ```)
-
-(defn tidal-pat-set-param-f [pat :int f :float] #{Unsafe} :void
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (n) n->param_f = (double)f;
-  ```)
-
-(defn tidal-pat-set-param-n [pat :int v :int] #{Unsafe} :void
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (n) n->param_n = (int)v;
-  ```)
-
-(defn tidal-pat-set-param-k [pat :int v :int] #{Unsafe} :void
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (n) n->param_k = (int)v;
-  ```)
-
-(defn tidal-pat-total-weight [pat :int] #{Unsafe} :float
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  PatNode *n = (PatNode*)(intptr_t)pat;
-  if (!n || n->child_count == 0) return 1.0f;
-  double total = 0.0;
-  for (int i = 0; i < n->child_count; i++) total += n->weights[i];
-  return total > 0.0 ? (float)total : (float)n->child_count;
-  ```)
-
-;; tidal-pat-free-raw -- iterative DFS free (no nested C functions).
-(defn tidal-pat-free-raw [pat :int] #{Unsafe} :void
-  ```c
-  typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
-                   double *weights; void **children; int child_count; int child_cap; } PatNode;
-  if (!pat) return;
-  struct { int64_t *buf; int len; int cap; } stk;
-  stk.cap = 16; stk.len = 0;
-  stk.buf = malloc(stk.cap * sizeof(int64_t));
-  stk.buf[stk.len++] = (int64_t)pat;
-  while (stk.len > 0) {
-    int64_t cur = stk.buf[--stk.len];
-    PatNode *n = (PatNode*)(intptr_t)cur;
-    if (!n) continue;
-    for (int i = 0; i < n->child_count; i++) {
-      if (stk.len >= stk.cap) {
-        stk.cap *= 2;
-        stk.buf = realloc(stk.buf, stk.cap * sizeof(int64_t));
-      }
-      stk.buf[stk.len++] = (int64_t)(intptr_t)n->children[i];
+  (defn note->midi [value :cstr] #{Unsafe} :int
+    ```c
+    const char *s = (const char*)(intptr_t)value;
+    if (!s || !*s) return -1;
+    if (strcmp(s, "~") == 0) return -1;
+    int si = 0; if (s[0] == '-') si = 1;
+    int ad = 1; for (int i = si; s[i]; i++) { if (s[i]<'0'||s[i]>'9') { ad=0; break; } }
+    if (ad && s[si] != '\0') return atoi(s);
+    char ch = s[0]; if (ch >= 'A' && ch <= 'Z') ch = ch - 'A' + 'a';
+    int pc = -1;
+    switch (ch) {
+      case 'c': pc=0; break; case 'd': pc=2; break; case 'e': pc=4; break;
+      case 'f': pc=5; break; case 'g': pc=7; break; case 'a': pc=9; break;
+      case 'b': pc=11; break; default: return -1;
     }
+    int pos = 1, acc = 0;
+    while (s[pos]=='#' || s[pos]=='b') { if (s[pos]=='#') acc++; else acc--; pos++; }
+    if (s[pos]<'0' || s[pos]>'9') return -1;
+    int octave = s[pos] - '0';
+    int midi = (octave + 1) * 12 + pc + acc;
+    return (midi >= 0 && midi <= 127) ? midi : -1;
+    ```)
+
+  ;; ---- misc helpers from notation.tur ----
+
+  (defn tidal-cstr-is-rest? [s :cstr] #{Unsafe} :bool
+    ```c
+    const char *str = (const char*)(intptr_t)s;
+    return str && strcmp(str, "~") == 0;
+    ```)
+
+  (defn tidal-int-to-float [n :int] #{Unsafe} :float
+    ```c
+    return (float)(int)n;
+    ```)
+
+  (defn tidal-float-to-int [f :float] #{Unsafe} :int
+    ```c
+    return (int64_t)(int)(double)f;
+    ```)
+
+  (defn tidal-int-div [a :int b :int] #{Unsafe} :int
+    ```c
+    if (b <= 0) return 0;
+    return (int64_t)((int)a / (int)b);
+    ```)
+
+  (defn tidal-int-mod [a :int b :int] #{Unsafe} :int
+    ```c
+    if (b <= 0) return 0;
+    return (int64_t)((int)a % (int)b);
+    ```)
+
+  (defn tidal-int-max [a :int b :int] #{Unsafe} :int
+    ```c
+    return a > b ? a : b;
+    ```)
+
+  ;; ---- PatNode struct helpers ----
+
+  (defn tidal-pat-alloc [kind :int] #{Unsafe} :int
+    ```c
+    typedef struct PatNode {
+      int kind; char *value; double param_f; int param_n; int param_k;
+      double *weights; struct PatNode **children; int child_count; int child_cap;
+    } PatNode;
+    PatNode *n = calloc(1, sizeof(PatNode));
+    n->kind    = (int)kind;
+    n->param_f = 1.0;
+    n->child_cap = 4;
+    n->children = malloc(4 * sizeof(PatNode*));
+    n->weights  = malloc(4 * sizeof(double));
+    return (int64_t)(intptr_t)n;
+    ```)
+
+  (defn tidal-pat-add-child [pat :int child :int w :float] #{Unsafe} :void
+    ```c
+    typedef struct PatNode {
+      int kind; char *value; double param_f; int param_n; int param_k;
+      double *weights; struct PatNode **children; int child_count; int child_cap;
+    } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (!n) return;
+    if (n->child_count >= n->child_cap) {
+      n->child_cap *= 2;
+      n->children = realloc(n->children, n->child_cap * sizeof(PatNode*));
+      n->weights  = realloc(n->weights,  n->child_cap * sizeof(double));
+    }
+    n->children[n->child_count] = (PatNode*)(intptr_t)child;
+    n->weights[n->child_count]  = (double)w;
+    n->child_count++;
+    ```)
+
+  (defn tidal-pat-kind [pat :int] #{Unsafe} :int
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    return n ? (int64_t)n->kind : 0;
+    ```)
+
+  (defn tidal-pat-value [pat :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    return (n && n->value) ? n->value : "";
+    ```)
+
+  (defn tidal-pat-set-value [pat :int v :cstr] #{Unsafe} :void
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (!n) return;
     free(n->value);
-    free(n->children);
-    free(n->weights);
-    free(n);
-  }
-  free(stk.buf);
-  ```)
+    n->value = v ? strdup((const char*)(intptr_t)v) : NULL;
+    ```)
 
-;; ---- tokenizer ----
+  (defn tidal-pat-count [pat :int] #{Unsafe} :int
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    return n ? (int64_t)n->child_count : 0;
+    ```)
 
-(defn tidal-tokenize [text :cstr] #{Unsafe} :int
-  ```c
-  typedef struct { int type; char *value; } TidalTok;
-  typedef struct { TidalTok *items; int count; int cap; } TokArr;
-  const char *src = (const char*)(intptr_t)text;
-  if (!src) src = "";
-  TokArr *ta = malloc(sizeof(TokArr));
-  ta->cap = 16; ta->count = 0;
-  ta->items = malloc(ta->cap * sizeof(TidalTok));
-  int pos = 0, len = (int)strlen(src);
-  while (pos < len) {
-    while (pos < len && (src[pos]==' '||src[pos]=='\t'||src[pos]=='\r'||src[pos]=='\n'))
-      pos++;
-    if (pos >= len) break;
-    if (ta->count >= ta->cap) {
-      ta->cap *= 2;
-      ta->items = realloc(ta->items, ta->cap * sizeof(TidalTok));
+  (defn tidal-pat-child [pat :int i :int] #{Unsafe} :int
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (!n || (int)i < 0 || (int)i >= n->child_count) return 0;
+    return (int64_t)(intptr_t)n->children[(int)i];
+    ```)
+
+  (defn tidal-pat-weight [pat :int i :int] #{Unsafe} :float
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (!n || (int)i < 0 || (int)i >= n->child_count) return 1.0f;
+    return (float)n->weights[(int)i];
+    ```)
+
+  (defn tidal-pat-param-f [pat :int] #{Unsafe} :float
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    return n ? (float)n->param_f : 1.0f;
+    ```)
+
+  (defn tidal-pat-param-n [pat :int] #{Unsafe} :int
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    return n ? (int64_t)n->param_n : 0;
+    ```)
+
+  (defn tidal-pat-param-k [pat :int] #{Unsafe} :int
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    return n ? (int64_t)n->param_k : 0;
+    ```)
+
+  (defn tidal-pat-set-param-f [pat :int f :float] #{Unsafe} :void
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (n) n->param_f = (double)f;
+    ```)
+
+  (defn tidal-pat-set-param-n [pat :int v :int] #{Unsafe} :void
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (n) n->param_n = (int)v;
+    ```)
+
+  (defn tidal-pat-set-param-k [pat :int v :int] #{Unsafe} :void
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (n) n->param_k = (int)v;
+    ```)
+
+  (defn tidal-pat-total-weight [pat :int] #{Unsafe} :float
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    PatNode *n = (PatNode*)(intptr_t)pat;
+    if (!n || n->child_count == 0) return 1.0f;
+    double total = 0.0;
+    for (int i = 0; i < n->child_count; i++) total += n->weights[i];
+    return total > 0.0 ? (float)total : (float)n->child_count;
+    ```)
+
+  ;; tidal-pat-free-raw -- iterative DFS free (no nested C functions).
+  (defn tidal-pat-free-raw [pat :int] #{Unsafe} :void
+    ```c
+    typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
+                     double *weights; void **children; int child_count; int child_cap; } PatNode;
+    if (!pat) return;
+    struct { int64_t *buf; int len; int cap; } stk;
+    stk.cap = 16; stk.len = 0;
+    stk.buf = malloc(stk.cap * sizeof(int64_t));
+    stk.buf[stk.len++] = (int64_t)pat;
+    while (stk.len > 0) {
+      int64_t cur = stk.buf[--stk.len];
+      PatNode *n = (PatNode*)(intptr_t)cur;
+      if (!n) continue;
+      for (int i = 0; i < n->child_count; i++) {
+        if (stk.len >= stk.cap) {
+          stk.cap *= 2;
+          stk.buf = realloc(stk.buf, stk.cap * sizeof(int64_t));
+        }
+        stk.buf[stk.len++] = (int64_t)(intptr_t)n->children[i];
+      }
+      free(n->value);
+      free(n->children);
+      free(n->weights);
+      free(n);
     }
-    TidalTok *tok = &ta->items[ta->count++];
-    char c = src[pos];
-    if      (c == '[') { tok->type = 1; tok->value = strdup("["); pos++; }
-    else if (c == ']') { tok->type = 2; tok->value = strdup("]"); pos++; }
-    else if (c == '<') { tok->type = 3; tok->value = strdup("<"); pos++; }
-    else if (c == '>') { tok->type = 4; tok->value = strdup(">"); pos++; }
-    else {
-      int start = pos;
-      while (pos < len && src[pos]!=' ' && src[pos]!='\t' &&
-             src[pos]!='\r' && src[pos]!='\n' &&
-             src[pos]!='[' && src[pos]!=']' &&
-             src[pos]!='<' && src[pos]!='>')
+    free(stk.buf);
+    ```)
+
+  ;; ---- tokenizer ----
+
+  (defn tidal-tokenize [text :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { int type; char *value; } TidalTok;
+    typedef struct { TidalTok *items; int count; int cap; } TokArr;
+    const char *src = (const char*)(intptr_t)text;
+    if (!src) src = "";
+    TokArr *ta = malloc(sizeof(TokArr));
+    ta->cap = 16; ta->count = 0;
+    ta->items = malloc(ta->cap * sizeof(TidalTok));
+    int pos = 0, len = (int)strlen(src);
+    while (pos < len) {
+      while (pos < len && (src[pos]==' '||src[pos]=='\t'||src[pos]=='\r'||src[pos]=='\n'))
         pos++;
-      int n = pos - start;
-      tok->type  = 0;
-      tok->value = malloc(n + 1);
-      memcpy(tok->value, src + start, n);
-      tok->value[n] = '\0';
+      if (pos >= len) break;
+      if (ta->count >= ta->cap) {
+        ta->cap *= 2;
+        ta->items = realloc(ta->items, ta->cap * sizeof(TidalTok));
+      }
+      TidalTok *tok = &ta->items[ta->count++];
+      char c = src[pos];
+      if      (c == '[') { tok->type = 1; tok->value = strdup("["); pos++; }
+      else if (c == ']') { tok->type = 2; tok->value = strdup("]"); pos++; }
+      else if (c == '<') { tok->type = 3; tok->value = strdup("<"); pos++; }
+      else if (c == '>') { tok->type = 4; tok->value = strdup(">"); pos++; }
+      else {
+        int start = pos;
+        while (pos < len && src[pos]!=' ' && src[pos]!='\t' &&
+               src[pos]!='\r' && src[pos]!='\n' &&
+               src[pos]!='[' && src[pos]!=']' &&
+               src[pos]!='<' && src[pos]!='>')
+          pos++;
+        int n = pos - start;
+        tok->type  = 0;
+        tok->value = malloc(n + 1);
+        memcpy(tok->value, src + start, n);
+        tok->value[n] = '\0';
+      }
     }
-  }
-  return (int64_t)(intptr_t)ta;
-  ```)
+    return (int64_t)(intptr_t)ta;
+    ```)
 
-(defn tidal-tok-count [ta :int] #{Unsafe} :int
-  ```c
-  typedef struct { void *items; int count; int cap; } TokArr;
-  TokArr *t = (TokArr*)(intptr_t)ta;
-  return t ? (int64_t)t->count : 0;
-  ```)
+  (defn tidal-tok-count [ta :int] #{Unsafe} :int
+    ```c
+    typedef struct { void *items; int count; int cap; } TokArr;
+    TokArr *t = (TokArr*)(intptr_t)ta;
+    return t ? (int64_t)t->count : 0;
+    ```)
 
-(defn tidal-tok-type [ta :int i :int] #{Unsafe} :int
-  ```c
-  typedef struct { int type; char *value; } TidalTok;
-  typedef struct { TidalTok *items; int count; int cap; } TokArr;
-  TokArr *t = (TokArr*)(intptr_t)ta;
-  if (!t || (int)i < 0 || (int)i >= t->count) return -1;
-  return (int64_t)t->items[(int)i].type;
-  ```)
+  (defn tidal-tok-type [ta :int i :int] #{Unsafe} :int
+    ```c
+    typedef struct { int type; char *value; } TidalTok;
+    typedef struct { TidalTok *items; int count; int cap; } TokArr;
+    TokArr *t = (TokArr*)(intptr_t)ta;
+    if (!t || (int)i < 0 || (int)i >= t->count) return -1;
+    return (int64_t)t->items[(int)i].type;
+    ```)
 
-(defn tidal-tok-value [ta :int i :int] #{Unsafe} :cstr
-  ```c
-  typedef struct { int type; char *value; } TidalTok;
-  typedef struct { TidalTok *items; int count; int cap; } TokArr;
-  TokArr *t = (TokArr*)(intptr_t)ta;
-  if (!t || (int)i < 0 || (int)i >= t->count) return "";
-  return t->items[(int)i].value ? t->items[(int)i].value : "";
-  ```)
+  (defn tidal-tok-value [ta :int i :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { int type; char *value; } TidalTok;
+    typedef struct { TidalTok *items; int count; int cap; } TokArr;
+    TokArr *t = (TokArr*)(intptr_t)ta;
+    if (!t || (int)i < 0 || (int)i >= t->count) return "";
+    return t->items[(int)i].value ? t->items[(int)i].value : "";
+    ```)
 
-(defn tidal-tok-free [ta :int] #{Unsafe} :void
-  ```c
-  typedef struct { int type; char *value; } TidalTok;
-  typedef struct { TidalTok *items; int count; int cap; } TokArr;
-  TokArr *t = (TokArr*)(intptr_t)ta;
-  if (!t) return;
-  for (int i = 0; i < t->count; i++) free(t->items[i].value);
-  free(t->items);
-  free(t);
-  ```)
+  (defn tidal-tok-free [ta :int] #{Unsafe} :void
+    ```c
+    typedef struct { int type; char *value; } TidalTok;
+    typedef struct { TidalTok *items; int count; int cap; } TokArr;
+    TokArr *t = (TokArr*)(intptr_t)ta;
+    if (!t) return;
+    for (int i = 0; i < t->count; i++) free(t->items[i].value);
+    free(t->items);
+    free(t);
+    ```)
 
-;; ---- atom modifier helpers ----
+  ;; ---- atom modifier helpers ----
 
-(defn tidal-atom-base [s :cstr] #{Unsafe} :cstr
-  ```c
-  const char *src = (const char*)(intptr_t)s;
-  if (!src) return strdup("");
-  int i = 0;
-  while (src[i] && src[i]!='*' && src[i]!='/' && src[i]!='(' && src[i]!='@') i++;
-  char *out = malloc(i + 1);
-  memcpy(out, src, i);
-  out[i] = '\0';
-  return out;
-  ```)
+  (defn tidal-atom-base [s :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = (const char*)(intptr_t)s;
+    if (!src) return strdup("");
+    int i = 0;
+    while (src[i] && src[i]!='*' && src[i]!='/' && src[i]!='(' && src[i]!='@') i++;
+    char *out = malloc(i + 1);
+    memcpy(out, src, i);
+    out[i] = '\0';
+    return out;
+    ```)
 
-(defn tidal-atom-mod-type [s :cstr] #{Unsafe} :int
-  ```c
-  const char *src = (const char*)(intptr_t)s;
-  if (!src) return 0;
-  while (*src && *src!='*' && *src!='/' && *src!='(' && *src!='@') src++;
-  if (!*src) return 0;
-  if (*src == '*') return 1;
-  if (*src == '/') return 2;
-  if (*src == '(') return 3;
-  if (*src == '@') return 4;
-  return 0;
-  ```)
+  (defn tidal-atom-mod-type [s :cstr] #{Unsafe} :int
+    ```c
+    const char *src = (const char*)(intptr_t)s;
+    if (!src) return 0;
+    while (*src && *src!='*' && *src!='/' && *src!='(' && *src!='@') src++;
+    if (!*src) return 0;
+    if (*src == '*') return 1;
+    if (*src == '/') return 2;
+    if (*src == '(') return 3;
+    if (*src == '@') return 4;
+    return 0;
+    ```)
 
-(defn tidal-atom-mod-n [s :cstr] #{Unsafe} :int
-  ```c
-  const char *src = (const char*)(intptr_t)s;
-  if (!src) return 1;
-  while (*src && *src!='*' && *src!='(') src++;
-  if (!*src) return 1;
-  src++;
-  return (int64_t)atoi(src);
-  ```)
+  (defn tidal-atom-mod-n [s :cstr] #{Unsafe} :int
+    ```c
+    const char *src = (const char*)(intptr_t)s;
+    if (!src) return 1;
+    while (*src && *src!='*' && *src!='(') src++;
+    if (!*src) return 1;
+    src++;
+    return (int64_t)atoi(src);
+    ```)
 
-(defn tidal-atom-mod-k [s :cstr] #{Unsafe} :int
-  ```c
-  const char *src = (const char*)(intptr_t)s;
-  if (!src) return 1;
-  while (*src && *src!='(') src++;
-  if (!*src) return 1;
-  src++;
-  while (*src && *src!=',') src++;
-  if (!*src) return 1;
-  src++;
-  int k = atoi(src);
-  return k < 1 ? 1 : (int64_t)k;
-  ```)
+  (defn tidal-atom-mod-k [s :cstr] #{Unsafe} :int
+    ```c
+    const char *src = (const char*)(intptr_t)s;
+    if (!src) return 1;
+    while (*src && *src!='(') src++;
+    if (!*src) return 1;
+    src++;
+    while (*src && *src!=',') src++;
+    if (!*src) return 1;
+    src++;
+    int k = atoi(src);
+    return k < 1 ? 1 : (int64_t)k;
+    ```)
 
-(defn tidal-atom-mod-f [s :cstr] #{Unsafe} :float
-  ```c
-  const char *src = (const char*)(intptr_t)s;
-  if (!src) return 1.0f;
-  while (*src && *src!='/' && *src!='@') src++;
-  if (!*src) return 1.0f;
-  src++;
-  double f = atof(src);
-  return f > 0.0 ? (float)f : 1.0f;
-  ```)
+  (defn tidal-atom-mod-f [s :cstr] #{Unsafe} :float
+    ```c
+    const char *src = (const char*)(intptr_t)s;
+    if (!src) return 1.0f;
+    while (*src && *src!='/' && *src!='@') src++;
+    if (!*src) return 1.0f;
+    src++;
+    double f = atof(src);
+    return f > 0.0 ? (float)f : 1.0f;
+    ```)
 
-;; ---- pure Turmeric recursive parser ----
+  ;; ---- pure Turmeric recursive parser ----
 
-(defn tidal-parse-element [ta :int i :int] #{Unsafe} :ptr<void>
-  (if (>= i (tidal-tok-count ta))
-    (err 0)
-    (let [ttype (tidal-tok-type ta i)]
-      (if (= ttype 1)
-        (let [subnode (tidal-pat-alloc 2)
-              r       (tidal-parse-seq-body ta (+ i 1) subnode)]
-          (if (err? r)
-            r
-            (let [pair  (ok-val r)
-                  seq   (head pair)
-                  end-i (tail pair)
-                  next-i (if (< end-i (tidal-tok-count ta))
-                           (if (= (tidal-tok-type ta end-i) 2)
-                             (+ end-i 1)
-                             end-i)
-                           end-i)]
-              (ok (cons seq next-i)))))
-        (if (= ttype 3)
-          (let [altnode (tidal-pat-alloc 3)
-                r       (tidal-parse-alt-body ta (+ i 1) altnode)]
-            r)
-          (let [val  (tidal-tok-value ta i)
-                base (tidal-atom-base val)
-                leaf (tidal-pat-alloc 0)]
-            (tidal-pat-set-value leaf base)
-            (let [mt (tidal-atom-mod-type val)]
-              (if (= mt 0)
-                (ok (cons leaf (+ i 1)))
-                (if (= mt 1)
-                  (let [n   (tidal-atom-mod-n val)
-                        rep (tidal-pat-alloc 4)]
-                    (tidal-pat-set-param-n rep n)
-                    (tidal-pat-add-child rep leaf 1.0)
-                    (ok (cons rep (+ i 1))))
-                  (if (= mt 2)
-                    (let [f  (tidal-atom-mod-f val)
-                          sl (tidal-pat-alloc 5)]
-                      (tidal-pat-set-param-f sl f)
-                      (tidal-pat-add-child sl leaf 1.0)
-                      (ok (cons sl (+ i 1))))
-                    (if (= mt 3)
-                      (let [n  (tidal-atom-mod-n val)
-                            k  (tidal-atom-mod-k val)
-                            eu (tidal-pat-alloc 6)]
-                        (tidal-pat-set-param-n eu n)
-                        (tidal-pat-set-param-k eu k)
-                        (tidal-pat-add-child eu leaf 1.0)
-                        (ok (cons eu (+ i 1))))
-                      (let [w (tidal-atom-mod-f val)]
-                        (tidal-pat-set-param-f leaf w)
-                        (ok (cons leaf (+ i 1)))))))))))))))
+  (defn tidal-parse-element [ta :int i :int] #{Unsafe} :ptr<void>
+    (if (>= i (tidal-tok-count ta))
+      (err 0)
+      (let [ttype (tidal-tok-type ta i)]
+        (if (= ttype 1)
+          (let [subnode (tidal-pat-alloc 2)
+                r       (tidal-parse-seq-body ta (+ i 1) subnode)]
+            (if (err? r)
+              r
+              (let [pair  (ok-val r)
+                    seq   (head pair)
+                    end-i (tail pair)
+                    next-i (if (< end-i (tidal-tok-count ta))
+                             (if (= (tidal-tok-type ta end-i) 2)
+                               (+ end-i 1)
+                               end-i)
+                             end-i)]
+                (ok (cons seq next-i)))))
+          (if (= ttype 3)
+            (let [altnode (tidal-pat-alloc 3)
+                  r       (tidal-parse-alt-body ta (+ i 1) altnode)]
+              r)
+            (let [val  (tidal-tok-value ta i)
+                  base (tidal-atom-base val)
+                  leaf (tidal-pat-alloc 0)]
+              (tidal-pat-set-value leaf base)
+              (let [mt (tidal-atom-mod-type val)]
+                (if (= mt 0)
+                  (ok (cons leaf (+ i 1)))
+                  (if (= mt 1)
+                    (let [n   (tidal-atom-mod-n val)
+                          rep (tidal-pat-alloc 4)]
+                      (tidal-pat-set-param-n rep n)
+                      (tidal-pat-add-child rep leaf 1.0)
+                      (ok (cons rep (+ i 1))))
+                    (if (= mt 2)
+                      (let [f  (tidal-atom-mod-f val)
+                            sl (tidal-pat-alloc 5)]
+                        (tidal-pat-set-param-f sl f)
+                        (tidal-pat-add-child sl leaf 1.0)
+                        (ok (cons sl (+ i 1))))
+                      (if (= mt 3)
+                        (let [n  (tidal-atom-mod-n val)
+                              k  (tidal-atom-mod-k val)
+                              eu (tidal-pat-alloc 6)]
+                          (tidal-pat-set-param-n eu n)
+                          (tidal-pat-set-param-k eu k)
+                          (tidal-pat-add-child eu leaf 1.0)
+                          (ok (cons eu (+ i 1))))
+                        (let [w (tidal-atom-mod-f val)]
+                          (tidal-pat-set-param-f leaf w)
+                          (ok (cons leaf (+ i 1)))))))))))))))
 
-(defn tidal-parse-seq-body [ta :int i :int node :int] #{Unsafe} :ptr<void>
-  (if (>= i (tidal-tok-count ta))
-    (ok (cons node i))
-    (let [ttype (tidal-tok-type ta i)]
-      (if (= ttype 2)
-        (ok (cons node i))
-        (if (= ttype 4)
+  (defn tidal-parse-seq-body [ta :int i :int node :int] #{Unsafe} :ptr<void>
+    (if (>= i (tidal-tok-count ta))
+      (ok (cons node i))
+      (let [ttype (tidal-tok-type ta i)]
+        (if (= ttype 2)
           (ok (cons node i))
+          (if (= ttype 4)
+            (ok (cons node i))
+            (let [r (tidal-parse-element ta i)]
+              (if (err? r)
+                r
+                (let [pair  (ok-val r)
+                      child (head pair)
+                      new-i (tail pair)
+                      w     (if (= (tidal-pat-kind child) 0)
+                              (tidal-pat-param-f child)
+                              1.0)]
+                  (tidal-pat-add-child node child w)
+                  (tidal-parse-seq-body ta new-i node)))))))))
+
+  (defn tidal-parse-alt-body [ta :int i :int node :int] #{Unsafe} :ptr<void>
+    (if (>= i (tidal-tok-count ta))
+      (ok (cons node i))
+      (let [ttype (tidal-tok-type ta i)]
+        (if (= ttype 4)
+          (ok (cons node (+ i 1)))
           (let [r (tidal-parse-element ta i)]
             (if (err? r)
               r
               (let [pair  (ok-val r)
                     child (head pair)
-                    new-i (tail pair)
-                    w     (if (= (tidal-pat-kind child) 0)
-                            (tidal-pat-param-f child)
-                            1.0)]
-                (tidal-pat-add-child node child w)
-                (tidal-parse-seq-body ta new-i node)))))))))
+                    new-i (tail pair)]
+                (tidal-pat-add-child node child 1.0)
+                (tidal-parse-alt-body ta new-i node))))))))
 
-(defn tidal-parse-alt-body [ta :int i :int node :int] #{Unsafe} :ptr<void>
-  (if (>= i (tidal-tok-count ta))
-    (ok (cons node i))
-    (let [ttype (tidal-tok-type ta i)]
-      (if (= ttype 4)
-        (ok (cons node (+ i 1)))
-        (let [r (tidal-parse-element ta i)]
-          (if (err? r)
-            r
-            (let [pair  (ok-val r)
-                  child (head pair)
-                  new-i (tail pair)]
-              (tidal-pat-add-child node child 1.0)
-              (tidal-parse-alt-body ta new-i node))))))))
+  (defn tidal-parse-seq [text :cstr] #{Unsafe} :ptr<void>
+    (let [ta   (tidal-tokenize text)
+          root (tidal-pat-alloc 1)
+          r    (tidal-parse-seq-body ta 0 root)]
+      (tidal-tok-free ta)
+      (if (err? r)
+        r
+        (ok (head (ok-val r))))))
 
-(defn tidal-parse-seq [text :cstr] #{Unsafe} :ptr<void>
-  (let [ta   (tidal-tokenize text)
-        root (tidal-pat-alloc 1)
-        r    (tidal-parse-seq-body ta 0 root)]
-    (tidal-tok-free ta)
-    (if (err? r)
-      r
-      (ok (head (ok-val r))))))
+  ;; ---- EventList helpers ----
 
-;; ---- EventList helpers ----
+  (defn tidal-el-new [] #{Unsafe} :int
+    ```c
+    typedef struct { void **items; int count; int cap; } EventList;
+    EventList *el = malloc(sizeof(EventList));
+    el->cap = 16; el->count = 0;
+    el->items = malloc(16 * sizeof(void*));
+    return (int64_t)(intptr_t)el;
+    ```)
 
-(defn tidal-el-new [] #{Unsafe} :int
-  ```c
-  typedef struct { void **items; int count; int cap; } EventList;
-  EventList *el = malloc(sizeof(EventList));
-  el->cap = 16; el->count = 0;
-  el->items = malloc(16 * sizeof(void*));
-  return (int64_t)(intptr_t)el;
-  ```)
+  (defn tidal-el-push [el :int onset :float dur :float value :cstr] #{Unsafe} :void
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    typedef struct { void **items; int count; int cap; } EventList;
+    EventList *e = (EventList*)(intptr_t)el;
+    if (!e) return;
+    if (e->count >= e->cap) {
+      e->cap *= 2;
+      e->items = realloc(e->items, e->cap * sizeof(void*));
+    }
+    TidalEvent *ev = malloc(sizeof(TidalEvent));
+    ev->onset = (double)onset;
+    ev->dur   = (double)dur;
+    const char *v = (const char*)(intptr_t)value;
+    ev->value = v ? strdup(v) : strdup("");
+    e->items[e->count++] = ev;
+    ```)
 
-(defn tidal-el-push [el :int onset :float dur :float value :cstr] #{Unsafe} :void
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  typedef struct { void **items; int count; int cap; } EventList;
-  EventList *e = (EventList*)(intptr_t)el;
-  if (!e) return;
-  if (e->count >= e->cap) {
-    e->cap *= 2;
-    e->items = realloc(e->items, e->cap * sizeof(void*));
-  }
-  TidalEvent *ev = malloc(sizeof(TidalEvent));
-  ev->onset = (double)onset;
-  ev->dur   = (double)dur;
-  const char *v = (const char*)(intptr_t)value;
-  ev->value = v ? strdup(v) : strdup("");
-  e->items[e->count++] = ev;
-  ```)
+  (defn tidal-el-count [el :int] #{Unsafe} :int
+    ```c
+    typedef struct { void **items; int count; int cap; } EventList;
+    EventList *e = (EventList*)(intptr_t)el;
+    return e ? (int64_t)e->count : 0;
+    ```)
 
-(defn tidal-el-count [el :int] #{Unsafe} :int
-  ```c
-  typedef struct { void **items; int count; int cap; } EventList;
-  EventList *e = (EventList*)(intptr_t)el;
-  return e ? (int64_t)e->count : 0;
-  ```)
+  (defn tidal-el-get [el :int i :int] #{Unsafe} :int
+    ```c
+    typedef struct { void **items; int count; int cap; } EventList;
+    EventList *e = (EventList*)(intptr_t)el;
+    if (!e || (int)i < 0 || (int)i >= e->count) return 0;
+    return (int64_t)(intptr_t)e->items[(int)i];
+    ```)
 
-(defn tidal-el-get [el :int i :int] #{Unsafe} :int
-  ```c
-  typedef struct { void **items; int count; int cap; } EventList;
-  EventList *e = (EventList*)(intptr_t)el;
-  if (!e || (int)i < 0 || (int)i >= e->count) return 0;
-  return (int64_t)(intptr_t)e->items[(int)i];
-  ```)
+  (defn tidal-el-to-cons [el :int] #{Unsafe} :int
+    ```c
+    typedef struct { void **items; int count; int cap; } EventList;
+    typedef struct { int64_t value; int64_t next; } ConsCell;
+    EventList *e = (EventList*)(intptr_t)el;
+    if (!e) return 0;
+    int64_t lst = 0;
+    for (int i = e->count - 1; i >= 0; i--) {
+      ConsCell *cell = malloc(sizeof(ConsCell));
+      cell->value = (int64_t)(intptr_t)e->items[i];
+      cell->next  = lst;
+      lst = (int64_t)(intptr_t)cell;
+    }
+    return lst;
+    ```)
 
-(defn tidal-el-to-cons [el :int] #{Unsafe} :int
-  ```c
-  typedef struct { void **items; int count; int cap; } EventList;
-  typedef struct { int64_t value; int64_t next; } ConsCell;
-  EventList *e = (EventList*)(intptr_t)el;
-  if (!e) return 0;
-  int64_t lst = 0;
-  for (int i = e->count - 1; i >= 0; i--) {
-    ConsCell *cell = malloc(sizeof(ConsCell));
-    cell->value = (int64_t)(intptr_t)e->items[i];
-    cell->next  = lst;
-    lst = (int64_t)(intptr_t)cell;
-  }
-  return lst;
-  ```)
+  (defn tidal-el-free-all [el :int] #{Unsafe} :void
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    typedef struct { void **items; int count; int cap; } EventList;
+    EventList *e = (EventList*)(intptr_t)el;
+    if (!e) return;
+    for (int i = 0; i < e->count; i++) {
+      TidalEvent *ev = (TidalEvent*)e->items[i];
+      if (ev) { free(ev->value); free(ev); }
+    }
+    free(e->items);
+    free(e);
+    ```)
 
-(defn tidal-el-free-all [el :int] #{Unsafe} :void
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  typedef struct { void **items; int count; int cap; } EventList;
-  EventList *e = (EventList*)(intptr_t)el;
-  if (!e) return;
-  for (int i = 0; i < e->count; i++) {
-    TidalEvent *ev = (TidalEvent*)e->items[i];
-    if (ev) { free(ev->value); free(ev); }
-  }
-  free(e->items);
-  free(e);
-  ```)
+  (defn tidal-el-free-struct [el :int] #{Unsafe} :void
+    ```c
+    typedef struct { void **items; int count; int cap; } EventList;
+    EventList *e = (EventList*)(intptr_t)el;
+    if (!e) return;
+    free(e->items);
+    free(e);
+    ```)
 
-(defn tidal-el-free-struct [el :int] #{Unsafe} :void
-  ```c
-  typedef struct { void **items; int count; int cap; } EventList;
-  EventList *e = (EventList*)(intptr_t)el;
-  if (!e) return;
-  free(e->items);
-  free(e);
-  ```)
+  ;; ---- TidalEvent accessors ----
 
-;; ---- TidalEvent accessors ----
+  (defn tidal-ev-onset [e :int] #{Unsafe} :float
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *ev = (TidalEvent*)(intptr_t)e;
+    return ev ? (float)ev->onset : 0.0f;
+    ```)
 
-(defn tidal-ev-onset [e :int] #{Unsafe} :float
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *ev = (TidalEvent*)(intptr_t)e;
-  return ev ? (float)ev->onset : 0.0f;
-  ```)
+  (defn tidal-ev-dur [e :int] #{Unsafe} :float
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *ev = (TidalEvent*)(intptr_t)e;
+    return ev ? (float)ev->dur : 0.0f;
+    ```)
 
-(defn tidal-ev-dur [e :int] #{Unsafe} :float
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *ev = (TidalEvent*)(intptr_t)e;
-  return ev ? (float)ev->dur : 0.0f;
-  ```)
+  (defn tidal-ev-value [e :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { double onset; double dur; char *value; } TidalEvent;
+    TidalEvent *ev = (TidalEvent*)(intptr_t)e;
+    return (ev && ev->value) ? ev->value : "";
+    ```)
 
-(defn tidal-ev-value [e :int] #{Unsafe} :cstr
-  ```c
-  typedef struct { double onset; double dur; char *value; } TidalEvent;
-  TidalEvent *ev = (TidalEvent*)(intptr_t)e;
-  return (ev && ev->value) ? ev->value : "";
-  ```)
+  ;; ---- Bjorklund (Euclidean rhythm) ----
 
-;; ---- Bjorklund (Euclidean rhythm) ----
+  (defn tidal-bjorklund [n :int k :int] #{Unsafe} :int
+    ```c
+    int ni = (int)n, ki = (int)k;
+    if (ki <= 0) ki = 1;
+    int *out = calloc(ki, sizeof(int));
+    if (ni <= 0) return (int64_t)(intptr_t)out;
+    if (ni >= ki) { for (int i = 0; i < ki; i++) out[i] = 1; return (int64_t)(intptr_t)out; }
+    int error = 0;
+    for (int i = 0; i < ki; i++) {
+      error += ni;
+      if (error >= ki) { out[i] = 1; error -= ki; }
+    }
+    return (int64_t)(intptr_t)out;
+    ```)
 
-(defn tidal-bjorklund [n :int k :int] #{Unsafe} :int
-  ```c
-  int ni = (int)n, ki = (int)k;
-  if (ki <= 0) ki = 1;
-  int *out = calloc(ki, sizeof(int));
-  if (ni <= 0) return (int64_t)(intptr_t)out;
-  if (ni >= ki) { for (int i = 0; i < ki; i++) out[i] = 1; return (int64_t)(intptr_t)out; }
-  int error = 0;
-  for (int i = 0; i < ki; i++) {
-    error += ni;
-    if (error >= ki) { out[i] = 1; error -= ki; }
-  }
-  return (int64_t)(intptr_t)out;
-  ```)
+  (defn tidal-bjorklund-get [arr :int i :int] #{Unsafe} :int
+    ```c
+    int *a = (int*)(intptr_t)arr;
+    return a ? (int64_t)a[(int)i] : 0;
+    ```)
 
-(defn tidal-bjorklund-get [arr :int i :int] #{Unsafe} :int
-  ```c
-  int *a = (int*)(intptr_t)arr;
-  return a ? (int64_t)a[(int)i] : 0;
-  ```)
+  (defn tidal-bjorklund-free [arr :int] #{Unsafe} :void
+    ```c
+    free((void*)(intptr_t)arr);
+    ```)
 
-(defn tidal-bjorklund-free [arr :int] #{Unsafe} :void
-  ```c
-  free((void*)(intptr_t)arr);
-  ```)
+  ;; ---- random ----
 
-;; ---- random ----
+  (defn tidal-rand [] #{Unsafe} :float
+    ```c
+    return (float)rand() / (float)(RAND_MAX > 0 ? RAND_MAX : 1);
+    ```)
 
-(defn tidal-rand [] #{Unsafe} :float
-  ```c
-  return (float)rand() / (float)(RAND_MAX > 0 ? RAND_MAX : 1);
-  ```)
+  ;; ---- pure Turmeric recursive evaluator ----
 
-;; ---- pure Turmeric recursive evaluator ----
+  ;; tidal-eval -- public dispatch wrapper.  The real implementation is
+  ;; `tidal-eval-impl` (defined below).  This stub forwards to it through the
+  ;; stable C name "tur_tidal_eval_impl", so the helpers that follow can call
+  ;; `tidal-eval` and type-check correctly without producing a duplicate C
+  ;; function definition.
+  (defn tidal-eval [pat :int cycle :int onset :float dur :float el :int] #{Unsafe} :void
+    ```c
+    tur_tidal_eval_impl(pat, cycle, onset, dur, el);
+    ```)
 
-;; tidal-eval -- public dispatch wrapper.  The real implementation is
-;; `tidal-eval-impl` (defined below).  This stub forwards to it through the
-;; stable C name "tur_tidal_eval_impl", so the helpers that follow can call
-;; `tidal-eval` and type-check correctly without producing a duplicate C
-;; function definition.
-(defn tidal-eval [pat :int cycle :int onset :float dur :float el :int] #{Unsafe} :void
-  ```c
-  tur_tidal_eval_impl(pat, cycle, onset, dur, el);
-  ```)
+  ;; tidal-child-dur -- dur * (w / total-w); user-defn so result is CK_COPY.
+  (defn tidal-child-dur [dur :float w :float total-w :float] #{Unsafe} :float
+    ```c
+    return (float)((double)dur * ((double)w / (double)total_w));
+    ```)
 
-;; tidal-child-dur -- dur * (w / total-w); user-defn so result is CK_COPY.
-(defn tidal-child-dur [dur :float w :float total-w :float] #{Unsafe} :float
-  ```c
-  return (float)((double)dur * ((double)w / (double)total_w));
-  ```)
+  ;; tidal-slow-frac -- r / fa; user-defn so result is CK_COPY.
+  (defn tidal-slow-frac [r :float fa :float] #{Unsafe} :float
+    ```c
+    return (float)((double)r / (double)fa);
+    ```)
 
-;; tidal-slow-frac -- r / fa; user-defn so result is CK_COPY.
-(defn tidal-slow-frac [r :float fa :float] #{Unsafe} :float
-  ```c
-  return (float)((double)r / (double)fa);
-  ```)
+  (defn tidal-eval-seq-children [pat :int n :int cycle :int onset :float dur :float i :int el :int total-w :float] #{Unsafe} :void
+    (if (>= i n)
+      (tidal-void)
+      (let [child     (tidal-pat-child pat i)
+            w         (tidal-pat-weight pat i)
+            child-dur (tidal-child-dur dur w total-w)]
+        (tidal-eval child cycle onset child-dur el)
+        (tidal-eval-seq-children pat n cycle (+ onset child-dur) dur (+ i 1) el total-w))))
 
-(defn tidal-eval-seq-children [pat :int n :int cycle :int onset :float dur :float i :int el :int total-w :float] #{Unsafe} :void
-  (if (>= i n)
-    (tidal-void)
-    (let [child     (tidal-pat-child pat i)
-          w         (tidal-pat-weight pat i)
-          child-dur (tidal-child-dur dur w total-w)]
-      (tidal-eval child cycle onset child-dur el)
-      (tidal-eval-seq-children pat n cycle (+ onset child-dur) dur (+ i 1) el total-w))))
-
-(defn tidal-eval-repeat-steps [child :int n :int cycle :int onset :float step-dur :float i :int el :int] #{Unsafe} :void
-  (if (>= i n)
-    (tidal-void)
-    (do
-      (tidal-eval child cycle onset step-dur el)
-      (tidal-eval-repeat-steps child n cycle (+ onset step-dur) step-dur (+ i 1) el))))
-
-(defn tidal-eval-fast-steps [child :int fi :int cycle :int onset :float step-dur :float i :int el :int] #{Unsafe} :void
-  (if (>= i fi)
-    (tidal-void)
-    (do
-      (tidal-eval child (+ (* cycle fi) i) onset step-dur el)
-      (tidal-eval-fast-steps child fi cycle (+ onset step-dur) step-dur (+ i 1) el))))
-
-(defn tidal-eval-stack-children [pat :int n :int cycle :int onset :float dur :float i :int el :int] #{Unsafe} :void
-  (if (>= i n)
-    (tidal-void)
-    (do
-      (tidal-eval (tidal-pat-child pat i) cycle onset dur el)
-      (tidal-eval-stack-children pat n cycle onset dur (+ i 1) el))))
-
-(defn tidal-eval-euclid-steps [child :int pulses :int k :int cycle :int onset :float step-dur :float i :int el :int] #{Unsafe} :void
-  (if (>= i k)
-    (tidal-bjorklund-free pulses)
-    (do
-      (if (= (tidal-bjorklund-get pulses i) 1)
+  (defn tidal-eval-repeat-steps [child :int n :int cycle :int onset :float step-dur :float i :int el :int] #{Unsafe} :void
+    (if (>= i n)
+      (tidal-void)
+      (do
         (tidal-eval child cycle onset step-dur el)
-        (tidal-void))
-      (tidal-eval-euclid-steps child pulses k cycle (+ onset step-dur) step-dur (+ i 1) el))))
+        (tidal-eval-repeat-steps child n cycle (+ onset step-dur) step-dur (+ i 1) el))))
 
-(defn tidal-eval-slow-filter [temp-el :int i :int frac :float frac-end :float onset :float dur :float factor :float el :int] #{Unsafe} :void
-  (if (>= i (tidal-el-count temp-el))
-    (tidal-void)
-    (let [ev     (tidal-el-get temp-el i)
-          eo     (tidal-ev-onset ev)
-          ed     (tidal-ev-dur ev)
-          val    (tidal-ev-value ev)
-          in-win (if (>= eo frac) (< eo frac-end) false)]
-      (if in-win
-        (let [rel-start (* (- eo frac) factor)
-              rel-dur   (* ed factor)]
-          (tidal-el-push el (+ onset (* rel-start dur)) (* rel-dur dur) val))
-        (tidal-void))
-      (tidal-eval-slow-filter temp-el (+ i 1) frac frac-end onset dur factor el))))
+  (defn tidal-eval-fast-steps [child :int fi :int cycle :int onset :float step-dur :float i :int el :int] #{Unsafe} :void
+    (if (>= i fi)
+      (tidal-void)
+      (do
+        (tidal-eval child (+ (* cycle fi) i) onset step-dur el)
+        (tidal-eval-fast-steps child fi cycle (+ onset step-dur) step-dur (+ i 1) el))))
 
-(defn tidal-eval-slow [pat :int cycle :int onset :float dur :float el :int] #{Unsafe} :void
-  (let [f     (tidal-pat-param-f pat)
-        fi    (tidal-int-max (tidal-float-to-int f) 1)
-        fac   (tidal-int-to-float fi)
-        rem   (tidal-int-mod cycle fi)
-        child (tidal-pat-child pat 0)
-        frac      (tidal-slow-frac (tidal-int-to-float rem) fac)
-        frac-end  (+ frac (/ 1.0 fac))
-        temp-el   (tidal-el-new)]
-    (tidal-eval child (tidal-int-div cycle fi) 0.0 1.0 temp-el)
-    (tidal-eval-slow-filter temp-el 0 frac frac-end onset dur fac el)
-    (tidal-el-free-all temp-el)))
+  (defn tidal-eval-stack-children [pat :int n :int cycle :int onset :float dur :float i :int el :int] #{Unsafe} :void
+    (if (>= i n)
+      (tidal-void)
+      (do
+        (tidal-eval (tidal-pat-child pat i) cycle onset dur el)
+        (tidal-eval-stack-children pat n cycle onset dur (+ i 1) el))))
 
-(defn tidal-eval-rev-build [temp-el :int n :int i :int onset :float dur :float el :int] #{Unsafe} :void
-  (if (>= i n)
-    (tidal-void)
-    (let [ev        (tidal-el-get temp-el i)
-          eo        (tidal-ev-onset ev)
-          ed        (tidal-ev-dur ev)
-          val       (tidal-ev-value ev)
-          new-onset (- (- (+ onset dur) (- eo onset)) ed)]
-      (tidal-el-push el new-onset ed val)
-      (tidal-eval-rev-build temp-el n (+ i 1) onset dur el))))
+  (defn tidal-eval-euclid-steps [child :int pulses :int k :int cycle :int onset :float step-dur :float i :int el :int] #{Unsafe} :void
+    (if (>= i k)
+      (tidal-bjorklund-free pulses)
+      (do
+        (if (= (tidal-bjorklund-get pulses i) 1)
+          (tidal-eval child cycle onset step-dur el)
+          (tidal-void))
+        (tidal-eval-euclid-steps child pulses k cycle (+ onset step-dur) step-dur (+ i 1) el))))
 
-(defn tidal-eval-degrade-filter [temp-el :int n :int i :int prob :float el :int] #{Unsafe} :void
-  (if (>= i n)
-    (tidal-void)
-    (let [ev (tidal-el-get temp-el i)
-          r  (tidal-rand)]
-      (if (>= r prob)
-        (tidal-el-push el (tidal-ev-onset ev) (tidal-ev-dur ev) (tidal-ev-value ev))
-        (tidal-void))
-      (tidal-eval-degrade-filter temp-el n (+ i 1) prob el))))
+  (defn tidal-eval-slow-filter [temp-el :int i :int frac :float frac-end :float onset :float dur :float factor :float el :int] #{Unsafe} :void
+    (if (>= i (tidal-el-count temp-el))
+      (tidal-void)
+      (let [ev     (tidal-el-get temp-el i)
+            eo     (tidal-ev-onset ev)
+            ed     (tidal-ev-dur ev)
+            val    (tidal-ev-value ev)
+            in-win (if (>= eo frac) (< eo frac-end) false)]
+        (if in-win
+          (let [rel-start (* (- eo frac) factor)
+                rel-dur   (* ed factor)]
+            (tidal-el-push el (+ onset (* rel-start dur)) (* rel-dur dur) val))
+          (tidal-void))
+        (tidal-eval-slow-filter temp-el (+ i 1) frac frac-end onset dur factor el))))
 
-;; tidal-eval-impl -- main dispatch.  Exported as "tur_tidal_eval_impl"
-;; so the tidal-eval stub above can forward to it via that stable C name.
-(defn (export-as "tur_tidal_eval_impl") tidal-eval-impl [pat :int cycle :int onset :float dur :float el :int] #{Unsafe} :void
-  (let [kind (tidal-pat-kind pat)]
-    (if (= kind 0)
-      (let [val (tidal-pat-value pat)]
-        (if (tidal-cstr-is-rest? val)
-          (tidal-void)
-          (tidal-el-push el onset dur val)))
-      (if (= kind 1)
-        (tidal-eval-seq-children pat (tidal-pat-count pat) cycle onset dur 0 el (tidal-pat-total-weight pat))
-        (if (= kind 2)
+  (defn tidal-eval-slow [pat :int cycle :int onset :float dur :float el :int] #{Unsafe} :void
+    (let [f     (tidal-pat-param-f pat)
+          fi    (tidal-int-max (tidal-float-to-int f) 1)
+          fac   (tidal-int-to-float fi)
+          rem   (tidal-int-mod cycle fi)
+          child (tidal-pat-child pat 0)
+          frac      (tidal-slow-frac (tidal-int-to-float rem) fac)
+          frac-end  (+ frac (/ 1.0 fac))
+          temp-el   (tidal-el-new)]
+      (tidal-eval child (tidal-int-div cycle fi) 0.0 1.0 temp-el)
+      (tidal-eval-slow-filter temp-el 0 frac frac-end onset dur fac el)
+      (tidal-el-free-all temp-el)))
+
+  (defn tidal-eval-rev-build [temp-el :int n :int i :int onset :float dur :float el :int] #{Unsafe} :void
+    (if (>= i n)
+      (tidal-void)
+      (let [ev        (tidal-el-get temp-el i)
+            eo        (tidal-ev-onset ev)
+            ed        (tidal-ev-dur ev)
+            val       (tidal-ev-value ev)
+            new-onset (- (- (+ onset dur) (- eo onset)) ed)]
+        (tidal-el-push el new-onset ed val)
+        (tidal-eval-rev-build temp-el n (+ i 1) onset dur el))))
+
+  (defn tidal-eval-degrade-filter [temp-el :int n :int i :int prob :float el :int] #{Unsafe} :void
+    (if (>= i n)
+      (tidal-void)
+      (let [ev (tidal-el-get temp-el i)
+            r  (tidal-rand)]
+        (if (>= r prob)
+          (tidal-el-push el (tidal-ev-onset ev) (tidal-ev-dur ev) (tidal-ev-value ev))
+          (tidal-void))
+        (tidal-eval-degrade-filter temp-el n (+ i 1) prob el))))
+
+  ;; tidal-eval-impl -- main dispatch.  Exported as "tur_tidal_eval_impl"
+  ;; so the tidal-eval stub above can forward to it via that stable C name.
+  (defn (export-as "tur_tidal_eval_impl") tidal-eval-impl [pat :int cycle :int onset :float dur :float el :int] #{Unsafe} :void
+    (let [kind (tidal-pat-kind pat)]
+      (if (= kind 0)
+        (let [val (tidal-pat-value pat)]
+          (if (tidal-cstr-is-rest? val)
+            (tidal-void)
+            (tidal-el-push el onset dur val)))
+        (if (= kind 1)
           (tidal-eval-seq-children pat (tidal-pat-count pat) cycle onset dur 0 el (tidal-pat-total-weight pat))
-          (if (= kind 3)
-            (let [n   (tidal-pat-count pat)
-                  idx (tidal-int-mod cycle (tidal-int-max n 1))]
-              (tidal-eval (tidal-pat-child pat idx) cycle onset dur el))
-            (if (= kind 4)
-              (let [n        (tidal-pat-param-n pat)
-                    ni       (tidal-int-max n 1)
-                    child    (tidal-pat-child pat 0)
-                    step-dur (/ dur (tidal-int-to-float ni))]
-                (tidal-eval-repeat-steps child ni cycle onset step-dur 0 el))
-              (if (= kind 5)
-                (tidal-eval-slow pat cycle onset dur el)
-                (if (= kind 6)
-                  (let [n        (tidal-pat-param-n pat)
-                        k        (tidal-int-max (tidal-pat-param-k pat) 1)
-                        child    (tidal-pat-child pat 0)
-                        step-dur (/ dur (tidal-int-to-float k))
-                        pulses   (tidal-bjorklund n k)]
-                    (tidal-eval-euclid-steps child pulses k cycle onset step-dur 0 el))
-                  (if (= kind 7)
-                    (tidal-eval-stack-children pat (tidal-pat-count pat) cycle onset dur 0 el)
-                    (if (= kind 8)
-                      (let [n   (tidal-pat-count pat)
-                            idx (tidal-int-mod cycle (tidal-int-max n 1))]
-                        (tidal-eval (tidal-pat-child pat idx) cycle onset dur el))
-                      (if (= kind 9)
-                        (let [child   (tidal-pat-child pat 0)
-                              temp-el (tidal-el-new)]
-                          (tidal-eval child cycle onset dur temp-el)
-                          (tidal-eval-rev-build temp-el (tidal-el-count temp-el) 0 onset dur el)
-                          (tidal-el-free-all temp-el))
-                        (if (= kind 10)
-                          (let [f     (tidal-pat-param-f pat)
-                                fi    (tidal-int-max (tidal-float-to-int f) 1)
-                                child (tidal-pat-child pat 0)
-                                step-dur (/ dur (tidal-int-to-float fi))]
-                            (tidal-eval-fast-steps child fi cycle onset step-dur 0 el))
-                          (if (= kind 11)
-                            (let [n     (tidal-pat-param-n pat)
-                                  ni    (tidal-int-max n 1)
-                                  cnt   (tidal-pat-count pat)
-                                  rem   (tidal-int-mod cycle ni)
-                                  child (if (if (= rem 0) (>= cnt 2) false)
-                                          (tidal-pat-child pat 1)
-                                          (tidal-pat-child pat 0))]
-                              (tidal-eval child cycle onset dur el))
-                            (if (= kind 12)
-                              (let [prob    (tidal-pat-param-f pat)
-                                    child   (tidal-pat-child pat 0)
-                                    temp-el (tidal-el-new)]
-                                (tidal-eval child cycle onset dur temp-el)
-                                (tidal-eval-degrade-filter temp-el (tidal-el-count temp-el) 0 prob el)
-                                (tidal-el-free-all temp-el))
-                              (tidal-void))))))))))))))))
+          (if (= kind 2)
+            (tidal-eval-seq-children pat (tidal-pat-count pat) cycle onset dur 0 el (tidal-pat-total-weight pat))
+            (if (= kind 3)
+              (let [n   (tidal-pat-count pat)
+                    idx (tidal-int-mod cycle (tidal-int-max n 1))]
+                (tidal-eval (tidal-pat-child pat idx) cycle onset dur el))
+              (if (= kind 4)
+                (let [n        (tidal-pat-param-n pat)
+                      ni       (tidal-int-max n 1)
+                      child    (tidal-pat-child pat 0)
+                      step-dur (/ dur (tidal-int-to-float ni))]
+                  (tidal-eval-repeat-steps child ni cycle onset step-dur 0 el))
+                (if (= kind 5)
+                  (tidal-eval-slow pat cycle onset dur el)
+                  (if (= kind 6)
+                    (let [n        (tidal-pat-param-n pat)
+                          k        (tidal-int-max (tidal-pat-param-k pat) 1)
+                          child    (tidal-pat-child pat 0)
+                          step-dur (/ dur (tidal-int-to-float k))
+                          pulses   (tidal-bjorklund n k)]
+                      (tidal-eval-euclid-steps child pulses k cycle onset step-dur 0 el))
+                    (if (= kind 7)
+                      (tidal-eval-stack-children pat (tidal-pat-count pat) cycle onset dur 0 el)
+                      (if (= kind 8)
+                        (let [n   (tidal-pat-count pat)
+                              idx (tidal-int-mod cycle (tidal-int-max n 1))]
+                          (tidal-eval (tidal-pat-child pat idx) cycle onset dur el))
+                        (if (= kind 9)
+                          (let [child   (tidal-pat-child pat 0)
+                                temp-el (tidal-el-new)]
+                            (tidal-eval child cycle onset dur temp-el)
+                            (tidal-eval-rev-build temp-el (tidal-el-count temp-el) 0 onset dur el)
+                            (tidal-el-free-all temp-el))
+                          (if (= kind 10)
+                            (let [f     (tidal-pat-param-f pat)
+                                  fi    (tidal-int-max (tidal-float-to-int f) 1)
+                                  child (tidal-pat-child pat 0)
+                                  step-dur (/ dur (tidal-int-to-float fi))]
+                              (tidal-eval-fast-steps child fi cycle onset step-dur 0 el))
+                            (if (= kind 11)
+                              (let [n     (tidal-pat-param-n pat)
+                                    ni    (tidal-int-max n 1)
+                                    cnt   (tidal-pat-count pat)
+                                    rem   (tidal-int-mod cycle ni)
+                                    child (if (if (= rem 0) (>= cnt 2) false)
+                                            (tidal-pat-child pat 1)
+                                            (tidal-pat-child pat 0))]
+                                (tidal-eval child cycle onset dur el))
+                              (if (= kind 12)
+                                (let [prob    (tidal-pat-param-f pat)
+                                      child   (tidal-pat-child pat 0)
+                                      temp-el (tidal-el-new)]
+                                  (tidal-eval child cycle onset dur temp-el)
+                                  (tidal-eval-degrade-filter temp-el (tidal-el-count temp-el) 0 prob el)
+                                  (tidal-el-free-all temp-el))
+                                (tidal-void))))))))))))))))
 
-;; ---- public notation API ----
+  ;; ---- public notation API ----
 
-(defn tidal-eval-to-cons [pat :int cycle :int] #{Unsafe} :int
-  (let [el (tidal-el-new)]
-    (tidal-eval pat cycle 0.0 1.0 el)
-    (let [lst (tidal-el-to-cons el)]
-      (tidal-el-free-struct el)
-      lst)))
+  (defn tidal-eval-to-cons [pat :int cycle :int] #{Unsafe} :int
+    (let [el (tidal-el-new)]
+      (tidal-eval pat cycle 0.0 1.0 el)
+      (let [lst (tidal-el-to-cons el)]
+        (tidal-el-free-struct el)
+        lst)))
 
-(defn parse-notation [text :cstr] #{Unsafe} :ptr<void>
-  (let [r (tidal-parse-seq text)]
-    (if (err? r)
-      (err 0)
-      r)))
+  (defn parse-notation [text :cstr] #{Unsafe} :ptr<void>
+    (let [r (tidal-parse-seq text)]
+      (if (err? r)
+        (err 0)
+        r)))
 
-(defn notation-free [p :int] #{Unsafe} :void
-  (tidal-pat-free-raw p))
+  (defn notation-free [p :int] #{Unsafe} :void
+    (tidal-pat-free-raw p))
 
-(defn pattern-events [p :int cycle :int] #{Unsafe} :int
-  (tidal-eval-to-cons p cycle))
+  (defn pattern-events [p :int cycle :int] #{Unsafe} :int
+    (tidal-eval-to-cons p cycle))
 
-;; ---- render string helpers ----
+  ;; ---- render string helpers ----
 
-(defn tidal-concat [a :cstr b :cstr] #{Unsafe} :cstr
-  ```c
-  const char *sa = (const char*)(intptr_t)a;
-  const char *sb = (const char*)(intptr_t)b;
-  if (!sa) sa = ""; if (!sb) sb = "";
-  size_t la = strlen(sa), lb = strlen(sb);
-  char *out = malloc(la + lb + 1);
-  memcpy(out, sa, la); memcpy(out + la, sb, lb);
-  out[la + lb] = '\0';
-  return out;
-  ```)
+  (defn tidal-concat [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    const char *sa = (const char*)(intptr_t)a;
+    const char *sb = (const char*)(intptr_t)b;
+    if (!sa) sa = ""; if (!sb) sb = "";
+    size_t la = strlen(sa), lb = strlen(sb);
+    char *out = malloc(la + lb + 1);
+    memcpy(out, sa, la); memcpy(out + la, sb, lb);
+    out[la + lb] = '\0';
+    return out;
+    ```)
 
-(defn tidal-float-str [f :float] #{Unsafe} :cstr
-  ```c
-  char *buf = malloc(32);
-  snprintf(buf, 32, "%.3f", (double)f);
-  return buf;
-  ```)
+  (defn tidal-float-str [f :float] #{Unsafe} :cstr
+    ```c
+    char *buf = malloc(32);
+    snprintf(buf, 32, "%.3f", (double)f);
+    return buf;
+    ```)
 
-(defn tidal-int-str [n :int] #{Unsafe} :cstr
-  ```c
-  char *buf = malloc(24);
-  snprintf(buf, 24, "%d", (int)n);
-  return buf;
-  ```)
+  (defn tidal-int-str [n :int] #{Unsafe} :cstr
+    ```c
+    char *buf = malloc(24);
+    snprintf(buf, 24, "%d", (int)n);
+    return buf;
+    ```)
 
-;; ---- render event table ----
+  ;; ---- render event table ----
 
-(defn render-events-loop [evts :int acc :cstr] #{Unsafe} :cstr
-  (if (list-nil? evts)
-    acc
-    (let [e     (head evts)
-          onset (tidal-ev-onset e)
-          dur   (tidal-ev-dur e)
-          value (tidal-ev-value e)
-          line  (tidal-concat (tidal-float-str onset)
-                  (tidal-concat "  "
-                    (tidal-concat (tidal-float-str dur)
-                      (tidal-concat "  "
-                        (tidal-concat value "\n")))))]
-      (render-events-loop (tail evts) (tidal-concat acc line)))))
+  (defn render-events-loop [evts :int acc :cstr] #{Unsafe} :cstr
+    (if (list-nil? evts)
+      acc
+      (let [e     (head evts)
+            onset (tidal-ev-onset e)
+            dur   (tidal-ev-dur e)
+            value (tidal-ev-value e)
+            line  (tidal-concat (tidal-float-str onset)
+                    (tidal-concat "  "
+                      (tidal-concat (tidal-float-str dur)
+                        (tidal-concat "  "
+                          (tidal-concat value "\n")))))]
+        (render-events-loop (tail evts) (tidal-concat acc line)))))
 
-(defn render-events [p :int cycle :int] #{Unsafe} :cstr
-  (let [evts (tidal-eval-to-cons p cycle)]
-    (render-events-loop evts "")))
+  (defn render-events [p :int cycle :int] #{Unsafe} :cstr
+    (let [evts (tidal-eval-to-cons p cycle)]
+      (render-events-loop evts "")))
 
-;; ---- render MIDI/dur string helpers (pure Turmeric, no nested C) ----
+  ;; ---- render MIDI/dur string helpers (pure Turmeric, no nested C) ----
 
-(defn render-midi-csv [evts :int first? :bool] #{Unsafe} :cstr
-  (if (list-nil? evts)
-    ""
-    (let [ev   (head evts)
-          midi (note->midi (tidal-ev-value ev))
-          rest (render-midi-csv (tail evts) false)]
-      (if (< midi 0)
-        (render-midi-csv (tail evts) first?)
-        (if first?
-          (tidal-concat (tidal-int-str midi) rest)
-          (tidal-concat "," (tidal-concat (tidal-int-str midi) rest)))))))
+  (defn render-midi-csv [evts :int first? :bool] #{Unsafe} :cstr
+    (if (list-nil? evts)
+      ""
+      (let [ev   (head evts)
+            midi (note->midi (tidal-ev-value ev))
+            rest (render-midi-csv (tail evts) false)]
+        (if (< midi 0)
+          (render-midi-csv (tail evts) first?)
+          (if first?
+            (tidal-concat (tidal-int-str midi) rest)
+            (tidal-concat "," (tidal-concat (tidal-int-str midi) rest)))))))
 
-(defn render-dur-csv [evts :int first? :bool] #{Unsafe} :cstr
-  (if (list-nil? evts)
-    ""
-    (let [ev   (head evts)
-          midi (note->midi (tidal-ev-value ev))
-          rest (render-dur-csv (tail evts) false)]
-      (if (< midi 0)
-        (render-dur-csv (tail evts) first?)
-        (if first?
-          (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)
-          (tidal-concat "," (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)))))))
+  (defn render-dur-csv [evts :int first? :bool] #{Unsafe} :cstr
+    (if (list-nil? evts)
+      ""
+      (let [ev   (head evts)
+            midi (note->midi (tidal-ev-value ev))
+            rest (render-dur-csv (tail evts) false)]
+        (if (< midi 0)
+          (render-dur-csv (tail evts) first?)
+          (if first?
+            (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)
+            (tidal-concat "," (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)))))))
 
-(defn render-midi-sp [evts :int first? :bool] #{Unsafe} :cstr
-  (if (list-nil? evts)
-    ""
-    (let [ev   (head evts)
-          midi (note->midi (tidal-ev-value ev))
-          rest (render-midi-sp (tail evts) false)]
-      (if (< midi 0)
-        (render-midi-sp (tail evts) first?)
-        (if first?
-          (tidal-concat (tidal-int-str midi) rest)
-          (tidal-concat " " (tidal-concat (tidal-int-str midi) rest)))))))
+  (defn render-midi-sp [evts :int first? :bool] #{Unsafe} :cstr
+    (if (list-nil? evts)
+      ""
+      (let [ev   (head evts)
+            midi (note->midi (tidal-ev-value ev))
+            rest (render-midi-sp (tail evts) false)]
+        (if (< midi 0)
+          (render-midi-sp (tail evts) first?)
+          (if first?
+            (tidal-concat (tidal-int-str midi) rest)
+            (tidal-concat " " (tidal-concat (tidal-int-str midi) rest)))))))
 
-(defn render-dur-sp [evts :int first? :bool] #{Unsafe} :cstr
-  (if (list-nil? evts)
-    ""
-    (let [ev   (head evts)
-          midi (note->midi (tidal-ev-value ev))
-          rest (render-dur-sp (tail evts) false)]
-      (if (< midi 0)
-        (render-dur-sp (tail evts) first?)
-        (if first?
-          (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)
-          (tidal-concat " " (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)))))))
+  (defn render-dur-sp [evts :int first? :bool] #{Unsafe} :cstr
+    (if (list-nil? evts)
+      ""
+      (let [ev   (head evts)
+            midi (note->midi (tidal-ev-value ev))
+            rest (render-dur-sp (tail evts) false)]
+        (if (< midi 0)
+          (render-dur-sp (tail evts) first?)
+          (if first?
+            (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)
+            (tidal-concat " " (tidal-concat (tidal-float-str (tidal-ev-dur ev)) rest)))))))
 
-(defn render-sclang [p :int instrument :cstr] #{Unsafe} :cstr
-  (let [evts     (tidal-eval-to-cons p 0)
-        midi-str (render-midi-csv evts true)
-        dur-str  (render-dur-csv  evts true)]
-    (tidal-concat
-      "(Pbind.new([\\instrument, \""
-      (tidal-concat instrument
-        (tidal-concat "\", \\midinote, Pseq.new(["
-          (tidal-concat midi-str
-            (tidal-concat "],inf), \\dur, Pseq.new(["
-              (tidal-concat dur-str "],inf)])).play;"))))))))
+  (defn render-sclang [p :int instrument :cstr] #{Unsafe} :cstr
+    (let [evts     (tidal-eval-to-cons p 0)
+          midi-str (render-midi-csv evts true)
+          dur-str  (render-dur-csv  evts true)]
+      (tidal-concat
+        "(Pbind.new([\\instrument, \""
+        (tidal-concat instrument
+          (tidal-concat "\", \\midinote, Pseq.new(["
+            (tidal-concat midi-str
+              (tidal-concat "],inf), \\dur, Pseq.new(["
+                (tidal-concat dur-str "],inf)])).play;"))))))))
 
-(defn render-pbind [p :int instrument :cstr] #{Unsafe} :cstr
-  (let [evts     (tidal-eval-to-cons p 0)
-        midi-str (render-midi-sp evts true)
-        dur-str  (render-dur-sp  evts true)]
-    (tidal-concat
-      "(. (pbind :instrument \""
-      (tidal-concat instrument
-        (tidal-concat "\" :midinote (pseq ["
-          (tidal-concat midi-str
-            (tidal-concat "] inf) :dur (pseq ["
-              (tidal-concat dur-str "] inf)) play)"))))))))
+  (defn render-pbind [p :int instrument :cstr] #{Unsafe} :cstr
+    (let [evts     (tidal-eval-to-cons p 0)
+          midi-str (render-midi-sp evts true)
+          dur-str  (render-dur-sp  evts true)]
+      (tidal-concat
+        "(. (pbind :instrument \""
+        (tidal-concat instrument
+          (tidal-concat "\" :midinote (pseq ["
+            (tidal-concat midi-str
+              (tidal-concat "] inf) :dur (pseq ["
+                (tidal-concat dur-str "] inf)) play)"))))))))
 
-;; ---- tests ----
+  ;; ---- tests ----
 
-(unsafe
-(println "=== tidal/event ===")
+  (unsafe
+  (println "=== tidal/event ===")
 
-(let [e (event-new 0.0 0.333 "c4")]
-  (print-bool "event-onset:   " (= (event-onset e) 0.0))
-  (print-bool "event-dur:     " (< (- (event-dur e) 0.333) 0.001))
-  (print-bool "event-value:   " (scscm-cstr-eq? (event-value e) "c4"))
-  (event-free e))
+  (let [e (event-new 0.0 0.333 "c4")]
+    (print-bool "event-onset:   " (= (event-onset e) 0.0))
+    (print-bool "event-dur:     " (< (- (event-dur e) 0.333) 0.001))
+    (print-bool "event-value:   " (scscm-cstr-eq? (event-value e) "c4"))
+    (event-free e))
 
-(println "")
-(println "=== note->midi ===")
+  (println "")
+  (println "=== note->midi ===")
 
-(print-bool "c4 = 60:       " (= (note->midi "c4") 60))
-(print-bool "d4 = 62:       " (= (note->midi "d4") 62))
-(print-bool "e4 = 64:       " (= (note->midi "e4") 64))
-(print-bool "f4 = 65:       " (= (note->midi "f4") 65))
-(print-bool "g4 = 67:       " (= (note->midi "g4") 67))
-(print-bool "a4 = 69:       " (= (note->midi "a4") 69))
-(print-bool "b4 = 71:       " (= (note->midi "b4") 71))
-(print-bool "eb4 = 63:      " (= (note->midi "eb4") 63))
-(print-bool "f#4 = 66:      " (= (note->midi "f#4") 66))
-(print-bool "bb5 = 82:      " (= (note->midi "bb5") 82))
-(print-bool "60 = 60:       " (= (note->midi "60") 60))
-(print-bool "rest ~ = -1:   " (= (note->midi "~") -1))
-(print-bool "c5 = 72:       " (= (note->midi "c5") 72))
-(print-bool "c3 = 48:       " (= (note->midi "c3") 48))
+  (print-bool "c4 = 60:       " (= (note->midi "c4") 60))
+  (print-bool "d4 = 62:       " (= (note->midi "d4") 62))
+  (print-bool "e4 = 64:       " (= (note->midi "e4") 64))
+  (print-bool "f4 = 65:       " (= (note->midi "f4") 65))
+  (print-bool "g4 = 67:       " (= (note->midi "g4") 67))
+  (print-bool "a4 = 69:       " (= (note->midi "a4") 69))
+  (print-bool "b4 = 71:       " (= (note->midi "b4") 71))
+  (print-bool "eb4 = 63:      " (= (note->midi "eb4") 63))
+  (print-bool "f#4 = 66:      " (= (note->midi "f#4") 66))
+  (print-bool "bb5 = 82:      " (= (note->midi "bb5") 82))
+  (print-bool "60 = 60:       " (= (note->midi "60") 60))
+  (print-bool "rest ~ = -1:   " (= (note->midi "~") -1))
+  (print-bool "c5 = 72:       " (= (note->midi "c5") 72))
+  (print-bool "c3 = 48:       " (= (note->midi "c3") 48))
 
-(println "")
-(println "=== parse-notation: basic sequence ===")
+  (println "")
+  (println "=== parse-notation: basic sequence ===")
 
-(let [r (parse-notation "bd sd cp")]
-  (print-bool "parse ok?:     " (ok? r))
-  (let [p    (ok-val r)
-        evts (pattern-events p 0)]
-    (print-bool "has events:    " (not (list-nil? evts)))
-    (let [e0 (head evts)
-          e1 (head (tail evts))
-          e2 (head (tail (tail evts)))]
-      (print-bool "3rd event:     " (not (list-nil? (tail (tail evts)))))
-      (print-bool "onset e0=0:    " (< (tidal-ev-onset e0) 0.001))
-      (print-bool "dur e0~0.333:  " (< (- (tidal-ev-dur e0) 0.333) 0.002)))
-    (notation-free p)))
+  (let [r (parse-notation "bd sd cp")]
+    (print-bool "parse ok?:     " (ok? r))
+    (let [p    (ok-val r)
+          evts (pattern-events p 0)]
+      (print-bool "has events:    " (not (list-nil? evts)))
+      (let [e0 (head evts)
+            e1 (head (tail evts))
+            e2 (head (tail (tail evts)))]
+        (print-bool "3rd event:     " (not (list-nil? (tail (tail evts)))))
+        (print-bool "onset e0=0:    " (< (tidal-ev-onset e0) 0.001))
+        (print-bool "dur e0~0.333:  " (< (- (tidal-ev-dur e0) 0.333) 0.002)))
+      (notation-free p)))
 
-(println "")
-(println "=== parse-notation: subsequence ===")
+  (println "")
+  (println "=== parse-notation: subsequence ===")
 
-(let [r (parse-notation "[bd sd] cp")]
-  (print-bool "parse ok?:     " (ok? r))
-  (let [p    (ok-val r)
-        evts (pattern-events p 0)]
-    (print-bool "has events:    " (not (list-nil? evts)))
-    ;; should have 3 events: bd, sd, cp
-    (let [evts2 (tail evts)
-          evts3 (tail evts2)]
-      (print-bool "3 events:      " (not (list-nil? evts3)))
-      (print-bool "no 4th event:  " (list-nil? (tail evts3))))
-    (notation-free p)))
+  (let [r (parse-notation "[bd sd] cp")]
+    (print-bool "parse ok?:     " (ok? r))
+    (let [p    (ok-val r)
+          evts (pattern-events p 0)]
+      (print-bool "has events:    " (not (list-nil? evts)))
+      ;; should have 3 events: bd, sd, cp
+      (let [evts2 (tail evts)
+            evts3 (tail evts2)]
+        (print-bool "3 events:      " (not (list-nil? evts3)))
+        (print-bool "no 4th event:  " (list-nil? (tail evts3))))
+      (notation-free p)))
 
-(println "")
-(println "=== parse-notation: alternating <...> ===")
+  (println "")
+  (println "=== parse-notation: alternating <...> ===")
 
-(let [r (parse-notation "<60 62 64>")]
-  (print-bool "parse ok?:     " (ok? r))
-  (let [p     (ok-val r)
-        evts0 (pattern-events p 0)
-        evts1 (pattern-events p 1)
-        evts2 (pattern-events p 2)]
-    (print-bool "cycle 0 evts:  " (not (list-nil? evts0)))
-    (print-bool "cycle 1 evts:  " (not (list-nil? evts1)))
-    (print-bool "cycle 2 evts:  " (not (list-nil? evts2)))
-    (let [v0 (tidal-ev-value (head evts0))
-          v1 (tidal-ev-value (head evts1))
-          v2 (tidal-ev-value (head evts2))]
-      (print-bool "cycle0 = 60:   " (scscm-cstr-eq? v0 "60"))
-      (print-bool "cycle1 = 62:   " (scscm-cstr-eq? v1 "62"))
-      (print-bool "cycle2 = 64:   " (scscm-cstr-eq? v2 "64")))
-    (notation-free p)))
+  (let [r (parse-notation "<60 62 64>")]
+    (print-bool "parse ok?:     " (ok? r))
+    (let [p     (ok-val r)
+          evts0 (pattern-events p 0)
+          evts1 (pattern-events p 1)
+          evts2 (pattern-events p 2)]
+      (print-bool "cycle 0 evts:  " (not (list-nil? evts0)))
+      (print-bool "cycle 1 evts:  " (not (list-nil? evts1)))
+      (print-bool "cycle 2 evts:  " (not (list-nil? evts2)))
+      (let [v0 (tidal-ev-value (head evts0))
+            v1 (tidal-ev-value (head evts1))
+            v2 (tidal-ev-value (head evts2))]
+        (print-bool "cycle0 = 60:   " (scscm-cstr-eq? v0 "60"))
+        (print-bool "cycle1 = 62:   " (scscm-cstr-eq? v1 "62"))
+        (print-bool "cycle2 = 64:   " (scscm-cstr-eq? v2 "64")))
+      (notation-free p)))
 
-(println "")
-(println "=== parse-notation: repeat *n ===")
+  (println "")
+  (println "=== parse-notation: repeat *n ===")
 
-(let [r (parse-notation "bd*3")]
-  (print-bool "parse ok?:     " (ok? r))
-  (let [p    (ok-val r)
-        evts (pattern-events p 0)]
-    ;; should yield 3 bd events
-    (print-bool "event 1:       " (not (list-nil? evts)))
-    (print-bool "event 2:       " (not (list-nil? (tail evts))))
-    (print-bool "event 3:       " (not (list-nil? (tail (tail evts)))))
-    (print-bool "no event 4:    " (list-nil? (tail (tail (tail evts)))))
-    (notation-free p)))
+  (let [r (parse-notation "bd*3")]
+    (print-bool "parse ok?:     " (ok? r))
+    (let [p    (ok-val r)
+          evts (pattern-events p 0)]
+      ;; should yield 3 bd events
+      (print-bool "event 1:       " (not (list-nil? evts)))
+      (print-bool "event 2:       " (not (list-nil? (tail evts))))
+      (print-bool "event 3:       " (not (list-nil? (tail (tail evts)))))
+      (print-bool "no event 4:    " (list-nil? (tail (tail (tail evts)))))
+      (notation-free p)))
 
-(println "")
-(println "=== parse-notation: Euclidean rhythm ===")
+  (println "")
+  (println "=== parse-notation: Euclidean rhythm ===")
 
-(let [r (parse-notation "bd(3,8)")]
-  (print-bool "parse ok?:     " (ok? r))
-  (let [p    (ok-val r)
-        evts (pattern-events p 0)]
-    (print-bool "has events:    " (not (list-nil? evts)))
-    ;; 3 pulses in 8 steps
-    (let [count (list-length evts)]
-      (print-bool "3 pulses:      " (= count 3)))
-    (notation-free p)))
+  (let [r (parse-notation "bd(3,8)")]
+    (print-bool "parse ok?:     " (ok? r))
+    (let [p    (ok-val r)
+          evts (pattern-events p 0)]
+      (print-bool "has events:    " (not (list-nil? evts)))
+      ;; 3 pulses in 8 steps
+      (let [count (list-length evts)]
+        (print-bool "3 pulses:      " (= count 3)))
+      (notation-free p)))
 
-(println "")
-(println "=== render-events ===")
+  (println "")
+  (println "=== render-events ===")
 
-(let [r (parse-notation "c4 d4 e4")]
-  (let [p     (ok-val r)
-        table (render-events p 0)]
-    (println table)
-    (notation-free p)))
+  (let [r (parse-notation "c4 d4 e4")]
+    (let [p     (ok-val r)
+          table (render-events p 0)]
+      (println table)
+      (notation-free p)))
 
-(println "")
-(println "=== render-sclang ===")
+  (println "")
+  (println "=== render-sclang ===")
 
-(let [r (parse-notation "c4 d4")]
-  (let [p  (ok-val r)
-        sc (render-sclang p "piano")]
-    (println sc)
-    (notation-free p)))
+  (let [r (parse-notation "c4 d4")]
+    (let [p  (ok-val r)
+          sc (render-sclang p "piano")]
+      (println sc)
+      (notation-free p)))
 
-(println "")
-(println "=== render-pbind ===")
+  (println "")
+  (println "=== render-pbind ===")
 
-(let [r (parse-notation "c4 d4")]
-  (let [p     (ok-val r)
-        scscm (render-pbind p "piano")]
-    (println scscm)
-    (notation-free p)))
+  (let [r (parse-notation "c4 d4")]
+    (let [p     (ok-val r)
+          scscm (render-pbind p "piano")]
+      (println scscm)
+      (notation-free p)))
 
-(println "")
-(println "=== pattern-fast combinator ===")
+  (println "")
+  (println "=== pattern-fast combinator ===")
 
-(let [r (parse-notation "c4 d4")]
-  (let [p    (ok-val r)
-        fast (let [node (tidal-pat-alloc 10)]
-               (tidal-pat-set-param-f node 2.0)
-               (tidal-pat-add-child node p 1.0)
-               node)
-        evts0 (tidal-eval-to-cons fast 0)]
-    (print-bool "fast has evts: " (not (list-nil? evts0)))
-    (tidal-pat-free-raw fast)))
+  (let [r (parse-notation "c4 d4")]
+    (let [p    (ok-val r)
+          fast (let [node (tidal-pat-alloc 10)]
+                 (tidal-pat-set-param-f node 2.0)
+                 (tidal-pat-add-child node p 1.0)
+                 node)
+          evts0 (tidal-eval-to-cons fast 0)]
+      (print-bool "fast has evts: " (not (list-nil? evts0)))
+      (tidal-pat-free-raw fast)))
 
-(println "")
-(println "Done.")
+  (println "")
+  (println "Done.")
 
-)
-0
+  )
+  0
+
+
+  (defn main [] :int 0))

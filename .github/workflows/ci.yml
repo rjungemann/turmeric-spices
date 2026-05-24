@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Per-spice job: parse build.tur and (if cmake-deps are declared) fetch and
+  # build the C dependencies, then attempt to compile every test file via
+  # `tur test`.  Tests that fail compilation count as a CI failure; tests
+  # that compile but exit non-zero at runtime do too.
+  #
+  # The matrix is expanded by the `discover-spices` job below so adding or
+  # removing a spice does not require touching this file.
+  test-spice:
+    name: ${{ matrix.spice }} (${{ matrix.os }})
+    needs: discover-spices
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        spice: ${{ fromJSON(needs.discover-spices.outputs.spices) }}
+
+    steps:
+      - name: Checkout turmeric-spices
+        uses: actions/checkout@v4
+        with:
+          path: turmeric-spices
+
+      - name: Checkout turmeric (compiler)
+        uses: actions/checkout@v4
+        with:
+          repository: rjungemann/turmeric
+          path: turmeric
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libedit-dev cmake
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libedit cmake || true
+
+      - name: Build the tur compiler
+        working-directory: turmeric
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build -j
+
+      - name: Show spice manifest
+        working-directory: turmeric-spices/spices/${{ matrix.spice }}
+        run: cat build.tur
+
+      - name: Fetch C dependencies (if any)
+        working-directory: turmeric-spices/spices/${{ matrix.spice }}
+        env:
+          TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
+        run: |
+          if grep -q ':cmake-deps' build.tur; then
+            "$GITHUB_WORKSPACE/turmeric/build/tur" fetch --update || \
+              echo "::warning::fetch reported errors (often optional :spices entries); proceeding anyway"
+          else
+            echo "no :cmake-deps declared"
+          fi
+
+      - name: Type-check spice sources
+        working-directory: turmeric-spices/spices/${{ matrix.spice }}
+        env:
+          TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
+        run: |
+          if [ -d src ]; then
+            find src -name '*.tur' -print -exec \
+              "$GITHUB_WORKSPACE/turmeric/build/tur" check {} \;
+          else
+            echo "no src/ directory; skipping check"
+          fi
+
+      - name: Run spice tests (if any)
+        working-directory: turmeric-spices/spices/${{ matrix.spice }}
+        env:
+          TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
+        run: |
+          if [ -d tests ]; then
+            "$GITHUB_WORKSPACE/turmeric/build/tur" test tests
+          else
+            echo "no tests/ directory; skipping test run"
+          fi
+
+  # Enumerate the spices/ subdirectories that contain a build.tur so the
+  # matrix below stays in sync as spices are added.  Output is a JSON array
+  # of basenames (e.g. ["c-dsl","glsl","plutovg",...]).
+  discover-spices:
+    name: Enumerate spices
+    runs-on: ubuntu-latest
+    outputs:
+      spices: ${{ steps.list.outputs.spices }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          json=$(find spices -mindepth 2 -maxdepth 2 -name build.tur \
+                 | sed 's|spices/||;s|/build.tur||' \
+                 | sort \
+                 | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          echo "spices=$json" >> "$GITHUB_OUTPUT"
+          echo "Discovered: $json"
+
+  # Sanity job: every build.tur must parse cleanly.  Catches the
+  # `{` vs `#{` regression class without needing the full per-spice matrix.
+  manifest-parse:
+    name: Parse every build.tur
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout turmeric-spices
+        uses: actions/checkout@v4
+        with:
+          path: turmeric-spices
+
+      - name: Checkout turmeric (compiler)
+        uses: actions/checkout@v4
+        with:
+          repository: rjungemann/turmeric
+          path: turmeric
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libedit-dev cmake
+
+      - name: Build the tur compiler
+        working-directory: turmeric
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build -j
+
+      - name: Parse every spice manifest
+        working-directory: turmeric-spices
+        env:
+          TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
+        run: |
+          set -e
+          n_ok=0; n_fail=0
+          for d in spices/*/; do
+            name=$(basename "$d")
+            pushd "$d" >/dev/null
+            # tur fetch is the cheapest way to exercise the manifest parser.
+            # We do not require fetch to succeed (optional :spices entries
+            # may fail to clone) -- only that no `:cmake-deps must be a map`
+            # or other manifest-parse diagnostic is emitted.
+            out=$("$GITHUB_WORKSPACE/turmeric/build/tur" fetch 2>&1 || true)
+            if echo "$out" | grep -q 'must be a map\|no (defpackage'; then
+              echo "::error::$name manifest parse error"
+              echo "$out"
+              n_fail=$((n_fail+1))
+            else
+              echo "OK $name"
+              n_ok=$((n_ok+1))
+            fi
+            popd >/dev/null
+          done
+          echo "Summary: $n_ok parse-ok, $n_fail parse-fail"
+          test "$n_fail" -eq 0
