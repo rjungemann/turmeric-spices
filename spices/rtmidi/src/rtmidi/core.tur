@@ -1,0 +1,231 @@
+;; rtmidi/core.tur -- RtMidi handle lifecycle and port enumeration.
+;;
+;; Handles returned by midi-in-new / midi-out-new are opaque :int values
+;; (cast from RtMidiInPtr / RtMidiOutPtr via intptr_t).
+;; Results are compatible with stdlib/result.tur:
+;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
+
+(defmodule rtmidi/core
+  (export midi-in-new midi-out-new midi-in-free midi-out-free
+          midi-in-port-count midi-out-port-count
+          midi-in-port-name midi-out-port-name)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: API keyword -> enum helpers
+;; -------------------------------------------------------------------------
+
+;;; __parse-midi-api -- map a keyword string to an rtmidi_api_t value.
+(defn __parse-midi-api [api :cstr] :int
+  ```c
+  #include <string.h>
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_api_t api_val = RTMIDI_API_UNSPECIFIED;
+  if (strcmp((const char*)api, ":alsa") == 0)       api_val = RTMIDI_API_LINUX_ALSA;
+  else if (strcmp((const char*)api, ":core-midi") == 0) api_val = RTMIDI_API_MACOSX_CORE;
+  else if (strcmp((const char*)api, ":winmm") == 0) api_val = RTMIDI_API_WINDOWS_MM;
+  else if (strcmp((const char*)api, ":jack") == 0)  api_val = RTMIDI_API_UNIX_JACK;
+  else if (strcmp((const char*)api, ":dummy") == 0) api_val = RTMIDI_API_DUMMY;
+  return (int64_t)api_val;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; midi-in-new -- create an RtMidi input handle for the given backend API.
+;;;
+;;; Parameters:
+;;;   api -- backend keyword: ":alsa", ":core-midi", ":winmm", ":jack", ":dummy",
+;;;          or any other value for RTMIDI_API_UNSPECIFIED (auto-select)
+;;;
+;;; Returns:
+;;;   (ok handle) on success; (err 0) on failure.
+;;;   Pass handle as :int to rtmidi/in and rtmidi/core functions.
+;;;   Free with midi-in-free when done.
+;;;
+;;; Example:
+;;;   (let [r (midi-in-new ":core-midi")]
+;;;     (if (ok? r) (let [mi (ok-val r)] ...) (println "midi-in init failed")))
+;;;
+;;; Since: RM0
+(defn midi-in-new [api :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_api_t api_val = (rtmidi_api_t)(__parse_midi_api(api));
+  RtMidiInPtr mi = rtmidi_in_create(api_val, "Turmeric", 100);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (mi != NULL && mi->ok) {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)mi; r->err_val = 0;
+  } else {
+    if (mi) rtmidi_in_free(mi);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; midi-out-new -- create an RtMidi output handle for the given backend API.
+;;;
+;;; Parameters:
+;;;   api -- backend keyword: ":alsa", ":core-midi", ":winmm", ":jack", ":dummy",
+;;;          or any other value for RTMIDI_API_UNSPECIFIED (auto-select)
+;;;
+;;; Returns:
+;;;   (ok handle) on success; (err 0) on failure.
+;;;   Pass handle as :int to rtmidi/out and rtmidi/core functions.
+;;;   Free with midi-out-free when done.
+;;;
+;;; Example:
+;;;   (let [r (midi-out-new ":core-midi")]
+;;;     (if (ok? r) (let [mo (ok-val r)] ...) (println "midi-out init failed")))
+;;;
+;;; Since: RM0
+(defn midi-out-new [api :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_api_t api_val = (rtmidi_api_t)(__parse_midi_api(api));
+  RtMidiOutPtr mo = rtmidi_out_create(api_val, "Turmeric");
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (mo != NULL && mo->ok) {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)mo; r->err_val = 0;
+  } else {
+    if (mo) rtmidi_out_free(mo);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; midi-in-free -- destroy an RtMidi input handle created with midi-in-new.
+;;;
+;;; Parameters:
+;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (midi-in-free mi)
+;;;
+;;; Since: RM0
+(defn midi-in-free [mi :int] :void
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_in_free((RtMidiInPtr)(intptr_t)mi);
+  ```)
+
+;;; midi-out-free -- destroy an RtMidi output handle created with midi-out-new.
+;;;
+;;; Parameters:
+;;;   mo -- MIDI output handle (ok-val from midi-out-new)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (midi-out-free mo)
+;;;
+;;; Since: RM0
+(defn midi-out-free [mo :int] :void
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_out_free((RtMidiOutPtr)(intptr_t)mo);
+  ```)
+
+;;; midi-in-port-count -- return the number of available MIDI input ports.
+;;;
+;;; Parameters:
+;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;
+;;; Returns:
+;;;   Port count as :int.
+;;;
+;;; Example:
+;;;   (println (midi-in-port-count mi))
+;;;
+;;; Since: RM0
+(defn midi-in-port-count [mi :int] :int
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mi);
+  ```)
+
+;;; midi-out-port-count -- return the number of available MIDI output ports.
+;;;
+;;; Parameters:
+;;;   mo -- MIDI output handle (ok-val from midi-out-new)
+;;;
+;;; Returns:
+;;;   Port count as :int.
+;;;
+;;; Example:
+;;;   (println (midi-out-port-count mo))
+;;;
+;;; Since: RM0
+(defn midi-out-port-count [mo :int] :int
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mo);
+  ```)
+
+;;; midi-in-port-name -- return the name of MIDI input port at index i.
+;;;
+;;; Parameters:
+;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;   i  -- port index (0-based, must be < midi-in-port-count)
+;;;
+;;; Returns:
+;;;   Port name as :cstr.
+;;;
+;;; Example:
+;;;   (println (midi-in-port-name mi 0))
+;;;
+;;; Since: RM0
+(defn midi-in-port-name [mi :int i :int] :cstr
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  int len = 0;
+  return (char*)rtmidi_get_port_name((RtMidiPtr)(intptr_t)mi, (unsigned int)i, NULL, &len);
+  ```)
+
+;;; midi-out-port-name -- return the name of MIDI output port at index i.
+;;;
+;;; Parameters:
+;;;   mo -- MIDI output handle (ok-val from midi-out-new)
+;;;   i  -- port index (0-based, must be < midi-out-port-count)
+;;;
+;;; Returns:
+;;;   Port name as :cstr.
+;;;
+;;; Example:
+;;;   (println (midi-out-port-name mo 0))
+;;;
+;;; Since: RM0
+(defn midi-out-port-name [mo :int i :int] :cstr
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  int len = 0;
+  return (char*)rtmidi_get_port_name((RtMidiPtr)(intptr_t)mo, (unsigned int)i, NULL, &len);
+  ```)
+
+) ;; end defmodule rtmidi/core

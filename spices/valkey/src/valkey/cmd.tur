@@ -1,0 +1,379 @@
+;; valkey/cmd.tur -- command dispatch for Valkey/Redis via hiredis.
+;;
+;; All functions return :ptr<void> results: (ok reply-ptr) or (err 0).
+;; The reply-ptr is an opaque :int; use valkey/reply functions to inspect it.
+;; Call reply-free when done with a reply to avoid memory leaks.
+
+(defmodule valkey/cmd
+  (export cmd cmd-get cmd-set cmd-del cmd-incr cmd-expire
+          cmd-hset cmd-hget cmd-lpush cmd-lrange)
+
+;; -------------------------------------------------------------------------
+;; Private: result helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; cmd -- send an arbitrary command with a cons list of string arguments.
+;;;
+;;; Parameters:
+;;;   c       -- ctx-ptr (ok-val from client-connect)
+;;;   command -- command name string (e.g. "SET")
+;;;   args    -- cons list of :cstr argument strings; use 0 for empty list
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error or NULL reply.
+;;;   Call reply-free on the reply-ptr when done.
+;;;
+;;; Example:
+;;;   (let [r (cmd c "SET" (cons "mykey" (cons "myval" 0)))]
+;;;     (if (ok? r) (reply-free (ok-val r)) (println "cmd failed")))
+;;;
+;;; Since: VK0
+(defn cmd [c :int command :cstr args :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <hiredis/hiredis.h>
+  struct __vc { int64_t value; int64_t next; };
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  /* count args */
+  int argc = 1;
+  struct __vc *cell = (struct __vc *)(intptr_t)args;
+  while (cell) { argc++; cell = (struct __vc *)(intptr_t)cell->next; }
+  const char **argv = malloc(sizeof(char *) * (size_t)argc);
+  argv[0] = (const char *)command;
+  int i = 1;
+  cell = (struct __vc *)(intptr_t)args;
+  while (cell) {
+    argv[i++] = (const char *)(intptr_t)cell->value;
+    cell = (struct __vc *)(intptr_t)cell->next;
+  }
+  redisReply *reply = (redisReply *)redisCommandArgv(ctx, argc, argv, NULL);
+  free(argv);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-get -- send GET key.
+;;;
+;;; Parameters:
+;;;   c   -- ctx-ptr (ok-val from client-connect)
+;;;   key -- key name string
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;   Call reply-free on the reply-ptr when done.
+;;;
+;;; Example:
+;;;   (let [r (cmd-get c "mykey")]
+;;;     (if (ok? r) (println (reply-string (ok-val r))) (println "get failed")))
+;;;
+;;; Since: VK0
+(defn cmd-get [c :int key :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "GET %s", (const char *)key);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-set -- send SET key value.
+;;;
+;;; Parameters:
+;;;   c   -- ctx-ptr (ok-val from client-connect)
+;;;   key -- key name string
+;;;   val -- value string
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;
+;;; Example:
+;;;   (let [r (cmd-set c "mykey" "hello")]
+;;;     (if (ok? r) (reply-free (ok-val r)) (println "set failed")))
+;;;
+;;; Since: VK0
+(defn cmd-set [c :int key :cstr val :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "SET %s %s",
+                                                 (const char *)key,
+                                                 (const char *)val);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-del -- send DEL key.
+;;;
+;;; Parameters:
+;;;   c   -- ctx-ptr (ok-val from client-connect)
+;;;   key -- key name string
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;
+;;; Example:
+;;;   (let [r (cmd-del c "mykey")]
+;;;     (if (ok? r) (reply-free (ok-val r)) (println "del failed")))
+;;;
+;;; Since: VK0
+(defn cmd-del [c :int key :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "DEL %s", (const char *)key);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-incr -- send INCR key.
+;;;
+;;; Parameters:
+;;;   c   -- ctx-ptr (ok-val from client-connect)
+;;;   key -- key name string
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;
+;;; Example:
+;;;   (let [r (cmd-incr c "counter")]
+;;;     (if (ok? r) (println (reply-int (ok-val r))) (println "incr failed")))
+;;;
+;;; Since: VK0
+(defn cmd-incr [c :int key :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "INCR %s", (const char *)key);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-expire -- send EXPIRE key seconds.
+;;;
+;;; Parameters:
+;;;   c       -- ctx-ptr (ok-val from client-connect)
+;;;   key     -- key name string
+;;;   seconds -- expiry duration as a decimal string (e.g. "60")
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;
+;;; Example:
+;;;   (let [r (cmd-expire c "session" "3600")]
+;;;     (if (ok? r) (reply-free (ok-val r)) (println "expire failed")))
+;;;
+;;; Since: VK0
+(defn cmd-expire [c :int key :cstr seconds :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "EXPIRE %s %s",
+                                                 (const char *)key,
+                                                 (const char *)seconds);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-hset -- send HSET hash field value.
+;;;
+;;; Parameters:
+;;;   c     -- ctx-ptr (ok-val from client-connect)
+;;;   hash  -- hash key name
+;;;   field -- field name within the hash
+;;;   val   -- value string
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;
+;;; Example:
+;;;   (let [r (cmd-hset c "user:1" "name" "Alice")]
+;;;     (if (ok? r) (reply-free (ok-val r)) (println "hset failed")))
+;;;
+;;; Since: VK0
+(defn cmd-hset [c :int hash :cstr field :cstr val :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "HSET %s %s %s",
+                                                 (const char *)hash,
+                                                 (const char *)field,
+                                                 (const char *)val);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-hget -- send HGET hash field.
+;;;
+;;; Parameters:
+;;;   c     -- ctx-ptr (ok-val from client-connect)
+;;;   hash  -- hash key name
+;;;   field -- field name within the hash
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;
+;;; Example:
+;;;   (let [r (cmd-hget c "user:1" "name")]
+;;;     (if (ok? r) (println (reply-string (ok-val r))) (println "hget failed")))
+;;;
+;;; Since: VK0
+(defn cmd-hget [c :int hash :cstr field :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "HGET %s %s",
+                                                 (const char *)hash,
+                                                 (const char *)field);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-lpush -- send LPUSH list value.
+;;;
+;;; Parameters:
+;;;   c    -- ctx-ptr (ok-val from client-connect)
+;;;   list -- list key name
+;;;   val  -- value string to prepend
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;
+;;; Example:
+;;;   (let [r (cmd-lpush c "mylist" "item")]
+;;;     (if (ok? r) (reply-free (ok-val r)) (println "lpush failed")))
+;;;
+;;; Since: VK0
+(defn cmd-lpush [c :int list :cstr val :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "LPUSH %s %s",
+                                                 (const char *)list,
+                                                 (const char *)val);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; cmd-lrange -- send LRANGE list start stop.
+;;;
+;;; Parameters:
+;;;   c     -- ctx-ptr (ok-val from client-connect)
+;;;   list  -- list key name
+;;;   start -- 0-based start index (inclusive)
+;;;   stop  -- 0-based stop index (inclusive; -1 for last element)
+;;;
+;;; Returns:
+;;;   (ok reply-ptr) on success; (err 0) on error.
+;;;   Reply type is array; use reply-array-len and reply-array-get to iterate.
+;;;
+;;; Example:
+;;;   (let [r (cmd-lrange c "mylist" 0 -1)]
+;;;     (if (ok? r) (let [rep (ok-val r)] ...) (println "lrange failed")))
+;;;
+;;; Since: VK0
+(defn cmd-lrange [c :int list :cstr start :int stop :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <stdio.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  char start_buf[32], stop_buf[32];
+  snprintf(start_buf, sizeof(start_buf), "%lld", (long long)start);
+  snprintf(stop_buf,  sizeof(stop_buf),  "%lld", (long long)stop);
+  redisReply *reply = (redisReply *)redisCommand(ctx, "LRANGE %s %s %s",
+                                                 (const char *)list,
+                                                 start_buf, stop_buf);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!reply || reply->type == REDIS_REPLY_ERROR) {
+    if (reply) freeReplyObject(reply);
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+) ;; end defmodule valkey/cmd

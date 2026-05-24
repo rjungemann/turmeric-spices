@@ -20,6 +20,8 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 | [`tur-json`](spices/json/) | JSON parsing and serialization | 3 -- cmake-dep | yyjson 0.10.0 |
 | [`tur-http`](spices/http/) | HTTP/HTTPS client | 3 -- cmake-dep | mbedTLS 3.6.2 |
 | [`tur-regex`](spices/regex/) | PCRE2 regex bindings | 3 -- cmake-dep | PCRE2 10.44 |
+| [`tur-scscm`](spices/scscm/) | scscm s-expression -> sclang compiler + scsynth/hcsynth OSC client | 1 -- inline-C only | tur-osc (optional, server module only) |
+| [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 1 -- inline-C only | -- |
 
 ---
 

@@ -1,0 +1,179 @@
+;; png/writer.tur -- PNG image writing via libpng.
+;;
+;; png-write accepts an opaque :int image handle (struct __img*) from png/reader.
+;; png-write-raw accepts raw pixel data directly without an image handle.
+;; Results are compatible with stdlib/result.tur:
+;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
+
+(defmodule png/writer
+  (export png-write png-write-raw)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; png-write -- write an image handle to a PNG file on disk.
+;;;
+;;; Parameters:
+;;;   path -- destination filesystem path for the PNG file
+;;;   img  -- image handle (ok-val from png-read in png/reader)
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (let [r (png-write "/tmp/out.png" img)]
+;;;     (if (ok? r) (println "written") (println "write failed")))
+;;;
+;;; Since: PN0
+(defn png-write [path :cstr img :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <setjmp.h>
+  #include <png.h>
+  #include <stdio.h>
+  struct __img {
+    unsigned int width;
+    unsigned int height;
+    int channels;
+    int bit_depth;
+    unsigned char *pixels;
+  };
+  struct __img *i = (struct __img *)(intptr_t)img;
+  FILE *fp = fopen((const char *)path, "wb");
+  if (!fp) {
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+  if (!png) {
+    fclose(fp);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  png_infop info = png_create_info_struct(png);
+  if (!info) {
+    png_destroy_write_struct(&png, NULL);
+    fclose(fp);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  if (setjmp(png_jmpbuf(png))) {
+    png_destroy_write_struct(&png, &info);
+    fclose(fp);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  png_init_io(png, fp);
+  int color_type = PNG_COLOR_TYPE_RGBA;
+  if      (i->channels == 1) color_type = PNG_COLOR_TYPE_GRAY;
+  else if (i->channels == 2) color_type = PNG_COLOR_TYPE_GRAY_ALPHA;
+  else if (i->channels == 3) color_type = PNG_COLOR_TYPE_RGB;
+  else                       color_type = PNG_COLOR_TYPE_RGBA;
+  png_set_IHDR(png, info, i->width, i->height, i->bit_depth, color_type,
+               PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
+               PNG_FILTER_TYPE_DEFAULT);
+  png_write_info(png, info);
+  size_t row_bytes = (size_t)i->width * (size_t)i->channels;
+  for (unsigned int y = 0; y < i->height; y++)
+    png_write_row(png, i->pixels + y * row_bytes);
+  png_write_end(png, NULL);
+  png_destroy_write_struct(&png, &info);
+  fclose(fp);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = 0; r->err_val = 0; return r;
+  ```)
+
+;;; png-write-raw -- write raw pixel data to a PNG file on disk.
+;;;
+;;; Parameters:
+;;;   path      -- destination filesystem path for the PNG file
+;;;   pixels    -- pointer to pixel data as :cstr (row-major interleaved bytes)
+;;;   width     -- image width in pixels
+;;;   height    -- image height in pixels
+;;;   channels  -- number of channels: 1=GRAY, 2=GRAY_ALPHA, 3=RGB, 4=RGBA
+;;;   bit-depth -- bit depth per channel (typically 8)
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (let [r (png-write-raw "/tmp/out.png" buf 256 256 4 8)]
+;;;     (if (ok? r) (println "written") (println "write failed")))
+;;;
+;;; Since: PN0
+(defn png-write-raw [path :cstr pixels :cstr width :int height :int channels :int bit-depth :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <setjmp.h>
+  #include <png.h>
+  #include <stdio.h>
+  FILE *fp = fopen((const char *)path, "wb");
+  if (!fp) {
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+  if (!png) {
+    fclose(fp);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  png_infop info = png_create_info_struct(png);
+  if (!info) {
+    png_destroy_write_struct(&png, NULL);
+    fclose(fp);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  if (setjmp(png_jmpbuf(png))) {
+    png_destroy_write_struct(&png, &info);
+    fclose(fp);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  png_init_io(png, fp);
+  int color_type = PNG_COLOR_TYPE_RGBA;
+  if      ((int)channels == 1) color_type = PNG_COLOR_TYPE_GRAY;
+  else if ((int)channels == 2) color_type = PNG_COLOR_TYPE_GRAY_ALPHA;
+  else if ((int)channels == 3) color_type = PNG_COLOR_TYPE_RGB;
+  else                         color_type = PNG_COLOR_TYPE_RGBA;
+  png_set_IHDR(png, info, (unsigned int)width, (unsigned int)height,
+               (int)bit_depth, color_type,
+               PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
+               PNG_FILTER_TYPE_DEFAULT);
+  png_write_info(png, info);
+  unsigned char *px = (unsigned char *)(intptr_t)pixels;
+  size_t row_bytes = (size_t)width * (size_t)channels;
+  for (int y = 0; y < (int)height; y++)
+    png_write_row(png, px + (size_t)y * row_bytes);
+  png_write_end(png, NULL);
+  png_destroy_write_struct(&png, &info);
+  fclose(fp);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = 0; r->err_val = 0; return r;
+  ```)
+
+) ;; end defmodule png/writer

@@ -1,0 +1,168 @@
+;; rtmidi/in.tur -- MIDI input port management and callback registration.
+;;
+;; All functions accept a MIDI input handle (ok-val from midi-in-new in rtmidi/core).
+;; Results are compatible with stdlib/result.tur:
+;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
+
+(defmodule rtmidi/in
+  (export midi-in-open midi-in-open-virtual midi-in-close
+          midi-in-set-callback midi-in-cancel-callback
+          midi-in-ignore-types)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; midi-in-open -- open a physical MIDI input port by index.
+;;;
+;;; Parameters:
+;;;   mi   -- MIDI input handle (ok-val from midi-in-new)
+;;;   i    -- port index (0-based, must be < midi-in-port-count)
+;;;   name -- client name to register with the system
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (let [r (midi-in-open mi 0 "Turmeric In")]
+;;;     (if (ok? r) ... (println "open failed")))
+;;;
+;;; Since: RM0
+(defn midi-in-open [mi :int i :int name :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_open_port((RtMidiPtr)(intptr_t)mi, (unsigned int)i, (const char*)name);
+  RtMidiPtr ptr = (RtMidiPtr)(intptr_t)mi;
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (ptr->ok) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
+  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
+  return r;
+  ```)
+
+;;; midi-in-open-virtual -- open a virtual MIDI input port.
+;;;
+;;; Parameters:
+;;;   mi   -- MIDI input handle (ok-val from midi-in-new)
+;;;   name -- name for the virtual port
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (let [r (midi-in-open-virtual mi "My Virtual In")]
+;;;     (if (ok? r) ... (println "virtual open failed")))
+;;;
+;;; Since: RM0
+(defn midi-in-open-virtual [mi :int name :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_open_virtual_port((RtMidiPtr)(intptr_t)mi, (const char*)name);
+  RtMidiPtr ptr = (RtMidiPtr)(intptr_t)mi;
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (ptr->ok) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
+  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
+  return r;
+  ```)
+
+;;; midi-in-close -- close the currently open MIDI input port.
+;;;
+;;; Parameters:
+;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (midi-in-close mi)
+;;;
+;;; Since: RM0
+(defn midi-in-close [mi :int] :void
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_close_port((RtMidiPtr)(intptr_t)mi);
+  ```)
+
+;;; midi-in-set-callback -- register a callback to receive incoming MIDI messages.
+;;;
+;;; Parameters:
+;;;   mi       -- MIDI input handle (ok-val from midi-in-new)
+;;;   callback -- RtMidiCCallback function pointer as :int
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (midi-in-set-callback mi my-midi-handler)
+;;;
+;;; Since: RM0
+(defn midi-in-set-callback [mi :int callback :int] :void
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_in_set_callback((RtMidiInPtr)(intptr_t)mi,
+                         (RtMidiCCallback)(intptr_t)callback,
+                         NULL);
+  ```)
+
+;;; midi-in-cancel-callback -- remove the previously registered MIDI input callback.
+;;;
+;;; Parameters:
+;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (midi-in-cancel-callback mi)
+;;;
+;;; Since: RM0
+(defn midi-in-cancel-callback [mi :int] :void
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_in_cancel_callback((RtMidiInPtr)(intptr_t)mi);
+  ```)
+
+;;; midi-in-ignore-types -- configure which MIDI message types to ignore.
+;;;
+;;; Parameters:
+;;;   mi           -- MIDI input handle (ok-val from midi-in-new)
+;;;   sysex        -- if true, suppress SysEx messages
+;;;   timing       -- if true, suppress MIDI timing clock messages
+;;;   active-sense -- if true, suppress Active Sensing messages
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (midi-in-ignore-types mi true true true)
+;;;
+;;; Since: RM0
+(defn midi-in-ignore-types [mi :int sysex :bool timing :bool active-sense :bool] :void
+  ```c
+  #include <rtmidi/rtmidi_c.h>
+  rtmidi_in_ignore_types((RtMidiInPtr)(intptr_t)mi,
+                         (bool)sysex, (bool)timing, (bool)active_sense);
+  ```)
+
+) ;; end defmodule rtmidi/in

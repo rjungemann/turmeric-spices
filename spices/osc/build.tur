@@ -1,0 +1,27 @@
+(defpackage tur-osc
+  :name        "tur-osc"
+  :version     "0.1.0"
+  :description "Open Sound Control (OSC) messaging for Turmeric via liblo"
+  :license     "MIT"
+  :spices {
+    "test" {:url    "https://github.com/turmeric-lang/turmeric-spices"
+            :ref    "test-v0.1.0"
+            :subdir "spices/test"
+            :optional true}
+  }
+  :cmake-deps {
+    "lo" {:url     "https://github.com/radarsat1/liblo"
+          :ref     "0.32"
+          :options {:BUILD_SHARED_LIBS "OFF"
+                    :WITH_TESTS        "OFF"
+                    :WITH_EXAMPLES     "OFF"}}
+  }
+  :exports {
+    "osc/server" ["server-new" "server-new-tcp" "server-free"
+                  "server-add-method" "server-recv" "server-recv-noblock"]
+    "osc/client" ["client-new" "client-free" "client-send" "client-send-bundle"]
+    "osc/msg"    ["msg-new" "msg-add-float" "msg-add-int" "msg-add-string" "msg-free"
+                  "msg-path" "msg-arg-count" "msg-arg-type"
+                  "msg-arg-float" "msg-arg-int" "msg-arg-string"]
+    "osc/bundle" ["bundle-new" "bundle-add-msg" "bundle-free"]
+  })

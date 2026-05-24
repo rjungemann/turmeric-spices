@@ -1,0 +1,210 @@
+;; postgres/notify.tur -- LISTEN/NOTIFY support via libpq.
+;;
+;; Asynchronous notifications from PostgreSQL NOTIFY are polled with notify-poll.
+;; A notification is a PGnotify* passed as :int; use notification-channel and
+;; notification-payload to read its fields. The caller must free it with
+;; PQfreemem (not exposed here; the pointer is valid until the next notify-poll call).
+;;
+;; Typical usage:
+;;   (notify-listen conn "my_channel")
+;;   (let [r (notify-poll conn)]
+;;     (if (ok? r)
+;;       (let [n (ok-val r)]
+;;         (if (!= n 0) (println (notification-channel n)) nil))
+;;       nil))
+
+(defmodule postgres/notify
+  (export notify-listen notify-unlisten notify-poll
+          notification-channel notification-payload)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: string-building helpers for LISTEN/UNLISTEN
+;; -------------------------------------------------------------------------
+
+;;; __listen-sql -- build "LISTEN channel" as a heap-allocated cstr.
+(defn __listen-sql [channel :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const char *prefix = "LISTEN ";
+  size_t plen = strlen(prefix);
+  size_t clen = strlen((const char *)channel);
+  char *buf = (char *)malloc(plen + clen + 1);
+  memcpy(buf, prefix, plen);
+  memcpy(buf + plen, (const char *)channel, clen);
+  buf[plen + clen] = '\0';
+  return (int64_t)(intptr_t)buf;
+  ```)
+
+;;; __unlisten-sql -- build "UNLISTEN channel" as a heap-allocated cstr.
+(defn __unlisten-sql [channel :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const char *prefix = "UNLISTEN ";
+  size_t plen = strlen(prefix);
+  size_t clen = strlen((const char *)channel);
+  char *buf = (char *)malloc(plen + clen + 1);
+  memcpy(buf, prefix, plen);
+  memcpy(buf + plen, (const char *)channel, clen);
+  buf[plen + clen] = '\0';
+  return (int64_t)(intptr_t)buf;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: raw libpq wrappers
+;; -------------------------------------------------------------------------
+
+;;; __pq-exec-raw -- execute SQL with no params; returns 1 on success, 0 on failure.
+(defn __pq-exec-raw [conn :int sql :cstr] :int
+  ```c
+  #include <libpq-fe.h>
+  PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
+  if (!res) return 0;
+  ExecStatusType st = PQresultStatus(res);
+  PQclear(res);
+  return (st == PGRES_COMMAND_OK || st == PGRES_TUPLES_OK) ? 1 : 0;
+  ```)
+
+;;; __pq-consume-input -- call PQconsumeInput; returns 1 on success, 0 on error.
+(defn __pq-consume-input [conn :int] :int
+  ```c
+  #include <libpq-fe.h>
+  return (int64_t)PQconsumeInput((PGconn *)(intptr_t)conn);
+  ```)
+
+;;; __pq-notifies -- call PQnotifies; returns PGnotify* as :int (0 if none pending).
+(defn __pq-notifies [conn :int] :int
+  ```c
+  #include <libpq-fe.h>
+  PGnotify *n = PQnotifies((PGconn *)(intptr_t)conn);
+  return (int64_t)(intptr_t)n;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; notify-listen -- subscribe to asynchronous notifications on a channel.
+;;;
+;;; Parameters:
+;;;   conn    -- connection handle
+;;;   channel -- channel name to listen on
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (notify-listen conn "my_channel")
+;;;
+;;; Since: PG3
+(defn notify-listen [conn :int channel :cstr] :ptr<void>
+  (let [sql (__listen-sql channel)
+        rc  (__pq-exec-raw conn sql)]
+    (if (!= rc 0) (__ok 0) (__err 0))))
+
+;;; notify-unlisten -- unsubscribe from asynchronous notifications on a channel.
+;;;
+;;; Parameters:
+;;;   conn    -- connection handle
+;;;   channel -- channel name to stop listening on
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (notify-unlisten conn "my_channel")
+;;;
+;;; Since: PG3
+(defn notify-unlisten [conn :int channel :cstr] :ptr<void>
+  (let [sql (__unlisten-sql channel)
+        rc  (__pq-exec-raw conn sql)]
+    (if (!= rc 0) (__ok 0) (__err 0))))
+
+;;; notify-poll -- poll for a pending notification without blocking.
+;;;
+;;; Parameters:
+;;;   conn -- connection handle
+;;;
+;;; Returns:
+;;;   (ok notif-handle) if a notification is available; (ok 0) if none pending;
+;;;   (err 0) if PQconsumeInput fails.
+;;;   Use notification-channel and notification-payload to read the notif-handle.
+;;;   The handle is a PGnotify* owned by libpq; free it with PQfreemem after reading.
+;;;
+;;; Example:
+;;;   (let [r (notify-poll conn)]
+;;;     (if (ok? r)
+;;;       (let [n (ok-val r)]
+;;;         (if (!= n 0)
+;;;           (println (notification-channel n))
+;;;           nil))
+;;;       (println "poll error")))
+;;;
+;;; Since: PG3
+(defn notify-poll [conn :int] :ptr<void>
+  (let [ci (__pq-consume-input conn)]
+    (if (= ci 0)
+      (__err 0)
+      (__ok (__pq-notifies conn)))))
+
+;;; notification-channel -- return the channel name of a PGnotify notification.
+;;;
+;;; Parameters:
+;;;   n -- notification handle (ok-val from notify-poll when non-zero)
+;;;
+;;; Returns:
+;;;   Channel name as :cstr (valid until PQfreemem is called on n).
+;;;
+;;; Example:
+;;;   (notification-channel notif)  ; => "my_channel"
+;;;
+;;; Since: PG3
+(defn notification-channel [n :int] :cstr
+  ```c
+  #include <libpq-fe.h>
+  PGnotify *notif = (PGnotify *)(intptr_t)n;
+  return notif ? (char *)notif->relname : (char *)"";
+  ```)
+
+;;; notification-payload -- return the payload string of a PGnotify notification.
+;;;
+;;; Parameters:
+;;;   n -- notification handle (ok-val from notify-poll when non-zero)
+;;;
+;;; Returns:
+;;;   Payload as :cstr (valid until PQfreemem is called on n); "" if none.
+;;;
+;;; Example:
+;;;   (notification-payload notif)  ; => "hello"
+;;;
+;;; Since: PG3
+(defn notification-payload [n :int] :cstr
+  ```c
+  #include <libpq-fe.h>
+  PGnotify *notif = (PGnotify *)(intptr_t)n;
+  if (!notif) return (char *)"";
+  return notif->extra ? (char *)notif->extra : (char *)"";
+  ```)
+
+) ;; end defmodule postgres/notify

@@ -1,0 +1,132 @@
+;; valkey/client.tur -- connection lifecycle for Valkey/Redis via hiredis.
+;;
+;; All public functions return :ptr<void> results compatible with stdlib/result.tur.
+;; Use ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
+;; to inspect return values.
+
+(defmodule valkey/client
+  (export client-connect client-connect-unix client-close client-ping)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; client-connect -- connect to a Valkey/Redis server over TCP.
+;;;
+;;; Parameters:
+;;;   host -- hostname or IP address string
+;;;   port -- TCP port number
+;;;
+;;; Returns:
+;;;   (ok ctx-ptr) on success; (err 0) on failure.
+;;;   ctx-ptr is an opaque :int handle; pass to cmd/reply/pubsub functions.
+;;;   Call client-close when done.
+;;;
+;;; Example:
+;;;   (let [r (client-connect "127.0.0.1" 6379)]
+;;;     (if (ok? r) (let [c (ok-val r)] ...) (println "connect failed")))
+;;;
+;;; Since: VK0
+(defn client-connect [host :cstr port :int] :ptr<void>
+  ```c
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = redisConnect((const char *)host, (int)port);
+  if (!ctx || ctx->err != 0) {
+    if (ctx) redisFree(ctx);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)ctx; r->err_val = 0; return r;
+  ```)
+
+;;; client-connect-unix -- connect to a Valkey/Redis server over a Unix socket.
+;;;
+;;; Parameters:
+;;;   path -- filesystem path to the Unix domain socket
+;;;
+;;; Returns:
+;;;   (ok ctx-ptr) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (let [r (client-connect-unix "/tmp/valkey.sock")]
+;;;     (if (ok? r) (let [c (ok-val r)] ...) (println "connect failed")))
+;;;
+;;; Since: VK0
+(defn client-connect-unix [path :cstr] :ptr<void>
+  ```c
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = redisConnectUnix((const char *)path);
+  if (!ctx || ctx->err != 0) {
+    if (ctx) redisFree(ctx);
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+  }
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)ctx; r->err_val = 0; return r;
+  ```)
+
+;;; client-close -- close a connection and free its resources.
+;;;
+;;; Parameters:
+;;;   c -- ctx-ptr obtained from client-connect or client-connect-unix (ok-val)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (client-close c)
+;;;
+;;; Since: VK0
+(defn client-close [c :int] :void
+  ```c
+  #include <hiredis/hiredis.h>
+  redisFree((redisContext *)(intptr_t)c);
+  ```)
+
+;;; client-ping -- send a PING command and verify the server responds.
+;;;
+;;; Parameters:
+;;;   c -- ctx-ptr (ok-val from client-connect)
+;;;
+;;; Returns:
+;;;   (ok 0) if the server replies with a status reply; (err 0) otherwise.
+;;;
+;;; Example:
+;;;   (let [r (client-ping c)]
+;;;     (if (ok? r) (println "pong") (println "ping failed")))
+;;;
+;;; Since: VK0
+(defn client-ping [c :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <hiredis/hiredis.h>
+  redisContext *ctx = (redisContext *)(intptr_t)c;
+  redisReply *reply = (redisReply *)redisCommand(ctx, "PING");
+  bool ok = reply != NULL && reply->type == REDIS_REPLY_STATUS;
+  if (reply) freeReplyObject(reply);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = ok; r->ok_val = 0; r->err_val = 0; return r;
+  ```)
+
+) ;; end defmodule valkey/client

@@ -1,0 +1,241 @@
+;; rtaudio/devices.tur -- device enumeration and property inspection.
+;;
+;; device-info returns a __dev_info* as :int.  Use the device-info-* accessors
+;; to read individual fields.  Call device-info-free when done to release all
+;; heap memory (name string, sample-rates cons list, and the struct itself).
+;;
+;; Sample rates are returned as a cons list of :int values; iterate with the
+;; standard stdlib/list head/tail pattern (0 is the empty-list sentinel).
+
+(defmodule rtaudio/devices
+  (export device-count device-info device-info-name
+          device-info-output-chans device-info-input-chans
+          device-info-sample-rates device-default-output
+          device-default-input device-info-free)
+
+;; -------------------------------------------------------------------------
+;; Private: cons list helpers (layout matches stdlib/list.tur)
+;; -------------------------------------------------------------------------
+
+;;; __nil -- return the empty list sentinel (0).
+(defn __nil [] :int
+  ```c
+  return 0;
+  ```)
+
+;;; __cons -- prepend a value to a cons list; returns new cell as :int.
+(defn __cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
+  cell->value = v; cell->next = n;
+  return (int64_t)(intptr_t)cell;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; device-count -- return the number of audio devices available.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   Number of devices as :int.
+;;;
+;;; Example:
+;;;   (let [n (device-count a)] (println n))
+;;;
+;;; Since: RA0
+(defn device-count [a :int] :int
+  ```c
+  #include <rtaudio/rtaudio_c.h>
+  return (int64_t)rtaudio_device_count((rtaudio_t)(intptr_t)a);
+  ```)
+
+;;; device-info -- retrieve a device-info struct for the device at index id.
+;;;
+;;; Parameters:
+;;;   a  -- audio handle (ok-val from audio-new)
+;;;   id -- device index (0-based, must be < device-count)
+;;;
+;;; Returns:
+;;;   A __dev_info* as :int.  Access fields with device-info-* accessors.
+;;;   Free with device-info-free when done.
+;;;
+;;; Example:
+;;;   (let [di (device-info a 0)]
+;;;     (println (device-info-name di))
+;;;     (device-info-free di))
+;;;
+;;; Since: RA0
+(defn device-info [a :int id :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <rtaudio/rtaudio_c.h>
+  struct __dev_info {
+    char         *name;
+    unsigned int  output_chans;
+    unsigned int  input_chans;
+    int64_t       sample_rates;
+  };
+  rtaudio_device_info_t info = rtaudio_get_device_info((rtaudio_t)(intptr_t)a, (unsigned int)id);
+  struct __dev_info *di = (struct __dev_info*)malloc(sizeof(struct __dev_info));
+  di->name         = strdup(info.name);
+  di->output_chans = info.output_channels;
+  di->input_chans  = info.input_channels;
+  int64_t rates = 0;
+  for (unsigned int i = info.num_sample_rates; i-- > 0;) {
+    struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
+    cell->value = (int64_t)info.sample_rates[i];
+    cell->next  = rates;
+    rates = (int64_t)(intptr_t)cell;
+  }
+  di->sample_rates = rates;
+  return (int64_t)(intptr_t)di;
+  ```)
+
+;;; device-info-name -- return the device name string.
+;;;
+;;; Parameters:
+;;;   di -- device-info handle from device-info
+;;;
+;;; Returns:
+;;;   Device name as :cstr (owned by the di struct; do not free separately).
+;;;
+;;; Example:
+;;;   (println (device-info-name di))
+;;;
+;;; Since: RA0
+(defn device-info-name [di :int] :cstr
+  ```c
+  struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
+  return ((struct __dev_info*)(intptr_t)di)->name;
+  ```)
+
+;;; device-info-output-chans -- return the number of output channels.
+;;;
+;;; Parameters:
+;;;   di -- device-info handle from device-info
+;;;
+;;; Returns:
+;;;   Output channel count as :int.
+;;;
+;;; Example:
+;;;   (println (device-info-output-chans di))
+;;;
+;;; Since: RA0
+(defn device-info-output-chans [di :int] :int
+  ```c
+  struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
+  return (int64_t)((struct __dev_info*)(intptr_t)di)->output_chans;
+  ```)
+
+;;; device-info-input-chans -- return the number of input channels.
+;;;
+;;; Parameters:
+;;;   di -- device-info handle from device-info
+;;;
+;;; Returns:
+;;;   Input channel count as :int.
+;;;
+;;; Example:
+;;;   (println (device-info-input-chans di))
+;;;
+;;; Since: RA0
+(defn device-info-input-chans [di :int] :int
+  ```c
+  struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
+  return (int64_t)((struct __dev_info*)(intptr_t)di)->input_chans;
+  ```)
+
+;;; device-info-sample-rates -- return the supported sample rates as a cons list.
+;;;
+;;; Parameters:
+;;;   di -- device-info handle from device-info
+;;;
+;;; Returns:
+;;;   Cons list head as :int; each cell value is a sample rate in Hz.
+;;;   0 is the empty-list sentinel.
+;;;
+;;; Example:
+;;;   (let [rates (device-info-sample-rates di)]
+;;;     (while (!= rates 0)
+;;;       (println (head rates))
+;;;       (set! rates (tail rates))))
+;;;
+;;; Since: RA0
+(defn device-info-sample-rates [di :int] :int
+  ```c
+  struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
+  return ((struct __dev_info*)(intptr_t)di)->sample_rates;
+  ```)
+
+;;; device-default-output -- return the index of the default output device.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   Default output device index as :int.
+;;;
+;;; Example:
+;;;   (let [id (device-default-output a)] ...)
+;;;
+;;; Since: RA0
+(defn device-default-output [a :int] :int
+  ```c
+  #include <rtaudio/rtaudio_c.h>
+  return (int64_t)rtaudio_get_default_output_device((rtaudio_t)(intptr_t)a);
+  ```)
+
+;;; device-default-input -- return the index of the default input device.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   Default input device index as :int.
+;;;
+;;; Example:
+;;;   (let [id (device-default-input a)] ...)
+;;;
+;;; Since: RA0
+(defn device-default-input [a :int] :int
+  ```c
+  #include <rtaudio/rtaudio_c.h>
+  return (int64_t)rtaudio_get_default_input_device((rtaudio_t)(intptr_t)a);
+  ```)
+
+;;; device-info-free -- free all memory associated with a device-info handle.
+;;;
+;;; Parameters:
+;;;   di -- device-info handle from device-info
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (device-info-free di)
+;;;
+;;; Since: RA0
+(defn device-info-free [di :int] :void
+  ```c
+  #include <stdlib.h>
+  struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
+  struct __dev_info *d = (struct __dev_info*)(intptr_t)di;
+  free(d->name);
+  struct { int64_t value; int64_t next; } *cell =
+      (struct { int64_t value; int64_t next; } *)(intptr_t)d->sample_rates;
+  while (cell) {
+    struct { int64_t value; int64_t next; } *next =
+        (struct { int64_t value; int64_t next; } *)(intptr_t)cell->next;
+    free(cell);
+    cell = next;
+  }
+  free(d);
+  ```)
+
+) ;; end defmodule rtaudio/devices

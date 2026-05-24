@@ -1,0 +1,42 @@
+;; tests/postgres/notify_test.tur -- tests for postgres/notify.
+
+(import postgres/notify :refer [notify-listen notify-unlisten notify-poll
+                                 notification-channel notification-payload])
+(import test/suite      :refer [describe it])
+(import test/assert     :refer [assert-eq assert-true])
+(import test/runner     :refer [run-all])
+
+;; -------------------------------------------------------------------------
+;; Helpers: inspect notification structs without a live connection.
+;; -------------------------------------------------------------------------
+
+;; notification-channel and notification-payload on a null pointer
+;; should return "".
+
+(defn __cstr= [a :cstr b :cstr] :bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+(describe "postgres/notify -- module smoke tests"
+
+  (it "module loads without error"
+    (assert-eq 1 1))
+
+  (it "notification-channel on null returns empty string"
+    (assert-true (__cstr= (notification-channel 0) "")))
+
+  (it "notification-payload on null returns empty string"
+    (assert-true (__cstr= (notification-payload 0) "")))
+
+  (it "notify-listen is exported"
+    (assert-eq 1 1))
+
+  (it "notify-unlisten is exported"
+    (assert-eq 1 1))
+
+  (it "notify-poll is exported"
+    (assert-eq 1 1)))
+
+(run-all)

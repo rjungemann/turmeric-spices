@@ -1,0 +1,334 @@
+;; scscm/codegen -- emit sclang text from an expanded AST.
+;;
+;; Transformations applied:
+;;   symbol   foo-bar  -> foo_bar
+;;   symbol   foo?     -> foo_p (? suffix)
+;;   symbol   foo!     -> foo_b (! suffix, "bang")
+;;   keyword  :freq    -> \freq
+;;   atom     nil      -> nil
+;;   atom     true     -> true
+;;   atom     false    -> false
+;;   number   440      -> 440
+;;   string   "hello"  -> "hello"
+;;   vector   [a b c]  -> [a, b, c]
+;;   list with binary op head: (+ a b) -> a + b
+;;   list with "."  head:      (. obj msg ...)  -> obj.msg(...)
+;;   list with ".dot" head:    (.dot Cls new ..) -> Cls.new(..)
+;;   list with "fn" head:      (fn [a b] body)  -> { |a, b| body }
+;;   list with "defn" head:    (defn name [a] #{Unsafe} body) -> name = { |a| body }
+;;   list with "var" head:     (var x val) -> var x = val
+;;   list with "set!" head:    (set! x val) -> x = val
+;;   list with "let" head:     (let [x v y w] body...) -> (var x = v; var y = w; body...)
+;;   list with "if" head:      (if c t e) -> if(c, {t}, {e})
+;;   list with "if" head (2-arg): (if c t) -> if(c, {t})
+;;   list with "do" head:      (do e1 e2) -> e1; \ne2
+;;   generic list call:        (foo a b) -> foo(a, b)
+;;   all top-level forms joined by ";\n"
+
+;; ---- symbol transformation ----
+
+;;; scscm-sym-escape -- transform a scscm symbol name to a valid sclang identifier.
+(defn scscm-sym-escape [name :cstr] #{Unsafe} :cstr
+  ```c
+  const char *src = (const char*)(intptr_t)name;
+  int len = (int)strlen(src);
+  /* worst case: each char stays same (no expansion needed) */
+  char *out = malloc(len + 3); /* +3 for possible _p/_b suffix + NUL */
+  int j = 0;
+  for (int i = 0; i < len; i++) {
+    char c = src[i];
+    if (c == '-') out[j++] = '_';
+    else if (c == '?' && i == len - 1) { out[j++] = '_'; out[j++] = 'p'; }
+    else if (c == '!' && i == len - 1) { out[j++] = '_'; out[j++] = 'b'; }
+    else out[j++] = c;
+  }
+  out[j] = '\0';
+  return out;
+  ```)
+
+;; ---- binary operator detection ----
+
+(defn scscm-is-binary-op? [name :cstr] #{Unsafe} :bool
+  ```c
+  const char *n = (const char*)(intptr_t)name;
+  if (!n) return false;
+  static const char *ops[] = {
+    "+","-","*","/","=","<",">","<=",">=","!=",
+    "&&","||","&","|","^","<<",">>",
+    "and","or","mod","rem",NULL
+  };
+  for (int i = 0; ops[i]; i++)
+    if (strcmp(n, ops[i]) == 0) return true;
+  return false;
+  ```)
+
+;; Map scscm op to sclang op (= becomes ==, etc.)
+(defn scscm-sclang-op [name :cstr] #{Unsafe} :cstr
+  ```c
+  const char *n = (const char*)(intptr_t)name;
+  if (strcmp(n,"=")==0) return "==";
+  if (strcmp(n,"and")==0) return "&&";
+  if (strcmp(n,"or")==0)  return "||";
+  if (strcmp(n,"mod")==0) return "%";
+  if (strcmp(n,"rem")==0) return "%";
+  return n;
+  ```)
+
+;; ---- string builder helper ----
+
+;; Concatenate two :cstr values into a new heap buffer.
+(defn scscm-concat [a :cstr b :cstr] #{Unsafe} :cstr
+  ```c
+  const char *sa = (const char*)(intptr_t)a;
+  const char *sb = (const char*)(intptr_t)b;
+  if (!sa) sa = ""; if (!sb) sb = "";
+  size_t la = strlen(sa), lb = strlen(sb);
+  char *out = malloc(la + lb + 1);
+  memcpy(out, sa, la); memcpy(out + la, sb, lb);
+  out[la + lb] = '\0';
+  return out;
+  ```)
+
+;; Wrap a string in braces: "body" -> "{ body }".
+(defn scscm-brace [s :cstr] #{Unsafe} :cstr
+  (scscm-concat "{ " (scscm-concat s " }")))
+
+;; ---- generate helpers ----
+
+;; Generate a comma-separated list of children starting at index i.
+(defn scscm-gen-args [node :int i :int] #{Unsafe} :cstr
+  (if (>= i (ast-list-len node))
+    ""
+    (if (= i (- (ast-list-len node) 1))
+      (generate (ast-list-get node i))
+      (scscm-concat (generate (ast-list-get node i))
+                    (scscm-concat ", " (scscm-gen-args node (+ i 1)))))))
+
+;; Generate a comma-separated list from a cons list of nodes.
+(defn scscm-gen-cons-list [nodes :int] #{Unsafe} :cstr
+  (if (list-nil? nodes)
+    ""
+    (if (list-nil? (tail nodes))
+      (generate (head nodes))
+      (scscm-concat (generate (head nodes))
+                    (scscm-concat ", " (scscm-gen-cons-list (tail nodes)))))))
+
+;; Generate parameter names (symbols only) for a fn parameter vector.
+(defn scscm-gen-params [node :int i :int] #{Unsafe} :cstr
+  (if (>= i (ast-list-len node))
+    ""
+    (if (= i (- (ast-list-len node) 1))
+      (scscm-sym-escape (ast-symbol-name (ast-list-get node i)))
+      (scscm-concat (scscm-sym-escape (ast-symbol-name (ast-list-get node i)))
+                    (scscm-concat ", " (scscm-gen-params node (+ i 1)))))))
+
+;; Generate all children from index i joined by ";\n".
+(defn scscm-gen-stmts [node :int i :int] #{Unsafe} :cstr
+  (if (>= i (ast-list-len node))
+    ""
+    (if (= i (- (ast-list-len node) 1))
+      (generate (ast-list-get node i))
+      (scscm-concat (generate (ast-list-get node i))
+                    (scscm-concat ";\n" (scscm-gen-stmts node (+ i 1)))))))
+
+;; Generate let bindings: [x v y w] -> "var x = v;\nvar y = w;"
+(defn scscm-gen-let-bindings [bvec :int i :int] #{Unsafe} :cstr
+  (if (>= i (ast-list-len bvec))
+    ""
+    (let [name-node (ast-list-get bvec i)
+          val-node  (ast-list-get bvec (+ i 1))
+          binding   (scscm-concat "var "
+                      (scscm-concat (scscm-sym-escape (ast-symbol-name name-node))
+                        (scscm-concat " = " (generate val-node))))]
+      (if (>= (+ i 2) (ast-list-len bvec))
+        binding
+        (scscm-concat binding (scscm-concat ";\n" (scscm-gen-let-bindings bvec (+ i 2))))))))
+
+;; ---- generate a dot-call: (. obj msg args...) ----
+(defn scscm-gen-dot [node :int] #{Unsafe} :cstr
+  (let [obj (generate (ast-list-get node 1))
+        msg (scscm-sym-escape (ast-symbol-name (ast-list-get node 2)))]
+    (if (<= (ast-list-len node) 3)
+      (scscm-concat obj (scscm-concat "." msg))
+      (scscm-concat obj (scscm-concat "." (scscm-concat msg
+        (scscm-concat "(" (scscm-concat (scscm-gen-args node 3) ")"))))))))
+
+;; ---- generate a .dot call: (.dot Cls msg args...) ----
+(defn scscm-gen-dotdot [node :int] #{Unsafe} :cstr
+  (let [cls (ast-symbol-name (ast-list-get node 1))
+        msg (scscm-sym-escape (ast-symbol-name (ast-list-get node 2)))]
+    (if (<= (ast-list-len node) 3)
+      (scscm-concat cls (scscm-concat "." msg))
+      (scscm-concat cls (scscm-concat "." (scscm-concat msg
+        (scscm-concat "(" (scscm-concat (scscm-gen-args node 3) ")"))))))))
+
+;; ---- generate fn: (fn [params] body...) ----
+(defn scscm-gen-fn [node :int] #{Unsafe} :cstr
+  (let [params-node (ast-list-get node 1)]
+    (if (= (ast-list-len params-node) 0)
+      (scscm-concat "{ " (scscm-concat (scscm-gen-stmts node 2) " }"))
+      (scscm-concat "{ |"
+        (scscm-concat (scscm-gen-params params-node 0)
+          (scscm-concat "| " (scscm-concat (scscm-gen-stmts node 2) " }")))))))
+
+;; ---- generate defn: (defn name [params] #{Unsafe} body...) ----
+(defn scscm-gen-defn [node :int] #{Unsafe} :cstr
+  (let [name        (scscm-sym-escape (ast-symbol-name (ast-list-get node 1)))
+        params-node (ast-list-get node 2)]
+    (if (= (ast-list-len params-node) 0)
+      (scscm-concat name (scscm-concat " = { " (scscm-concat (scscm-gen-stmts node 3) " }")))
+      (scscm-concat name (scscm-concat " = { |"
+        (scscm-concat (scscm-gen-params params-node 0)
+          (scscm-concat "| " (scscm-concat (scscm-gen-stmts node 3) " }"))))))))
+
+;; ---- generate if form ----
+(defn scscm-gen-if [node :int] #{Unsafe} :cstr
+  (if (>= (ast-list-len node) 4)
+    (scscm-concat "if("
+      (scscm-concat (generate (ast-list-get node 1))
+        (scscm-concat ", "
+          (scscm-concat (scscm-brace (generate (ast-list-get node 2)))
+            (scscm-concat ", "
+              (scscm-concat (scscm-brace (generate (ast-list-get node 3)))
+                ")"))))))
+    (scscm-concat "if("
+      (scscm-concat (generate (ast-list-get node 1))
+        (scscm-concat ", "
+          (scscm-concat (scscm-brace (generate (ast-list-get node 2)))
+            ")"))))))
+
+;; ---- generate let form ----
+(defn scscm-gen-let [node :int] #{Unsafe} :cstr
+  (let [bvec  (ast-list-get node 1)
+        binds (scscm-gen-let-bindings bvec 0)
+        body  (scscm-gen-stmts node 2)]
+    (scscm-concat binds (scscm-concat ";\n" body))))
+
+;; ---- generate quote form ----
+(defn scscm-gen-quote [node :int] #{Unsafe} :cstr
+  (let [inner (ast-list-get node 1)]
+    (if (scscm-cstr-eq? (ast-kind inner) ":symbol")
+      (scscm-concat "\\" (ast-symbol-name inner))
+      (generate inner))))
+
+;; ---- symbol dispatch: generate a list whose head is a known symbol ----
+(defn scscm-gen-list-sym [node :int head-name :cstr] #{Unsafe} :cstr
+  (if (scscm-cstr-eq? head-name ".")
+    (scscm-gen-dot node)
+    (if (scscm-cstr-eq? head-name ".dot")
+      (scscm-gen-dotdot node)
+      (if (scscm-cstr-eq? head-name "fn")
+        (scscm-gen-fn node)
+        (if (scscm-cstr-eq? head-name "defn")
+          (scscm-gen-defn node)
+          (if (scscm-cstr-eq? head-name "var")
+            (scscm-concat "var "
+              (scscm-concat (scscm-sym-escape (ast-symbol-name (ast-list-get node 1)))
+                (scscm-concat " = " (generate (ast-list-get node 2)))))
+            (if (scscm-cstr-eq? head-name "set!")
+              (scscm-concat (scscm-sym-escape (ast-symbol-name (ast-list-get node 1)))
+                (scscm-concat " = " (generate (ast-list-get node 2))))
+              (if (scscm-cstr-eq? head-name "let")
+                (scscm-gen-let node)
+                (if (scscm-cstr-eq? head-name "if")
+                  (scscm-gen-if node)
+                  (if (scscm-cstr-eq? head-name "do")
+                    (scscm-gen-stmts node 1)
+                    (if (scscm-cstr-eq? head-name "quote")
+                      (scscm-gen-quote node)
+                      (if (scscm-is-binary-op? head-name)
+                        (scscm-concat (generate (ast-list-get node 1))
+                          (scscm-concat " "
+                            (scscm-concat (scscm-sclang-op head-name)
+                              (scscm-concat " " (generate (ast-list-get node 2))))))
+                        (scscm-concat (scscm-sym-escape head-name)
+                          (scscm-concat "("
+                            (scscm-concat (scscm-gen-args node 1) ")")))))))))))))))
+
+;; ---- generate list node ----
+(defn scscm-gen-list [node :int] #{Unsafe} :cstr
+  (if (= (ast-list-len node) 0)
+    "()"
+    (let [head-node (ast-list-get node 0)
+          head-kind (ast-kind head-node)]
+      (if (scscm-cstr-eq? head-kind ":symbol")
+        (scscm-gen-list-sym node (ast-symbol-name head-node))
+        (scscm-concat (generate head-node)
+          (scscm-concat "(" (scscm-concat (scscm-gen-args node 1) ")")))))))
+
+;; Strip leading colon from keyword text: ":freq" -> "freq"
+(defn scscm-kw-name [raw :cstr] #{Unsafe} :cstr
+  ```c
+  const char *s = (const char*)(intptr_t)raw;
+  if (s && s[0] == ':') return s + 1;
+  return s ? s : "";
+  ```)
+
+;;; generate -- emit sclang text for a single AST node.
+;;;
+;;; Parameters:
+;;;   node -- AST node handle
+;;;
+;;; Returns:
+;;;   Heap-allocated :cstr of the sclang representation.
+;;;
+;;; Example:
+;;;   (generate my-ast-node)  ; => "foo_bar(1, 2)"
+;;;
+;;; Since: SC2
+(defn generate [node :int] #{Unsafe} :cstr
+  (let [knd (ast-kind node)]
+    (if (scscm-cstr-eq? knd ":atom")
+      (scscm-ast-value node)
+      (if (scscm-cstr-eq? knd ":symbol")
+        (scscm-sym-escape (ast-symbol-name node))
+        (if (scscm-cstr-eq? knd ":keyword")
+          (let [raw (scscm-ast-value node)]
+            ;; :freq -> \freq  (drop the leading colon, add backslash)
+            (scscm-concat "\\" (scscm-kw-name raw)))
+          (if (scscm-cstr-eq? knd ":number")
+            (ast-number-value node)
+            (if (scscm-cstr-eq? knd ":string")
+              (scscm-concat "\"" (scscm-concat (ast-string-value node) "\""))
+              (if (scscm-cstr-eq? knd ":list")
+                (scscm-gen-list node)
+                (if (scscm-cstr-eq? knd ":vector")
+                  (scscm-concat "[" (scscm-concat (scscm-gen-args node 0) "]"))
+                  (if (scscm-cstr-eq? knd ":hash-paren")
+                    (scscm-concat "[" (scscm-concat (scscm-gen-args node 0) "]"))
+                    (if (scscm-cstr-eq? knd ":quote")
+                      (let [inner (ast-list-get node 0)]
+                        (if (scscm-cstr-eq? (ast-kind inner) ":symbol")
+                          (scscm-concat "\\" (ast-symbol-name inner))
+                          (generate inner)))
+                      (if (or (scscm-cstr-eq? knd ":quasiquote")
+                               (scscm-cstr-eq? knd ":unquote")
+                               (scscm-cstr-eq? knd ":unquote-splice"))
+                        ;; These should be fully expanded before codegen.
+                        ;; Emit the inner node as a fallback.
+                        (generate (ast-list-get node 0))
+                        ""))))))))))))
+
+(defn scscm-gen-all-loop [nodes :int acc :cstr] #{Unsafe} :cstr
+  (if (list-nil? nodes)
+    acc
+    (let [text (generate (head nodes))
+          rest (tail nodes)]
+      (if (list-nil? rest)
+        (scscm-concat acc text)
+        (scscm-gen-all-loop rest (scscm-concat acc (scscm-concat text ";\n")))))))
+
+;;; generate-all -- emit sclang text for every node in a top-level cons list.
+;;;
+;;; Parameters:
+;;;   nodes -- cons list of AST node handles
+;;;
+;;; Returns:
+;;;   Heap-allocated :cstr with each form's sclang joined by ";\n".
+;;;
+;;; Example:
+;;;   (generate-all top-level-nodes)  ; => "foo(1);\nbar(2)"
+;;;
+;;; Since: SC2
+(defn generate-all [nodes :int] #{Unsafe} :cstr
+  (scscm-gen-all-loop nodes ""))

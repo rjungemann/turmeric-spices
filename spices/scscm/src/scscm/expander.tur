@@ -1,0 +1,753 @@
+;; scscm/expander -- expand macros and special forms in an AST.
+;;
+;; The expander processes AST nodes from the parser and:
+;;   1. Expands quasiquote/unquote/unquote-splice forms
+;;   2. Expands user-defined macros (stored via defmacro)
+;;   3. Expands the built-in stdlib macros:
+;;        -> ->> do when unless doseq dotimes collect icollect accumulate
+;;        comp partial defsynth definst routine wait now metronome at in demo
+;;        pbind pseq prand pwhite pgeom ctl kill
+;;        midi->hz hz->midi db->amp amp->db chord degrees->pitches
+;;        adsr perc env-line
+;;   4. Recurses into all sub-forms
+
+;; ---- global macro environment (C static) ----
+;; Stored as a Turmeric cons list:
+;;   ((name . (params . body)) . rest)
+
+(defn scscm-macro-env-get [] #{Unsafe} :int
+  ```c
+  static int64_t g_scscm_macro_env = 0;
+  return g_scscm_macro_env;
+  ```)
+
+(defn scscm-macro-env-set [env :int] #{Unsafe} :void
+  ```c
+  static int64_t g_scscm_macro_env = 0;
+  g_scscm_macro_env = env;
+  ```)
+
+;; Hmm -- two separate static variables would be created above.
+;; Use a single C-global approach via a helper that manages one static.
+(defn scscm-macro-env-update [env :int] #{Unsafe} :void
+  ```c
+  /* Accesses the same static as scscm_macro_env_get via extern linkage trick.
+     We redefine it here as a companion mutator; both share the same storage
+     because the linker merges identical static-local-name symbols in the same
+     translation unit only if they have the same name and linkage.
+     To guarantee shared storage, use a file-scoped static instead. */
+  extern int64_t __scscm_macro_env_storage;
+  __scscm_macro_env_storage = env;
+  ```)
+
+;; Cleaner: put the global in a single inline-C block that both get/set use.
+;; We reimplement get/set using an extern-declared symbol.
+
+;; Actually, the simplest portable approach: thread env as an argument.
+;; The public API (expand/expand-all) starts with an empty env, collects
+;; defmacro definitions during expansion, and uses a cons list.
+
+;; Since Turmeric doesn't have mutable cells, we use a C static via
+;; a single dedicated function that dispatches on an opcode.
+(defn scscm-macro-env-op [op :int val :int] #{Unsafe} :int
+  ```c
+  static int64_t env = 0;
+  if (op == 0) return env;         /* get */
+  if (op == 1) { env = val; return 0; } /* set */
+  return 0;
+  ```)
+
+;; ---- macro environment helpers ----
+
+(defn scscm-macro-get [] #{Unsafe} :int
+  (scscm-macro-env-op 0 0))
+
+(defn scscm-macro-set [env :int] #{Unsafe} :void
+  (scscm-macro-env-op 1 env))
+
+;; Define a macro: store (name . (params . body)) at front of env.
+(defn scscm-macro-define [name :int params :int body :int] #{Unsafe} :void
+  (let [entry (cons name (cons params body))
+        env   (cons entry (scscm-macro-get))]
+    (scscm-macro-set env)))
+
+;; Check if a symbol node's name matches a :cstr.
+(defn scscm-cstr-eq-node? [name :cstr node :int] #{Unsafe} :bool
+  (if (scscm-cstr-eq? (ast-kind node) ":symbol")
+    (scscm-cstr-eq? name (ast-symbol-name node))
+    false))
+
+(defn scscm-macro-lookup-loop [name :cstr env :int] #{Unsafe} :int
+  (if (list-nil? env)
+    (nil-value)
+    (let [entry      (head env)
+          entry-name (head entry)]
+      (if (scscm-cstr-eq-node? name entry-name)
+        (tail entry)
+        (scscm-macro-lookup-loop name (tail env))))))
+
+;; Look up a macro by name string. Returns (params . body) or nil-value.
+(defn scscm-macro-lookup [name :cstr] #{Unsafe} :int
+  (scscm-macro-lookup-loop name (scscm-macro-get)))
+
+;; ---- AST construction helpers ----
+
+;; Make a symbol node.
+(defn scscm-make-sym [name :cstr] #{Unsafe} :int
+  (scscm-ast-leaf 1 name))
+
+;; Make a list node from a Turmeric cons list of child handles.
+(defn scscm-make-list-from-cons [children :int] #{Unsafe} :int
+  (let [node (scscm-ast-list-node 5)]
+    (scscm-fill-list-from-cons node children)
+    node))
+
+(defn scscm-fill-list-from-cons [node :int children :int] #{Unsafe} :void
+  (if (list-nil? children)
+    (scscm-void)
+    (do
+      (scscm-ast-add-child node (head children))
+      (scscm-fill-list-from-cons node (tail children)))))
+
+;; Make a 1-arg wrapper list node.
+(defn scscm-make-wrap [sym-name :cstr inner :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym sym-name))
+    (scscm-ast-add-child n inner)
+    n))
+
+;; Make a 2-arg list node: (sym a b).
+(defn scscm-make-call2 [sym-name :cstr a :int b :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym sym-name))
+    (scscm-ast-add-child n a)
+    (scscm-ast-add-child n b)
+    n))
+
+;; Copy children from src starting at index start into dst.
+(defn scscm-copy-children [dst :int src :int start :int] #{Unsafe} :void
+  (if (>= start (ast-list-len src))
+    (scscm-void)
+    (do
+      (scscm-ast-add-child dst (ast-list-get src start))
+      (scscm-copy-children dst src (+ start 1)))))
+
+;; Collect children from start as a cons list (in order).
+(defn scscm-children-cons [src :int start :int] #{Unsafe} :int
+  (scscm-children-cons-loop src start (nil-value)))
+
+(defn scscm-children-cons-loop [src :int i :int acc :int] #{Unsafe} :int
+  (if (>= i (ast-list-len src))
+    (scscm-list-rev acc (nil-value))
+    (scscm-children-cons-loop src (+ i 1) (cons (ast-list-get src i) acc))))
+
+(defn scscm-void [] #{Unsafe} :void
+  ```c
+  (void)0;
+  ```)
+
+;; ---- quasiquote expansion ----
+
+;; Expand a quasiquote body at depth 1:
+;;   atom/leaf -> wrap in quote wrapper node
+;;   (unquote x) -> return x
+;;   (unquote-splice x) is an error at list level (handled in scscm-qq-list)
+;;   list -> build a new list, recursively expanding elements
+(defn scscm-expand-qq [node :int depth :int] #{Unsafe} :int
+  (if (= depth 0)
+    (expand node)
+    (let [knd (ast-kind node)]
+      (if (or (scscm-cstr-eq? knd ":atom")
+               (or (scscm-cstr-eq? knd ":symbol")
+                   (or (scscm-cstr-eq? knd ":keyword")
+                       (or (scscm-cstr-eq? knd ":number")
+                           (scscm-cstr-eq? knd ":string")))))
+        ;; Leaf: wrap in quote-wrapper
+        (let [w (scscm-ast-list-node 7)]
+          (scscm-ast-add-child w node)
+          w)
+        (if (scscm-cstr-eq? knd ":list")
+          (if (> (ast-list-len node) 0)
+            (let [h0 (ast-list-get node 0)
+                  h0k (ast-kind h0)]
+              (if (and (scscm-cstr-eq? h0k ":symbol")
+                        (scscm-cstr-eq? (ast-symbol-name h0) "unquote"))
+                (if (= depth 1)
+                  (expand (ast-list-get node 1))
+                  ;; nested quasi: expand inner
+                  (let [inner (scscm-expand-qq (ast-list-get node 1) (- depth 1))
+                        n (scscm-ast-list-node 5)]
+                    (scscm-ast-add-child n h0) (scscm-ast-add-child n inner) n))
+                (if (and (scscm-cstr-eq? h0k ":symbol")
+                          (scscm-cstr-eq? (ast-symbol-name h0) "quasiquote"))
+                  ;; nested quasiquote: increase depth
+                  (let [inner (scscm-expand-qq (ast-list-get node 1) (+ depth 1))
+                        n (scscm-ast-list-node 5)]
+                    (scscm-ast-add-child n h0) (scscm-ast-add-child n inner) n)
+                  ;; regular list: expand each element
+                  (let [n (scscm-ast-list-node 5)]
+                    (scscm-qq-fill-list n node 0 depth)
+                    n))))
+            ;; empty list: return as-is
+            (scscm-ast-list-node 5))
+          (if (scscm-cstr-eq? knd ":vector")
+            (let [n (scscm-ast-list-node 6)]
+              (scscm-qq-fill-list n node 0 depth)
+              n)
+            node))))))
+
+;; Fill dst list by qq-expanding each element of src.
+;; unquote-splice elements are spliced in.
+(defn scscm-qq-fill-list [dst :int src :int i :int depth :int] #{Unsafe} :void
+  (if (>= i (ast-list-len src))
+    (scscm-void)
+    (let [child (ast-list-get src i)
+          cknd  (ast-kind child)]
+      (if (and (scscm-cstr-eq? cknd ":list")
+                (> (ast-list-len child) 0)
+                (scscm-cstr-eq? (ast-kind (ast-list-get child 0)) ":symbol")
+                (scscm-cstr-eq? (ast-symbol-name (ast-list-get child 0)) "unquote-splice"))
+        (if (= depth 1)
+          ;; splice: evaluate the arg and add its children
+          (let [spliced (expand (ast-list-get child 1))]
+            (scscm-splice-children dst spliced)
+            (scscm-qq-fill-list dst src (+ i 1) depth))
+          (let [expanded (scscm-expand-qq child depth)]
+            (scscm-ast-add-child dst expanded)
+            (scscm-qq-fill-list dst src (+ i 1) depth)))
+        (let [expanded (scscm-expand-qq child depth)]
+          (scscm-ast-add-child dst expanded)
+          (scscm-qq-fill-list dst src (+ i 1) depth))))))
+
+;; Splice all children of src-node into dst.
+(defn scscm-splice-children [dst :int src-node :int] #{Unsafe} :void
+  (scscm-copy-children dst src-node 0))
+
+;; ---- thread macro helpers ----
+
+;; Thread-first step: insert acc as first arg into form.
+(defn scscm-thread-first-step [acc :int form :int] #{Unsafe} :int
+  (if (scscm-cstr-eq? (ast-kind form) ":symbol")
+    (let [n (scscm-ast-list-node 5)]
+      (scscm-ast-add-child n form)
+      (scscm-ast-add-child n acc)
+      n)
+    ;; list: (head x rest...)
+    (let [n (scscm-ast-list-node 5)]
+      (scscm-ast-add-child n (ast-list-get form 0))
+      (scscm-ast-add-child n acc)
+      (scscm-copy-children n form 1)
+      n)))
+
+;; Thread-last step: append acc as last arg of form.
+(defn scscm-thread-last-step [acc :int form :int] #{Unsafe} :int
+  (if (scscm-cstr-eq? (ast-kind form) ":symbol")
+    (let [n (scscm-ast-list-node 5)]
+      (scscm-ast-add-child n form)
+      (scscm-ast-add-child n acc)
+      n)
+    ;; list: (head rest... x)
+    (let [n (scscm-ast-list-node 5)]
+      (scscm-copy-children n form 0)
+      (scscm-ast-add-child n acc)
+      n)))
+
+;; Expand (-> acc step1 step2 ...) from index i.
+(defn scscm-expand-thread-first [node :int i :int acc :int] #{Unsafe} :int
+  (if (>= i (ast-list-len node))
+    (expand acc)
+    (let [step (ast-list-get node i)]
+      (scscm-expand-thread-first node (+ i 1) (scscm-thread-first-step acc step)))))
+
+;; Expand (->> acc step1 step2 ...) from index i.
+(defn scscm-expand-thread-last [node :int i :int acc :int] #{Unsafe} :int
+  (if (>= i (ast-list-len node))
+    (expand acc)
+    (let [step (ast-list-get node i)]
+      (scscm-expand-thread-last node (+ i 1) (scscm-thread-last-step acc step)))))
+
+;; ---- user macro application ----
+
+;; Apply a user macro: substitute params with args in body AST, then expand.
+(defn scscm-macro-apply [params-node :int body :int args :int] #{Unsafe} :int
+  (let [substituted (scscm-subst body params-node args)]
+    (expand substituted)))
+
+;; Convert kind string to integer code.
+(defn scscm-kind-int [knd :cstr] #{Unsafe} :int
+  ```c
+  static const char *names[] = {
+    ":atom",":symbol",":keyword",":number",":string",
+    ":list",":vector",":quote",":quasiquote",":unquote",":unquote-splice",":hash-paren"
+  };
+  const char *k = (const char*)(intptr_t)knd;
+  for (int i = 0; i < 12; i++)
+    if (strcmp(k, names[i]) == 0) return i;
+  return 5; /* default to :list */
+  ```)
+
+;; Substitute symbol nodes matching param names with corresponding arg values.
+(defn scscm-subst [node :int params :int args :int] #{Unsafe} :int
+  (let [knd (ast-kind node)]
+    (if (scscm-cstr-eq? knd ":symbol")
+      (let [found (scscm-find-param node params args)]
+        (if (= found 0)
+          node
+          found))
+      (if (or (scscm-cstr-eq? knd ":list")
+               (or (scscm-cstr-eq? knd ":vector")
+                   (or (scscm-cstr-eq? knd ":quote")
+                       (or (scscm-cstr-eq? knd ":quasiquote")
+                           (or (scscm-cstr-eq? knd ":hash-paren")
+                               (or (scscm-cstr-eq? knd ":unquote")
+                                   (scscm-cstr-eq? knd ":unquote-splice")))))))
+        (let [n (scscm-ast-list-node (scscm-kind-int knd))]
+          (scscm-subst-fill n node params args 0)
+          n)
+        node))))
+
+(defn scscm-subst-fill [dst :int src :int params :int args :int i :int] #{Unsafe} :void
+  (if (>= i (ast-list-len src))
+    (scscm-void)
+    (do
+      (scscm-ast-add-child dst (scscm-subst (ast-list-get src i) params args))
+      (scscm-subst-fill dst src params args (+ i 1)))))
+
+;; Find the argument corresponding to a param name.
+;; params is a :vector/:list AST node; args is a cons list of AST handles.
+;; Returns 0 (not found) or the matching arg handle.
+(defn scscm-find-param [sym-node :int params :int args :int] #{Unsafe} :int
+  (scscm-find-param-loop sym-node params args 0))
+
+(defn scscm-find-param-loop [sym-node :int params :int args :int i :int] #{Unsafe} :int
+  (if (>= i (ast-list-len params))
+    0
+    (let [param (ast-list-get params i)]
+      (if (scscm-cstr-eq? (ast-symbol-name param) (ast-symbol-name sym-node))
+        (scscm-cons-nth args i)
+        (scscm-find-param-loop sym-node params args (+ i 1))))))
+
+;; Get the n-th element of a cons list.
+(defn scscm-cons-nth [lst :int n :int] #{Unsafe} :int
+  (if (= n 0)
+    (head lst)
+    (scscm-cons-nth (tail lst) (- n 1))))
+
+;; ---- stdlib macro expansions ----
+
+;; (when cond body...) -> (if cond (do body...) nil)
+(defn scscm-expand-when [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym "if"))
+    (scscm-ast-add-child n (expand (ast-list-get node 1)))
+    (let [body-do (scscm-ast-list-node 5)]
+      (scscm-ast-add-child body-do (scscm-make-sym "do"))
+      (scscm-copy-expanded-children body-do node 2)
+      (scscm-ast-add-child n body-do)
+      (scscm-ast-add-child n (scscm-ast-leaf 0 "nil"))
+      n)))
+
+;; (unless cond body...) -> (if (not cond) (do body...) nil)
+(defn scscm-expand-unless [node :int] #{Unsafe} :int
+  (let [not-node (scscm-make-wrap "not" (expand (ast-list-get node 1)))
+        n        (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym "if"))
+    (scscm-ast-add-child n not-node)
+    (let [body-do (scscm-ast-list-node 5)]
+      (scscm-ast-add-child body-do (scscm-make-sym "do"))
+      (scscm-copy-expanded-children body-do node 2)
+      (scscm-ast-add-child n body-do)
+      (scscm-ast-add-child n (scscm-ast-leaf 0 "nil"))
+      n)))
+
+;; Copy children from src starting at i, expanding each, into dst.
+(defn scscm-copy-expanded-children [dst :int src :int start :int] #{Unsafe} :void
+  (if (>= start (ast-list-len src))
+    (scscm-void)
+    (do
+      (scscm-ast-add-child dst (expand (ast-list-get src start)))
+      (scscm-copy-expanded-children dst src (+ start 1)))))
+
+;; Generic "just expand all children" for pass-through forms.
+(defn scscm-expand-children [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node (scscm-kind-int (ast-kind node)))]
+    (scscm-copy-expanded-children n node 0)
+    n))
+
+;; (pbind :k1 v1 :k2 v2) -> (. (Pbind :k1 v1 :k2 v2) play)
+;; We leave pbind as-is and let codegen emit Pbind(...)  (capitalized via sym-escape is not enough)
+;; So we need to rename: replace "pbind" head with "Pbind".
+(defn scscm-expand-pbind [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym "Pbind"))
+    (scscm-copy-expanded-children n node 1)
+    n))
+
+;; (pseq [items] repeats) -> (Pseq [items] repeats)
+(defn scscm-expand-pattern-fn [sclang-name :cstr node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym sclang-name))
+    (scscm-copy-expanded-children n node 1)
+    n))
+
+;; (defsynth name params body) -> SynthDef.new(\name, { |params| body }).add
+;; Simplified: leave defsynth as a list, codegen can handle it or
+;; we expand to: (.dot SynthDef new (quote name) (fn params body))
+(defn scscm-expand-defsynth [node :int] #{Unsafe} :int
+  (let [name-node   (ast-list-get node 1)
+        params-node (ast-list-get node 2)
+        qname    (let [qn (scscm-ast-list-node 7)]
+                   (scscm-ast-add-child qn name-node)
+                   qn)
+        fn-node  (scscm-ast-list-node 5)
+        new-node (scscm-ast-list-node 5)
+        add-node (scscm-ast-list-node 5)]
+    (scscm-ast-add-child fn-node (scscm-make-sym "fn"))
+    (scscm-ast-add-child fn-node params-node)
+    (scscm-copy-expanded-children fn-node node 3)
+    (scscm-ast-add-child new-node (scscm-make-sym ".dot"))
+    (scscm-ast-add-child new-node (scscm-make-sym "SynthDef"))
+    (scscm-ast-add-child new-node (scscm-make-sym "new"))
+    (scscm-ast-add-child new-node qname)
+    (scscm-ast-add-child new-node fn-node)
+    (scscm-ast-add-child add-node (scscm-make-sym "."))
+    (scscm-ast-add-child add-node new-node)
+    (scscm-ast-add-child add-node (scscm-make-sym "add"))
+    add-node))
+
+;; (definst name params body) -> same pattern but SynthDef without .add
+;; simplified to same as defsynth
+(defn scscm-expand-definst [node :int] #{Unsafe} :int
+  (scscm-expand-defsynth node))
+
+;; (comp f g) -> { |x| f(g(x)) }  -- simplified to a fn wrapping calls
+(defn scscm-expand-comp [node :int] #{Unsafe} :int
+  ;; Just pass through -- complex to implement without closures
+  (scscm-expand-children node))
+
+;; (partial f a) -> { |x| f(a x) }  -- simplified
+(defn scscm-expand-partial [node :int] #{Unsafe} :int
+  (scscm-expand-children node))
+
+;; (adsr a d s r) -> Env.adsr(a, d, s, r)
+(defn scscm-expand-adsr [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym ".dot"))
+    (scscm-ast-add-child n (scscm-make-sym "Env"))
+    (scscm-ast-add-child n (scscm-make-sym "adsr"))
+    (scscm-copy-expanded-children n node 1)
+    n))
+
+;; (perc attack release) -> Env.perc(attack, release)
+(defn scscm-expand-perc [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym ".dot"))
+    (scscm-ast-add-child n (scscm-make-sym "Env"))
+    (scscm-ast-add-child n (scscm-make-sym "perc"))
+    (scscm-copy-expanded-children n node 1)
+    n))
+
+;; (env-line levels times) -> Env.new(levels, times)
+(defn scscm-expand-env-line [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym ".dot"))
+    (scscm-ast-add-child n (scscm-make-sym "Env"))
+    (scscm-ast-add-child n (scscm-make-sym "new"))
+    (scscm-copy-expanded-children n node 1)
+    n))
+
+;; (midi->hz n) -> n.midicps
+(defn scscm-expand-midi-hz [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym "."))
+    (scscm-ast-add-child n (expand (ast-list-get node 1)))
+    (scscm-ast-add-child n (scscm-make-sym "midicps"))
+    n))
+
+;; (hz->midi n) -> n.cpsmidi
+(defn scscm-expand-hz-midi [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym "."))
+    (scscm-ast-add-child n (expand (ast-list-get node 1)))
+    (scscm-ast-add-child n (scscm-make-sym "cpsmidi"))
+    n))
+
+;; (db->amp db) -> db.dbamp
+(defn scscm-expand-db-amp [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym "."))
+    (scscm-ast-add-child n (expand (ast-list-get node 1)))
+    (scscm-ast-add-child n (scscm-make-sym "dbamp"))
+    n))
+
+;; (amp->db amp) -> amp.ampdb
+(defn scscm-expand-amp-db [node :int] #{Unsafe} :int
+  (let [n (scscm-ast-list-node 5)]
+    (scscm-ast-add-child n (scscm-make-sym "."))
+    (scscm-ast-add-child n (expand (ast-list-get node 1)))
+    (scscm-ast-add-child n (scscm-make-sym "ampdb"))
+    n))
+
+;; (ctl node-id key val) -> expands to n_set message (pass through for now)
+(defn scscm-expand-ctl [node :int] #{Unsafe} :int
+  (scscm-expand-children node))
+
+;; (kill node-id) -> n_free message (pass through for now)
+(defn scscm-expand-kill [node :int] #{Unsafe} :int
+  (scscm-expand-children node))
+
+;; (doseq [x seq] body) -> seq.do { |x| body }
+(defn scscm-expand-doseq [node :int] #{Unsafe} :int
+  (let [bvec      (ast-list-get node 1)
+        bind-name (ast-symbol-name (ast-list-get bvec 0))
+        seq-node  (expand (ast-list-get bvec 1))
+        fn-node   (scscm-ast-list-node 5)
+        param-vec (scscm-ast-list-node 6)
+        n         (scscm-ast-list-node 5)]
+    (scscm-ast-add-child param-vec (scscm-make-sym bind-name))
+    (scscm-ast-add-child fn-node (scscm-make-sym "fn"))
+    (scscm-ast-add-child fn-node param-vec)
+    (scscm-copy-expanded-children fn-node node 2)
+    (scscm-ast-add-child n (scscm-make-sym "."))
+    (scscm-ast-add-child n seq-node)
+    (scscm-ast-add-child n (scscm-make-sym "do"))
+    (scscm-ast-add-child n fn-node)
+    n))
+
+;; (dotimes [i n] body) -> n.do { |i| body }
+(defn scscm-expand-dotimes [node :int] #{Unsafe} :int
+  (let [bvec       (ast-list-get node 1)
+        bind-name  (ast-symbol-name (ast-list-get bvec 0))
+        count-node (expand (ast-list-get bvec 1))
+        fn-node    (scscm-ast-list-node 5)
+        param-vec  (scscm-ast-list-node 6)
+        n          (scscm-ast-list-node 5)]
+    (scscm-ast-add-child param-vec (scscm-make-sym bind-name))
+    (scscm-ast-add-child fn-node (scscm-make-sym "fn"))
+    (scscm-ast-add-child fn-node param-vec)
+    (scscm-copy-expanded-children fn-node node 2)
+    (scscm-ast-add-child n (scscm-make-sym "."))
+    (scscm-ast-add-child n count-node)
+    (scscm-ast-add-child n (scscm-make-sym "do"))
+    (scscm-ast-add-child n fn-node)
+    n))
+
+;; (collect [x seq] body) -> seq.collect { |x| body }
+(defn scscm-expand-collect [node :int] #{Unsafe} :int
+  (let [bvec      (ast-list-get node 1)
+        bind-name (ast-symbol-name (ast-list-get bvec 0))
+        seq-node  (expand (ast-list-get bvec 1))
+        fn-node   (scscm-ast-list-node 5)
+        param-vec (scscm-ast-list-node 6)
+        n         (scscm-ast-list-node 5)]
+    (scscm-ast-add-child param-vec (scscm-make-sym bind-name))
+    (scscm-ast-add-child fn-node (scscm-make-sym "fn"))
+    (scscm-ast-add-child fn-node param-vec)
+    (scscm-copy-expanded-children fn-node node 2)
+    (scscm-ast-add-child n (scscm-make-sym "."))
+    (scscm-ast-add-child n seq-node)
+    (scscm-ast-add-child n (scscm-make-sym "collect"))
+    (scscm-ast-add-child n fn-node)
+    n))
+
+;; ---- defmacro handling ----
+
+;; (defmacro name [params] body) -> store and return nil atom
+(defn scscm-handle-defmacro [node :int] #{Unsafe} :int
+  (let [name-node   (ast-list-get node 1)
+        params-node (ast-list-get node 2)
+        body-node   (ast-list-get node 3)]
+    (scscm-macro-define name-node params-node body-node)
+    (scscm-ast-leaf 0 "nil")))
+
+;; ---- main expand dispatch ----
+
+;;; expand -- expand macros in a single AST node.
+;;;
+;;; Parameters:
+;;;   ast -- AST node handle (from parser)
+;;;
+;;; Returns:
+;;;   Expanded AST node handle (may be a new allocation).
+;;;
+;;; Example:
+;;;   (expand (parse-one-form my-tokens))
+;;;
+;;; Since: SC3
+(defn expand [ast :int] #{Unsafe} :int
+  (let [knd (ast-kind ast)]
+    (if (or (scscm-cstr-eq? knd ":atom")
+             (or (scscm-cstr-eq? knd ":symbol")
+                 (or (scscm-cstr-eq? knd ":keyword")
+                     (or (scscm-cstr-eq? knd ":number")
+                         (scscm-cstr-eq? knd ":string")))))
+      ;; Leaf nodes: no expansion needed
+      ast
+      (if (scscm-cstr-eq? knd ":quote")
+        ;; (quote x) -> leave as-is (no expansion inside quotes)
+        ast
+        (if (scscm-cstr-eq? knd ":quasiquote")
+          (scscm-expand-qq (ast-list-get ast 0) 1)
+          (if (or (scscm-cstr-eq? knd ":list")
+                   (scscm-cstr-eq? knd ":hash-paren"))
+            (scscm-expand-list ast)
+            (if (scscm-cstr-eq? knd ":vector")
+              (scscm-expand-children ast)
+              ;; unquote/unquote-splice outside quasiquote: pass through
+              ast)))))))
+
+;; Expand a list node: check head for macros, then recurse.
+(defn scscm-expand-list [node :int] #{Unsafe} :int
+  (if (= (ast-list-len node) 0)
+    node
+    (let [h0    (ast-list-get node 0)
+          h0knd (ast-kind h0)]
+      (if (scscm-cstr-eq? h0knd ":symbol")
+        (let [nm (ast-symbol-name h0)]
+          ;; Built-in special forms (recurse into children, no rewrite):
+          (if (or (scscm-cstr-eq? nm "fn")
+                   (or (scscm-cstr-eq? nm "defn")
+                       (or (scscm-cstr-eq? nm "var")
+                           (or (scscm-cstr-eq? nm "set!")
+                               (or (scscm-cstr-eq? nm "if")
+                                   (or (scscm-cstr-eq? nm ".")
+                                       (or (scscm-cstr-eq? nm ".dot")
+                                           (or (scscm-cstr-eq? nm "class")
+                                               (or (scscm-cstr-eq? nm "super")
+                                                   (or (scscm-cstr-eq? nm "this")
+                                                       (or (scscm-cstr-eq? nm "array")
+                                                           (or (scscm-cstr-eq? nm "dict")
+                                                               (or (scscm-cstr-eq? nm "list")
+                                                                   (scscm-cstr-eq? nm "do"))))))))))))))
+            (scscm-expand-children node)
+            ;; let/cond: special forms that expand children but are structurally aware
+            (if (scscm-cstr-eq? nm "let")
+              (scscm-expand-let node)
+              (if (scscm-cstr-eq? nm "cond")
+                (scscm-expand-cond node)
+                ;; Stdlib macros:
+                (if (scscm-cstr-eq? nm "->")
+                  (scscm-expand-thread-first node 2 (expand (ast-list-get node 1)))
+                  (if (scscm-cstr-eq? nm "->>")
+                    (scscm-expand-thread-last node 2 (expand (ast-list-get node 1)))
+                    (if (scscm-cstr-eq? nm "when")
+                      (scscm-expand-when node)
+                      (if (scscm-cstr-eq? nm "unless")
+                        (scscm-expand-unless node)
+                        (if (scscm-cstr-eq? nm "doseq")
+                          (scscm-expand-doseq node)
+                          (if (scscm-cstr-eq? nm "dotimes")
+                            (scscm-expand-dotimes node)
+                            (if (scscm-cstr-eq? nm "collect")
+                              (scscm-expand-collect node)
+                              (if (scscm-cstr-eq? nm "icollect")
+                                (scscm-expand-collect node)
+                                (if (scscm-cstr-eq? nm "pbind")
+                                  (scscm-expand-pbind node)
+                                  (if (scscm-cstr-eq? nm "pseq")
+                                    (scscm-expand-pattern-fn "Pseq" node)
+                                    (if (scscm-cstr-eq? nm "prand")
+                                      (scscm-expand-pattern-fn "Prand" node)
+                                      (if (scscm-cstr-eq? nm "pwhite")
+                                        (scscm-expand-pattern-fn "Pwhite" node)
+                                        (if (scscm-cstr-eq? nm "pgeom")
+                                          (scscm-expand-pattern-fn "Pgeom" node)
+                                          (if (scscm-cstr-eq? nm "defsynth")
+                                            (scscm-expand-defsynth node)
+                                            (if (scscm-cstr-eq? nm "definst")
+                                              (scscm-expand-definst node)
+                                              (if (scscm-cstr-eq? nm "adsr")
+                                                (scscm-expand-adsr node)
+                                                (if (scscm-cstr-eq? nm "perc")
+                                                  (scscm-expand-perc node)
+                                                  (if (scscm-cstr-eq? nm "env-line")
+                                                    (scscm-expand-env-line node)
+                                                    (if (scscm-cstr-eq? nm "midi->hz")
+                                                      (scscm-expand-midi-hz node)
+                                                      (if (scscm-cstr-eq? nm "hz->midi")
+                                                        (scscm-expand-hz-midi node)
+                                                        (if (scscm-cstr-eq? nm "db->amp")
+                                                          (scscm-expand-db-amp node)
+                                                          (if (scscm-cstr-eq? nm "amp->db")
+                                                            (scscm-expand-amp-db node)
+                                                            (if (scscm-cstr-eq? nm "ctl")
+                                                              (scscm-expand-ctl node)
+                                                              (if (scscm-cstr-eq? nm "kill")
+                                                                (scscm-expand-kill node)
+                                                                (if (scscm-cstr-eq? nm "comp")
+                                                                  (scscm-expand-comp node)
+                                                                  (if (scscm-cstr-eq? nm "partial")
+                                                                    (scscm-expand-partial node)
+                                                                    (if (scscm-cstr-eq? nm "defmacro")
+                                                                      (scscm-handle-defmacro node)
+                                                                      ;; Check user macros
+                                                                      (let [mentry (scscm-macro-lookup nm)]
+                                                                        (if (list-nil? mentry)
+                                                                          ;; Generic call: expand children
+                                                                          (scscm-expand-children node)
+                                                                          ;; User macro: apply
+                                                                          (let [params (head mentry)
+                                                                                body   (tail mentry)
+                                                                                args   (scscm-children-cons node 1)]
+                                                                            (scscm-macro-apply params body args)))))))))))))))))))))))))))))))))))
+        ;; head not a symbol: expand all children
+        (scscm-expand-children node)))))
+
+;; Expand let: expand the binding values and the body.
+;; (let [x (f) y (g)] body) -> bindings expanded, body expanded.
+(defn scscm-expand-let [node :int] #{Unsafe} :int
+  (let [bvec (ast-list-get node 1)
+        nbv  (scscm-ast-list-node 6)]
+    (scscm-expand-let-bindings nbv bvec 0)
+    (let [n (scscm-ast-list-node 5)]
+      (scscm-ast-add-child n (scscm-make-sym "let"))
+      (scscm-ast-add-child n nbv)
+      (scscm-copy-expanded-children n node 2)
+      n)))
+
+(defn scscm-expand-let-bindings [dst :int bvec :int i :int] #{Unsafe} :void
+  (if (>= i (ast-list-len bvec))
+    (scscm-void)
+    (do
+      ;; name: keep as-is
+      (scscm-ast-add-child dst (ast-list-get bvec i))
+      ;; value: expand
+      (scscm-ast-add-child dst (expand (ast-list-get bvec (+ i 1))))
+      (scscm-expand-let-bindings dst bvec (+ i 2)))))
+
+;; Expand cond: (cond t1 e1 t2 e2 ...) -> nested ifs.
+(defn scscm-expand-cond [node :int] #{Unsafe} :int
+  (scscm-expand-cond-pairs node 1))
+
+(defn scscm-expand-cond-pairs [node :int i :int] #{Unsafe} :int
+  (if (>= i (ast-list-len node))
+    (scscm-ast-leaf 0 "nil")
+    (if (>= (+ i 1) (ast-list-len node))
+      (expand (ast-list-get node i))
+      (let [test (expand (ast-list-get node i))
+            body (expand (ast-list-get node (+ i 1)))
+            n    (scscm-ast-list-node 5)]
+        (scscm-ast-add-child n (scscm-make-sym "if"))
+        (scscm-ast-add-child n test)
+        (scscm-ast-add-child n body)
+        (scscm-ast-add-child n (scscm-expand-cond-pairs node (+ i 2)))
+        n))))
+
+;;; expand-all -- expand macros in a cons list of top-level AST nodes.
+;;;
+;;; Parameters:
+;;;   asts -- cons list of AST node handles
+;;;
+;;; Returns:
+;;;   Cons list of expanded AST node handles.
+;;;
+;;; Example:
+;;;   (expand-all top-level-nodes)
+;;;
+;;; Since: SC3
+(defn expand-all [asts :int] #{Unsafe} :int
+  (if (list-nil? asts)
+    (nil-value)
+    (let [expanded-head (expand (head asts))
+          expanded-tail (expand-all (tail asts))]
+      (cons expanded-head expanded-tail))))

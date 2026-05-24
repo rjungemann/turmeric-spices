@@ -1,0 +1,81 @@
+;; scscm/compile -- public compile API: scscm source text -> sclang text.
+;;
+;; Pipeline: source -> tokenize -> parse -> expand-all -> generate-all -> sclang
+;;
+;; compile-text returns result<:cstr> (ok = sclang text, err = error message).
+;; compile-file reads the file and delegates to compile-text.
+
+;; ---- file I/O helper ----
+
+(defn scscm-read-file [path :cstr] #{Unsafe} :int
+  ```c
+  const char *p = (const char*)(intptr_t)path;
+  FILE *f = fopen(p, "rb");
+  if (!f) return 0;
+  fseek(f, 0, SEEK_END);
+  long sz = ftell(f);
+  rewind(f);
+  char *buf = malloc(sz + 1);
+  if (!buf) { fclose(f); return 0; }
+  fread(buf, 1, sz, f);
+  buf[sz] = '\0';
+  fclose(f);
+  return (int64_t)(intptr_t)buf;
+  ```)
+
+;; Cast :int (cstr pointer) to :cstr.
+(defn scscm-int-as-cstr [n :int] #{Unsafe} :cstr
+  ```c
+  return (const char *)(intptr_t)n;
+  ```)
+
+;;; compile-text -- compile scscm source text to sclang text.
+;;;
+;;; Parameters:
+;;;   source -- NUL-terminated scscm source string
+;;;
+;;; Returns:
+;;;   ok(sclang-text :cstr) on success.
+;;;   err(message-int :int) on lexer/parser error (cast :int to :cstr for message).
+;;;
+;;; Example:
+;;;   (let [r (compile-text "(+ 1 2)")]
+;;;     (if (ok? r) (ok-val r) "error"))
+;;;
+;;; Since: SC4
+(defn compile-text [source :cstr] #{Unsafe} :ptr<void>
+  (let [lex-res (tokenize source)]
+    (if (err? lex-res)
+      lex-res
+      (let [tokens   (ok-val lex-res)
+            parse-res (parse tokens)]
+        (tokens-free tokens)
+        (if (err? parse-res)
+          parse-res
+          (let [ast-list  (ok-val parse-res)
+                expanded  (expand-all ast-list)
+                sclang    (generate-all expanded)]
+            (ast-free-all ast-list)
+            (ok (scscm-cstr-as-int sclang))))))))
+
+;;; compile-file -- read a file and compile its scscm content to sclang.
+;;;
+;;; Parameters:
+;;;   path -- NUL-terminated filesystem path to a .tur or .scscm file
+;;;
+;;; Returns:
+;;;   ok(sclang-text :cstr) on success.
+;;;   err(message-int :int) on I/O or compile error.
+;;;
+;;; Example:
+;;;   (let [r (compile-file "my-synth.scscm")]
+;;;     (if (ok? r) (ok-val r) "error"))
+;;;
+;;; Since: SC4
+(defn compile-file [path :cstr] #{Unsafe} :ptr<void>
+  (let [buf (scscm-read-file path)]
+    (if (= buf 0)
+      (err 0)
+      (let [src (scscm-int-as-cstr buf)]
+        (compile-text src)))))
+

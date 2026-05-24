@@ -1,0 +1,199 @@
+;; osc/server.tur -- OSC server (UDP and TCP) via liblo.
+;;
+;; Servers are lo_server_thread instances; they run message dispatch in a
+;; background POSIX thread managed by liblo.
+;;
+;; Note: server-add-method registers a no-op C trampoline for now.  Full
+;; Turmeric-function callback support requires a future FFI callback API that
+;; can marshal a Turmeric closure into a C function pointer at runtime.
+
+(defmodule osc/server
+  (export server-new server-new-tcp server-free
+          server-add-method server-recv server-recv-noblock)
+
+;; -------------------------------------------------------------------------
+;; Private: result helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; server-new -- create a new UDP OSC server thread on the given port.
+;;;
+;;; Parameters:
+;;;   port  -- port string (e.g. "7770"); passed directly to liblo
+;;;   proto -- ignored; always creates a UDP server in this implementation
+;;;
+;;; Returns:
+;;;   (ok st-ptr) on success; (err 0) on failure.
+;;;   st-ptr is an opaque :int handle; pass to server-free and server-add-method.
+;;;
+;;; Example:
+;;;   (let [r (server-new "7770" "udp")]
+;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "server-new failed")))
+;;;
+;;; Since: OSC0
+(defn server-new [port :cstr proto :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <lo/lo.h>
+  (void)proto; /* proto arg reserved; always UDP in this implementation */
+  lo_server_thread st = lo_server_thread_new((const char *)port, NULL);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!st) {
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    lo_server_thread_start(st);
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)st; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; server-new-tcp -- create a new TCP OSC server thread on the given port.
+;;;
+;;; Parameters:
+;;;   port -- port string (e.g. "7771")
+;;;
+;;; Returns:
+;;;   (ok st-ptr) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (let [r (server-new-tcp "7771")]
+;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "server-new-tcp failed")))
+;;;
+;;; Since: OSC0
+(defn server-new-tcp [port :cstr] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <lo/lo.h>
+  lo_server_thread st = lo_server_thread_new_with_proto((const char *)port,
+                                                        LO_TCP, NULL);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (!st) {
+    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
+  } else {
+    lo_server_thread_start(st);
+    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)st; r->err_val = 0;
+  }
+  return r;
+  ```)
+
+;;; server-free -- stop and free a server thread created by server-new or server-new-tcp.
+;;;
+;;; Parameters:
+;;;   s -- st-ptr (ok-val from server-new or server-new-tcp)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (server-free s)
+;;;
+;;; Since: OSC0
+(defn server-free [s :int] :void
+  ```c
+  #include <lo/lo.h>
+  lo_server_thread st = (lo_server_thread)(intptr_t)s;
+  lo_server_thread_stop(st);
+  lo_server_thread_free(st);
+  ```)
+
+;;; server-add-method -- register a handler for an OSC path and type spec.
+;;;
+;;; Parameters:
+;;;   s        -- st-ptr (ok-val from server-new)
+;;;   path     -- OSC address path string (e.g. "/synth/freq"); NULL matches all
+;;;   typespec -- OSC type tag string (e.g. "f"); NULL matches all
+;;;   handler  -- reserved for future Turmeric FFI callback support; ignored
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Note:
+;;;   Full Turmeric-function callbacks require a future FFI API.  This
+;;;   implementation registers a no-op C handler so the path/typespec entry
+;;;   exists in the server dispatch table.
+;;;
+;;; Example:
+;;;   (server-add-method s "/synth/freq" "f" 0)
+;;;
+;;; Since: OSC0
+(defn server-add-method [s :int path :cstr typespec :cstr handler :int] :void
+  ```c
+  #include <lo/lo.h>
+  /* Stub trampoline -- full Turmeric FFI callback support is deferred.
+     A no-op handler is registered so the method entry exists in liblo's
+     dispatch table.  Replace handler_stub with a real trampoline once
+     the Turmeric callback API is available. */
+  static int handler_stub(const char *p, const char *t,
+                          lo_arg **argv, int argc,
+                          lo_message msg, void *data) {
+    (void)p; (void)t; (void)argv; (void)argc; (void)msg; (void)data;
+    return 0;
+  }
+  lo_server_thread st = (lo_server_thread)(intptr_t)s;
+  lo_server_thread_add_method(st,
+    path ? (const char *)path : NULL,
+    typespec ? (const char *)typespec : NULL,
+    handler_stub, NULL);
+  ```)
+
+;;; server-recv -- dispatch pending OSC messages, blocking up to timeout-ms milliseconds.
+;;;
+;;; Parameters:
+;;;   s          -- st-ptr (ok-val from server-new)
+;;;   timeout-ms -- maximum wait time in milliseconds
+;;;
+;;; Returns:
+;;;   Number of messages dispatched as :int.
+;;;
+;;; Example:
+;;;   (server-recv s 100)  ; => 1
+;;;
+;;; Since: OSC0
+(defn server-recv [s :int timeout-ms :int] :int
+  ```c
+  #include <lo/lo.h>
+  lo_server_thread st = (lo_server_thread)(intptr_t)s;
+  lo_server srv = lo_server_thread_get_server(st);
+  return (int64_t)lo_server_recv_noblock(srv, (int)timeout_ms);
+  ```)
+
+;;; server-recv-noblock -- dispatch any pending OSC messages without blocking.
+;;;
+;;; Parameters:
+;;;   s -- st-ptr (ok-val from server-new)
+;;;
+;;; Returns:
+;;;   Number of messages dispatched as :int (0 if none pending).
+;;;
+;;; Example:
+;;;   (server-recv-noblock s)  ; => 0
+;;;
+;;; Since: OSC0
+(defn server-recv-noblock [s :int] :int
+  ```c
+  #include <lo/lo.h>
+  lo_server_thread st = (lo_server_thread)(intptr_t)s;
+  lo_server srv = lo_server_thread_get_server(st);
+  return (int64_t)lo_server_recv_noblock(srv, 0);
+  ```)
+
+) ;; end defmodule osc/server

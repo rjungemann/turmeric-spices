@@ -1,0 +1,196 @@
+;; rtaudio/stream.tur -- audio stream open/start/stop/close and queries.
+;;
+;; Use stream-open to configure and open a stream, stream-start to begin
+;; audio processing, stream-stop to pause, and stream-close to tear down.
+;; The callback parameter is a Turmeric function pointer cast to rtaudio_cb_t.
+;;
+;; Results are compatible with stdlib/result.tur:
+;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
+
+(defmodule rtaudio/stream
+  (export stream-open stream-start stream-stop stream-close
+          stream-latency stream-sample-rate)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; stream-open -- configure and open an audio stream.
+;;;
+;;; Parameters:
+;;;   a           -- audio handle (ok-val from audio-new)
+;;;   out-device  -- output device index (-1 to disable output)
+;;;   out-chans   -- number of output channels (0 to disable output)
+;;;   in-device   -- input device index (-1 to disable input)
+;;;   in-chans    -- number of input channels (0 to disable input)
+;;;   format      -- sample format keyword: ":int16", ":int32", ":float32", ":float64"
+;;;   sample-rate -- desired sample rate in Hz (e.g. 44100, 48000)
+;;;   buf-frames  -- buffer size in frames (e.g. 256, 512)
+;;;   callback    -- audio callback function pointer as :int (cast to rtaudio_cb_t)
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (let [r (stream-open a 0 2 -1 0 ":float32" 44100 512 my-cb)]
+;;;     (if (ok? r) (stream-start a) (println "stream-open failed")))
+;;;
+;;; Since: RA0
+(defn stream-open [a :int out-device :int out-chans :int
+                   in-device :int in-chans :int
+                   format :cstr sample-rate :int buf-frames :int
+                   callback :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <rtaudio/rtaudio_c.h>
+  rtaudio_format_t fmt = RTAUDIO_FORMAT_FLOAT32;
+  if (strcmp((const char*)format, ":int16") == 0)        fmt = RTAUDIO_FORMAT_SINT16;
+  else if (strcmp((const char*)format, ":int32") == 0)   fmt = RTAUDIO_FORMAT_SINT32;
+  else if (strcmp((const char*)format, ":float32") == 0) fmt = RTAUDIO_FORMAT_FLOAT32;
+  else if (strcmp((const char*)format, ":float64") == 0) fmt = RTAUDIO_FORMAT_FLOAT64;
+  rtaudio_stream_parameters_t out_params;
+  rtaudio_stream_parameters_t in_params;
+  rtaudio_stream_parameters_t *out_ptr = NULL;
+  rtaudio_stream_parameters_t *in_ptr  = NULL;
+  if (out_chans > 0) {
+    out_params.device_id    = (unsigned int)out_device;
+    out_params.num_channels = (unsigned int)out_chans;
+    out_params.first_channel = 0;
+    out_ptr = &out_params;
+  }
+  if (in_chans > 0) {
+    in_params.device_id    = (unsigned int)in_device;
+    in_params.num_channels = (unsigned int)in_chans;
+    in_params.first_channel = 0;
+    in_ptr = &in_params;
+  }
+  unsigned int frames = (unsigned int)buf_frames;
+  int rc = rtaudio_open_stream((rtaudio_t)(intptr_t)a,
+                               out_ptr, in_ptr,
+                               fmt, (unsigned int)sample_rate,
+                               &frames,
+                               (rtaudio_cb_t)(intptr_t)callback,
+                               NULL, NULL, NULL);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (rc == 0) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
+  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
+  return r;
+  ```)
+
+;;; stream-start -- begin audio processing on an open stream.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (stream-start a)
+;;;
+;;; Since: RA0
+(defn stream-start [a :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <rtaudio/rtaudio_c.h>
+  int rc = rtaudio_start_stream((rtaudio_t)(intptr_t)a);
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  if (rc == 0) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
+  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
+  return r;
+  ```)
+
+;;; stream-stop -- stop audio processing without closing the stream.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (stream-stop a)
+;;;
+;;; Since: RA0
+(defn stream-stop [a :int] :void
+  ```c
+  #include <rtaudio/rtaudio_c.h>
+  rtaudio_stop_stream((rtaudio_t)(intptr_t)a);
+  ```)
+
+;;; stream-close -- close the audio stream and release its resources.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (stream-close a)
+;;;
+;;; Since: RA0
+(defn stream-close [a :int] :void
+  ```c
+  #include <rtaudio/rtaudio_c.h>
+  rtaudio_close_stream((rtaudio_t)(intptr_t)a);
+  ```)
+
+;;; stream-latency -- return the stream latency in frames.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   Latency in frames as :int.
+;;;
+;;; Example:
+;;;   (println (stream-latency a))
+;;;
+;;; Since: RA0
+(defn stream-latency [a :int] :int
+  ```c
+  #include <rtaudio/rtaudio_c.h>
+  return (int64_t)rtaudio_get_stream_latency((rtaudio_t)(intptr_t)a);
+  ```)
+
+;;; stream-sample-rate -- return the stream sample rate in Hz.
+;;;
+;;; Parameters:
+;;;   a -- audio handle (ok-val from audio-new)
+;;;
+;;; Returns:
+;;;   Sample rate as :int (e.g. 44100).
+;;;
+;;; Example:
+;;;   (println (stream-sample-rate a))
+;;;
+;;; Since: RA0
+(defn stream-sample-rate [a :int] :int
+  ```c
+  #include <rtaudio/rtaudio_c.h>
+  return (int64_t)rtaudio_get_stream_sample_rate((rtaudio_t)(intptr_t)a);
+  ```)
+
+) ;; end defmodule rtaudio/stream

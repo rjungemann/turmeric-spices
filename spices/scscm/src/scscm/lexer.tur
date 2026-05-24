@@ -1,0 +1,426 @@
+;; scscm/lexer -- tokenize scscm source text into a flat cons list of token handles.
+;;
+;; Token type codes (returned as :cstr by token-type):
+;;   ":atom"  ":symbol"  ":keyword"  ":number"  ":string"
+;;   ":lparen"  ":rparen"  ":lbracket"  ":rbracket"  ":lbrace"  ":rbrace"
+;;   ":quote"  ":quasiquote"  ":unquote"  ":unquote-splice"  ":hash-paren"
+;;   ":eof"
+;;
+;; Internal int codes:
+;;   0=atom 1=symbol 2=keyword 3=number 4=string
+;;   5=lparen 6=rparen 7=lbracket 8=rbracket 9=lbrace 10=rbrace
+;;   11=quote 12=quasiquote 13=unquote 14=unquote-splice 15=hash-paren 16=eof
+;;
+;; This module is self-contained: it embeds the minimal list and result
+;; primitives (cons/head/tail/nil-value/list-nil? and ok/err/ok?/err?/ok-val/err-val)
+;; so no stdlib loads are needed.
+
+;; ---- minimal cons list primitives ----
+
+(defn nil-value [] #{Unsafe} :int
+  ```c
+  return 0;
+  ```)
+
+(defn list-nil? [lst :int] #{Unsafe} :bool
+  ```c
+  return lst == 0;
+  ```)
+
+(defn cons [value :int next :int] #{Unsafe} :int
+  ```c
+  struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
+  cell->value = value; cell->next = next;
+  return (int64_t)(intptr_t)cell;
+  ```)
+
+(defn head [lst :int] #{Unsafe} :int
+  ```c
+  struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
+  if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
+  return cell->value;
+  ```)
+
+(defn tail [lst :int] #{Unsafe} :int
+  ```c
+  struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
+  if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
+  return cell->next;
+  ```)
+
+;; ---- minimal result primitives ----
+
+(defn ok [x :int] #{Unsafe} :ptr<void>
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = x; r->err_val = 0;
+  return (void*)r;
+  ```)
+
+(defn err [e :int] #{Unsafe} :ptr<void>
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e;
+  return (void*)r;
+  ```)
+
+(defn ok? [r :ptr<void>] #{Unsafe} :bool
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+  return res != NULL && res->is_ok;
+  ```)
+
+(defn err? [r :ptr<void>] #{Unsafe} :bool
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+  return res == NULL || !res->is_ok;
+  ```)
+
+(defn ok-val [r :ptr<void>] #{Unsafe} :int
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+  return res->ok_val;
+  ```)
+
+(defn err-val [r :ptr<void>] #{Unsafe} :int
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
+  return res->err_val;
+  ```)
+
+;; ---- raw tokenizer (runs entire scan in C, stores results in a heap array) ----
+
+;;; scscm-tokenize-raw -- scan all tokens from source into a heap array.
+(defn scscm-tokenize-raw [source :cstr] #{Unsafe} :int
+  ```c
+  typedef struct { int type; char *value; int line; int col; } STok;
+  typedef struct { int count; int cap; int64_t *handles; const char *error; } STL;
+  const char *src = (const char *)(intptr_t)source;
+  STL *tl = malloc(sizeof(*tl));
+  tl->count = 0; tl->cap = 32; tl->error = NULL;
+  tl->handles = malloc(tl->cap * sizeof(int64_t));
+
+  int pos = 0, line = 1, col = 1;
+
+  while (src[pos]) {
+    /* skip whitespace */
+    while (src[pos]==' '||src[pos]=='\t'||src[pos]=='\r'||src[pos]=='\n') {
+      if (src[pos]=='\n'){line++;col=1;}else{col++;}
+      pos++;
+    }
+    if (!src[pos]) break;
+    /* skip line comments */
+    if (src[pos]==';') { while(src[pos]&&src[pos]!='\n') pos++; continue; }
+
+    int tok_line=line, tok_col=col;
+    STok *tok = malloc(sizeof(*tok));
+    tok->line=tok_line; tok->col=tok_col; tok->value=NULL; tok->type=-1;
+
+    char c = src[pos];
+    if      (c=='(') { tok->type=5;  tok->value=strdup("(");  pos++;col++; }
+    else if (c==')') { tok->type=6;  tok->value=strdup(")");  pos++;col++; }
+    else if (c=='[') { tok->type=7;  tok->value=strdup("[");  pos++;col++; }
+    else if (c==']') { tok->type=8;  tok->value=strdup("]");  pos++;col++; }
+    else if (c=='{') { tok->type=9;  tok->value=strdup("{");  pos++;col++; }
+    else if (c=='}') { tok->type=10; tok->value=strdup("}");  pos++;col++; }
+    else if (c=='\'') { tok->type=11; tok->value=strdup("'"); pos++;col++; }
+    else if (c=='`') { tok->type=12; tok->value=strdup("`");  pos++;col++; }
+    else if (c=='~') {
+      if (src[pos+1]=='@') { tok->type=14; tok->value=strdup("~@"); pos+=2;col+=2; }
+      else                 { tok->type=13; tok->value=strdup("~");  pos++;col++; }
+    }
+    else if (c=='#' && src[pos+1]=='(') {
+      tok->type=15; tok->value=strdup("#("); pos+=2; col+=2;
+    }
+    else if (c=='"') {
+      pos++; col++;
+      int start=pos;
+      while (src[pos] && src[pos]!='"') {
+        if (src[pos]=='\\') { pos++;col++; if(!src[pos]) break; }
+        if (src[pos]=='\n'){line++;col=1;}else{col++;}
+        pos++;
+      }
+      if (!src[pos]) {
+        tl->error = strdup("unterminated string literal");
+        free(tok); return (int64_t)(intptr_t)tl;
+      }
+      int len=pos-start;
+      tok->value=malloc(len+1); memcpy(tok->value,src+start,len); tok->value[len]='\0';
+      tok->type=4; pos++;col++;
+    }
+    else if (c==':') {
+      /* keyword :foo */
+      int start=pos; pos++;col++;
+      while (src[pos]&&!strchr("()[]{}\"';`,@# \t\r\n",src[pos])) { pos++;col++; }
+      int len=pos-start;
+      tok->value=malloc(len+1); memcpy(tok->value,src+start,len); tok->value[len]='\0';
+      tok->type=2;
+    }
+    else if ((c>='0'&&c<='9') ||
+             ((c=='-'||c=='+') && src[pos+1]>='0' && src[pos+1]<='9')) {
+      int start=pos; pos++;col++;
+      while (src[pos]>='0'&&src[pos]<='9') { pos++;col++; }
+      if (src[pos]=='.') {
+        pos++;col++;
+        while (src[pos]>='0'&&src[pos]<='9') { pos++;col++; }
+      }
+      if (src[pos]=='e'||src[pos]=='E') {
+        pos++;col++;
+        if (src[pos]=='+'||src[pos]=='-') { pos++;col++; }
+        while (src[pos]>='0'&&src[pos]<='9') { pos++;col++; }
+      }
+      int len=pos-start;
+      tok->value=malloc(len+1); memcpy(tok->value,src+start,len); tok->value[len]='\0';
+      tok->type=3;
+    }
+    else if (c && !strchr("()[]{}\"';`,@# \t\r\n",c)) {
+      /* symbol or atom */
+      int start=pos;
+      while (src[pos]&&!strchr("()[]{}\"';`,@# \t\r\n",src[pos])) { pos++;col++; }
+      int len=pos-start;
+      tok->value=malloc(len+1); memcpy(tok->value,src+start,len); tok->value[len]='\0';
+      if (strcmp(tok->value,"nil")==0||strcmp(tok->value,"true")==0||
+          strcmp(tok->value,"false")==0)
+        tok->type=0;
+      else
+        tok->type=1;
+    }
+    else {
+      char msg[80];
+      snprintf(msg,sizeof(msg),"unexpected char '%c' at line %d col %d",(char)c,line,col);
+      tl->error=strdup(msg); free(tok); return (int64_t)(intptr_t)tl;
+    }
+
+    /* append token handle */
+    if (tl->count >= tl->cap) {
+      tl->cap *= 2;
+      tl->handles = realloc(tl->handles, tl->cap * sizeof(int64_t));
+    }
+    tl->handles[tl->count++] = (int64_t)(intptr_t)tok;
+  }
+  return (int64_t)(intptr_t)tl;
+  ```)
+
+;;; scscm-rtl-error? -- true if the raw token list contains a scan error.
+(defn scscm-rtl-error? [tl :int] #{Unsafe} :bool
+  ```c
+  typedef struct { int count; int cap; int64_t *handles; const char *error; } STL;
+  STL *t = (STL*)(intptr_t)tl;
+  return t->error != NULL;
+  ```)
+
+;;; scscm-rtl-error -- return the error message from the raw token list.
+(defn scscm-rtl-error [tl :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int count; int cap; int64_t *handles; const char *error; } STL;
+  STL *t = (STL*)(intptr_t)tl;
+  return t->error ? t->error : "";
+  ```)
+
+;;; scscm-rtl-count -- return the number of tokens in the raw token list.
+(defn scscm-rtl-count [tl :int] #{Unsafe} :int
+  ```c
+  typedef struct { int count; int cap; int64_t *handles; const char *error; } STL;
+  STL *t = (STL*)(intptr_t)tl;
+  return t->count;
+  ```)
+
+;;; scscm-rtl-get -- return the i-th token handle from the raw token list.
+(defn scscm-rtl-get [tl :int i :int] #{Unsafe} :int
+  ```c
+  typedef struct { int count; int cap; int64_t *handles; const char *error; } STL;
+  STL *t = (STL*)(intptr_t)tl;
+  return t->handles[i];
+  ```)
+
+;;; scscm-rtl-free -- free the raw token list struct and all token structs.
+(defn scscm-rtl-free [tl :int] #{Unsafe} :void
+  ```c
+  typedef struct { int type; char *value; int line; int col; } STok;
+  typedef struct { int count; int cap; int64_t *handles; const char *error; } STL;
+  STL *t = (STL*)(intptr_t)tl;
+  if (!t) return;
+  for (int i = 0; i < t->count; i++) {
+    STok *tok = (STok*)(intptr_t)t->handles[i];
+    if (tok) { free(tok->value); free(tok); }
+  }
+  free(t->handles);
+  if (t->error) free((void*)t->error);
+  free(t);
+  ```)
+
+;;; scscm-rtl-free-shallow -- free the STL wrapper only, not the STok structs.
+(defn scscm-rtl-free-shallow [tl :int] #{Unsafe} :void
+  ```c
+  typedef struct { int count; int cap; int64_t *handles; const char *error; } STL;
+  STL *t = (STL*)(intptr_t)tl;
+  if (!t) return;
+  free(t->handles);
+  free(t);
+  ```)
+
+;; ---- public token accessors ----
+
+;;; token-type -- return the type keyword string for a token handle.
+;;;
+;;; Parameters:
+;;;   tok -- token handle returned by tokenize
+;;;
+;;; Returns:
+;;;   One of ":atom" ":symbol" ":keyword" ":number" ":string" ":lparen"
+;;;   ":rparen" ":lbracket" ":rbracket" ":lbrace" ":rbrace" ":quote"
+;;;   ":quasiquote" ":unquote" ":unquote-splice" ":hash-paren" ":eof"
+;;;
+;;; Example:
+;;;   (token-type (head (ok-val (tokenize "(+ 1 2)"))))  ; => ":lparen"
+;;;
+;;; Since: SC0
+(defn token-type [tok :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int type; char *value; int line; int col; } STok;
+  static const char *names[] = {
+    ":atom",":symbol",":keyword",":number",":string",
+    ":lparen",":rparen",":lbracket",":rbracket",":lbrace",":rbrace",
+    ":quote",":quasiquote",":unquote",":unquote-splice",":hash-paren",":eof"
+  };
+  STok *t = (STok*)(intptr_t)tok;
+  if (!t || t->type < 0 || t->type > 16) return ":unknown";
+  return names[t->type];
+  ```)
+
+;;; token-value -- return the raw text value of a token.
+;;;
+;;; Parameters:
+;;;   tok -- token handle returned by tokenize
+;;;
+;;; Returns:
+;;;   The raw scanned text as :cstr (e.g. "foo-bar", ":freq", "440", "hello").
+;;;
+;;; Example:
+;;;   (token-value tok)  ; => "foo-bar"
+;;;
+;;; Since: SC0
+(defn token-value [tok :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int type; char *value; int line; int col; } STok;
+  STok *t = (STok*)(intptr_t)tok;
+  return t && t->value ? t->value : "";
+  ```)
+
+;;; token-line -- return the 1-based source line of a token.
+;;;
+;;; Parameters:
+;;;   tok -- token handle
+;;;
+;;; Returns:
+;;;   Line number as :int (1-based).
+;;;
+;;; Example:
+;;;   (token-line tok)  ; => 1
+;;;
+;;; Since: SC0
+(defn token-line [tok :int] #{Unsafe} :int
+  ```c
+  typedef struct { int type; char *value; int line; int col; } STok;
+  STok *t = (STok*)(intptr_t)tok;
+  return t ? t->line : 0;
+  ```)
+
+;;; token-col -- return the 1-based source column of a token.
+;;;
+;;; Parameters:
+;;;   tok -- token handle
+;;;
+;;; Returns:
+;;;   Column number as :int (1-based).
+;;;
+;;; Example:
+;;;   (token-col tok)  ; => 1
+;;;
+;;; Since: SC0
+(defn token-col [tok :int] #{Unsafe} :int
+  ```c
+  typedef struct { int type; char *value; int line; int col; } STok;
+  STok *t = (STok*)(intptr_t)tok;
+  return t ? t->col : 0;
+  ```)
+
+;; ---- cons list construction ----
+
+;; Build cons list from raw token list, index i, accumulating into acc (reversed).
+(defn scscm-tokens-build [tl :int i :int acc :int] #{Unsafe} :int
+  (if (>= i (scscm-rtl-count tl))
+    acc
+    (scscm-tokens-build tl (+ i 1) (cons (scscm-rtl-get tl i) acc))))
+
+;; Reverse a cons list.
+(defn scscm-list-rev [lst :int acc :int] #{Unsafe} :int
+  (if (list-nil? lst)
+    acc
+    (scscm-list-rev (tail lst) (cons (head lst) acc))))
+
+;; Helper: cast a :cstr pointer to :int for storing in result.
+(defn scscm-cstr-as-int [s :cstr] #{Unsafe} :int
+  ```c
+  return (int64_t)(intptr_t)s;
+  ```)
+
+;; String equality helper shared across all scscm modules.
+(defn scscm-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  ```c
+  const char *ca = (const char*)(intptr_t)a;
+  const char *cb = (const char*)(intptr_t)b;
+  if (!ca || !cb) return ca == cb;
+  return strcmp(ca, cb) == 0;
+  ```)
+
+;; ---- public API ----
+
+;;; tokenize -- scan scscm source text and return a cons list of token handles.
+;;;
+;;; Parameters:
+;;;   source -- NUL-terminated scscm source string
+;;;
+;;; Returns:
+;;;   ok(tokens :int) on success, where tokens is a cons list of token handles.
+;;;   err(message :cstr) on scan error.
+;;;
+;;; Example:
+;;;   (let [res (tokenize "(+ 1 2)")]
+;;;     (if (ok? res) (ok-val res) (err-val res)))
+;;;
+;;; Since: SC0
+(defn tokenize [source :cstr] #{Unsafe} :ptr<void>
+  (let [tl (scscm-tokenize-raw source)]
+    (if (scscm-rtl-error? tl)
+      (let [msg (scscm-rtl-error tl)]
+        (scscm-rtl-free tl)
+        (err (scscm-cstr-as-int msg)))
+      (let [reversed (scscm-tokens-build tl 0 (nil-value))
+            tokens   (scscm-list-rev reversed (nil-value))]
+        (scscm-rtl-free-shallow tl)
+        (ok tokens)))))
+
+;;; scscm-token-free-one -- free one STok struct (value string + struct itself).
+(defn scscm-token-free-one [tok :int] #{Unsafe} :void
+  ```c
+  typedef struct { int type; char *value; int line; int col; } STok;
+  STok *t = (STok*)(intptr_t)tok;
+  if (t) { free(t->value); free(t); }
+  ```)
+
+;;; tokens-free -- free all token STok structs in a cons list.
+;;;
+;;; Parameters:
+;;;   ts -- cons list of token handles returned by tokenize
+;;;
+;;; Example:
+;;;   (tokens-free my-tokens)
+;;;
+;;; Since: SC0
+(defn tokens-free [ts :int] #{Unsafe} :void
+  (if (list-nil? ts)
+    (scscm-void)
+    (do
+      (scscm-token-free-one (head ts))
+      (tokens-free (tail ts)))))

@@ -1,0 +1,134 @@
+;; valkey/reply.tur -- reply inspection for Valkey/Redis via hiredis.
+;;
+;; Functions operate on reply-ptr values (ok-val from valkey/cmd results).
+;; Always call reply-free when done with a reply to avoid memory leaks.
+
+(defmodule valkey/reply
+  (export reply-type reply-string reply-int reply-array-len
+          reply-array-get reply-free)
+
+;;; reply-type -- return a string describing the type of a reply.
+;;;
+;;; Parameters:
+;;;   r -- reply-ptr (ok-val from a valkey/cmd result)
+;;;
+;;; Returns:
+;;;   One of: "string", "integer", "array", "nil", "error", "status", "unknown".
+;;;
+;;; Example:
+;;;   (reply-type r)  ; => "string"
+;;;
+;;; Since: VK0
+(defn reply-type [r :int] :cstr
+  ```c
+  #include <hiredis/hiredis.h>
+  redisReply *reply = (redisReply *)(intptr_t)r;
+  switch (reply->type) {
+    case REDIS_REPLY_STRING:  return (char *)"string";
+    case REDIS_REPLY_INTEGER: return (char *)"integer";
+    case REDIS_REPLY_ARRAY:   return (char *)"array";
+    case REDIS_REPLY_NIL:     return (char *)"nil";
+    case REDIS_REPLY_ERROR:   return (char *)"error";
+    case REDIS_REPLY_STATUS:  return (char *)"status";
+    default:                  return (char *)"unknown";
+  }
+  ```)
+
+;;; reply-string -- return the string content of a string, status, or error reply.
+;;;
+;;; Parameters:
+;;;   r -- reply-ptr (ok-val from a valkey/cmd result)
+;;;
+;;; Returns:
+;;;   Reply string as :cstr; valid until reply-free is called.
+;;;   Returns empty string for non-string reply types.
+;;;
+;;; Example:
+;;;   (reply-string r)  ; => "OK"
+;;;
+;;; Since: VK0
+(defn reply-string [r :int] :cstr
+  ```c
+  #include <hiredis/hiredis.h>
+  redisReply *reply = (redisReply *)(intptr_t)r;
+  return reply->str ? reply->str : (char *)"";
+  ```)
+
+;;; reply-int -- return the integer value of an integer reply.
+;;;
+;;; Parameters:
+;;;   r -- reply-ptr (ok-val from a valkey/cmd result)
+;;;
+;;; Returns:
+;;;   Reply integer as :int.
+;;;
+;;; Example:
+;;;   (reply-int r)  ; => 42
+;;;
+;;; Since: VK0
+(defn reply-int [r :int] :int
+  ```c
+  #include <hiredis/hiredis.h>
+  redisReply *reply = (redisReply *)(intptr_t)r;
+  return (int64_t)reply->integer;
+  ```)
+
+;;; reply-array-len -- return the number of elements in an array reply.
+;;;
+;;; Parameters:
+;;;   r -- reply-ptr (ok-val from a valkey/cmd result)
+;;;
+;;; Returns:
+;;;   Element count as :int; 0 for non-array replies.
+;;;
+;;; Example:
+;;;   (reply-array-len r)  ; => 3
+;;;
+;;; Since: VK0
+(defn reply-array-len [r :int] :int
+  ```c
+  #include <hiredis/hiredis.h>
+  redisReply *reply = (redisReply *)(intptr_t)r;
+  return (int64_t)reply->elements;
+  ```)
+
+;;; reply-array-get -- return the i-th sub-reply of an array reply as an :int handle.
+;;;
+;;; Parameters:
+;;;   r -- reply-ptr (ok-val from a valkey/cmd result)
+;;;   i -- 0-based element index
+;;;
+;;; Returns:
+;;;   Sub-reply pointer as :int; pass to reply-type, reply-string, etc.
+;;;   The sub-reply is owned by the parent reply; do not call reply-free on it.
+;;;
+;;; Example:
+;;;   (reply-string (reply-array-get r 0))  ; => "item0"
+;;;
+;;; Since: VK0
+(defn reply-array-get [r :int i :int] :int
+  ```c
+  #include <hiredis/hiredis.h>
+  redisReply *reply = (redisReply *)(intptr_t)r;
+  return (int64_t)(intptr_t)reply->element[i];
+  ```)
+
+;;; reply-free -- release a reply object and all its sub-replies.
+;;;
+;;; Parameters:
+;;;   r -- reply-ptr (ok-val from a valkey/cmd result)
+;;;
+;;; Returns:
+;;;   void
+;;;
+;;; Example:
+;;;   (reply-free r)
+;;;
+;;; Since: VK0
+(defn reply-free [r :int] :void
+  ```c
+  #include <hiredis/hiredis.h>
+  freeReplyObject((redisReply *)(intptr_t)r);
+  ```)
+
+) ;; end defmodule valkey/reply

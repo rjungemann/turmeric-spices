@@ -1,0 +1,186 @@
+;; postgres/stmt.tur -- named prepared statement operations via PQprepare/PQexecPrepared.
+;;
+;; Prepared statements are named server-side plans. Use stmt-prepare to compile
+;; a SQL string once, stmt-exec-prepared to run it with different parameter lists,
+;; and stmt-deallocate to drop the plan when finished.
+
+(defmodule postgres/stmt
+  (export stmt-prepare stmt-exec-prepared stmt-deallocate)
+
+;; -------------------------------------------------------------------------
+;; Private: result type helpers (layout matches stdlib/result.tur)
+;; -------------------------------------------------------------------------
+
+;;; __ok -- create an ok result wrapping integer value v.
+(defn __ok [v :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __err -- create an err result wrapping integer error value e.
+(defn __err [e :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: cons list helpers
+;; -------------------------------------------------------------------------
+
+;;; __params-count -- count the number of cells in a cons list.
+(defn __params-count [params :int] :int
+  ```c
+  struct { int64_t value; int64_t next; } *cell =
+      (struct { int64_t value; int64_t next; } *)(intptr_t)params;
+  int64_t n = 0;
+  while (cell) { n++; cell = (struct { int64_t value; int64_t next; } *)(intptr_t)cell->next; }
+  return n;
+  ```)
+
+;;; __params-values -- build a heap-allocated char** from a cons list of :cstr.
+(defn __params-values [params :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  struct __stcons { int64_t value; int64_t next; };
+  const char **arr = (const char **)malloc((size_t)n * sizeof(const char *));
+  struct __stcons *cell = (struct __stcons *)(intptr_t)params;
+  for (int64_t i = 0; i < n && cell; i++) {
+    arr[i] = (const char *)(intptr_t)cell->value;
+    cell = (struct __stcons *)(intptr_t)cell->next;
+  }
+  return (int64_t)(intptr_t)arr;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: string-building helper for DEALLOCATE
+;; -------------------------------------------------------------------------
+
+;;; __dealloc-sql -- build "DEALLOCATE name" as a heap-allocated cstr.
+(defn __dealloc-sql [name :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdio.h>
+  const char *prefix = "DEALLOCATE ";
+  size_t plen = strlen(prefix);
+  size_t nlen = strlen((const char *)name);
+  char *buf = (char *)malloc(plen + nlen + 1);
+  memcpy(buf, prefix, plen);
+  memcpy(buf + plen, (const char *)name, nlen);
+  buf[plen + nlen] = '\0';
+  return (int64_t)(intptr_t)buf;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Private: raw libpq wrappers
+;; -------------------------------------------------------------------------
+
+;;; __pq-prepare-raw -- PQprepare; returns 1 on success, 0 on failure.
+(defn __pq-prepare-raw [conn :int name :cstr sql :cstr nparams :int] :int
+  ```c
+  #include <libpq-fe.h>
+  PGresult *res = PQprepare((PGconn *)(intptr_t)conn,
+                            (const char *)name,
+                            (const char *)sql,
+                            (int)nparams,
+                            NULL);
+  if (!res) return 0;
+  int ok = (PQresultStatus(res) == PGRES_COMMAND_OK) ? 1 : 0;
+  PQclear(res);
+  return ok;
+  ```)
+
+;;; __pq-exec-prepared-raw -- PQexecPrepared; returns PGresult* as :int (0 on failure).
+(defn __pq-exec-prepared-raw [conn :int name :cstr paramValues :int nparams :int] :int
+  ```c
+  #include <libpq-fe.h>
+  const char **vals = (const char **)(intptr_t)paramValues;
+  PGresult *res = PQexecPrepared((PGconn *)(intptr_t)conn,
+                                 (const char *)name,
+                                 (int)nparams,
+                                 vals, NULL, NULL, 0);
+  if (!res) return 0;
+  ExecStatusType st = PQresultStatus(res);
+  if (st != PGRES_TUPLES_OK && st != PGRES_COMMAND_OK) { PQclear(res); return 0; }
+  return (int64_t)(intptr_t)res;
+  ```)
+
+;;; __pq-exec-raw -- execute SQL with no params; returns 1 on success, 0 on failure.
+(defn __pq-exec-raw [conn :int sql :cstr] :int
+  ```c
+  #include <libpq-fe.h>
+  PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
+  if (!res) return 0;
+  ExecStatusType st = PQresultStatus(res);
+  PQclear(res);
+  return (st == PGRES_COMMAND_OK || st == PGRES_TUPLES_OK) ? 1 : 0;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Public API
+;; -------------------------------------------------------------------------
+
+;;; stmt-prepare -- compile a named prepared statement on the server.
+;;;
+;;; Parameters:
+;;;   conn     -- connection handle
+;;;   name     -- unique name for this prepared statement
+;;;   sql      -- SQL string with $1,$2,... placeholders
+;;;   nparams  -- number of parameters in sql
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (stmt-prepare conn "insert-user" "INSERT INTO users (name) VALUES ($1)" 1)
+;;;
+;;; Since: PG2
+(defn stmt-prepare [conn :int name :cstr sql :cstr nparams :int] :ptr<void>
+  (let [rc (__pq-prepare-raw conn name sql nparams)]
+    (if (!= rc 0) (__ok 0) (__err 0))))
+
+;;; stmt-exec-prepared -- execute a previously prepared statement with parameters.
+;;;
+;;; Parameters:
+;;;   conn   -- connection handle
+;;;   name   -- name used in stmt-prepare
+;;;   params -- cons list of :cstr parameter values (positional, 1-indexed)
+;;;
+;;; Returns:
+;;;   (ok rows-handle) on success; (err 0) on failure.
+;;;   Free the rows-handle with rows-free from postgres/row when done.
+;;;
+;;; Example:
+;;;   (let [r (stmt-exec-prepared conn "insert-user" (cons "Alice" 0))]
+;;;     (if (ok? r) (rows-free (ok-val r)) (println "exec failed")))
+;;;
+;;; Since: PG2
+(defn stmt-exec-prepared [conn :int name :cstr params :int] :ptr<void>
+  (let [n    (__params-count params)
+        vals (__params-values params n)
+        raw  (__pq-exec-prepared-raw conn name vals n)]
+    (if (!= raw 0) (__ok raw) (__err 0))))
+
+;;; stmt-deallocate -- drop a named prepared statement from the server.
+;;;
+;;; Parameters:
+;;;   conn -- connection handle
+;;;   name -- name used in stmt-prepare
+;;;
+;;; Returns:
+;;;   (ok 0) on success; (err 0) on failure.
+;;;
+;;; Example:
+;;;   (stmt-deallocate conn "insert-user")
+;;;
+;;; Since: PG2
+(defn stmt-deallocate [conn :int name :cstr] :ptr<void>
+  (let [sql (__dealloc-sql name)
+        rc  (__pq-exec-raw conn sql)]
+    (if (!= rc 0) (__ok 0) (__err 0))))
+
+) ;; end defmodule postgres/stmt
