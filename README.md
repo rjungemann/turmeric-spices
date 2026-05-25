@@ -23,6 +23,7 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 | [`tur-regex`](spices/regex/) | PCRE2 regex bindings | 3 -- cmake-dep | PCRE2 10.44 |
 | [`tur-scscm`](spices/scscm/) | scscm s-expression -> sclang compiler + scsynth/hcsynth OSC client | 1 -- inline-C only | tur-osc (optional, server module only) |
 | [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 1 -- inline-C only | -- |
+| [`tur-signal`](spices/signal/) | Arrow-based signal processing (SF, DSP, ADSR, synth) | 1 -- pure Turmeric | -- |
 
 ---
 
