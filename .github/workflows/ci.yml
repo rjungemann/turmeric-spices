@@ -71,11 +71,52 @@ jobs:
         env:
           TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
         run: |
-          if [ -d src ]; then
-            find src -name '*.tur' -print -exec \
-              "$GITHUB_WORKSPACE/turmeric/build/tur" check {} \;
-          else
+          # SC8: regression matrix.
+          # Before the spice-aware-check work, `tur check src/foo/bar.tur`
+          # could not resolve intra-spice imports like `(import foo/baz)`
+          # because the per-file driver didn't know it was inside a spice;
+          # output was a wall of spurious "module not found" lines.  With
+          # SC4 auto-discovery + SC5 cross-spice dep wiring landed, each
+          # `tur check` is a genuine signal for intra-spice import breakage
+          # and missing-export regressions.
+          #
+          # We must fail the job on any non-zero exit -- the previous
+          # `find -exec` pattern swallowed failures because find returns 0
+          # regardless of what -exec'd commands return.
+          #
+          # Per-spice opt-out: a `requires.typecheck-skip` marker file in
+          # the spice root marks the spice as known-broken; the type-check
+          # step reports it but does not fail the job.  The marker must
+          # contain at least one human-readable line explaining what's
+          # broken and pointing at a tracking issue.  Delete the marker
+          # once the spice type-checks cleanly.
+          if [ -f requires.typecheck-skip ]; then
+            echo "::warning::type-check skipped via requires.typecheck-skip:"
+            sed 's/^/  /' requires.typecheck-skip
+            exit 0
+          fi
+          if [ ! -d src ]; then
             echo "no src/ directory; skipping check"
+            exit 0
+          fi
+          n_files=0
+          n_fail=0
+          failed=()
+          while IFS= read -r -d '' f; do
+            n_files=$((n_files + 1))
+            if "$GITHUB_WORKSPACE/turmeric/build/tur" check "$f"; then
+              echo "  ok   $f"
+            else
+              echo "::error file=$f::tur check failed"
+              n_fail=$((n_fail + 1))
+              failed+=("$f")
+            fi
+          done < <(find src -name '*.tur' -print0)
+          echo "Summary: checked $n_files file(s), $n_fail failed"
+          if [ "$n_fail" -gt 0 ]; then
+            echo "Failed files:"
+            for f in "${failed[@]}"; do echo "  - $f"; done
+            exit 1
           fi
 
       - name: Run spice tests (if any)
