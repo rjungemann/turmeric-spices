@@ -17,7 +17,7 @@ This guide walks the seven things you'll do most often:
 3. [Sort and de-duplicate](#3-sorting-and-deduplicating)
 4. [Group-by and aggregate](#4-group-by-and-aggregation)
 5. [Join two frames](#5-joining-two-frames)
-6. [Reshape with `melt` and `pivot`](#6-reshape-melt-and-pivot)
+6. [Reshape long-form with `melt`](#6-reshape-melt)
 7. [Hand a frame to Python / R / DuckDB via Arrow](#7-arrow-c-data-interface)
 
 Each section is a self-contained snippet you can drop into a `defn main`.
@@ -259,12 +259,10 @@ row hashes + chained buckets). Build side is selected per join direction
 
 ---
 
-## 6. Reshape: melt and pivot
-
-### melt -- wide to long
+## 6. Reshape: melt
 
 ```turmeric
-(import frame/reshape :refer [melt pivot])
+(import frame/reshape :refer [melt])
 
 (let [wide (read-csv-string "id,group,x,y\n1,A,10,100\n2,B,20,200\n" 0 0 1 0 "")
       ids  (cons (cast "id" :int) (cons (cast "group" :int) 0))
@@ -279,42 +277,22 @@ row hashes + chained buckets). Build side is selected per join direction
 ```
 
 Outer loop is over non-id columns, inner over original rows (pandas
-convention). All non-id columns must share a single type; melt returns
-0 otherwise.
+convention). All non-id columns must share a single type; `melt` returns
+`0` otherwise.
 
-### pivot -- long to wide
+`pivot` (long → wide) and `transpose` are intentionally **not** in
+v0.1.0. The recommended path:
 
-```turmeric
-(let [long (read-csv-string "id,k,v\n1,A,10\n1,B,20\n2,A,30\n2,B,40\n" 0 0 1 0 "")
-      ids  (cons (cast "id" :int) 0)
-      wide (pivot long ids "k" "v")]
-  ;; wide schema: id | A | B
-  ;;              1   10  20
-  ;;              2   30  40
-  ...)
-```
+- For `pivot`, do `group-by` + `agg` first to collapse any duplicate
+  `(index, key)` tuples, then reshape externally (PyArrow, DuckDB,
+  Polars) after an `arrow-export` hop. `pivot-agg` may return in a
+  later release once the duplicate-key reduction policy is settled.
+- For `transpose`, do it in the receiving runtime after `arrow-export`
+  -- PyArrow/Polars/DuckDB all have native transposes with better
+  ergonomics than what a typed columnar layout can offer here.
 
-Output column names come from stringifying the representative key cell
-(int -> "42", utf8 -> the string, etc.). Missing `(index, key)` combos
-become nulls; duplicate `(index, key)` tuples return `0` (no aggregation
-in v0 -- use `group-by` + `agg` first if you need to collapse them).
-
-### transpose -- swap rows and columns
-
-```turmeric
-(import frame/reshape :refer [transpose])
-
-(let [src (read-csv-string "id,name\n1,Alice\n2,Bob\n" 0 0 1 0 "")
-      t   (transpose src "var")]
-  ;; t schema: var | row_0 | row_1
-  ;; row "id":    int64:1   int64:2
-  ;; row "name":  utf8:Alice utf8:Bob
-  ...)
-```
-
-`transpose` produces an `any`-typed value column where each cell carries
-its source Arrow type tag (so mixing int and utf8 round-trips losslessly).
-Access cells via `column-any-tag-at` + `column-any-{int64,float64,utf8}-at`.
+See `docs/frame-spice-plan.md` "Potential later enhancements" for the
+full rationale.
 
 ---
 
@@ -400,7 +378,6 @@ df = pl.from_arrow(pa.StructArray._import_from_c(int(array_ptr), int(schema_ptr)
 | 7   | date32     | `tdD`     | int32 days-since-epoch                                        |
 | 8   | timestamp  | `tsu:`    | int64 microseconds-since-epoch (UTC)                          |
 | 9   | null       | `n`       | all-null sentinel                                             |
-| 10  | any        | `+ud`     | per-cell type tag + 8-byte payload + side strings buffer      |
 
 Columns are 64-byte aligned (Arrow spec; matches AVX-512 vector width and
 typical cache line size).
@@ -425,14 +402,20 @@ typical cache line size).
 
 ## What's next (v0.2 candidates)
 
-- **`pivot-agg`** when duplicate (index, key) combos should be reduced
-  instead of erroring.
-- **`column-slice` for any-typed columns** -- v0 errors out.
-- **Pretty rendering of date32 / timestamp** in `print-frame` (currently
-  shows the underlying int).
+- **`pivot-agg`** -- long → wide with an explicit reduction
+  (`agg-sum` / `agg-mean` / `agg-first`) for duplicate `(index, key)`
+  combos. The "pivot then error on duplicates" version that lived
+  briefly under FR7.5a was removed because the duplicate-key policy
+  and the column-name stringification rules aren't worth locking in
+  yet.
+- **Pretty rendering of date32 / timestamp** in `print-frame`
+  (currently shows the underlying int).
 - **`tur-frame-parquet`** -- read/write Parquet (requires a Parquet C lib).
 - **`tur-frame-lazy`** -- query-plan layer for chained operations.
 - **Zero-copy Arrow interop** (FR8.1) -- share buffers via refcount and
   fire release callbacks at column-free time.
 - **Date32 / timestamp arithmetic helpers** (`date+`, `date-days-between`,
   `timestamp->ymd`, etc.).
+
+`transpose` is **not** on the v0.2 list -- the recommended path is
+`arrow-export` and let PyArrow / Polars / DuckDB do it.

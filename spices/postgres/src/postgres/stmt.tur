@@ -60,7 +60,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __dealloc-sql -- build "DEALLOCATE name" as a heap-allocated cstr.
-(defn __dealloc-sql [name :cstr] :int
+(defn __dealloc-sql [name :cstr] :cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -72,7 +72,7 @@
   memcpy(buf, prefix, plen);
   memcpy(buf + plen, (const char *)name, nlen);
   buf[plen + nlen] = '\0';
-  return (int64_t)(intptr_t)buf;
+  return buf;
   ```)
 
 ;; -------------------------------------------------------------------------
@@ -141,7 +141,7 @@
 ;;; Since: PG2
 (defn stmt-prepare [conn :int name :cstr sql :cstr nparams :int] :ptr<void>
   (let [rc (__pq-prepare-raw conn name sql nparams)]
-    (if (!= rc 0) (__ok 0) (__err 0))))
+    (if (not= rc 0) (__ok 0) (__err 0))))
 
 ;;; stmt-exec-prepared -- execute a previously prepared statement with parameters.
 ;;;
@@ -163,7 +163,7 @@
   (let [n    (__params-count params)
         vals (__params-values params n)
         raw  (__pq-exec-prepared-raw conn name vals n)]
-    (if (!= raw 0) (__ok raw) (__err 0))))
+    (if (not= raw 0) (__ok raw) (__err 0))))
 
 ;;; stmt-deallocate -- drop a named prepared statement from the server.
 ;;;
@@ -181,6 +181,6 @@
 (defn stmt-deallocate [conn :int name :cstr] :ptr<void>
   (let [sql (__dealloc-sql name)
         rc  (__pq-exec-raw conn sql)]
-    (if (!= rc 0) (__ok 0) (__err 0))))
+    (if (not= rc 0) (__ok 0) (__err 0))))
 
 ) ;; end defmodule postgres/stmt

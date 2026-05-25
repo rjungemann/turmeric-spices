@@ -1,3 +1,9 @@
+(defn scscm-ast-value [node :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int kind; char *value; } ASTNode;
+  return (const char *)((ASTNode*)(intptr_t)node)->value;
+  ```)
+
 ;; scscm/codegen -- emit sclang text from an expanded AST.
 ;;
 ;; Transformations applied:
@@ -28,6 +34,52 @@
 ;; ---- symbol transformation ----
 
 ;;; scscm-sym-escape -- transform a scscm symbol name to a valid sclang identifier.
+
+;; ---- cross-file type stubs (from scscm/lexer and scscm/parser) ----
+;; These stubs provide type information for per-file tur check.
+;; The real implementations live in lexer.tur and parser.tur.
+(defn scscm-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  ```c
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+(defn list-nil? [lst :int] #{Unsafe} :bool
+  ```c
+  return lst == 0;
+  ```)
+(defn ast-kind [node :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int kind; char *value; } ASTNode;
+  static const char *kinds[] = {":atom",":symbol",":keyword",":number",":string",
+    ":list",":vector",":quote",":quasiquote",":unquote",":unquote-splice",":hash-paren"};
+  ASTNode *n = (void*)(intptr_t)node;
+  return (n && n->kind >= 0 && n->kind < 12) ? kinds[n->kind] : ":atom";
+  ```)
+(defn ast-symbol-name [node :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int kind; char *value; } ASTNode;
+  return (const char *)((ASTNode*)(intptr_t)node)->value;
+  ```)
+(defn ast-number-value [node :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int kind; char *value; } ASTNode;
+  return (const char *)((ASTNode*)(intptr_t)node)->value;
+  ```)
+(defn ast-string-value [node :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int kind; char *value; } ASTNode;
+  return (const char *)((ASTNode*)(intptr_t)node)->value;
+  ```)
+(defn ast-list-len [node :int] #{Unsafe} :int
+  ```c
+  typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
+  return ((ASTNode*)(intptr_t)node)->child_count;
+  ```)
+(defn ast-list-get [node :int i :int] #{Unsafe} :int
+  ```c
+  typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
+  return ((ASTNode*)(intptr_t)node)->children[i];
+  ```)
+
 (defn scscm-sym-escape [name :cstr] #{Unsafe} :cstr
   ```c
   const char *src = (const char*)(intptr_t)name;

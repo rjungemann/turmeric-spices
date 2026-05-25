@@ -11,6 +11,62 @@
 ;;        adsr perc env-line
 ;;   4. Recurses into all sub-forms
 
+;; ---- cross-file type stubs (from scscm/lexer and scscm/parser) ----
+;; These stubs provide type information for per-file tur check.
+;; The real implementations live in lexer.tur and parser.tur.
+(defn scscm-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  ```c
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+(defn ast-kind [node :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int kind; char *value; } ASTNode;
+  static const char *kinds[] = {":atom",":symbol",":keyword",":number",":string",
+    ":list",":vector",":quote",":quasiquote",":unquote",":unquote-splice",":hash-paren"};
+  ASTNode *n = (void*)(intptr_t)node;
+  return (n && n->kind >= 0 && n->kind < 12) ? kinds[n->kind] : ":atom";
+  ```)
+(defn ast-symbol-name [node :int] #{Unsafe} :cstr
+  ```c
+  typedef struct { int kind; char *value; } ASTNode;
+  return (const char *)((ASTNode*)(intptr_t)node)->value;
+  ```)
+(defn ast-list-len [node :int] #{Unsafe} :int
+  ```c
+  typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
+  return ((ASTNode*)(intptr_t)node)->child_count;
+  ```)
+(defn ast-list-get [node :int i :int] #{Unsafe} :int
+  ```c
+  typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
+  return ((ASTNode*)(intptr_t)node)->children[i];
+  ```)
+(defn scscm-ast-leaf [kind :int value :cstr] #{Unsafe} :int
+  ```c
+  typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
+  ASTNode *n = malloc(sizeof(*n));
+  n->kind = kind; n->value = value ? strdup((const char*)(intptr_t)value) : NULL;
+  n->children = NULL; n->child_count = 0; n->child_cap = 0;
+  return (int64_t)(intptr_t)n;
+  ```)
+(defn scscm-ast-list-node [kind :int] #{Unsafe} :int
+  ```c
+  typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
+  ASTNode *n = malloc(sizeof(*n)); n->kind = kind; n->value = NULL;
+  n->child_cap = 4; n->children = malloc(4 * sizeof(int64_t)); n->child_count = 0;
+  return (int64_t)(intptr_t)n;
+  ```)
+(defn scscm-ast-add-child [node :int child :int] #{Unsafe} :void
+  ```c
+  typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
+  ASTNode *n = (void*)(intptr_t)node;
+  if (n->child_count >= n->child_cap) {
+    n->child_cap *= 2;
+    n->children = realloc(n->children, n->child_cap * sizeof(int64_t));
+  }
+  n->children[n->child_count++] = child;
+  ```)
+
 ;; ---- global macro environment (C static) ----
 ;; Stored as a Turmeric cons list:
 ;;   ((name . (params . body)) . rest)
@@ -78,7 +134,7 @@
     false))
 
 (defn scscm-macro-lookup-loop [name :cstr env :int] #{Unsafe} :int
-  (if (list-nil? env)
+  (if (tnil? env)
     (nil-value)
     (let [entry      (head env)
           entry-name (head entry)]
@@ -103,7 +159,7 @@
     node))
 
 (defn scscm-fill-list-from-cons [node :int children :int] #{Unsafe} :void
-  (if (list-nil? children)
+  (if (tnil? children)
     (scscm-void)
     (do
       (scscm-ast-add-child node (head children))
@@ -682,7 +738,7 @@
                                                                       (scscm-handle-defmacro node)
                                                                       ;; Check user macros
                                                                       (let [mentry (scscm-macro-lookup nm)]
-                                                                        (if (list-nil? mentry)
+                                                                        (if (tnil? mentry)
                                                                           ;; Generic call: expand children
                                                                           (scscm-expand-children node)
                                                                           ;; User macro: apply
@@ -746,7 +802,7 @@
 ;;;
 ;;; Since: SC3
 (defn expand-all [asts :int] #{Unsafe} :int
-  (if (list-nil? asts)
+  (if (tnil? asts)
     (nil-value)
     (let [expanded-head (expand (head asts))
           expanded-tail (expand-all (tail asts))]

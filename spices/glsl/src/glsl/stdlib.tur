@@ -17,7 +17,7 @@
 (import glsl/codegen :refer [glsl-cat2 glsl-cat3 glsl-indent glsl-join
                               glsl-stmts glsl-sprintf1 glsl-sprintf2 glsl-sprintf3])
 (import glsl/core    :refer [glsl-let glsl-return glsl-param glsl-defn])
-(import glsl/builtins :refer [normalize dot cross mix pow abs vec3])
+(import glsl/builtins :refer [normalize cross mix pow abs vec3])
 
 ;;; phong-lighting -- return a GLSL function string implementing Phong shading.
 ;;;
@@ -38,11 +38,11 @@
   (let [body (glsl-stmts
                 (cons (glsl-let "ambient"    ":vec3"  "(ambientColor * diffuseColor)")
                   (cons (glsl-let "lightDir"  ":vec3"  (normalize "(lightPos - position)"))
-                    (cons (glsl-let "diff"      ":float" (glsl-sprintf1 "max(%s, 0.0)" (dot "normal" "lightDir")))
+                    (cons (glsl-let "diff"      ":float" (glsl-sprintf1 "max(%s, 0.0)" "dot(normal, lightDir)"))
                       (cons (glsl-let "diffuse"   ":vec3"  "(diff * lightColor * diffuseColor)")
                         (cons (glsl-let "viewDir"   ":vec3"  (normalize "(viewPos - position)"))
                           (cons (glsl-let "reflDir"   ":vec3"  (glsl-sprintf2 "reflect(-%s, %s)" "lightDir" "normal"))
-                            (cons (glsl-let "spec"      ":float" (glsl-sprintf2 "pow(max(%s, 0.0), shininess)" (dot "viewDir" "reflDir")))
+                            (cons (glsl-let "spec"      ":float" (glsl-sprintf1 "pow(max(%s, 0.0), shininess)" "dot(viewDir, reflDir)"))
                               (cons (glsl-let "specular"  ":vec3"  "(spec * lightColor * specularColor)")
                                 (cons (glsl-return "(ambient + diffuse + specular)") 0))))))))))]
     (glsl-defn "phong_lighting"

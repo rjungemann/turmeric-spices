@@ -1,0 +1,15 @@
+synth.tur cannot type-check cleanly until two blocked features land:
+
+  1. Higher-order / let-bound closure calls:
+     The typechecker currently rejects `(f arg)` when `f` is a let-bound
+     closure (e.g. `osc`, `env`, `filtered` in voice/ks-voice/additive-voice).
+     The signal spice uses Arrow-style composition that depends on this.
+
+  2. Float-as-int encoding:
+     All Sample values are float64 stored as int64 bitfields.  Parameters
+     are untyped so the typechecker infers int, but float literals (0.01,
+     0.8, etc.) produce type-mismatch errors.
+
+core.tur, dsp.tur, and envelope.tur pass tur check individually.
+Remove this marker once higher-order function calls and the float/int
+encoding story are resolved in the typechecker.

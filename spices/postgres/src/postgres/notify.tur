@@ -42,7 +42,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __listen-sql -- build "LISTEN channel" as a heap-allocated cstr.
-(defn __listen-sql [channel :cstr] :int
+(defn __listen-sql [channel :cstr] :cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -53,11 +53,11 @@
   memcpy(buf, prefix, plen);
   memcpy(buf + plen, (const char *)channel, clen);
   buf[plen + clen] = '\0';
-  return (int64_t)(intptr_t)buf;
+  return buf;
   ```)
 
 ;;; __unlisten-sql -- build "UNLISTEN channel" as a heap-allocated cstr.
-(defn __unlisten-sql [channel :cstr] :int
+(defn __unlisten-sql [channel :cstr] :cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -68,7 +68,7 @@
   memcpy(buf, prefix, plen);
   memcpy(buf + plen, (const char *)channel, clen);
   buf[plen + clen] = '\0';
-  return (int64_t)(intptr_t)buf;
+  return buf;
   ```)
 
 ;; -------------------------------------------------------------------------
@@ -121,7 +121,7 @@
 (defn notify-listen [conn :int channel :cstr] :ptr<void>
   (let [sql (__listen-sql channel)
         rc  (__pq-exec-raw conn sql)]
-    (if (!= rc 0) (__ok 0) (__err 0))))
+    (if (not= rc 0) (__ok 0) (__err 0))))
 
 ;;; notify-unlisten -- unsubscribe from asynchronous notifications on a channel.
 ;;;
@@ -139,7 +139,7 @@
 (defn notify-unlisten [conn :int channel :cstr] :ptr<void>
   (let [sql (__unlisten-sql channel)
         rc  (__pq-exec-raw conn sql)]
-    (if (!= rc 0) (__ok 0) (__err 0))))
+    (if (not= rc 0) (__ok 0) (__err 0))))
 
 ;;; notify-poll -- poll for a pending notification without blocking.
 ;;;

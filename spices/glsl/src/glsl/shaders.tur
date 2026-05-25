@@ -152,25 +152,6 @@
 ;;;   decls          -- cons list of declaration strings
 ;;;   main-body      -- body of void main()
 ;;;
-;;; Returns:
-;;;   Complete geometry shader GLSL source string.
-;;;
-;;; Example:
-;;;   (glsl-geometry-shader "330 core" ":points" ":triangle-strip" 4 0 body)
-;;;
-;;; Since: v0.1.0
-(defn glsl-geometry-shader [version :cstr input-layout :cstr output-layout :cstr
-                              max-vertices :int decls :int main-body :cstr] :cstr
-  (let [in-prim  (__prim-keyword input-layout)
-        out-prim (__prim-keyword output-layout)
-        ver      (glsl-sprintf1 "#version %s\n\n" version)
-        in-line  (glsl-sprintf1 "layout(%s) in;\n" in-prim)
-        out-line (glsl-sprintf3 "layout(%s, max_vertices = %s) out;\n\n"
-                   out-prim (glsl-int->str max-vertices))
-        dlist    (glsl-join "\n" decls)
-        head     (glsl-cat4 ver (glsl-cat2 in-line out-line) dlist "\n\nvoid main() {\n")]
-    (glsl-cat3 head (glsl-indent main-body) "\n}")))
-
 ;;; __prim-keyword -- map a Turmeric keyword to a GLSL primitive layout string.
 (defn __prim-keyword [kw :cstr] :cstr
   ```c
@@ -184,5 +165,24 @@
   if (!strcmp(kw, ":triangle-strip")) return (char *)"triangle_strip";
   return (char *)(kw[0] == ':' ? kw + 1 : kw);
   ```)
+
+;;; Returns:
+;;;   Complete geometry shader GLSL source string.
+;;;
+;;; Example:
+;;;   (glsl-geometry-shader "330 core" ":points" ":triangle-strip" 4 0 body)
+;;;
+;;; Since: v0.1.0
+(defn glsl-geometry-shader [version :cstr input-layout :cstr output-layout :cstr
+                              max-vertices :int decls :int main-body :cstr] :cstr
+  (let [in-prim  (__prim-keyword input-layout)
+        out-prim (__prim-keyword output-layout)
+        ver      (glsl-sprintf1 "#version %s\n\n" version)
+        in-line  (glsl-sprintf1 "layout(%s) in;\n" in-prim)
+        out-line (glsl-sprintf2 "layout(%s, max_vertices = %s) out;\n\n"
+                   out-prim (glsl-int->str max-vertices))
+        dlist    (glsl-join "\n" decls)
+        head     (glsl-cat4 ver (glsl-cat2 in-line out-line) dlist "\n\nvoid main() {\n")]
+    (glsl-cat3 head (glsl-indent main-body) "\n}")))
 
 ) ;; end defmodule glsl/shaders

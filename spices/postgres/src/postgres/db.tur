@@ -169,7 +169,7 @@
 ;;; Since: PG0
 (defn db-connect [connstr :cstr] :ptr<void>
   (let [raw (__pq-connect-raw connstr)]
-    (if (!= raw 0) (__ok raw) (__err 0))))
+    (if (not= raw 0) (__ok raw) (__err 0))))
 
 ;;; db-close -- close a connection opened with db-connect.
 ;;;
@@ -201,7 +201,7 @@
 ;;; Since: PG0
 (defn db-exec [conn :int sql :cstr] :ptr<void>
   (let [rc (__pq-exec-raw conn sql)]
-    (if (!= rc 0) (__ok 0) (__err 0))))
+    (if (not= rc 0) (__ok 0) (__err 0))))
 
 ;;; db-query -- execute a SELECT and return a rows handle.
 ;;;
@@ -224,7 +224,7 @@
 ;;; Since: PG0
 (defn db-query [conn :int sql :cstr] :ptr<void>
   (let [raw (__pq-query-raw conn sql)]
-    (if (!= raw 0) (__ok raw) (__err 0))))
+    (if (not= raw 0) (__ok raw) (__err 0))))
 
 ;;; db-query-params -- execute a parameterized SELECT with $1,$2,... placeholders.
 ;;;
@@ -247,7 +247,7 @@
   (let [n    (__params-count params)
         vals (__params-values params n)
         raw  (__pq-query-params-raw conn sql vals n)]
-    (if (!= raw 0) (__ok raw) (__err 0))))
+    (if (not= raw 0) (__ok raw) (__err 0))))
 
 ;;; db-begin -- begin a transaction.
 ;;;

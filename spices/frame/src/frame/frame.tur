@@ -294,36 +294,22 @@
         /* Refcount-aware free: only release buffers when last frame drops it. */
         c->refcount--;
         if (c->refcount <= 0) {
-          if (c->type_tag == 10) {
-            /* Any column: values is an __any_aux*, validity is plain malloc. */
-            struct __any_aux {
-              int64_t length; unsigned char *type_tags; int64_t *payload;
-              unsigned char *strings; int64_t strings_len; int64_t strings_cap;
-            };
-            struct __any_aux *aux = (struct __any_aux *)c->values;
-            if (aux) {
-              free(aux->type_tags); free(aux->payload); free(aux->strings); free(aux);
-            }
-            if (c->validity) free(c->validity);
-            free(c);
-          } else {
-            if (c->values) {
-              uintptr_t d = (uintptr_t)c->values;
-              void *raw = (void *)(*((uintptr_t *)(d - 16)));
-              free(raw);
-            }
-            if (c->validity) {
-              uintptr_t d = (uintptr_t)c->validity;
-              void *raw = (void *)(*((uintptr_t *)(d - 16)));
-              free(raw);
-            }
-            if (c->offsets) {
-              uintptr_t d = (uintptr_t)c->offsets;
-              void *raw = (void *)(*((uintptr_t *)(d - 16)));
-              free(raw);
-            }
-            free(c);
+          if (c->values) {
+            uintptr_t d = (uintptr_t)c->values;
+            void *raw = (void *)(*((uintptr_t *)(d - 16)));
+            free(raw);
           }
+          if (c->validity) {
+            uintptr_t d = (uintptr_t)c->validity;
+            void *raw = (void *)(*((uintptr_t *)(d - 16)));
+            free(raw);
+          }
+          if (c->offsets) {
+            uintptr_t d = (uintptr_t)c->offsets;
+            void *raw = (void *)(*((uintptr_t *)(d - 16)));
+            free(raw);
+          }
+          free(c);
         }
       }
     }
@@ -413,29 +399,6 @@
           int32_t lb = ob[r + 1] - ob[r];
           if (la != lb) return false;
           if (la > 0 && memcmp((char *)ca->values + oa[r], (char *)cb->values + ob[r], (size_t)la) != 0) return false;
-        } break;
-        case 10: {
-          /* Any column: compare per-cell type tag first, then the payload
-             (utf8 cells dereference into each side's strings buffer). */
-          struct __any_aux {
-            int64_t length; unsigned char *type_tags; int64_t *payload;
-            unsigned char *strings; int64_t strings_len; int64_t strings_cap;
-          };
-          struct __any_aux *aa = (struct __any_aux *)ca->values;
-          struct __any_aux *bb = (struct __any_aux *)cb->values;
-          unsigned char ta = aa->type_tags[r];
-          unsigned char tb = bb->type_tags[r];
-          if (ta != tb) return false;
-          if (ta == 0) continue; /* both null */
-          if (ta == 6) {
-            int64_t pa = aa->payload[r], pb = bb->payload[r];
-            int32_t off_a = (int32_t)(pa >> 32), len_a = (int32_t)(pa & 0xffffffff);
-            int32_t off_b = (int32_t)(pb >> 32), len_b = (int32_t)(pb & 0xffffffff);
-            if (len_a != len_b) return false;
-            if (len_a > 0 && memcmp(aa->strings + off_a, bb->strings + off_b, (size_t)len_a) != 0) return false;
-          } else if (aa->payload[r] != bb->payload[r]) {
-            return false;
-          }
         } break;
         default: return false;
       }

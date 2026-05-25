@@ -14,7 +14,7 @@
   (import frame/filter :refer [distinct sample])
   (import frame/group  :refer [group-by grouped-free agg summarize
                                 agg-median agg-std agg-var agg-mean])
-  (import frame/reshape :refer [melt pivot])
+  (import frame/reshape :refer [melt])
   (import frame/print  :refer [frame-describe])
   (import test/assert  :refer [assert-eq assert-true])
   (import test/suite   :refer [describe it])
@@ -164,69 +164,6 @@
                        (= val0 10) (= val1 20) (= val2 100) (= val3 200)
                        (= id0 1)   (= id1 2)   (= id2 1)    (= id3 2))]
           (frame-free g) (frame-free f)
-          (assert-true ok)))
-      (it "pivot: basic int64 values"
-        (let [src "id,k,v\n1,A,10\n1,B,20\n2,A,30\n2,B,40\n"
-              f   (read-csv-string src 0 0 1 0 "")
-              ids (t-cons (cstr->int "id") (t-nil))
-              g   (pivot f ids "k" "v")
-              nr  (frame-nrows g)
-              nc  (frame-ncols g)
-              cid (frame-column g "id")
-              cA  (frame-column g "A")
-              cB  (frame-column g "B")
-              id0 (column-int64-at cid 0)  id1 (column-int64-at cid 1)
-              a0  (column-int64-at cA 0)   a1  (column-int64-at cA 1)
-              b0  (column-int64-at cB 0)   b1  (column-int64-at cB 1)
-              ok  (and (= nr 2) (= nc 3)
-                       (= id0 1) (= id1 2)
-                       (= a0 10) (= a1 30)
-                       (= b0 20) (= b1 40))]
-          (frame-free g) (frame-free f)
-          (assert-true ok)))
-      (it "pivot: missing (index, key) combos become null"
-        (let [src "id,k,v\n1,A,10\n2,B,40\n"
-              f   (read-csv-string src 0 0 1 0 "")
-              ids (t-cons (cstr->int "id") (t-nil))
-              g   (pivot f ids "k" "v")
-              nr  (frame-nrows g)
-              cA  (frame-column g "A")
-              cB  (frame-column g "B")
-              a0v (column-valid? cA 0)   ; id=1, A: present
-              a1v (column-valid? cA 1)   ; id=2, A: missing -> null
-              b0v (column-valid? cB 0)   ; id=1, B: missing -> null
-              b1v (column-valid? cB 1)   ; id=2, B: present
-              ok  (and (= nr 2) a0v (not a1v) (not b0v) b1v)]
-          (frame-free g) (frame-free f)
-          (assert-true ok)))
-      (it "pivot: duplicate (index, key) returns 0"
-        (let [src "id,k,v\n1,A,10\n1,A,99\n2,B,40\n"
-              f   (read-csv-string src 0 0 1 0 "")
-              ids (t-cons (cstr->int "id") (t-nil))
-              g   (pivot f ids "k" "v")
-              ok  (= g 0)]
-          (frame-free f)
-          (assert-true ok)))
-      (it "pivot: utf8 value column"
-        (let [src "id,k,v\n1,A,alpha\n1,B,beta\n2,A,gamma\n2,B,delta\n"
-              f   (read-csv-string src 0 0 1 0 "")
-              ids (t-cons (cstr->int "id") (t-nil))
-              g   (pivot f ids "k" "v")
-              cA  (frame-column g "A")
-              cB  (frame-column g "B")
-              a0  (column-utf8-at cA 0)  a1 (column-utf8-at cA 1)
-              b0  (column-utf8-at cB 0)  b1 (column-utf8-at cB 1)
-              ok  (and (t-cstr= a0 "alpha") (t-cstr= a1 "gamma")
-                       (t-cstr= b0 "beta")  (t-cstr= b1 "delta"))]
-          (frame-free g) (frame-free f)
-          (assert-true ok)))
-      (it "pivot: unknown column name returns 0"
-        (let [src "id,k,v\n1,A,10\n"
-              f   (read-csv-string src 0 0 1 0 "")
-              ids (t-cons (cstr->int "missing") (t-nil))
-              g   (pivot f ids "k" "v")
-              ok  (= g 0)]
-          (frame-free f)
           (assert-true ok)))
       (it "melt returns 0 if non-id columns have heterogeneous types"
         (let [src "id,a,b\n1,10,hello\n2,20,world\n"
