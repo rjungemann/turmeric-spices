@@ -35,6 +35,14 @@ filtered out of `render-sclang` / `render-pbind` MIDI arrays).
     (notation-free p)))
 ```
 
+```sweet-exp
+#lang sweet-exp
+let [r parse-notation("c4 [d4 e4] f4")]
+  let [p ok-val(r)]
+    println $ render-sclang p "piano"
+    notation-free(p)
+```
+
 Output:
 
 ```

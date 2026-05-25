@@ -38,6 +38,23 @@ Use `scscm/compile` for the public one-shot API.
 ;; => "1 + 2"
 ```
 
+```sweet-exp
+#lang sweet-exp
+load("stdlib/list.tur")
+load("stdlib/result.tur")
+load("spices/tur-scscm/src/scscm/lexer.tur")
+load("spices/tur-scscm/src/scscm/parser.tur")
+load("spices/tur-scscm/src/scscm/codegen.tur")
+load("spices/tur-scscm/src/scscm/expander.tur")
+load("spices/tur-scscm/src/scscm/compile.tur")
+
+let [res compile-text("(+ 1 2)")]
+  if ok?(res)
+    println $ scscm-int-as-cstr ok-val(res)
+    println("error")
+;; => "1 + 2"
+```
+
 ## scscm language reference
 
 ### Data literals
