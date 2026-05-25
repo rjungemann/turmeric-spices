@@ -1,0 +1,615 @@
+;; frame/print.tur -- ascii table renderer for numeric and bool columns.
+;;
+;; FR0 supports int32/int64/float32/float64/bool columns.  Utf8 (FR1) plugs
+;; into the same renderer once it lands -- the per-cell stringifier is the
+;; single point of extension.
+
+(defmodule frame/print
+  (export print-frame frame->str frame-describe)
+
+  (import frame/type    :refer [type-int64 type-float64 type-utf8])
+  (import frame/schema  :refer [field schema schema-field-at])
+  (import frame/column  :refer [column-length column-type column-builder
+                                 builder-append-int64 builder-append-float64
+                                 builder-append-utf8 builder-finish])
+  (import frame/frame   :refer [frame frame-nrows frame-ncols frame-schema
+                                 frame-column-at])
+
+;;; print-frame -- pretty-print a frame to stdout.
+;;;
+;;; Layout:
+;;;
+;;;     | name1 | name2 | ... |
+;;;     | type1 | type2 | ... |
+;;;     |-------|-------|-----|
+;;;     | v0_0  | v1_0  | ... |
+;;;     | v0_1  | v1_1  | ... |
+;;;     ...
+;;;
+;;; Up to 20 rows are printed; "... (N more rows)" is appended if truncated.
+;;; Cell values longer than 32 characters are truncated with an ellipsis.
+;;;
+;;; Since: FR0
+(defn print-frame [f :int] :void
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_schema { int64_t n_fields; int64_t *fields; };
+  struct __frame_field  { char *name; int64_t type_tag; int64_t nullable; };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+
+  if (!f) { printf("(null frame)\n"); return; }
+  struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)f;
+  struct __frame_schema *sc = (struct __frame_schema *)(intptr_t)fr->schema;
+  if (fr->n_cols == 0) { printf("(empty frame)\n"); return; }
+
+  const int MAX_ROWS = 20;
+  const int MAX_CELL = 32;
+  int64_t shown = fr->n_rows < MAX_ROWS ? fr->n_rows : MAX_ROWS;
+
+  /* Type names (must match frame/type::type-name). */
+  static const char *TYPES[] = {
+    "?", "int32", "int64", "float32", "float64",
+    "bool", "utf8", "date32", "timestamp", "null"
+  };
+
+  /* First pass: compute column widths.  We allocate a small staging buffer
+     per cell so we can also reuse it for the second pass. */
+  int *widths = (int *)calloc((size_t)fr->n_cols, sizeof(int));
+  if (!widths) return;
+
+  /* Header widths from name + type label. */
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[c];
+    int wn = fd && fd->name ? (int)strlen(fd->name) : 1;
+    int tt = (int)(fd ? fd->type_tag : 0);
+    if (tt < 0 || tt > 9) tt = 0;
+    int wt = (int)strlen(TYPES[tt]);
+    int w = wn > wt ? wn : wt;
+    if (w < 4) w = 4;
+    widths[c] = w;
+  }
+
+  /* Cell stringifier: writes into buf, returns length (truncated to MAX_CELL). */
+  char cell[64];
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_col *col = (struct __frame_col *)(intptr_t)fr->columns[c];
+    if (!col) continue;
+    for (int64_t r = 0; r < shown; r++) {
+      int is_null = 0;
+      if (col->validity) {
+        unsigned char *vb = (unsigned char *)col->validity;
+        is_null = !((vb[r >> 3] >> (r & 7)) & 1);
+      }
+      int len = 0;
+      if (is_null) {
+        len = (int)snprintf(cell, sizeof(cell), "NA");
+      } else {
+        switch ((int)col->type_tag) {
+          case 7:
+          case 1: { /* int32 / date32 (date renders as days-since-epoch in v0) */
+            int32_t v = ((int32_t *)col->values)[r];
+            len = (int)snprintf(cell, sizeof(cell), "%ld", (long)v);
+          } break;
+          case 8:
+          case 2: { /* int64 / timestamp (us-since-epoch in v0) */
+            int64_t v = ((int64_t *)col->values)[r];
+            len = (int)snprintf(cell, sizeof(cell), "%lld", (long long)v);
+          } break;
+          case 3: { /* float32 */
+            float v = ((float *)col->values)[r];
+            len = (int)snprintf(cell, sizeof(cell), "%g", (double)v);
+          } break;
+          case 4: { /* float64 */
+            double v = ((double *)col->values)[r];
+            len = (int)snprintf(cell, sizeof(cell), "%g", v);
+          } break;
+          case 5: { /* bool */
+            unsigned char *b = (unsigned char *)col->values;
+            int bit = (b[r >> 3] >> (r & 7)) & 1;
+            len = (int)snprintf(cell, sizeof(cell), "%s", bit ? "true" : "false");
+          } break;
+          case 6: { /* utf8 */
+            int32_t *o = (int32_t *)col->offsets;
+            int slen = (int)(o[r + 1] - o[r]);
+            const char *s = (const char *)col->values + o[r];
+            len = (int)snprintf(cell, sizeof(cell), "%.*s", slen, s);
+          } break;
+          default:
+            len = (int)snprintf(cell, sizeof(cell), "?");
+        }
+      }
+      if (len > MAX_CELL) len = MAX_CELL;
+      if (len > widths[c]) widths[c] = len;
+    }
+  }
+
+  /* Header: names */
+  printf("|");
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[c];
+    printf(" %-*s |", widths[c], fd && fd->name ? fd->name : "");
+  }
+  printf("\n");
+
+  /* Header: types */
+  printf("|");
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[c];
+    int tt = (int)(fd ? fd->type_tag : 0);
+    if (tt < 0 || tt > 9) tt = 0;
+    printf(" %-*s |", widths[c], TYPES[tt]);
+  }
+  printf("\n");
+
+  /* Separator */
+  printf("|");
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    printf("-");
+    for (int k = 0; k < widths[c]; k++) putchar('-');
+    printf("-|");
+  }
+  printf("\n");
+
+  /* Rows */
+  for (int64_t r = 0; r < shown; r++) {
+    printf("|");
+    for (int64_t c = 0; c < fr->n_cols; c++) {
+      struct __frame_col *col = (struct __frame_col *)(intptr_t)fr->columns[c];
+      int is_null = 0;
+      if (col && col->validity) {
+        unsigned char *vb = (unsigned char *)col->validity;
+        is_null = !((vb[r >> 3] >> (r & 7)) & 1);
+      }
+      int len = 0;
+      if (!col) {
+        len = (int)snprintf(cell, sizeof(cell), "?");
+      } else if (is_null) {
+        len = (int)snprintf(cell, sizeof(cell), "NA");
+      } else {
+        switch ((int)col->type_tag) {
+          case 7:
+          case 1: len = (int)snprintf(cell, sizeof(cell), "%ld", (long)((int32_t *)col->values)[r]); break;
+          case 8:
+          case 2: len = (int)snprintf(cell, sizeof(cell), "%lld", (long long)((int64_t *)col->values)[r]); break;
+          case 3: len = (int)snprintf(cell, sizeof(cell), "%g", (double)((float *)col->values)[r]); break;
+          case 4: len = (int)snprintf(cell, sizeof(cell), "%g", ((double *)col->values)[r]); break;
+          case 5: {
+            unsigned char *b = (unsigned char *)col->values;
+            int bit = (b[r >> 3] >> (r & 7)) & 1;
+            len = (int)snprintf(cell, sizeof(cell), "%s", bit ? "true" : "false");
+          } break;
+          case 6: {
+            int32_t *o = (int32_t *)col->offsets;
+            int slen = (int)(o[r + 1] - o[r]);
+            const char *s = (const char *)col->values + o[r];
+            len = (int)snprintf(cell, sizeof(cell), "%.*s", slen, s);
+          } break;
+          default: len = (int)snprintf(cell, sizeof(cell), "?");
+        }
+      }
+      if (len > MAX_CELL) { cell[MAX_CELL - 1] = '.'; cell[MAX_CELL - 2] = '.'; cell[MAX_CELL - 3] = '.'; cell[MAX_CELL] = '\0'; len = MAX_CELL; }
+      printf(" %-*s |", widths[c], cell);
+    }
+    printf("\n");
+  }
+
+  if (fr->n_rows > MAX_ROWS) {
+    printf("... (%lld more rows)\n", (long long)(fr->n_rows - MAX_ROWS));
+  }
+
+  free(widths);
+  ```)
+
+;;; frame->str -- render the same output as print-frame into a heap-allocated cstr.
+;;; Caller is responsible for freeing the returned :cstr (a future stdlib
+;;; cstr-free helper).  For FR0 this re-runs the formatter into a malloc'd
+;;; buffer rather than wiring up captured stdio.
+;;; Since: FR0
+(defn frame->str [f :int] :cstr
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_schema { int64_t n_fields; int64_t *fields; };
+  struct __frame_field  { char *name; int64_t type_tag; int64_t nullable; };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+
+  static const char *TYPES[] = {
+    "?", "int32", "int64", "float32", "float64",
+    "bool", "utf8", "date32", "timestamp", "null"
+  };
+
+  /* Growable buffer. */
+  size_t cap = 256, len = 0;
+  char *out = (char *)malloc(cap);
+  if (!out) return (const char *)(intptr_t)"";
+  out[0] = '\0';
+
+  #define APPEND(s) do { \
+    size_t _l = strlen(s); \
+    while (len + _l + 1 > cap) { cap *= 2; char *n = (char *)realloc(out, cap); if (!n) { return (const char *)(intptr_t)out; } out = n; } \
+    memcpy(out + len, (s), _l); len += _l; out[len] = '\0'; \
+  } while (0)
+
+  if (!f) { APPEND("(null frame)\n"); return (const char *)(intptr_t)out; }
+  struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)f;
+  struct __frame_schema *sc = (struct __frame_schema *)(intptr_t)fr->schema;
+  if (fr->n_cols == 0) { APPEND("(empty frame)\n"); return (const char *)(intptr_t)out; }
+
+  const int MAX_ROWS = 20;
+  const int MAX_CELL = 32;
+  int64_t shown = fr->n_rows < MAX_ROWS ? fr->n_rows : MAX_ROWS;
+
+  int *widths = (int *)calloc((size_t)fr->n_cols, sizeof(int));
+  if (!widths) return (const char *)(intptr_t)out;
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[c];
+    int wn = fd && fd->name ? (int)strlen(fd->name) : 1;
+    int tt = (int)(fd ? fd->type_tag : 0); if (tt < 0 || tt > 9) tt = 0;
+    int wt = (int)strlen(TYPES[tt]);
+    int w = wn > wt ? wn : wt; if (w < 4) w = 4;
+    widths[c] = w;
+  }
+
+  char cell[64], tmp[80];
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_col *col = (struct __frame_col *)(intptr_t)fr->columns[c];
+    if (!col) continue;
+    for (int64_t r = 0; r < shown; r++) {
+      int is_null = 0;
+      if (col->validity) {
+        unsigned char *vb = (unsigned char *)col->validity;
+        is_null = !((vb[r >> 3] >> (r & 7)) & 1);
+      }
+      int clen;
+      if (is_null) clen = (int)snprintf(cell, sizeof(cell), "NA");
+      else {
+        switch ((int)col->type_tag) {
+          case 7:
+          case 1: clen = (int)snprintf(cell, sizeof(cell), "%ld", (long)((int32_t *)col->values)[r]); break;
+          case 8:
+          case 2: clen = (int)snprintf(cell, sizeof(cell), "%lld", (long long)((int64_t *)col->values)[r]); break;
+          case 3: clen = (int)snprintf(cell, sizeof(cell), "%g", (double)((float *)col->values)[r]); break;
+          case 4: clen = (int)snprintf(cell, sizeof(cell), "%g", ((double *)col->values)[r]); break;
+          case 5: {
+            unsigned char *b = (unsigned char *)col->values;
+            int bit = (b[r >> 3] >> (r & 7)) & 1;
+            clen = (int)snprintf(cell, sizeof(cell), "%s", bit ? "true" : "false");
+          } break;
+          case 6: {
+            int32_t *o = (int32_t *)col->offsets;
+            int slen = (int)(o[r + 1] - o[r]);
+            const char *s = (const char *)col->values + o[r];
+            clen = (int)snprintf(cell, sizeof(cell), "%.*s", slen, s);
+          } break;
+          default: clen = (int)snprintf(cell, sizeof(cell), "?");
+        }
+      }
+      if (clen > MAX_CELL) clen = MAX_CELL;
+      if (clen > widths[c]) widths[c] = clen;
+    }
+  }
+
+  /* Header: names */
+  APPEND("|");
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[c];
+    snprintf(tmp, sizeof(tmp), " %-*s |", widths[c], fd && fd->name ? fd->name : "");
+    APPEND(tmp);
+  }
+  APPEND("\n|");
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[c];
+    int tt = (int)(fd ? fd->type_tag : 0); if (tt < 0 || tt > 9) tt = 0;
+    snprintf(tmp, sizeof(tmp), " %-*s |", widths[c], TYPES[tt]);
+    APPEND(tmp);
+  }
+  APPEND("\n|");
+  for (int64_t c = 0; c < fr->n_cols; c++) {
+    APPEND("-");
+    for (int k = 0; k < widths[c]; k++) APPEND("-");
+    APPEND("-|");
+  }
+  APPEND("\n");
+
+  for (int64_t r = 0; r < shown; r++) {
+    APPEND("|");
+    for (int64_t c = 0; c < fr->n_cols; c++) {
+      struct __frame_col *col = (struct __frame_col *)(intptr_t)fr->columns[c];
+      int is_null = 0;
+      if (col && col->validity) {
+        unsigned char *vb = (unsigned char *)col->validity;
+        is_null = !((vb[r >> 3] >> (r & 7)) & 1);
+      }
+      int clen;
+      if (!col) clen = (int)snprintf(cell, sizeof(cell), "?");
+      else if (is_null) clen = (int)snprintf(cell, sizeof(cell), "NA");
+      else {
+        switch ((int)col->type_tag) {
+          case 7:
+          case 1: clen = (int)snprintf(cell, sizeof(cell), "%ld", (long)((int32_t *)col->values)[r]); break;
+          case 8:
+          case 2: clen = (int)snprintf(cell, sizeof(cell), "%lld", (long long)((int64_t *)col->values)[r]); break;
+          case 3: clen = (int)snprintf(cell, sizeof(cell), "%g", (double)((float *)col->values)[r]); break;
+          case 4: clen = (int)snprintf(cell, sizeof(cell), "%g", ((double *)col->values)[r]); break;
+          case 5: {
+            unsigned char *b = (unsigned char *)col->values;
+            int bit = (b[r >> 3] >> (r & 7)) & 1;
+            clen = (int)snprintf(cell, sizeof(cell), "%s", bit ? "true" : "false");
+          } break;
+          case 6: {
+            int32_t *o = (int32_t *)col->offsets;
+            int slen = (int)(o[r + 1] - o[r]);
+            const char *s = (const char *)col->values + o[r];
+            clen = (int)snprintf(cell, sizeof(cell), "%.*s", slen, s);
+          } break;
+          default: clen = (int)snprintf(cell, sizeof(cell), "?");
+        }
+      }
+      if (clen > MAX_CELL) { cell[MAX_CELL - 3] = '.'; cell[MAX_CELL - 2] = '.'; cell[MAX_CELL - 1] = '.'; cell[MAX_CELL] = '\0'; clen = MAX_CELL; }
+      snprintf(tmp, sizeof(tmp), " %-*s |", widths[c], cell);
+      APPEND(tmp);
+    }
+    APPEND("\n");
+  }
+
+  if (fr->n_rows > MAX_ROWS) {
+    snprintf(tmp, sizeof(tmp), "... (%lld more rows)\n", (long long)(fr->n_rows - MAX_ROWS));
+    APPEND(tmp);
+  }
+
+  #undef APPEND
+  free(widths);
+  return (const char *)(intptr_t)out;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; FR7 -- describe
+;; ---------------------------------------------------------------------------
+
+(defn __ds-nil [] :int ```c return 0; ```)
+
+(defn __ds-cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+  if (!c) return 0;
+  c->value = v; c->next = n;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;;; __ds-stats -- compute count + 7 float stats for a column and return as an
+;;; opaque handle (int).  Layout: int64_t count followed by 7 doubles
+;;; (mean, std, min, q25, median, q75, max).  Caller must free with __ds-free.
+;;; Returns 0 if the column has no non-null values.
+(defn __ds-stats [col :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __ds {
+    int64_t count;
+    double  mean, std, mn, q25, med, q75, mx;
+  };
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  int64_t n = c->length;
+
+  /* Collect non-null values. */
+  double *buf = (double *)malloc((size_t)(n > 0 ? n : 1) * sizeof(double));
+  if (!buf) return 0;
+  int64_t k = 0;
+  for (int64_t r = 0; r < n; r++) {
+    int valid = 1;
+    if (c->validity) valid = ((((unsigned char *)c->validity)[r >> 3] >> (r & 7)) & 1);
+    if (!valid) continue;
+    double v = 0.0;
+    switch ((int)c->type_tag) {
+      case 1: v = (double)((int32_t *)c->values)[r]; break;
+      case 2: v = (double)((int64_t *)c->values)[r]; break;
+      case 3: v = (double)((float   *)c->values)[r]; break;
+      case 4: v =         ((double  *)c->values)[r]; break;
+      default: free(buf); return 0;
+    }
+    buf[k++] = v;
+  }
+  if (k == 0) { free(buf); return 0; }
+
+  /* Insertion sort.  Fine for describe's typical scale. */
+  for (int64_t i = 1; i < k; i++) {
+    double key = buf[i]; int64_t j = i - 1;
+    while (j >= 0 && buf[j] > key) { buf[j + 1] = buf[j]; j--; }
+    buf[j + 1] = key;
+  }
+
+  double sum = 0.0;
+  for (int64_t i = 0; i < k; i++) sum += buf[i];
+  double mean = sum / (double)k;
+  double sumsq = 0.0;
+  for (int64_t i = 0; i < k; i++) { double d = buf[i] - mean; sumsq += d * d; }
+  double variance = k > 1 ? sumsq / (double)(k - 1) : 0.0;
+  double std = 0.0;
+  if (variance > 0.0) {
+    double x = variance;
+    for (int it = 0; it < 32; it++) x = 0.5 * (x + variance / x);
+    std = x;
+  }
+
+  /* Linear interpolation quantile. */
+  #define QUANT(p_, out_) do {                                                   \
+    double idx = (p_) * (double)(k - 1);                                          \
+    int64_t lo = (int64_t)idx;                                                    \
+    int64_t hi = lo + 1; if (hi >= k) hi = k - 1;                                 \
+    double frac = idx - (double)lo;                                               \
+    (out_) = buf[lo] * (1.0 - frac) + buf[hi] * frac;                             \
+  } while (0)
+
+  struct __ds *ds = (struct __ds *)malloc(sizeof(*ds));
+  if (!ds) { free(buf); return 0; }
+  ds->count = k;
+  ds->mean  = mean;
+  ds->std   = std;
+  ds->mn    = buf[0];
+  QUANT(0.25, ds->q25);
+  QUANT(0.50, ds->med);
+  QUANT(0.75, ds->q75);
+  ds->mx    = buf[k - 1];
+  #undef QUANT
+  free(buf);
+  return (int64_t)(intptr_t)ds;
+  ```)
+
+(defn __ds-count [h :int] :int  ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->count; ```)
+(defn __ds-mean  [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mean; ```)
+(defn __ds-std   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->std; ```)
+(defn __ds-mn    [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mn; ```)
+(defn __ds-q25   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->q25; ```)
+(defn __ds-med   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->med; ```)
+(defn __ds-q75   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->q75; ```)
+(defn __ds-mx    [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mx; ```)
+(defn __ds-free  [h :int] :void  ```c #include <stdlib.h> #include <stdint.h> if (h) free((void *)(intptr_t)h); ```)
+
+(defn __ds-is-numeric? [tt :int] :bool
+  ;; tag 1=int32, 2=int64, 3=float32, 4=float64
+  (or (= tt 1) (or (= tt 2) (or (= tt 3) (= tt 4)))))
+
+(defn __ds-name [sch :int c :int] :cstr
+  ```c
+  #include <stdint.h>
+  struct __frame_schema { int64_t n_fields; int64_t *fields; };
+  struct __frame_field  { char *name; int64_t type_tag; int64_t nullable; };
+  struct __frame_schema *sc = (struct __frame_schema *)(intptr_t)sch;
+  return (const char *)(intptr_t)((struct __frame_field *)(intptr_t)sc->fields[c])->name;
+  ```)
+
+(defn __ds-fill [f :int sch :int ncols :int c :int
+                 b-var :int b-count :int b-mean :int b-std :int] :void
+  (if (>= c ncols)
+    nil
+    (let [col (frame-column-at f c)
+          tt  (column-type col)]
+      (do
+        (if (__ds-is-numeric? tt)
+          (let [h (__ds-stats col)]
+            (if (= h 0)
+              nil
+              (do
+                (builder-append-utf8    b-var   (__ds-name sch c))
+                (builder-append-int64   b-count (__ds-count h))
+                (builder-append-float64 b-mean  (__ds-mean  h))
+                (builder-append-float64 b-std   (__ds-std   h))
+                (__ds-free h))))
+          nil)
+        (__ds-fill f sch ncols (+ c 1) b-var b-count b-mean b-std)))))
+
+;; Second pass: fill min/q25/median/q75/max.  Doing this in two passes lets us
+;; stay within the 8-parameter limit per defn.
+(defn __ds-fill-2 [f :int sch :int ncols :int c :int
+                   b-min :int b-q25 :int b-med :int b-q75 :int] :void
+  (if (>= c ncols)
+    nil
+    (let [col (frame-column-at f c)
+          tt  (column-type col)]
+      (do
+        (if (__ds-is-numeric? tt)
+          (let [h (__ds-stats col)]
+            (if (= h 0)
+              nil
+              (do
+                (builder-append-float64 b-min (__ds-mn  h))
+                (builder-append-float64 b-q25 (__ds-q25 h))
+                (builder-append-float64 b-med (__ds-med h))
+                (builder-append-float64 b-q75 (__ds-q75 h))
+                (__ds-free h))))
+          nil)
+        (__ds-fill-2 f sch ncols (+ c 1) b-min b-q25 b-med b-q75)))))
+
+(defn __ds-fill-max [f :int sch :int ncols :int c :int b-max :int] :void
+  (if (>= c ncols)
+    nil
+    (let [col (frame-column-at f c)
+          tt  (column-type col)]
+      (do
+        (if (__ds-is-numeric? tt)
+          (let [h (__ds-stats col)]
+            (if (= h 0)
+              nil
+              (do
+                (builder-append-float64 b-max (__ds-mx h))
+                (__ds-free h))))
+          nil)
+        (__ds-fill-max f sch ncols (+ c 1) b-max)))))
+
+;;; describe -- pandas-style summary table for numeric columns.
+;;;
+;;; Returns a frame with columns:
+;;;   variable :utf8, count :int64, mean :float64, std, min, q25, median, q75, max :float64
+;;;
+;;; Each row corresponds to one numeric column in `f` (int32 / int64 /
+;;; float32 / float64).  Non-numeric columns are skipped silently.
+;;;
+;;; Since: FR7
+(defn frame-describe [f :int] :int
+  (let [sch    (frame-schema f)
+        ncols  (frame-ncols f)
+        b-var   (column-builder (type-utf8)    ncols)
+        b-cnt   (column-builder (type-int64)   ncols)
+        b-mean  (column-builder (type-float64) ncols)
+        b-std   (column-builder (type-float64) ncols)
+        b-min   (column-builder (type-float64) ncols)
+        b-q25   (column-builder (type-float64) ncols)
+        b-med   (column-builder (type-float64) ncols)
+        b-q75   (column-builder (type-float64) ncols)
+        b-max   (column-builder (type-float64) ncols)]
+    (do
+      (__ds-fill   f sch ncols 0 b-var b-cnt b-mean b-std)
+      (__ds-fill-2 f sch ncols 0 b-min b-q25 b-med b-q75)
+      (__ds-fill-max f sch ncols 0 b-max)
+      (let [c-var  (builder-finish b-var)
+            c-cnt  (builder-finish b-cnt)
+            c-mean (builder-finish b-mean)
+            c-std  (builder-finish b-std)
+            c-min  (builder-finish b-min)
+            c-q25  (builder-finish b-q25)
+            c-med  (builder-finish b-med)
+            c-q75  (builder-finish b-q75)
+            c-max  (builder-finish b-max)
+            flds (__ds-cons (field "variable" (type-utf8) 0)
+                  (__ds-cons (field "count"   (type-int64) 0)
+                  (__ds-cons (field "mean"    (type-float64) 0)
+                  (__ds-cons (field "std"     (type-float64) 0)
+                  (__ds-cons (field "min"     (type-float64) 0)
+                  (__ds-cons (field "q25"     (type-float64) 0)
+                  (__ds-cons (field "median"  (type-float64) 0)
+                  (__ds-cons (field "q75"     (type-float64) 0)
+                  (__ds-cons (field "max"     (type-float64) 0)
+                             (__ds-nil))))))))))
+            cols (__ds-cons c-var (__ds-cons c-cnt (__ds-cons c-mean
+                  (__ds-cons c-std (__ds-cons c-min (__ds-cons c-q25
+                  (__ds-cons c-med (__ds-cons c-q75 (__ds-cons c-max
+                             (__ds-nil))))))))))]
+        (frame (schema flds) cols)))))
+
+) ;; end defmodule frame/print

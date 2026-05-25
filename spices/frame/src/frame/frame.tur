@@ -1,0 +1,447 @@
+;; frame/frame.tur -- the core data-frame struct.
+;;
+;; A frame is an opaque heap handle:
+;;
+;;   struct __frame_frame {
+;;     int64_t  schema;        // opaque schema handle (frame owns it)
+;;     int64_t  n_cols;
+;;     int64_t  n_rows;
+;;     int64_t *columns;       // array of column handles (frame owns them)
+;;   };
+;;
+;; v0.1.0 transfers ownership of the schema and column handles at construction
+;; time.  frame-free recursively frees the schema, each column, and the
+;; descriptor.  FR2 will introduce refcounting so columns can be shared
+;; between frames after a select; v0.1.0 callers should not double-free.
+;;
+;; frame-slice / frame-head build a NEW frame: a deep-copied schema plus the
+;; per-column slices produced by frame/column's column-slice (which is itself
+;; a copying slice in FR0).  This is the simplest path that preserves the
+;; "frames own their columns and schema" invariant; FR2 introduces refcount
+;; sharing so derived frames can stay metadata-only.
+
+(defmodule frame/frame
+  (export frame frame-free
+          frame-nrows frame-ncols frame-schema
+          frame-column frame-column-at
+          frame-head frame-slice
+          frame=?)
+
+  (import frame/schema :refer [schema-arity schema-index-of])
+  (import frame/column :refer [column-length column-slice])
+
+;; ---------------------------------------------------------------------------
+;; Private cons helpers.  Matches the layout used by all other spices.
+;; ---------------------------------------------------------------------------
+
+(defn __nil [] :int ```c return 0; ```)
+
+(defn __cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+  if (!c) return 0;
+  c->value = v; c->next = n;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+(defn __cons-length [xs :int] :int
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t n = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next) n++;
+  return n;
+  ```)
+
+(defn __cons-nth [xs :int i :int] :int
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t k = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next, k++) {
+    if (k == i) return p->value;
+  }
+  return 0;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Internal: validate shape and allocate the frame struct.
+;; ---------------------------------------------------------------------------
+
+(defn __shape-ok? [columns :int n-cols :int n-rows :int] :bool
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  int64_t i = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)columns; p && i < n_cols; p = (struct __cons *)(intptr_t)p->next, i++) {
+    struct __frame_col *c = (struct __frame_col *)(intptr_t)p->value;
+    if (!c) return false;
+    if (c->length != n_rows) return false;
+  }
+  return true;
+  ```)
+
+(defn __frame-alloc [sch :int n-cols :int n-rows :int columns :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_frame *f = (struct __frame_frame *)malloc(sizeof(*f));
+  if (!f) return 0;
+  f->schema = sch;
+  f->n_cols = n_cols;
+  f->n_rows = n_rows;
+  f->columns = NULL;
+  if (n_cols > 0) {
+    f->columns = (int64_t *)malloc(sizeof(int64_t) * (size_t)n_cols);
+    if (!f->columns) { free(f); return 0; }
+    int64_t i = 0;
+    for (struct __cons *p = (struct __cons *)(intptr_t)columns; p && i < n_cols; p = (struct __cons *)(intptr_t)p->next) {
+      f->columns[i++] = p->value;
+    }
+  }
+  return (int64_t)(intptr_t)f;
+  ```)
+
+(defn __schema-clone [s :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __frame_schema { int64_t n_fields; int64_t *fields; };
+  struct __frame_field { char *name; int64_t type_tag; int64_t nullable; };
+  if (!s) return 0;
+  struct __frame_schema *src = (struct __frame_schema *)(intptr_t)s;
+  struct __frame_schema *dst = (struct __frame_schema *)malloc(sizeof(*dst));
+  if (!dst) return 0;
+  dst->n_fields = src->n_fields;
+  dst->fields = NULL;
+  if (src->n_fields > 0) {
+    dst->fields = (int64_t *)malloc(sizeof(int64_t) * (size_t)src->n_fields);
+    if (!dst->fields) { free(dst); return 0; }
+    for (int64_t i = 0; i < src->n_fields; i++) {
+      struct __frame_field *sf = (struct __frame_field *)(intptr_t)src->fields[i];
+      struct __frame_field *df = (struct __frame_field *)malloc(sizeof(*df));
+      if (!df) { dst->fields[i] = 0; continue; }
+      size_t len = (sf && sf->name) ? strlen(sf->name) : 0;
+      df->name = (char *)malloc(len + 1);
+      if (df->name) {
+        if (len) memcpy(df->name, sf->name, len);
+        df->name[len] = '\0';
+      }
+      df->type_tag = sf ? sf->type_tag : 0;
+      df->nullable = sf ? sf->nullable : 0;
+      dst->fields[i] = (int64_t)(intptr_t)df;
+    }
+  }
+  return (int64_t)(intptr_t)dst;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Public API
+;; ---------------------------------------------------------------------------
+
+;;; frame -- build a frame from a schema and a cons list of column handles.
+;;;
+;;; Ownership of the schema and every column in `columns` is transferred to
+;;; the new frame; call frame-free when done.  Returns 0 if column count
+;;; does not match schema arity, or if any column's length differs from
+;;; the first column's length.
+;;;
+;;; Parameters:
+;;;   schema  -- :int schema handle
+;;;   columns -- cons list of :int column handles
+;;;
+;;; Returns:
+;;;   :int  frame handle, or 0 on shape/arity mismatch.
+;;;
+;;; Example:
+;;;   (let [s (schema (cons (field "x" (type-int32) 0) 0))
+;;;         c (column-int32 (cons 1 (cons 2 0)) 0 0)
+;;;         f (frame s (cons c 0))]
+;;;     (frame-nrows f))   ; => 2
+;;;
+;;; Since: FR0
+(defn frame [sch :int columns :int] :int
+  (let [n-cols   (__cons-length columns)
+        expected (schema-arity sch)]
+    (if (not= n-cols expected)
+      0
+      (let [n-rows (if (= n-cols 0) 0 (column-length (__cons-nth columns 0)))]
+        (if (__shape-ok? columns n-cols n-rows)
+          (__frame-alloc sch n-cols n-rows columns)
+          0)))))
+
+;;; frame-nrows -- number of rows. Since: FR0
+(defn frame-nrows [f :int] :int
+  ```c
+  #include <stdint.h>
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  if (!f) return 0;
+  return ((struct __frame_frame *)(intptr_t)f)->n_rows;
+  ```)
+
+;;; frame-ncols -- number of columns. Since: FR0
+(defn frame-ncols [f :int] :int
+  ```c
+  #include <stdint.h>
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  if (!f) return 0;
+  return ((struct __frame_frame *)(intptr_t)f)->n_cols;
+  ```)
+
+;;; frame-schema -- schema handle (still owned by the frame). Since: FR0
+(defn frame-schema [f :int] :int
+  ```c
+  #include <stdint.h>
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  if (!f) return 0;
+  return ((struct __frame_frame *)(intptr_t)f)->schema;
+  ```)
+
+;;; frame-column-at -- column handle at index i (0-based).  Returns 0 if out of range.
+;;; The handle is still owned by the frame.
+;;; Since: FR0
+(defn frame-column-at [f :int i :int] :int
+  ```c
+  #include <stdint.h>
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  if (!f) return 0;
+  struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)f;
+  if (i < 0 || i >= fr->n_cols) return 0;
+  return fr->columns[i];
+  ```)
+
+;;; frame-column -- column handle for a named column.  Returns 0 if not found.
+;;; Since: FR0
+(defn frame-column [f :int name :cstr] :int
+  (let [s (frame-schema f)
+        i (schema-index-of s name)]
+    (if (< i 0) 0 (frame-column-at f i))))
+
+;; ---------------------------------------------------------------------------
+;; Slicing: build a cons list of sliced columns from index 0 to n-cols-1,
+;; deep-copy the schema, then call frame to assemble.
+;; ---------------------------------------------------------------------------
+
+(defn __slice-cols [f :int offset :int length :int i :int acc :int] :int
+  ;; Walk indices high -> low so cons builds a forward-order list.
+  (if (< i 0)
+    acc
+    (__slice-cols f offset length (- i 1)
+                  (__cons (column-slice (frame-column-at f i) offset length) acc))))
+
+;;; frame-slice -- a new frame containing rows [offset, offset+length).
+;;; Returns 0 on out-of-range arguments.
+;;; The new frame owns a freshly-copied schema and freshly-sliced columns.
+;;; Since: FR0
+(defn frame-slice [f :int offset :int length :int] :int
+  (let [nrows (frame-nrows f)
+        ncols (frame-ncols f)]
+    (if (or (< offset 0) (< length 0) (> (+ offset length) nrows))
+      0
+      (let [new-sch  (__schema-clone (frame-schema f))
+            new-cols (__slice-cols f offset length (- ncols 1) (__nil))]
+        (frame new-sch new-cols)))))
+
+;;; frame-head -- a new frame containing the first n rows.
+;;; n is clamped silently to [0, frame-nrows(f)].
+;;; Since: FR0
+(defn frame-head [f :int n :int] :int
+  (let [nrows (frame-nrows f)
+        k     (if (< n 0) 0 (if (> n nrows) nrows n))]
+    (frame-slice f 0 k)))
+
+;;; frame-free -- release a frame's schema, columns, and descriptor.
+;;; Since: FR0
+(defn frame-free [f :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_schema { int64_t n_fields; int64_t *fields; };
+  struct __frame_field { char *name; int64_t type_tag; int64_t nullable; };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  if (!f) return;
+  struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)f;
+  if (fr->columns) {
+    for (int64_t i = 0; i < fr->n_cols; i++) {
+      struct __frame_col *c = (struct __frame_col *)(intptr_t)fr->columns[i];
+      if (c) {
+        /* Refcount-aware free: only release buffers when last frame drops it. */
+        c->refcount--;
+        if (c->refcount <= 0) {
+          if (c->type_tag == 10) {
+            /* Any column: values is an __any_aux*, validity is plain malloc. */
+            struct __any_aux {
+              int64_t length; unsigned char *type_tags; int64_t *payload;
+              unsigned char *strings; int64_t strings_len; int64_t strings_cap;
+            };
+            struct __any_aux *aux = (struct __any_aux *)c->values;
+            if (aux) {
+              free(aux->type_tags); free(aux->payload); free(aux->strings); free(aux);
+            }
+            if (c->validity) free(c->validity);
+            free(c);
+          } else {
+            if (c->values) {
+              uintptr_t d = (uintptr_t)c->values;
+              void *raw = (void *)(*((uintptr_t *)(d - 16)));
+              free(raw);
+            }
+            if (c->validity) {
+              uintptr_t d = (uintptr_t)c->validity;
+              void *raw = (void *)(*((uintptr_t *)(d - 16)));
+              free(raw);
+            }
+            if (c->offsets) {
+              uintptr_t d = (uintptr_t)c->offsets;
+              void *raw = (void *)(*((uintptr_t *)(d - 16)));
+              free(raw);
+            }
+            free(c);
+          }
+        }
+      }
+    }
+    free(fr->columns);
+  }
+  if (fr->schema) {
+    struct __frame_schema *sc = (struct __frame_schema *)(intptr_t)fr->schema;
+    for (int64_t i = 0; i < sc->n_fields; i++) {
+      struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[i];
+      if (fd) {
+        if (fd->name) free(fd->name);
+        free(fd);
+      }
+    }
+    if (sc->fields) free(sc->fields);
+    free(sc);
+  }
+  free(fr);
+  ```)
+
+;;; frame=? -- structural equality across schema (names + types) and every cell.
+;;;
+;;; Returns true iff both frames have the same shape, same column names and
+;;; types in the same order, the same validity per cell, and the same value
+;;; per non-null cell.  Bit-exact comparison for primitives; bytewise compare
+;;; for utf8.
+;;;
+;;; Since: FR2
+(defn frame=? [a :int b :int] :bool
+  ```c
+  #include <string.h>
+  #include <stdint.h>
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_schema { int64_t n_fields; int64_t *fields; };
+  struct __frame_field  { char *name; int64_t type_tag; int64_t nullable; };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  if (a == b) return true;
+  if (!a || !b) return false;
+  struct __frame_frame *fa = (struct __frame_frame *)(intptr_t)a;
+  struct __frame_frame *fb = (struct __frame_frame *)(intptr_t)b;
+  if (fa->n_cols != fb->n_cols || fa->n_rows != fb->n_rows) return false;
+  struct __frame_schema *sa = (struct __frame_schema *)(intptr_t)fa->schema;
+  struct __frame_schema *sb = (struct __frame_schema *)(intptr_t)fb->schema;
+  if (sa->n_fields != sb->n_fields) return false;
+  for (int64_t c = 0; c < sa->n_fields; c++) {
+    struct __frame_field *fda = (struct __frame_field *)(intptr_t)sa->fields[c];
+    struct __frame_field *fdb = (struct __frame_field *)(intptr_t)sb->fields[c];
+    if (!fda || !fdb) return false;
+    if (fda->type_tag != fdb->type_tag) return false;
+    if (strcmp(fda->name ? fda->name : "", fdb->name ? fdb->name : "") != 0) return false;
+  }
+  for (int64_t c = 0; c < fa->n_cols; c++) {
+    struct __frame_col *ca = (struct __frame_col *)(intptr_t)fa->columns[c];
+    struct __frame_col *cb = (struct __frame_col *)(intptr_t)fb->columns[c];
+    if (!ca || !cb) return false;
+    if (ca->type_tag != cb->type_tag) return false;
+    if (ca->length   != cb->length)   return false;
+    if (ca->null_count != cb->null_count) return false;
+    int64_t n = ca->length;
+    /* Validity */
+    for (int64_t r = 0; r < n; r++) {
+      int va = ca->validity ? ((((unsigned char *)ca->validity)[r >> 3] >> (r & 7)) & 1) : 1;
+      int vb = cb->validity ? ((((unsigned char *)cb->validity)[r >> 3] >> (r & 7)) & 1) : 1;
+      if (va != vb) return false;
+      if (!va) continue; /* both null at row r */
+      switch ((int)ca->type_tag) {
+        case 1:
+        case 7: if (((int32_t*)ca->values)[r] != ((int32_t*)cb->values)[r]) return false; break;
+        case 2:
+        case 8: if (((int64_t*)ca->values)[r] != ((int64_t*)cb->values)[r]) return false; break;
+        case 3: if (((float  *)ca->values)[r] != ((float  *)cb->values)[r]) return false; break;
+        case 4: if (((double *)ca->values)[r] != ((double *)cb->values)[r]) return false; break;
+        case 5: {
+          int xa = (((unsigned char*)ca->values)[r >> 3] >> (r & 7)) & 1;
+          int xb = (((unsigned char*)cb->values)[r >> 3] >> (r & 7)) & 1;
+          if (xa != xb) return false;
+        } break;
+        case 6: {
+          int32_t *oa = (int32_t *)ca->offsets;
+          int32_t *ob = (int32_t *)cb->offsets;
+          int32_t la = oa[r + 1] - oa[r];
+          int32_t lb = ob[r + 1] - ob[r];
+          if (la != lb) return false;
+          if (la > 0 && memcmp((char *)ca->values + oa[r], (char *)cb->values + ob[r], (size_t)la) != 0) return false;
+        } break;
+        case 10: {
+          /* Any column: compare per-cell type tag first, then the payload
+             (utf8 cells dereference into each side's strings buffer). */
+          struct __any_aux {
+            int64_t length; unsigned char *type_tags; int64_t *payload;
+            unsigned char *strings; int64_t strings_len; int64_t strings_cap;
+          };
+          struct __any_aux *aa = (struct __any_aux *)ca->values;
+          struct __any_aux *bb = (struct __any_aux *)cb->values;
+          unsigned char ta = aa->type_tags[r];
+          unsigned char tb = bb->type_tags[r];
+          if (ta != tb) return false;
+          if (ta == 0) continue; /* both null */
+          if (ta == 6) {
+            int64_t pa = aa->payload[r], pb = bb->payload[r];
+            int32_t off_a = (int32_t)(pa >> 32), len_a = (int32_t)(pa & 0xffffffff);
+            int32_t off_b = (int32_t)(pb >> 32), len_b = (int32_t)(pb & 0xffffffff);
+            if (len_a != len_b) return false;
+            if (len_a > 0 && memcmp(aa->strings + off_a, bb->strings + off_b, (size_t)len_a) != 0) return false;
+          } else if (aa->payload[r] != bb->payload[r]) {
+            return false;
+          }
+        } break;
+        default: return false;
+      }
+    }
+  }
+  return true;
+  ```)
+
+) ;; end defmodule frame/frame

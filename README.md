@@ -24,6 +24,7 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 | [`tur-scscm`](spices/scscm/) | scscm s-expression -> sclang compiler + scsynth/hcsynth OSC client | 1 -- inline-C only | tur-osc (optional, server module only) |
 | [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 1 -- inline-C only | -- |
 | [`tur-signal`](spices/signal/) | Arrow-based signal processing (SF, DSP, ADSR, synth) | 1 -- pure Turmeric | -- |
+| [`tur-frame`](spices/frame/) | In-memory dataframe (Arrow-compatible columnar) | 1 -- pure Turmeric | -- |
 
 ---
 
@@ -395,6 +396,46 @@ Add to your project:
 ```sh
 tur add https://github.com/rjungemann/turmeric-spices \
   --ref regex-v0.1.0 --subdir spices/regex --name regex
+```
+
+---
+
+### tur-frame -- in-memory dataframe (Arrow-compatible columnar)
+
+Exports: `frame/type`, `frame/buffer`, `frame/column`, `frame/schema`, `frame/frame`,
+`frame/select`, `frame/filter`, `frame/sort`, `frame/group`, `frame/join`,
+`frame/reshape`, `frame/csv`, `frame/print`, `frame/interop`.
+
+```turmeric
+(import frame/csv    :refer [read-csv-string])
+(import frame/select :refer [select-cols])
+(import frame/filter :refer [filter-mask])
+(import frame/group  :refer [group-by agg agg-sum])
+(import frame/print  :refer [print-frame])
+
+(let [f       (read-csv-string "g,v\nA,10\nB,20\nA,30\n" 0 0 1 0 "")
+      g       (group-by f (cons "g" 0))
+      outs    (cons "total" 0)
+      ins     (cons "v" 0)
+      tags    (cons (agg-sum) 0)
+      summary (agg g outs ins tags)]
+  (print-frame summary))     ;; | g | total | ...
+```
+
+Storage layout matches Apache Arrow's in-memory columnar format (validity
+bitmap + values + offsets + 64-byte alignment), so frames can be handed to
+PyArrow / nanoarrow / DuckDB / Polars over the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html)
+via `frame/interop`'s `arrow-export` / `arrow-import`.
+
+See [`docs/guides/frame-guide.md`](docs/guides/frame-guide.md) for the full
+walkthrough (building, selecting, filtering, sorting, grouping, joining,
+reshaping, and Arrow interop).
+
+Add to your project:
+
+```sh
+tur add https://github.com/rjungemann/turmeric-spices \
+  --ref frame-v0.1.0 --subdir spices/frame --name frame
 ```
 
 ---

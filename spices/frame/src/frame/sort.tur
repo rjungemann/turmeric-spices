@@ -1,0 +1,480 @@
+;; frame/sort.tur -- multi-key, stable sort over frames.
+;;
+;; v0.1.0 uses qsort with an original-index tiebreaker for stability.
+;; Comparator handles int32 / int64 / float64 / bool / utf8 columns.
+;; v0 deviates from the plan's `(arrange f keys)` signature where
+;; keys is a cons list of (name . direction) pairs: we instead take two
+;; parallel lists -- (arrange f names dirs) -- so we don't need a pair type.
+
+(defmodule frame/sort
+  (export arrange arrange-indices reorder)
+
+  (import frame/schema :refer [field field-name field-type field-nullable
+                                schema schema-arity schema-field-at
+                                schema-index-of])
+  (import frame/column :refer [column-length column-type column-retain])
+  (import frame/frame  :refer [frame frame-nrows frame-ncols frame-schema
+                                frame-column-at])
+
+;; ---------------------------------------------------------------------------
+;; Private cons helpers (namespaced).
+;; ---------------------------------------------------------------------------
+
+(defn __so-nil [] :int ```c return 0; ```)
+
+(defn __so-cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+  if (!c) return 0;
+  c->value = v; c->next = n;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Inline-C core: compute permutation, then take by indices.
+;; ---------------------------------------------------------------------------
+
+;;; __so-compute-perm -- given a frame and parallel arrays of (col_ix, dir),
+;;; allocate and fill a permutation int64_t[n_rows] using qsort with stability
+;;; tiebreaker.  Returns the array as :int (intptr_t), 0 on OOM.  Since: FR4
+(defn __so-compute-perm [f :int n-rows :int n-keys :int
+                         col-ixs :int dirs :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+
+  if (n_rows == 0) {
+    int64_t *empty = (int64_t *)malloc(sizeof(int64_t));
+    if (!empty) return 0;
+    return (int64_t)(intptr_t)empty;
+  }
+
+  /* Snapshot the keys into flat arrays. */
+  static int64_t  s_n_keys;
+  static int64_t *s_dirs;
+  static int64_t *s_tags;
+  static void   **s_values;
+  static void   **s_offsets;
+  static void   **s_validity;
+
+  s_n_keys = n_keys;
+  s_dirs     = (int64_t *)malloc((size_t)n_keys * sizeof(int64_t));
+  s_tags     = (int64_t *)malloc((size_t)n_keys * sizeof(int64_t));
+  s_values   = (void  **)malloc((size_t)n_keys * sizeof(void *));
+  s_offsets  = (void  **)malloc((size_t)n_keys * sizeof(void *));
+  s_validity = (void  **)malloc((size_t)n_keys * sizeof(void *));
+  if (!s_dirs || !s_tags || !s_values || !s_offsets || !s_validity) {
+    free(s_dirs); free(s_tags); free(s_values); free(s_offsets); free(s_validity);
+    return 0;
+  }
+
+  struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)f;
+  /* Walk col-ixs and dirs in parallel. */
+  struct __cons *pix = (struct __cons *)(intptr_t)col_ixs;
+  struct __cons *pdi = (struct __cons *)(intptr_t)dirs;
+  for (int64_t k = 0; k < n_keys; k++) {
+    int64_t cix = pix->value;
+    int64_t dir = pdi->value;
+    struct __frame_col *col = (struct __frame_col *)(intptr_t)fr->columns[cix];
+    s_dirs[k]    = dir;
+    s_tags[k]    = col->type_tag;
+    s_values[k]  = col->values;
+    s_offsets[k] = col->offsets;
+    s_validity[k]= col->validity;
+    pix = (struct __cons *)(intptr_t)pix->next;
+    pdi = (struct __cons *)(intptr_t)pdi->next;
+  }
+
+  int64_t *perm = (int64_t *)malloc((size_t)n_rows * sizeof(int64_t));
+  if (!perm) {
+    free(s_dirs); free(s_tags); free(s_values); free(s_offsets); free(s_validity);
+    return 0;
+  }
+  for (int64_t i = 0; i < n_rows; i++) perm[i] = i;
+
+  /* Comparator -- nested function not portable; use file-scope static via
+     a small struct holding state.  We rely on the qsort call being the
+     only concurrent user of these statics (no recursion / no threading). */
+
+  int (*cmp_fn)(const void *, const void *) = NULL;
+  /* Define via a static stub below by stashing pointers in s_* statics. */
+
+  /* Macro for comparing two values from row a, b within key k.  Sets `_o`. */
+  /* (Inlined inside cmp; declared as a function below.) */
+
+  /* clang/gcc allow nested fns as an extension on Linux, but not macOS.
+     So we declare an outer-scope static function via a single-use trick:
+     compile-time we emit it before this function body.  Simpler: do the
+     comparisons inline using a struct of pairs sorted with insertion+merge.
+
+     Alternative: write our own stable merge sort. */
+
+  /* Stable merge sort over `perm`. */
+  int64_t *scratch = (int64_t *)malloc((size_t)n_rows * sizeof(int64_t));
+  if (!scratch) {
+    free(perm); free(s_dirs); free(s_tags); free(s_values); free(s_offsets); free(s_validity);
+    return 0;
+  }
+
+  #define CMP_KEYS(_a, _b, _out) do {                                         \
+    int _order = 0;                                                            \
+    for (int64_t _k = 0; _k < s_n_keys; _k++) {                                \
+      /* Null handling: null < non-null (asc), reversed under desc. */         \
+      int _va = 1, _vb = 1;                                                    \
+      if (s_validity[_k]) {                                                    \
+        _va = ((((unsigned char *)s_validity[_k])[(_a) >> 3] >> ((_a) & 7)) & 1); \
+        _vb = ((((unsigned char *)s_validity[_k])[(_b) >> 3] >> ((_b) & 7)) & 1); \
+      }                                                                        \
+      if (_va != _vb) { _order = _va ? 1 : -1; }                               \
+      else if (_va) {                                                          \
+        switch ((int)s_tags[_k]) {                                             \
+          case 7: \
+          case 1: { int32_t x = ((int32_t *)s_values[_k])[_a]; int32_t y = ((int32_t *)s_values[_k])[_b]; _order = (x<y)?-1:(x>y)?1:0; } break; \
+          case 8: \
+          case 2: { int64_t x = ((int64_t *)s_values[_k])[_a]; int64_t y = ((int64_t *)s_values[_k])[_b]; _order = (x<y)?-1:(x>y)?1:0; } break; \
+          case 3: { float   x = ((float   *)s_values[_k])[_a]; float   y = ((float   *)s_values[_k])[_b]; _order = (x<y)?-1:(x>y)?1:0; } break; \
+          case 4: { double  x = ((double  *)s_values[_k])[_a]; double  y = ((double  *)s_values[_k])[_b]; _order = (x<y)?-1:(x>y)?1:0; } break; \
+          case 5: { int xa = ((((unsigned char *)s_values[_k])[(_a)>>3]>>((_a)&7))&1); int xb = ((((unsigned char *)s_values[_k])[(_b)>>3]>>((_b)&7))&1); _order = (xa<xb)?-1:(xa>xb)?1:0; } break; \
+          case 6: { int32_t *o = (int32_t *)s_offsets[_k]; int32_t la = o[(_a)+1]-o[(_a)]; int32_t lb = o[(_b)+1]-o[(_b)]; int32_t lm = la<lb?la:lb; int c = memcmp((char *)s_values[_k]+o[(_a)], (char *)s_values[_k]+o[(_b)], (size_t)lm); _order = c?(c<0?-1:1):(la<lb?-1:(la>lb?1:0)); } break; \
+          default: _order = 0;                                                 \
+        }                                                                      \
+      } else _order = 0;                                                       \
+      if (s_dirs[_k]) _order = -_order;                                        \
+      if (_order != 0) break;                                                  \
+    }                                                                          \
+    /* Stability tiebreaker: original index. */                                \
+    if (_order == 0) _order = ((_a) < (_b)) ? -1 : ((_a) > (_b)) ? 1 : 0;      \
+    (_out) = _order;                                                           \
+  } while (0)
+
+  /* Iterative bottom-up merge sort. */
+  for (int64_t width = 1; width < n_rows; width *= 2) {
+    for (int64_t i = 0; i < n_rows; i += 2 * width) {
+      int64_t left = i;
+      int64_t mid  = i + width      < n_rows ? i + width      : n_rows;
+      int64_t right= i + 2 * width  < n_rows ? i + 2 * width  : n_rows;
+      int64_t a = left, b = mid, dst = left;
+      while (a < mid && b < right) {
+        int ord;
+        CMP_KEYS(perm[a], perm[b], ord);
+        if (ord <= 0) scratch[dst++] = perm[a++];
+        else          scratch[dst++] = perm[b++];
+      }
+      while (a < mid)   scratch[dst++] = perm[a++];
+      while (b < right) scratch[dst++] = perm[b++];
+      memcpy(perm + left, scratch + left, (size_t)(right - left) * sizeof(int64_t));
+    }
+  }
+
+  #undef CMP_KEYS
+
+  free(scratch);
+  free(s_dirs); free(s_tags); free(s_values); free(s_offsets); free(s_validity);
+  return (int64_t)(intptr_t)perm;
+  ```)
+
+;;; __so-perm-len -- length of a perm array (we already passed n-rows but
+;;; expose this so callers can sanity-check).  Just returns whatever len you
+;;; pass in -- placeholder so the API has a fetch.  Since: FR4
+(defn __so-perm-free [perm :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  void *p = (void *)(intptr_t)perm;
+  if (p) free(p);
+  ```)
+
+;;; __so-perm-nth -- read perm[i] (used by arrange-indices to build the
+;;; user-visible cons list). Since: FR4
+(defn __so-perm-nth [perm :int i :int] :int
+  ```c
+  #include <stdint.h>
+  return ((int64_t *)(intptr_t)perm)[i];
+  ```)
+
+;;; __so-take -- build a new column by applying `perm` (int64_t[n]) to `col`.
+;;; Handles every type that the sort comparator handles.  Since: FR4
+(defn __so-take [col :int perm :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __frame_col *src = (struct __frame_col *)(intptr_t)col;
+  int64_t *p = (int64_t *)(intptr_t)perm;
+  int64_t tag = src->type_tag;
+
+  int elem_size = 0;
+  int is_bool = 0;
+  int is_utf8 = 0;
+  switch ((int)tag) {
+    case 1:
+    case 7: elem_size = 4; break;   /* int32 / date32 */
+    case 2:
+    case 8: elem_size = 8; break;   /* int64 / timestamp */
+    case 3: elem_size = 4; break;
+    case 4: elem_size = 8; break;
+    case 5: is_bool = 1; break;
+    case 6: is_utf8 = 1; break;
+    default: return 0;
+  }
+
+  uintptr_t ddata = 0;
+  void *doffsets = NULL;
+
+  if (is_utf8) {
+    int32_t *soff = (int32_t *)src->offsets;
+    int64_t total = 0;
+    for (int64_t i = 0; i < n; i++) {
+      int64_t r = p[i];
+      total += (int64_t)(soff[r + 1] - soff[r]);
+    }
+    int64_t drounded = (total + 63) & ~((int64_t)63); if (drounded == 0) drounded = 64;
+    void *draw = malloc((size_t)(drounded + 64 + 8));
+    if (!draw) return 0;
+    memset(draw, 0, (size_t)(drounded + 64 + 8));
+    uintptr_t dbase = (uintptr_t)draw;
+    ddata = (dbase + 16 + 63) & ~((uintptr_t)63);
+    *((int64_t *)(ddata - 8))  = drounded;
+    *((uintptr_t *)(ddata - 16)) = dbase;
+
+    int64_t obytes = (n + 1) * (int64_t)sizeof(int32_t);
+    int64_t orounded = (obytes + 63) & ~((int64_t)63); if (orounded == 0) orounded = 64;
+    void *oraw = malloc((size_t)(orounded + 64 + 8));
+    if (!oraw) { free(draw); return 0; }
+    memset(oraw, 0, (size_t)(orounded + 64 + 8));
+    uintptr_t obase = (uintptr_t)oraw;
+    uintptr_t odata = (obase + 16 + 63) & ~((uintptr_t)63);
+    *((int64_t *)(odata - 8))  = orounded;
+    *((uintptr_t *)(odata - 16)) = obase;
+    doffsets = (void *)odata;
+
+    int32_t *dst_off = (int32_t *)doffsets;
+    unsigned char *bytes_dst = (unsigned char *)ddata;
+    int32_t cursor = 0;
+    for (int64_t i = 0; i < n; i++) {
+      int64_t r = p[i];
+      dst_off[i] = cursor;
+      int32_t lo = soff[r], hi = soff[r + 1], slen = hi - lo;
+      if (slen > 0) memcpy(bytes_dst + cursor, (char *)src->values + lo, (size_t)slen);
+      cursor += slen;
+    }
+    dst_off[n] = cursor;
+  } else {
+    int64_t bytes;
+    if (is_bool) {
+      bytes = (n + 7) / 8; if (bytes == 0) bytes = 1;
+    } else {
+      bytes = n * (int64_t)elem_size; if (bytes == 0) bytes = elem_size;
+    }
+    int64_t rounded = (bytes + 63) & ~((int64_t)63); if (rounded == 0) rounded = 64;
+    void *raw = malloc((size_t)(rounded + 64 + 8));
+    if (!raw) return 0;
+    memset(raw, 0, (size_t)(rounded + 64 + 8));
+    uintptr_t base = (uintptr_t)raw;
+    ddata = (base + 16 + 63) & ~((uintptr_t)63);
+    *((int64_t *)(ddata - 8))  = rounded;
+    *((uintptr_t *)(ddata - 16)) = base;
+
+    if (is_bool) {
+      unsigned char *src_b = (unsigned char *)src->values;
+      unsigned char *dst_b = (unsigned char *)ddata;
+      for (int64_t i = 0; i < n; i++) {
+        int64_t r = p[i];
+        int bit = (src_b[r >> 3] >> (r & 7)) & 1;
+        if (bit) dst_b[i >> 3] |= (unsigned char)(1u << (i & 7));
+      }
+    } else {
+      char *src_v = (char *)src->values;
+      char *dst_v = (char *)ddata;
+      for (int64_t i = 0; i < n; i++) {
+        int64_t r = p[i];
+        memcpy(dst_v + i * elem_size, src_v + r * elem_size, (size_t)elem_size);
+      }
+    }
+  }
+
+  void *valid_buf = NULL;
+  int64_t nulls = 0;
+  if (src->validity) {
+    int64_t vbytes = (n + 7) / 8; if (vbytes == 0) vbytes = 1;
+    int64_t vr = (vbytes + 63) & ~((int64_t)63);
+    void *vraw = malloc((size_t)(vr + 64 + 8));
+    if (!vraw) {
+      free((void*)(*((uintptr_t*)(ddata - 16))));
+      if (doffsets) free((void*)(*((uintptr_t*)((uintptr_t)doffsets - 16))));
+      return 0;
+    }
+    memset(vraw, 0, (size_t)(vr + 64 + 8));
+    uintptr_t vb_ = (uintptr_t)vraw;
+    uintptr_t vd_ = (vb_ + 16 + 63) & ~((uintptr_t)63);
+    *((int64_t *)(vd_ - 8))  = vr;
+    *((uintptr_t *)(vd_ - 16)) = vb_;
+    unsigned char *src_v = (unsigned char *)src->validity;
+    unsigned char *dst_v = (unsigned char *)vd_;
+    memset(dst_v, 0xFF, (size_t)vr);
+    for (int64_t i = 0; i < n; i++) {
+      int64_t r = p[i];
+      int vbit = (src_v[r >> 3] >> (r & 7)) & 1;
+      if (!vbit) {
+        dst_v[i >> 3] &= (unsigned char)~(1u << (i & 7));
+        nulls++;
+      }
+    }
+    valid_buf = (void *)vd_;
+  }
+
+  struct __frame_col *out = (struct __frame_col *)malloc(sizeof(*out));
+  if (!out) {
+    free((void*)(*((uintptr_t*)(ddata - 16))));
+    if (doffsets) free((void*)(*((uintptr_t*)((uintptr_t)doffsets - 16))));
+    if (valid_buf) free((void*)(*((uintptr_t*)((uintptr_t)valid_buf - 16))));
+    return 0;
+  }
+  out->type_tag   = tag;
+  out->length     = n;
+  out->null_count = nulls;
+  out->refcount   = 1;
+  out->validity   = valid_buf;
+  out->values     = (void *)ddata;
+  out->offsets    = doffsets;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Turmeric driver code.
+;; ---------------------------------------------------------------------------
+
+(defn __so-name-at [xs :int i :int] :cstr
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t k = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next, k++) {
+    if (k == i) return (const char *)(intptr_t)p->value;
+  }
+  return (const char *)(intptr_t)"";
+  ```)
+
+(defn __so-names-to-ixs [s :int names :int i :int n :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [nm (__so-name-at names i)
+          ix (schema-index-of s nm)]
+      (if (< ix 0)
+        -1
+        (__so-names-to-ixs s names (- i 1) n (__so-cons ix acc))))))
+
+(defn __so-list-length [xs :int] :int
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t n = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next) n++;
+  return n;
+  ```)
+
+(defn __so-clone-field-at [s :int i :int] :int
+  (let [fd (schema-field-at s i)]
+    (field (field-name fd) (field-type fd) (field-nullable fd))))
+
+(defn __so-build-fields [s :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (__so-build-fields s (- i 1) (__so-cons (__so-clone-field-at s i) acc))))
+
+(defn __so-build-cols [f :int perm :int n :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [col (__so-take (frame-column-at f i) perm n)]
+      (__so-build-cols f perm n (- i 1) (__so-cons col acc)))))
+
+(defn __so-perm-to-list [perm :int n :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (__so-perm-to-list perm n (- i 1) (__so-cons (__so-perm-nth perm i) acc))))
+
+;;; arrange-indices -- compute the permutation that would sort the frame.
+;;;
+;;; Parameters:
+;;;   f     -- :int frame
+;;;   names -- cons list of :cstr column names
+;;;   dirs  -- parallel cons list of :int directions (0 = asc, 1 = desc)
+;;;
+;;; Returns:
+;;;   :int  cons list of row indices in sorted order; 0 if any name is missing.
+;;;
+;;; Since: FR4
+(defn arrange-indices [f :int names :int dirs :int] :int
+  (let [src-sch (frame-schema f)
+        n-keys  (__so-list-length names)
+        ixs     (__so-names-to-ixs src-sch names (- n-keys 1) n-keys (__so-nil))]
+    (if (= ixs -1)
+      0
+      (let [nrows (frame-nrows f)
+            perm  (__so-compute-perm f nrows n-keys ixs dirs)
+            lst   (__so-perm-to-list perm nrows (- nrows 1) (__so-nil))]
+        (do (__so-perm-free perm) lst)))))
+
+;;; reorder -- apply a permutation cons list to f (returns a new frame).
+;;; Length of `indices` must equal frame-nrows; otherwise returns 0.
+;;; Since: FR4
+(defn reorder [f :int indices :int] :int
+  (let [nrows (frame-nrows f)
+        ncols (frame-ncols f)
+        n-ix  (__so-list-length indices)]
+    (if (not= n-ix nrows)
+      0
+      (let [perm   (__so-list-to-perm indices nrows)
+            cols   (__so-build-cols f perm nrows (- ncols 1) (__so-nil))
+            fields (__so-build-fields (frame-schema f) (- ncols 1) (__so-nil))
+            g      (frame (schema fields) cols)]
+        (do (__so-perm-free perm) g)))))
+
+(defn __so-list-to-perm [xs :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t *p = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+  if (!p) return 0;
+  struct __cons *cp = (struct __cons *)(intptr_t)xs;
+  for (int64_t i = 0; i < n && cp; i++, cp = (struct __cons *)(intptr_t)cp->next) {
+    p[i] = cp->value;
+  }
+  return (int64_t)(intptr_t)p;
+  ```)
+
+;;; arrange -- return a new frame sorted by the given keys.
+;;; Equivalent to (reorder f (arrange-indices f names dirs)) but skips the
+;;; intermediate cons list.  Since: FR4
+(defn arrange [f :int names :int dirs :int] :int
+  (let [src-sch (frame-schema f)
+        n-keys  (__so-list-length names)
+        ixs     (__so-names-to-ixs src-sch names (- n-keys 1) n-keys (__so-nil))]
+    (if (= ixs -1)
+      0
+      (let [nrows  (frame-nrows f)
+            ncols  (frame-ncols f)
+            perm   (__so-compute-perm f nrows n-keys ixs dirs)
+            cols   (__so-build-cols f perm nrows (- ncols 1) (__so-nil))
+            fields (__so-build-fields src-sch (- ncols 1) (__so-nil))
+            g      (frame (schema fields) cols)]
+        (do (__so-perm-free perm) g)))))
+
+) ;; end defmodule frame/sort

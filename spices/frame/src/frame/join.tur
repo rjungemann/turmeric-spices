@@ -1,0 +1,828 @@
+;; frame/join.tur -- hash-join driver for inner/left/right/full/semi/anti.
+;;
+;; v0.1.0 design:
+;;   - All keyed joins use the same hash-build + probe path internally.
+;;     The smaller side is hashed; we always hash `right` for inner/left/semi/
+;;     anti, `left` for right-join, and run the algorithm twice for full-join
+;;     (probing in both directions).
+;;   - The result schema is: left columns first, then right's NON-key columns
+;;     (key columns are not duplicated).  If a non-key right column collides
+;;     with a left column name we append `_r` to the right one.
+;;   - The API takes two parallel lists of join keys instead of the plan's
+;;     join-opts struct.  cross-join takes no keys.
+;;
+;; Join-type tag constants (used internally):
+;;   1 inner  2 left  3 right  4 full  5 semi  6 anti
+
+(defmodule frame/join
+  (export inner-join left-join right-join full-join
+          semi-join anti-join cross-join join)
+
+  (import frame/schema :refer [field field-name field-type field-nullable
+                                schema schema-arity schema-field-at
+                                schema-index-of])
+  (import frame/column :refer [column-length column-type column-retain])
+  (import frame/frame  :refer [frame frame-nrows frame-ncols frame-schema
+                                frame-column-at])
+
+;; ---------------------------------------------------------------------------
+;; Cons helpers (namespaced __j-*).
+;; ---------------------------------------------------------------------------
+
+(defn __j-nil [] :int ```c return 0; ```)
+
+(defn __j-cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+  if (!c) return 0;
+  c->value = v; c->next = n;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+(defn __j-list-length [xs :int] :int
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t n = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next) n++;
+  return n;
+  ```)
+
+(defn __j-list-nth-cstr [xs :int i :int] :cstr
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t k = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next, k++) {
+    if (k == i) return (const char *)(intptr_t)p->value;
+  }
+  return (const char *)(intptr_t)"";
+  ```)
+
+(defn __j-list-nth-int [xs :int i :int] :int
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t k = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next, k++) {
+    if (k == i) return p->value;
+  }
+  return 0;
+  ```)
+
+(defn __j-list-has? [xs :int needle :int] :bool
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next) {
+    if (p->value == needle) return true;
+  }
+  return false;
+  ```)
+
+(defn __j-list-has-cstr? [xs :int needle :cstr] :bool
+  ```c
+  #include <string.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  const char *n = (const char *)(intptr_t)needle;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next) {
+    const char *s = (const char *)(intptr_t)p->value;
+    if (s && strcmp(s, n) == 0) return true;
+  }
+  return false;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Core hash-join engine.
+;;
+;; struct __join_result {
+;;   int64_t n;
+;;   int64_t *left_ix;     // each entry: 0..n_left-1, or -1 for unmatched right
+;;   int64_t *right_ix;    // each entry: 0..n_right-1, or -1 for unmatched left
+;; };
+;; ---------------------------------------------------------------------------
+
+;;; __j-match -- run the chosen join type and return a __join_result handle.
+;;;
+;;; Parameters:
+;;;   l, r              -- :int left, right frames
+;;;   left-key-ixs      -- cons list of left column indices
+;;;   right-key-ixs     -- cons list of right column indices (same length)
+;;;   how               -- :int join type tag (1..6, see top of file)
+;;;
+;;; Returns:
+;;;   :int  handle to __join_result; release with __j-result-free.  Since: FR6
+(defn __j-match [l :int r :int left-key-ixs :int right-key-ixs :int
+                 n-keys :int how :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __join_result {
+    int64_t n;
+    int64_t cap;
+    int64_t *left_ix;
+    int64_t *right_ix;
+  };
+
+  struct __frame_frame *fl = (struct __frame_frame *)(intptr_t)l;
+  struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)r;
+  int64_t n_left  = fl->n_rows;
+  int64_t n_right = fr->n_rows;
+
+  /* Snapshot key columns into flat arrays. */
+  int64_t *l_keys = (int64_t *)malloc((size_t)n_keys * sizeof(int64_t));
+  int64_t *r_keys = (int64_t *)malloc((size_t)n_keys * sizeof(int64_t));
+  if (!l_keys || !r_keys) { free(l_keys); free(r_keys); return 0; }
+  {
+    struct __cons *p = (struct __cons *)(intptr_t)left_key_ixs;
+    for (int64_t k = 0; k < n_keys; k++) {
+      l_keys[k] = p->value;
+      p = (struct __cons *)(intptr_t)p->next;
+    }
+    p = (struct __cons *)(intptr_t)right_key_ixs;
+    for (int64_t k = 0; k < n_keys; k++) {
+      r_keys[k] = p->value;
+      p = (struct __cons *)(intptr_t)p->next;
+    }
+  }
+
+  /* Hash one row of a frame across the given key columns (FNV-1a). */
+  #define HASH_ROW(_fr, _keys, _n_keys, _row, _out_hash) do {                  \
+    uint64_t _h = 0xcbf29ce484222325ULL;                                       \
+    for (int64_t _k = 0; _k < (_n_keys); _k++) {                                \
+      struct __frame_col *_c = (struct __frame_col *)(intptr_t)(_fr)->columns[(_keys)[_k]]; \
+      int _v = 1;                                                              \
+      if (_c->validity) _v = ((((unsigned char *)_c->validity)[(_row)>>3]>>((_row)&7))&1); \
+      _h = (_h ^ (uint64_t)_v) * 0x100000001b3ULL;                              \
+      if (_v) {                                                                 \
+        switch ((int)_c->type_tag) {                                            \
+          case 7: \
+          case 1: { int32_t x = ((int32_t *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<4;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 8: \
+          case 2: { int64_t x = ((int64_t *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<8;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 3: { float   x = ((float   *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<4;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 4: { double  x = ((double  *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<8;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 5: { int _b = ((((unsigned char *)_c->values)[(_row)>>3]>>((_row)&7))&1); _h=(_h^(uint64_t)_b)*0x100000001b3ULL; } break; \
+          case 6: { int32_t *_o=(int32_t *)_c->offsets; int32_t _lo=_o[_row], _hi=_o[_row+1]; for (int32_t _b=_lo;_b<_hi;_b++) _h=(_h^(uint64_t)(unsigned char)((char *)_c->values)[_b])*0x100000001b3ULL; } break; \
+        }                                                                       \
+      }                                                                         \
+    }                                                                           \
+    (_out_hash) = _h;                                                           \
+  } while (0)
+
+  /* Compare key tuples between left row lr and right row rr. */
+  #define KEYS_EQ(_lr, _rr, _out_eq) do {                                       \
+    int _eq = 1;                                                                 \
+    for (int64_t _k = 0; _k < n_keys; _k++) {                                    \
+      struct __frame_col *_lc = (struct __frame_col *)(intptr_t)fl->columns[l_keys[_k]]; \
+      struct __frame_col *_rc = (struct __frame_col *)(intptr_t)fr->columns[r_keys[_k]]; \
+      int _vl = 1, _vr = 1;                                                      \
+      if (_lc->validity) _vl = ((((unsigned char *)_lc->validity)[(_lr)>>3]>>((_lr)&7))&1); \
+      if (_rc->validity) _vr = ((((unsigned char *)_rc->validity)[(_rr)>>3]>>((_rr)&7))&1); \
+      if (_vl != _vr) { _eq = 0; break; }                                        \
+      if (!_vl) continue; /* both null -- SQL would say UNEQUAL; we say equal */ \
+      if (_lc->type_tag != _rc->type_tag) { _eq = 0; break; }                    \
+      switch ((int)_lc->type_tag) {                                              \
+        case 7: \
+        case 1: if (((int32_t *)_lc->values)[_lr] != ((int32_t *)_rc->values)[_rr]) _eq = 0; break; \
+        case 8: \
+        case 2: if (((int64_t *)_lc->values)[_lr] != ((int64_t *)_rc->values)[_rr]) _eq = 0; break; \
+        case 3: if (((float   *)_lc->values)[_lr] != ((float   *)_rc->values)[_rr]) _eq = 0; break; \
+        case 4: if (((double  *)_lc->values)[_lr] != ((double  *)_rc->values)[_rr]) _eq = 0; break; \
+        case 5: { int _bl = ((((unsigned char *)_lc->values)[(_lr)>>3]>>((_lr)&7))&1); int _br = ((((unsigned char *)_rc->values)[(_rr)>>3]>>((_rr)&7))&1); if (_bl != _br) _eq = 0; } break; \
+        case 6: { int32_t *_ol = (int32_t *)_lc->offsets; int32_t *_orr = (int32_t *)_rc->offsets; int32_t _ll = _ol[(_lr)+1]-_ol[(_lr)]; int32_t _rl = _orr[(_rr)+1]-_orr[(_rr)]; if (_ll != _rl) { _eq = 0; } else if (_ll > 0 && memcmp((char *)_lc->values + _ol[(_lr)], (char *)_rc->values + _orr[(_rr)], (size_t)_ll) != 0) { _eq = 0; } } break; \
+      }                                                                          \
+      if (!_eq) break;                                                           \
+    }                                                                            \
+    (_out_eq) = _eq;                                                             \
+  } while (0)
+
+  /* Decide hash side.  For right-join we hash left.  Otherwise hash right. */
+  int hash_left_side = (how == 3);  /* right join */
+
+  int64_t n_build = hash_left_side ? n_left : n_right;
+  int64_t n_probe = hash_left_side ? n_right : n_left;
+
+  /* Build a chaining hash table for the build side.
+     Bucket count: next power of two >= 2 * n_build, min 16. */
+  int64_t n_buckets = 16;
+  while (n_buckets < 2 * n_build) n_buckets <<= 1;
+  int64_t bmask = n_buckets - 1;
+
+  int64_t *buckets = (int64_t *)malloc((size_t)n_buckets * sizeof(int64_t));
+  if (!buckets) { free(l_keys); free(r_keys); return 0; }
+  for (int64_t i = 0; i < n_buckets; i++) buckets[i] = -1;
+
+  /* Entries: parallel arrays.  ent_row[i] = build row index; ent_next[i] = next chain link. */
+  int64_t *ent_row  = (int64_t *)malloc((size_t)(n_build > 0 ? n_build : 1) * sizeof(int64_t));
+  int64_t *ent_next = (int64_t *)malloc((size_t)(n_build > 0 ? n_build : 1) * sizeof(int64_t));
+  if (!ent_row || !ent_next) {
+    free(buckets); free(ent_row); free(ent_next); free(l_keys); free(r_keys); return 0;
+  }
+
+  for (int64_t i = 0; i < n_build; i++) {
+    uint64_t h;
+    if (hash_left_side) { HASH_ROW(fl, l_keys, n_keys, i, h); }
+    else                { HASH_ROW(fr, r_keys, n_keys, i, h); }
+    int64_t b = (int64_t)(h & (uint64_t)bmask);
+    ent_row[i]  = i;
+    ent_next[i] = buckets[b];
+    buckets[b]  = i;
+  }
+
+  /* If we hashed left, we also need a "build-row matched?" bitmap for the
+     symmetric pass in full-join.  Track for full join only. */
+  unsigned char *matched = NULL;
+  if (how == 4) {
+    int64_t mb = (n_right + 7) / 8; if (mb < 1) mb = 1;
+    matched = (unsigned char *)calloc((size_t)mb, 1);
+  }
+
+  /* Output buffers. */
+  struct __join_result *res = (struct __join_result *)calloc(1, sizeof(*res));
+  if (!res) {
+    free(buckets); free(ent_row); free(ent_next); free(matched); free(l_keys); free(r_keys); return 0;
+  }
+  res->n = 0;
+  res->cap = 16;
+  res->left_ix  = (int64_t *)malloc((size_t)res->cap * sizeof(int64_t));
+  res->right_ix = (int64_t *)malloc((size_t)res->cap * sizeof(int64_t));
+
+  #define PUSH_PAIR(_lr, _rr) do {                                              \
+    if (res->n >= res->cap) {                                                    \
+      res->cap *= 2;                                                              \
+      res->left_ix  = (int64_t *)realloc(res->left_ix,  (size_t)res->cap * sizeof(int64_t)); \
+      res->right_ix = (int64_t *)realloc(res->right_ix, (size_t)res->cap * sizeof(int64_t)); \
+    }                                                                             \
+    res->left_ix[res->n]  = (_lr);                                                \
+    res->right_ix[res->n] = (_rr);                                                \
+    res->n++;                                                                     \
+  } while (0)
+
+  /* Probe loop. */
+  for (int64_t i = 0; i < n_probe; i++) {
+    uint64_t h;
+    if (hash_left_side) { HASH_ROW(fr, r_keys, n_keys, i, h); }
+    else                { HASH_ROW(fl, l_keys, n_keys, i, h); }
+    int64_t b = (int64_t)(h & (uint64_t)bmask);
+    int found_any = 0;
+
+    for (int64_t e = buckets[b]; e != -1; e = ent_next[e]) {
+      int64_t build_row = ent_row[e];
+      int eq = 0;
+      if (hash_left_side) {
+        /* Build = left, Probe = right.  Compare keys with lr=build_row, rr=i. */
+        KEYS_EQ(build_row, i, eq);
+      } else {
+        /* Build = right, Probe = left.  Compare with lr=i, rr=build_row. */
+        KEYS_EQ(i, build_row, eq);
+      }
+      if (!eq) continue;
+      found_any = 1;
+      int64_t lr = hash_left_side ? build_row : i;
+      int64_t rr = hash_left_side ? i         : build_row;
+
+      switch ((int)how) {
+        case 1: PUSH_PAIR(lr, rr); break;            /* inner */
+        case 2: PUSH_PAIR(lr, rr); break;            /* left -- emit; unmatched left handled below */
+        case 3: PUSH_PAIR(lr, rr); break;            /* right -- emit; unmatched right handled below */
+        case 4: PUSH_PAIR(lr, rr);                    /* full */
+                if (matched) matched[rr >> 3] |= (unsigned char)(1u << (rr & 7));
+                break;
+        case 5: PUSH_PAIR(lr, -1); /* semi: at most one row per left, but we'll dedupe by break */
+                goto done_probe_row;
+        case 6: /* anti: do not emit on match */ goto done_probe_row;
+      }
+    }
+    if (!found_any) {
+      switch ((int)how) {
+        case 2: PUSH_PAIR(i, -1); break;             /* left: unmatched left */
+        case 3: PUSH_PAIR(-1, i); break;             /* right: unmatched right (probe = right) */
+        case 4: PUSH_PAIR(i, -1); break;             /* full: unmatched left (probe = left) */
+        case 6: PUSH_PAIR(i, -1); break;             /* anti: emit left with no match */
+      }
+    }
+    done_probe_row: (void)0;
+  }
+
+  /* Full-join: emit unmatched right rows. */
+  if (how == 4 && matched) {
+    for (int64_t j = 0; j < n_right; j++) {
+      int m = (matched[j >> 3] >> (j & 7)) & 1;
+      if (!m) PUSH_PAIR(-1, j);
+    }
+  }
+
+  #undef PUSH_PAIR
+  #undef KEYS_EQ
+  #undef HASH_ROW
+
+  free(buckets); free(ent_row); free(ent_next); free(matched);
+  free(l_keys); free(r_keys);
+  return (int64_t)(intptr_t)res;
+  ```)
+
+(defn __j-result-count [res :int] :int
+  ```c
+  #include <stdint.h>
+  struct __join_result {
+    int64_t n; int64_t cap; int64_t *left_ix; int64_t *right_ix;
+  };
+  if (!res) return 0;
+  return ((struct __join_result *)(intptr_t)res)->n;
+  ```)
+
+(defn __j-result-left [res :int] :int
+  ```c
+  #include <stdint.h>
+  struct __join_result {
+    int64_t n; int64_t cap; int64_t *left_ix; int64_t *right_ix;
+  };
+  return (int64_t)(intptr_t)((struct __join_result *)(intptr_t)res)->left_ix;
+  ```)
+
+(defn __j-result-right [res :int] :int
+  ```c
+  #include <stdint.h>
+  struct __join_result {
+    int64_t n; int64_t cap; int64_t *left_ix; int64_t *right_ix;
+  };
+  return (int64_t)(intptr_t)((struct __join_result *)(intptr_t)res)->right_ix;
+  ```)
+
+(defn __j-result-free [res :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __join_result {
+    int64_t n; int64_t cap; int64_t *left_ix; int64_t *right_ix;
+  };
+  if (!res) return;
+  struct __join_result *r = (struct __join_result *)(intptr_t)res;
+  free(r->left_ix); free(r->right_ix); free(r);
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Column "take" with -1 → null support.
+;; ---------------------------------------------------------------------------
+
+;;; __j-take-nullable -- build a new column by indexing into `col` with the
+;;; int64_t[n] permutation `perm`.  Where perm[i] == -1, emit a null cell
+;;; (and set the validity bit accordingly).  Since: FR6
+(defn __j-take-nullable [col :int perm :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __frame_col *src = (struct __frame_col *)(intptr_t)col;
+  int64_t *p = (int64_t *)(intptr_t)perm;
+  int64_t tag = src->type_tag;
+
+  int elem_size = 0;
+  int is_bool = 0;
+  int is_utf8 = 0;
+  switch ((int)tag) {
+    case 1:
+    case 7: elem_size = 4; break;   /* int32 / date32 */
+    case 2:
+    case 8: elem_size = 8; break;   /* int64 / timestamp */
+    case 3: elem_size = 4; break;
+    case 4: elem_size = 8; break;
+    case 5: is_bool = 1; break;
+    case 6: is_utf8 = 1; break;
+    default: return 0;
+  }
+
+  uintptr_t ddata = 0;
+  void *doffsets = NULL;
+
+  if (is_utf8) {
+    int32_t *soff = (int32_t *)src->offsets;
+    int64_t total = 0;
+    for (int64_t i = 0; i < n; i++) {
+      int64_t r = p[i];
+      if (r >= 0) total += (int64_t)(soff[r + 1] - soff[r]);
+    }
+    int64_t drounded = (total + 63) & ~((int64_t)63); if (drounded == 0) drounded = 64;
+    void *draw = malloc((size_t)(drounded + 64 + 8));
+    if (!draw) return 0;
+    memset(draw, 0, (size_t)(drounded + 64 + 8));
+    uintptr_t dbase = (uintptr_t)draw;
+    ddata = (dbase + 16 + 63) & ~((uintptr_t)63);
+    *((int64_t *)(ddata - 8))  = drounded;
+    *((uintptr_t *)(ddata - 16)) = dbase;
+
+    int64_t obytes = (n + 1) * (int64_t)sizeof(int32_t);
+    int64_t orounded = (obytes + 63) & ~((int64_t)63); if (orounded == 0) orounded = 64;
+    void *oraw = malloc((size_t)(orounded + 64 + 8));
+    if (!oraw) { free(draw); return 0; }
+    memset(oraw, 0, (size_t)(orounded + 64 + 8));
+    uintptr_t obase = (uintptr_t)oraw;
+    uintptr_t odata = (obase + 16 + 63) & ~((uintptr_t)63);
+    *((int64_t *)(odata - 8))  = orounded;
+    *((uintptr_t *)(odata - 16)) = obase;
+    doffsets = (void *)odata;
+
+    int32_t *dst_off = (int32_t *)doffsets;
+    unsigned char *bytes_dst = (unsigned char *)ddata;
+    int32_t cursor = 0;
+    for (int64_t i = 0; i < n; i++) {
+      int64_t r = p[i];
+      dst_off[i] = cursor;
+      if (r < 0) continue;
+      int32_t lo = soff[r], hi = soff[r + 1], slen = hi - lo;
+      if (slen > 0) memcpy(bytes_dst + cursor, (char *)src->values + lo, (size_t)slen);
+      cursor += slen;
+    }
+    dst_off[n] = cursor;
+  } else {
+    int64_t bytes;
+    if (is_bool) {
+      bytes = (n + 7) / 8; if (bytes == 0) bytes = 1;
+    } else {
+      bytes = n * (int64_t)elem_size; if (bytes == 0) bytes = elem_size;
+    }
+    int64_t rounded = (bytes + 63) & ~((int64_t)63); if (rounded == 0) rounded = 64;
+    void *raw = malloc((size_t)(rounded + 64 + 8));
+    if (!raw) return 0;
+    memset(raw, 0, (size_t)(rounded + 64 + 8));
+    uintptr_t base = (uintptr_t)raw;
+    ddata = (base + 16 + 63) & ~((uintptr_t)63);
+    *((int64_t *)(ddata - 8))  = rounded;
+    *((uintptr_t *)(ddata - 16)) = base;
+
+    if (is_bool) {
+      unsigned char *src_b = (unsigned char *)src->values;
+      unsigned char *dst_b = (unsigned char *)ddata;
+      for (int64_t i = 0; i < n; i++) {
+        int64_t r = p[i];
+        if (r < 0) continue;
+        int bit = (src_b[r >> 3] >> (r & 7)) & 1;
+        if (bit) dst_b[i >> 3] |= (unsigned char)(1u << (i & 7));
+      }
+    } else {
+      char *src_v = (char *)src->values;
+      char *dst_v = (char *)ddata;
+      for (int64_t i = 0; i < n; i++) {
+        int64_t r = p[i];
+        if (r < 0) {
+          memset(dst_v + i * elem_size, 0, (size_t)elem_size);
+        } else {
+          memcpy(dst_v + i * elem_size, src_v + r * elem_size, (size_t)elem_size);
+        }
+      }
+    }
+  }
+
+  /* Validity: always allocate (we may have nulls from -1 in perm or from source). */
+  int64_t vbytes = (n + 7) / 8; if (vbytes == 0) vbytes = 1;
+  int64_t vr = (vbytes + 63) & ~((int64_t)63);
+  void *vraw = malloc((size_t)(vr + 64 + 8));
+  if (!vraw) {
+    free((void*)(*((uintptr_t*)(ddata - 16))));
+    if (doffsets) free((void*)(*((uintptr_t*)((uintptr_t)doffsets - 16))));
+    return 0;
+  }
+  memset(vraw, 0, (size_t)(vr + 64 + 8));
+  uintptr_t vb_ = (uintptr_t)vraw;
+  uintptr_t vd_ = (vb_ + 16 + 63) & ~((uintptr_t)63);
+  *((int64_t *)(vd_ - 8))  = vr;
+  *((uintptr_t *)(vd_ - 16)) = vb_;
+  unsigned char *dst_v = (unsigned char *)vd_;
+  memset(dst_v, 0xFF, (size_t)vr);
+  int64_t nulls = 0;
+  for (int64_t i = 0; i < n; i++) {
+    int64_t r = p[i];
+    int is_null = 1;
+    if (r >= 0) {
+      is_null = 0;
+      if (src->validity) {
+        int vbit = ((((unsigned char *)src->validity)[r >> 3]) >> (r & 7)) & 1;
+        if (!vbit) is_null = 1;
+      }
+    }
+    if (is_null) {
+      dst_v[i >> 3] &= (unsigned char)~(1u << (i & 7));
+      nulls++;
+    }
+  }
+  void *valid_buf = (void *)vd_;
+  if (nulls == 0) {
+    /* All-valid: free the bitmap, leave validity NULL on the column. */
+    free(vraw); valid_buf = NULL;
+  }
+
+  struct __frame_col *out = (struct __frame_col *)malloc(sizeof(*out));
+  if (!out) {
+    free((void*)(*((uintptr_t*)(ddata - 16))));
+    if (doffsets) free((void*)(*((uintptr_t*)((uintptr_t)doffsets - 16))));
+    if (valid_buf) free(vraw);
+    return 0;
+  }
+  out->type_tag   = tag;
+  out->length     = n;
+  out->null_count = nulls;
+  out->refcount   = 1;
+  out->validity   = valid_buf;
+  out->values     = (void *)ddata;
+  out->offsets    = doffsets;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Turmeric driver code.
+;; ---------------------------------------------------------------------------
+
+(defn __j-names-to-ixs [s :int names :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [nm (__j-list-nth-cstr names i)
+          ix (schema-index-of s nm)]
+      (if (< ix 0)
+        -1
+        (__j-names-to-ixs s names (- i 1) (__j-cons ix acc))))))
+
+;; Build the schema's left-side column list (all left columns) and a parallel
+;; cons list of columns produced from the left side's perm (= left_ix array
+;; from the join result).  Each emitted column uses __j-take-nullable.
+
+(defn __j-clone-field-at [s :int i :int] :int
+  (let [fd (schema-field-at s i)]
+    (field (field-name fd) (field-type fd) (field-nullable fd))))
+
+(defn __j-build-side-cols [f :int ncols :int perm :int n :int
+                           i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [c (__j-take-nullable (frame-column-at f i) perm n)]
+      (__j-build-side-cols f ncols perm n (- i 1) (__j-cons c acc)))))
+
+(defn __j-build-side-fields [s :int ncols :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (__j-build-side-fields s ncols (- i 1)
+                           (__j-cons (__j-clone-field-at s i) acc))))
+
+;; ---------------------------------------------------------------------------
+;; Right-side handling: include only NON-key columns; rename collisions.
+;; ---------------------------------------------------------------------------
+
+(defn __j-right-nonkey-ixs [s :int right-key-ixs :int ncols :int
+                             i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (if (__j-list-has? right-key-ixs i)
+      (__j-right-nonkey-ixs s right-key-ixs ncols (- i 1) acc)
+      (__j-right-nonkey-ixs s right-key-ixs ncols (- i 1) (__j-cons i acc)))))
+
+(defn __j-build-right-cols [f :int ixs :int n-keep :int perm :int n :int
+                             i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [src-ix (__j-list-nth-int ixs i)
+          c      (__j-take-nullable (frame-column-at f src-ix) perm n)]
+      (__j-build-right-cols f ixs n-keep perm n (- i 1) (__j-cons c acc)))))
+
+(defn __j-suffix [a :cstr b :cstr] :cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  const char *as = (const char *)(intptr_t)a;
+  const char *bs = (const char *)(intptr_t)b;
+  size_t la = strlen(as), lb = strlen(bs);
+  char *out = (char *)malloc(la + lb + 1);
+  if (!out) return (const char *)(intptr_t)"";
+  memcpy(out, as, la);
+  memcpy(out + la, bs, lb);
+  out[la + lb] = '\0';
+  return (const char *)(intptr_t)out;
+  ```)
+
+(defn __j-cstr-as-int [s :cstr] :int
+  ```c
+  #include <stdint.h>
+  return (int64_t)(intptr_t)s;
+  ```)
+
+(defn __j-build-right-fields [s :int ixs :int left-names :int n-keep :int
+                               i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [src-ix (__j-list-nth-int ixs i)
+          fd-i   (schema-field-at s src-ix)
+          nm     (field-name fd-i)
+          tt     (field-type fd-i)
+          nl     (field-nullable fd-i)
+          fd     (if (__j-list-has-cstr? left-names nm)
+                   (field (__j-suffix nm "_r") tt nl)
+                   (field nm tt nl))]
+      (__j-build-right-fields s ixs left-names n-keep (- i 1)
+                              (__j-cons fd acc)))))
+
+;; Build a cons list of left column names (for collision detection on the right).
+(defn __j-left-names [s :int ncols :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (__j-left-names s ncols (- i 1)
+                    (__j-cons (__j-cstr-as-int (field-name (schema-field-at s i)))
+                              acc))))
+
+(defn __j-list-concat [a :int b :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *head = NULL, *tail = NULL;
+  for (struct __cons *p = (struct __cons *)(intptr_t)a; p; p = (struct __cons *)(intptr_t)p->next) {
+    struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+    if (!c) return 0;
+    c->value = p->value; c->next = 0;
+    if (!head) head = c; else tail->next = (int64_t)(intptr_t)c;
+    tail = c;
+  }
+  if (!head) return b;
+  tail->next = b;
+  return (int64_t)(intptr_t)head;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Public join entry points.
+;; ---------------------------------------------------------------------------
+
+(defn __j-assemble [l :int r :int
+                    l-ixs :int r-ixs :int n-keys :int how :int
+                    keep-right? :bool] :int
+  (let [lsch    (frame-schema l)
+        rsch    (frame-schema r)
+        res     (__j-match l r l-ixs r-ixs n-keys how)
+        n       (__j-result-count res)
+        l-perm  (__j-result-left res)
+        r-perm  (__j-result-right res)
+        l-ncols (frame-ncols l)
+        l-cols  (__j-build-side-cols l l-ncols l-perm n (- l-ncols 1) (__j-nil))
+        l-flds  (__j-build-side-fields lsch l-ncols (- l-ncols 1) (__j-nil))]
+    (if (not keep-right?)
+      ;; semi / anti: only left columns
+      (let [g (frame (schema l-flds) l-cols)]
+        (do (__j-result-free res) g))
+      ;; inner / left / right / full: append right's non-key columns (renamed on collision)
+      (let [r-ncols    (frame-ncols r)
+            r-keep-ixs (__j-right-nonkey-ixs rsch r-ixs r-ncols (- r-ncols 1) (__j-nil))
+            n-keep     (__j-list-length r-keep-ixs)
+            r-cols     (__j-build-right-cols r r-keep-ixs n-keep r-perm n (- n-keep 1) (__j-nil))
+            l-names    (__j-left-names lsch l-ncols (- l-ncols 1) (__j-nil))
+            r-flds     (__j-build-right-fields rsch r-keep-ixs l-names n-keep (- n-keep 1) (__j-nil))
+            all-cols   (__j-list-concat l-cols r-cols)
+            all-flds   (__j-list-concat l-flds r-flds)
+            g          (frame (schema all-flds) all-cols)]
+        (do (__j-result-free res) g)))))
+
+(defn __j-keyed-join [l :int r :int left-keys :int right-keys :int how :int
+                      keep-right? :bool] :int
+  ;; keep-right? == true for inner/left/right/full; false for semi/anti.
+  (let [lsch    (frame-schema l)
+        rsch    (frame-schema r)
+        n-keys  (__j-list-length left-keys)
+        n-rk    (__j-list-length right-keys)]
+    (if (not= n-keys n-rk)
+      0
+      (let [l-ixs (__j-names-to-ixs lsch left-keys (- n-keys 1) (__j-nil))
+            r-ixs (__j-names-to-ixs rsch right-keys (- n-keys 1) (__j-nil))]
+        (if (or (= l-ixs -1) (= r-ixs -1))
+          0
+          (__j-assemble l r l-ixs r-ixs n-keys how keep-right?))))))
+
+;;; inner-join -- standard inner join.  Since: FR6
+(defn inner-join [l :int r :int left-keys :int right-keys :int] :int
+  (__j-keyed-join l r left-keys right-keys 1 true))
+
+;;; left-join -- keep all left rows; unmatched right is null.  Since: FR6
+(defn left-join [l :int r :int left-keys :int right-keys :int] :int
+  (__j-keyed-join l r left-keys right-keys 2 true))
+
+;;; right-join -- keep all right rows; unmatched left is null.  Since: FR6
+(defn right-join [l :int r :int left-keys :int right-keys :int] :int
+  (__j-keyed-join l r left-keys right-keys 3 true))
+
+;;; full-join -- keep all rows from both sides.  Since: FR6
+(defn full-join [l :int r :int left-keys :int right-keys :int] :int
+  (__j-keyed-join l r left-keys right-keys 4 true))
+
+;;; semi-join -- left rows that have at least one matching right row;
+;;; output schema is the left schema.  Since: FR6
+(defn semi-join [l :int r :int left-keys :int right-keys :int] :int
+  (__j-keyed-join l r left-keys right-keys 5 false))
+
+;;; anti-join -- left rows that have NO matching right row.  Since: FR6
+(defn anti-join [l :int r :int left-keys :int right-keys :int] :int
+  (__j-keyed-join l r left-keys right-keys 6 false))
+
+;;; cross-join -- cartesian product.  No keys; output is n_left * n_right rows.
+;;; Since: FR6
+(defn cross-join [l :int r :int] :int
+  (let [n-l    (frame-nrows l)
+        n-r    (frame-nrows r)
+        res    (__j-cross-result n-l n-r)
+        n-out  (__j-result-count res)
+        l-perm (__j-result-left res)
+        r-perm (__j-result-right res)
+        lsch   (frame-schema l)
+        rsch   (frame-schema r)
+        l-ncols (frame-ncols l)
+        r-ncols (frame-ncols r)
+        l-cols (__j-build-side-cols l l-ncols l-perm n-out (- l-ncols 1) (__j-nil))
+        l-flds (__j-build-side-fields lsch l-ncols (- l-ncols 1) (__j-nil))
+        r-cols (__j-build-side-cols r r-ncols r-perm n-out (- r-ncols 1) (__j-nil))
+        l-names (__j-left-names lsch l-ncols (- l-ncols 1) (__j-nil))
+        r-flds  (__j-cross-right-fields rsch l-names r-ncols (- r-ncols 1) (__j-nil))
+        all-cols (__j-list-concat l-cols r-cols)
+        all-flds (__j-list-concat l-flds r-flds)
+        g        (frame (schema all-flds) all-cols)]
+    (do (__j-result-free res) g)))
+
+(defn __j-cross-right-fields [s :int left-names :int ncols :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [fd-i (schema-field-at s i)
+          nm   (field-name fd-i)
+          fd   (if (__j-list-has-cstr? left-names nm)
+                 (field (__j-suffix nm "_r") (field-type fd-i) (field-nullable fd-i))
+                 (field nm (field-type fd-i) (field-nullable fd-i)))]
+      (__j-cross-right-fields s left-names ncols (- i 1) (__j-cons fd acc)))))
+
+(defn __j-cross-result [n-l :int n-r :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __join_result {
+    int64_t n; int64_t cap; int64_t *left_ix; int64_t *right_ix;
+  };
+  int64_t n = n_l * n_r;
+  struct __join_result *res = (struct __join_result *)calloc(1, sizeof(*res));
+  if (!res) return 0;
+  res->n = n;
+  res->cap = n > 0 ? n : 1;
+  res->left_ix  = (int64_t *)malloc((size_t)res->cap * sizeof(int64_t));
+  res->right_ix = (int64_t *)malloc((size_t)res->cap * sizeof(int64_t));
+  if (!res->left_ix || !res->right_ix) { free(res->left_ix); free(res->right_ix); free(res); return 0; }
+  int64_t k = 0;
+  for (int64_t i = 0; i < n_l; i++) {
+    for (int64_t j = 0; j < n_r; j++) {
+      res->left_ix[k]  = i;
+      res->right_ix[k] = j;
+      k++;
+    }
+  }
+  return (int64_t)(intptr_t)res;
+  ```)
+
+;;; join -- convenience: same key columns on both sides.
+;;;
+;;; Parameters:
+;;;   l, r  -- frames
+;;;   how   -- :cstr one of "inner", "left", "right", "full", "semi", "anti"
+;;;   keys  -- cons list of :cstr names that appear in both frames
+;;;
+(defn __j-how-tag [s :cstr] :int
+  ```c
+  #include <string.h>
+  #include <stdint.h>
+  const char *p = (const char *)(intptr_t)s;
+  if (!p) return 1;
+  if (strcmp(p, "inner") == 0) return 1;
+  if (strcmp(p, "left")  == 0) return 2;
+  if (strcmp(p, "right") == 0) return 3;
+  if (strcmp(p, "full")  == 0) return 4;
+  if (strcmp(p, "semi")  == 0) return 5;
+  if (strcmp(p, "anti")  == 0) return 6;
+  if (strcmp(p, "cross") == 0) return 7;
+  return 1; /* default to inner on unknown */
+  ```)
+
+;;; Since: FR6
+(defn join [l :int r :int how :cstr keys :int] :int
+  (let [how-tag (__j-how-tag how)]
+    (if (= how-tag 7)
+      (cross-join l r)
+      (let [keep? (and (not= how-tag 5) (not= how-tag 6))]
+        (__j-keyed-join l r keys keys how-tag keep?)))))
+
+) ;; end defmodule frame/join

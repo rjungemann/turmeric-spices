@@ -1,0 +1,866 @@
+;; frame/reshape.tur -- wide<->long transforms.
+;;
+;; v0.1.0 ships `melt` and `pivot`.  `transpose` is tracked under FR7.5b
+;; (waits on a heterogeneous "any" column type).
+
+(defmodule frame/reshape
+  (export melt pivot transpose)
+
+  (import frame/type   :refer [type-utf8 type-any])
+  (import frame/schema :refer [field field-name field-type field-nullable
+                                schema schema-arity schema-field-at
+                                schema-index-of])
+  (import frame/column :refer [column-length column-type column-builder
+                                builder-append-int64 builder-append-float64
+                                builder-append-bool builder-append-utf8
+                                builder-append-null builder-finish
+                                column-int64-at column-float64-at column-bool-at
+                                column-utf8-at column-valid?
+                                column-int32-at column-float32-at
+                                column-any-builder
+                                builder-any-append-int32 builder-any-append-int64
+                                builder-any-append-float64 builder-any-append-bool
+                                builder-any-append-utf8 builder-any-append-null
+                                builder-any-finish])
+  (import frame/frame  :refer [frame frame-nrows frame-ncols frame-schema
+                                frame-column-at])
+
+(defn __rh-nil [] :int ```c return 0; ```)
+
+(defn __rh-cons [v :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+  if (!c) return 0;
+  c->value = v; c->next = n;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+(defn __rh-list-has-cstr? [xs :int needle :cstr] :bool
+  ```c
+  #include <string.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  const char *n = (const char *)(intptr_t)needle;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next) {
+    const char *s = (const char *)(intptr_t)p->value;
+    if (s && strcmp(s, n) == 0) return true;
+  }
+  return false;
+  ```)
+
+(defn __rh-list-length [xs :int] :int
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t n = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next) n++;
+  return n;
+  ```)
+
+(defn __rh-list-nth-int [xs :int i :int] :int
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t k = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next, k++) {
+    if (k == i) return p->value;
+  }
+  return 0;
+  ```)
+
+(defn __rh-clone-field-at [s :int i :int] :int
+  (let [fd (schema-field-at s i)]
+    (field (field-name fd) (field-type fd) (field-nullable fd))))
+
+;; ---------------------------------------------------------------------------
+;; Compute non-id column indices in original column order.
+;; ---------------------------------------------------------------------------
+
+(defn __rh-non-id-ixs [s :int id-names :int ncols :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [fd (schema-field-at s i)
+          nm (field-name fd)]
+      (if (__rh-list-has-cstr? id-names nm)
+        (__rh-non-id-ixs s id-names ncols (- i 1) acc)
+        (__rh-non-id-ixs s id-names ncols (- i 1) (__rh-cons i acc))))))
+
+(defn __rh-id-ixs [s :int id-names :int ncols :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [fd (schema-field-at s i)
+          nm (field-name fd)]
+      (if (__rh-list-has-cstr? id-names nm)
+        (__rh-id-ixs s id-names ncols (- i 1) (__rh-cons i acc))
+        (__rh-id-ixs s id-names ncols (- i 1) acc)))))
+
+;; ---------------------------------------------------------------------------
+;; Per-cell appender: read row r of source column `src` and append to builder
+;; `b` whose type matches src.  Nulls handled.
+;; ---------------------------------------------------------------------------
+
+(defn __rh-append-cell [b :int src :int r :int t :int] :void
+  (if (not (column-valid? src r))
+    (builder-append-null b)
+    (if (= t 2)
+      (builder-append-int64   b (column-int64-at   src r))
+      (if (= t 4)
+        (builder-append-float64 b (column-float64-at src r))
+        (if (= t 5)
+          (builder-append-bool    b (column-bool-at    src r))
+          (if (= t 6)
+            (builder-append-utf8    b (column-utf8-at    src r))
+            (builder-append-null b)))))))
+
+;; ---------------------------------------------------------------------------
+;; Build output columns.
+;; ---------------------------------------------------------------------------
+
+;; For each id column ix, build an output column of length n_out = n_non_id * n_rows
+;; by reading row r%n_rows of src column for row r out.
+(defn __rh-build-id-col [f :int col-ix :int n-rows :int n-non-id :int
+                          out-row :int b :int n-out :int] :int
+  (if (>= out-row n-out)
+    (builder-finish b)
+    (let [r (__rh-mod out-row n-rows)]
+      (do
+        (__rh-append-cell b (frame-column-at f col-ix) r (column-type (frame-column-at f col-ix)))
+        (__rh-build-id-col f col-ix n-rows n-non-id (+ out-row 1) b n-out)))))
+
+(defn __rh-mod [a :int b :int] :int
+  ```c
+  return a % b;
+  ```)
+
+(defn __rh-mul [a :int b :int] :int
+  ```c
+  return a * b;
+  ```)
+
+(defn __rh-div [a :int b :int] :int
+  ```c
+  return a / b;
+  ```)
+
+;; var-name column: outer loop is non-id col, inner loop is original row.
+(defn __rh-build-var-col [f :int non-id-ixs :int n-non-id :int n-rows :int
+                           out-row :int b :int n-out :int] :int
+  (if (>= out-row n-out)
+    (builder-finish b)
+    (let [c-off (__rh-div out-row n-rows)
+          src-ix (__rh-list-nth-int non-id-ixs c-off)
+          nm     (field-name (schema-field-at (frame-schema f) src-ix))]
+      (do
+        (builder-append-utf8 b nm)
+        (__rh-build-var-col f non-id-ixs n-non-id n-rows (+ out-row 1) b n-out)))))
+
+;; value column: outer = non-id col, inner = original row.
+;; All non-id columns must share the same type tag.
+(defn __rh-build-val-col [f :int non-id-ixs :int n-non-id :int n-rows :int
+                           value-type :int out-row :int b :int n-out :int] :int
+  (if (>= out-row n-out)
+    (builder-finish b)
+    (let [c-off  (__rh-div out-row n-rows)
+          r      (__rh-mod out-row n-rows)
+          src-ix (__rh-list-nth-int non-id-ixs c-off)
+          src    (frame-column-at f src-ix)]
+      (do
+        (__rh-append-cell b src r value-type)
+        (__rh-build-val-col f non-id-ixs n-non-id n-rows value-type (+ out-row 1) b n-out)))))
+
+;; ---------------------------------------------------------------------------
+;; Check that all non-id columns share the same type.  Returns the common
+;; type tag, or 0 if non-id-ixs is empty / types differ.
+;; ---------------------------------------------------------------------------
+
+(defn __rh-common-type [f :int non-id-ixs :int n-non-id :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [src-ix (__rh-list-nth-int non-id-ixs i)
+          t      (column-type (frame-column-at f src-ix))]
+      (if (= acc 0)
+        (__rh-common-type f non-id-ixs n-non-id (- i 1) t)
+        (if (not= acc t)
+          -1
+          (__rh-common-type f non-id-ixs n-non-id (- i 1) acc))))))
+
+;; ---------------------------------------------------------------------------
+;; Build output schema fields: id fields + var (utf8) + value (common-type).
+;; ---------------------------------------------------------------------------
+
+(defn __rh-build-id-fields [f :int id-ixs :int n-id :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [src-ix (__rh-list-nth-int id-ixs i)
+          fd-i   (schema-field-at (frame-schema f) src-ix)
+          fd     (field (field-name fd-i) (field-type fd-i) (field-nullable fd-i))]
+      (__rh-build-id-fields f id-ixs n-id (- i 1) (__rh-cons fd acc)))))
+
+(defn __rh-build-id-cols [f :int id-ixs :int n-id :int n-rows :int n-non-id :int
+                           n-out :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [src-ix (__rh-list-nth-int id-ixs i)
+          t      (column-type (frame-column-at f src-ix))
+          b      (column-builder t n-out)
+          col    (__rh-build-id-col f src-ix n-rows n-non-id 0 b n-out)]
+      (__rh-build-id-cols f id-ixs n-id n-rows n-non-id n-out (- i 1)
+                           (__rh-cons col acc)))))
+
+(defn __rh-list-concat [a :int b :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *head = NULL, *tail = NULL;
+  for (struct __cons *p = (struct __cons *)(intptr_t)a; p; p = (struct __cons *)(intptr_t)p->next) {
+    struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+    if (!c) return 0;
+    c->value = p->value; c->next = 0;
+    if (!head) head = c; else tail->next = (int64_t)(intptr_t)c;
+    tail = c;
+  }
+  if (!head) return b;
+  tail->next = b;
+  return (int64_t)(intptr_t)head;
+  ```)
+
+;;; melt -- pivot a wide frame to long format.
+;;;
+;;; Parameters:
+;;;   f          -- :int source frame
+;;;   id-names   -- cons list of :cstr id-column names (stay as-is, replicated)
+;;;   var-name   -- :cstr name of the output column holding original column names
+;;;   value-name -- :cstr name of the output column holding cell values
+;;;
+;;; Returns:
+;;;   :int frame with (n_orig_rows * n_non_id_cols) rows and
+;;;   (n_id + 2) columns: id columns, then var-name (utf8), then value-name.
+;;;
+;;; Non-id columns must share a single type tag; returns 0 otherwise.
+;;;
+;;; Since: FR7
+(defn melt [f :int id-names :int var-name :cstr value-name :cstr] :int
+  (let [s        (frame-schema f)
+        ncols    (frame-ncols f)
+        n-rows   (frame-nrows f)
+        id-ixs   (__rh-id-ixs s id-names ncols (- ncols 1) (__rh-nil))
+        non-ixs  (__rh-non-id-ixs s id-names ncols (- ncols 1) (__rh-nil))
+        n-id     (__rh-list-length id-ixs)
+        n-non-id (__rh-list-length non-ixs)
+        n-out    (__rh-mul n-rows n-non-id)
+        v-type   (__rh-common-type f non-ixs n-non-id (- n-non-id 1) 0)]
+    (if (or (<= n-non-id 0) (= v-type -1))
+      0
+      (let [id-cols  (__rh-build-id-cols f id-ixs n-id n-rows n-non-id n-out
+                                          (- n-id 1) (__rh-nil))
+            var-b    (column-builder (type-utf8) n-out)
+            var-col  (__rh-build-var-col f non-ixs n-non-id n-rows 0 var-b n-out)
+            val-b    (column-builder v-type n-out)
+            val-col  (__rh-build-val-col f non-ixs n-non-id n-rows v-type 0 val-b n-out)
+            id-flds  (__rh-build-id-fields f id-ixs n-id (- n-id 1) (__rh-nil))
+            var-fld  (field var-name (type-utf8) 0)
+            val-fld  (field value-name v-type 0)
+            tail-cols   (__rh-cons var-col (__rh-cons val-col (__rh-nil)))
+            tail-fields (__rh-cons var-fld (__rh-cons val-fld (__rh-nil)))
+            all-cols    (__rh-list-concat id-cols tail-cols)
+            all-fields  (__rh-list-concat id-flds tail-fields)]
+        (frame (schema all-fields) all-cols)))))
+
+;; ---------------------------------------------------------------------------
+;; FR7.5a -- pivot.
+;;
+;; Algorithm:
+;;   1. Scan source rows.  Hash the index-col tuple and the key-col cell to
+;;      assign each row a (gid_idx, gid_key) pair.  This builds:
+;;        - unique_idx_src[i] = source row that first introduced idx tuple i
+;;        - unique_key_src[j] = source row that first introduced key value j
+;;        - cell_to_src[i, j] = source row whose (idx, key) is (i, j), or -1
+;;   2. If two source rows share the same (idx, key), set is_duplicate = 1.
+;;   3. Build output frame:
+;;        - index columns: __so-take of each source index col, perm =
+;;          unique_idx_src
+;;        - one column per unique key value, length = n_unique_idx, cells
+;;          read from f[value-col][cell_to_src[i, j]] or null when -1
+;;   4. Column names for the pivoted columns come from stringifying the key
+;;      cell at unique_key_src[j].
+;; ---------------------------------------------------------------------------
+
+;;; __pv-build -- run the hashing pass.  Returns an opaque __pv_result handle
+;;; (or 0 on OOM).  Caller must release via __pv-free.  Since: FR7.5a
+(defn __pv-build [f :int index-col-ixs :int n-idx-cols :int
+                  key-col-ix :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __frame_frame {
+    int64_t schema; int64_t n_cols; int64_t n_rows; int64_t *columns;
+  };
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __pv_result {
+    int64_t n_out_rows;
+    int64_t n_out_cols;
+    int64_t *cell_to_src;
+    int64_t *unique_idx_src;
+    int64_t *unique_key_src;
+    int      is_duplicate;
+  };
+
+  struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)f;
+  int64_t n_rows = fr->n_rows;
+
+  /* Flatten index column indices. */
+  int64_t *idx_cols = (int64_t *)malloc((size_t)(n_idx_cols > 0 ? n_idx_cols : 1) * sizeof(int64_t));
+  if (!idx_cols) return 0;
+  {
+    struct __cons *p = (struct __cons *)(intptr_t)index_col_ixs;
+    for (int64_t k = 0; k < n_idx_cols; k++) {
+      idx_cols[k] = p->value;
+      p = (struct __cons *)(intptr_t)p->next;
+    }
+  }
+
+  /* FNV-1a row hash over a list of columns.  Output: 64-bit hash. */
+  #define HASH_TUPLE(_cols, _n_cols, _row, _out) do {                            \
+    uint64_t _h = 0xcbf29ce484222325ULL;                                          \
+    for (int64_t _k = 0; _k < (_n_cols); _k++) {                                  \
+      struct __frame_col *_c = (struct __frame_col *)(intptr_t)fr->columns[(_cols)[_k]]; \
+      int _v = 1;                                                                 \
+      if (_c->validity) _v = ((((unsigned char *)_c->validity)[(_row)>>3]>>((_row)&7))&1); \
+      _h = (_h ^ (uint64_t)_v) * 0x100000001b3ULL;                                 \
+      if (_v) {                                                                    \
+        switch ((int)_c->type_tag) {                                               \
+          case 7: \
+          case 1: { int32_t x = ((int32_t *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<4;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 8: \
+          case 2: { int64_t x = ((int64_t *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<8;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 3: { float   x = ((float   *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<4;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 4: { double  x = ((double  *)_c->values)[_row]; unsigned char *bp=(unsigned char *)&x; for (int _b=0;_b<8;_b++) _h=(_h^bp[_b])*0x100000001b3ULL; } break; \
+          case 5: { int _b = ((((unsigned char *)_c->values)[(_row)>>3]>>((_row)&7))&1); _h=(_h^(uint64_t)_b)*0x100000001b3ULL; } break; \
+          case 6: { int32_t *_o=(int32_t *)_c->offsets; int32_t _lo=_o[_row], _hi=_o[_row+1]; for (int32_t _b=_lo;_b<_hi;_b++) _h=(_h^(uint64_t)(unsigned char)((char *)_c->values)[_b])*0x100000001b3ULL; } break; \
+        }                                                                          \
+      }                                                                            \
+    }                                                                              \
+    (_out) = _h;                                                                   \
+  } while (0)
+
+  /* Equality of tuples from two rows. */
+  #define TUPLES_EQ(_cols, _n_cols, _ra, _rb, _out) do {                          \
+    int _eq = 1;                                                                   \
+    for (int64_t _k = 0; _k < (_n_cols); _k++) {                                   \
+      struct __frame_col *_c = (struct __frame_col *)(intptr_t)fr->columns[(_cols)[_k]]; \
+      int _va = 1, _vb = 1;                                                        \
+      if (_c->validity) {                                                          \
+        _va = ((((unsigned char *)_c->validity)[(_ra)>>3]>>((_ra)&7))&1);           \
+        _vb = ((((unsigned char *)_c->validity)[(_rb)>>3]>>((_rb)&7))&1);           \
+      }                                                                            \
+      if (_va != _vb) { _eq = 0; break; }                                          \
+      if (!_va) continue;                                                          \
+      switch ((int)_c->type_tag) {                                                 \
+        case 7: \
+        case 1: if (((int32_t *)_c->values)[_ra] != ((int32_t *)_c->values)[_rb]) _eq = 0; break; \
+        case 8: \
+        case 2: if (((int64_t *)_c->values)[_ra] != ((int64_t *)_c->values)[_rb]) _eq = 0; break; \
+        case 3: if (((float   *)_c->values)[_ra] != ((float   *)_c->values)[_rb]) _eq = 0; break; \
+        case 4: if (((double  *)_c->values)[_ra] != ((double  *)_c->values)[_rb]) _eq = 0; break; \
+        case 5: { int _ba = ((((unsigned char *)_c->values)[(_ra)>>3]>>((_ra)&7))&1); int _bb = ((((unsigned char *)_c->values)[(_rb)>>3]>>((_rb)&7))&1); if (_ba != _bb) _eq = 0; } break; \
+        case 6: { int32_t *_o=(int32_t *)_c->offsets; int32_t _la=_o[(_ra)+1]-_o[(_ra)]; int32_t _lb=_o[(_rb)+1]-_o[(_rb)]; if (_la != _lb) _eq = 0; else if (_la > 0 && memcmp((char *)_c->values + _o[(_ra)], (char *)_c->values + _o[(_rb)], (size_t)_la) != 0) _eq = 0; } break; \
+      }                                                                            \
+      if (!_eq) break;                                                             \
+    }                                                                              \
+    (_out) = _eq;                                                                  \
+  } while (0)
+
+  /* Open-addressed hash table.  Each slot stores (row_index + 1, id), where
+     row_index is the FIRST source row that introduced this tuple's id (so we
+     can compare via TUPLES_EQ).  Slot 0 = empty. */
+
+  int64_t cap = 16;
+  while (cap < 2 * n_rows) cap <<= 1;
+  int64_t mask = cap - 1;
+
+  int64_t *idx_slot_rowp1 = (int64_t *)calloc((size_t)cap, sizeof(int64_t));
+  int64_t *idx_slot_id    = (int64_t *)calloc((size_t)cap, sizeof(int64_t));
+  int64_t *key_slot_rowp1 = (int64_t *)calloc((size_t)cap, sizeof(int64_t));
+  int64_t *key_slot_id    = (int64_t *)calloc((size_t)cap, sizeof(int64_t));
+  if (!idx_slot_rowp1 || !idx_slot_id || !key_slot_rowp1 || !key_slot_id) {
+    free(idx_slot_rowp1); free(idx_slot_id); free(key_slot_rowp1); free(key_slot_id);
+    free(idx_cols); return 0;
+  }
+
+  int64_t *gid_idx = (int64_t *)malloc((size_t)(n_rows > 0 ? n_rows : 1) * sizeof(int64_t));
+  int64_t *gid_key = (int64_t *)malloc((size_t)(n_rows > 0 ? n_rows : 1) * sizeof(int64_t));
+  if (!gid_idx || !gid_key) {
+    free(idx_slot_rowp1); free(idx_slot_id); free(key_slot_rowp1); free(key_slot_id);
+    free(gid_idx); free(gid_key); free(idx_cols); return 0;
+  }
+
+  int64_t unique_idx_cap = 16;
+  int64_t unique_key_cap = 16;
+  int64_t n_unique_idx = 0;
+  int64_t n_unique_key = 0;
+  int64_t *unique_idx_src = (int64_t *)malloc((size_t)unique_idx_cap * sizeof(int64_t));
+  int64_t *unique_key_src = (int64_t *)malloc((size_t)unique_key_cap * sizeof(int64_t));
+  if (!unique_idx_src || !unique_key_src) {
+    free(idx_slot_rowp1); free(idx_slot_id); free(key_slot_rowp1); free(key_slot_id);
+    free(gid_idx); free(gid_key); free(unique_idx_src); free(unique_key_src); free(idx_cols);
+    return 0;
+  }
+
+  int64_t key_cols[1]; key_cols[0] = key_col_ix;
+
+  /* First pass: hash index tuples and key cells; record gid_idx[r] and gid_key[r]. */
+  for (int64_t r = 0; r < n_rows; r++) {
+    uint64_t h;
+
+    /* Index tuple. */
+    HASH_TUPLE(idx_cols, n_idx_cols, r, h);
+    int64_t slot = (int64_t)(h & (uint64_t)mask);
+    while (1) {
+      if (idx_slot_rowp1[slot] == 0) {
+        /* Empty -- insert. */
+        int64_t id = n_unique_idx;
+        idx_slot_rowp1[slot] = r + 1;
+        idx_slot_id[slot]    = id;
+        if (n_unique_idx >= unique_idx_cap) {
+          unique_idx_cap *= 2;
+          unique_idx_src = (int64_t *)realloc(unique_idx_src, (size_t)unique_idx_cap * sizeof(int64_t));
+        }
+        unique_idx_src[id] = r;
+        n_unique_idx++;
+        gid_idx[r] = id;
+        break;
+      } else {
+        int64_t other = idx_slot_rowp1[slot] - 1;
+        int eq;
+        TUPLES_EQ(idx_cols, n_idx_cols, r, other, eq);
+        if (eq) { gid_idx[r] = idx_slot_id[slot]; break; }
+        slot = (slot + 1) & mask;
+      }
+    }
+
+    /* Key cell. */
+    HASH_TUPLE(key_cols, 1, r, h);
+    slot = (int64_t)(h & (uint64_t)mask);
+    while (1) {
+      if (key_slot_rowp1[slot] == 0) {
+        int64_t id = n_unique_key;
+        key_slot_rowp1[slot] = r + 1;
+        key_slot_id[slot]    = id;
+        if (n_unique_key >= unique_key_cap) {
+          unique_key_cap *= 2;
+          unique_key_src = (int64_t *)realloc(unique_key_src, (size_t)unique_key_cap * sizeof(int64_t));
+        }
+        unique_key_src[id] = r;
+        n_unique_key++;
+        gid_key[r] = id;
+        break;
+      } else {
+        int64_t other = key_slot_rowp1[slot] - 1;
+        int eq;
+        TUPLES_EQ(key_cols, 1, r, other, eq);
+        if (eq) { gid_key[r] = key_slot_id[slot]; break; }
+        slot = (slot + 1) & mask;
+      }
+    }
+  }
+
+  free(idx_slot_rowp1); free(idx_slot_id); free(key_slot_rowp1); free(key_slot_id);
+  #undef TUPLES_EQ
+  #undef HASH_TUPLE
+
+  /* Allocate cell_to_src and populate; detect duplicates. */
+  int64_t total = n_unique_idx * n_unique_key;
+  int64_t *cell_to_src = (int64_t *)malloc((size_t)(total > 0 ? total : 1) * sizeof(int64_t));
+  if (!cell_to_src) {
+    free(gid_idx); free(gid_key); free(unique_idx_src); free(unique_key_src); free(idx_cols);
+    return 0;
+  }
+  for (int64_t i = 0; i < total; i++) cell_to_src[i] = -1;
+
+  int is_duplicate = 0;
+  for (int64_t r = 0; r < n_rows; r++) {
+    int64_t pos = gid_idx[r] * n_unique_key + gid_key[r];
+    if (cell_to_src[pos] != -1) { is_duplicate = 1; break; }
+    cell_to_src[pos] = r;
+  }
+
+  free(gid_idx); free(gid_key); free(idx_cols);
+
+  struct __pv_result *res = (struct __pv_result *)malloc(sizeof(*res));
+  if (!res) {
+    free(cell_to_src); free(unique_idx_src); free(unique_key_src);
+    return 0;
+  }
+  res->n_out_rows = n_unique_idx;
+  res->n_out_cols = n_unique_key;
+  res->cell_to_src = cell_to_src;
+  res->unique_idx_src = unique_idx_src;
+  res->unique_key_src = unique_key_src;
+  res->is_duplicate = is_duplicate;
+  return (int64_t)(intptr_t)res;
+  ```)
+
+(defn __pv-n-out-rows [res :int] :int
+  ```c
+  #include <stdint.h>
+  struct __pv_result { int64_t n_out_rows; int64_t n_out_cols; int64_t *c; int64_t *ui; int64_t *uk; int dup; };
+  return ((struct __pv_result *)(intptr_t)res)->n_out_rows;
+  ```)
+
+(defn __pv-n-out-cols [res :int] :int
+  ```c
+  #include <stdint.h>
+  struct __pv_result { int64_t n_out_rows; int64_t n_out_cols; int64_t *c; int64_t *ui; int64_t *uk; int dup; };
+  return ((struct __pv_result *)(intptr_t)res)->n_out_cols;
+  ```)
+
+(defn __pv-cell-at [res :int i :int j :int] :int
+  ```c
+  #include <stdint.h>
+  struct __pv_result { int64_t n_out_rows; int64_t n_out_cols; int64_t *c; int64_t *ui; int64_t *uk; int dup; };
+  struct __pv_result *r = (struct __pv_result *)(intptr_t)res;
+  return r->c[i * r->n_out_cols + j];
+  ```)
+
+(defn __pv-uidx-at [res :int i :int] :int
+  ```c
+  #include <stdint.h>
+  struct __pv_result { int64_t n_out_rows; int64_t n_out_cols; int64_t *c; int64_t *ui; int64_t *uk; int dup; };
+  return ((struct __pv_result *)(intptr_t)res)->ui[i];
+  ```)
+
+(defn __pv-ukey-at [res :int j :int] :int
+  ```c
+  #include <stdint.h>
+  struct __pv_result { int64_t n_out_rows; int64_t n_out_cols; int64_t *c; int64_t *ui; int64_t *uk; int dup; };
+  return ((struct __pv_result *)(intptr_t)res)->uk[j];
+  ```)
+
+(defn __pv-was-duplicate? [res :int] :bool
+  ```c
+  #include <stdint.h>
+  struct __pv_result { int64_t n_out_rows; int64_t n_out_cols; int64_t *c; int64_t *ui; int64_t *uk; int dup; };
+  return ((struct __pv_result *)(intptr_t)res)->dup ? true : false;
+  ```)
+
+(defn __pv-free [res :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  struct __pv_result { int64_t n_out_rows; int64_t n_out_cols; int64_t *c; int64_t *ui; int64_t *uk; int dup; };
+  if (!res) return;
+  struct __pv_result *r = (struct __pv_result *)(intptr_t)res;
+  free(r->c); free(r->ui); free(r->uk); free(r);
+  ```)
+
+;;; __pv-cell-to-cstr -- stringify one cell of a column into a malloc'd cstr
+;;; (caller frees).  Used to name pivot output columns.  Since: FR7.5a
+(defn __pv-cell-to-cstr [col :int row :int] :cstr
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  char buf[64];
+  int valid = 1;
+  if (c->validity) valid = ((((unsigned char *)c->validity)[row >> 3] >> (row & 7)) & 1);
+  if (!valid) {
+    char *out = (char *)malloc(3); strcpy(out, "NA"); return (const char *)(intptr_t)out;
+  }
+  switch ((int)c->type_tag) {
+    case 7:
+    case 1: { snprintf(buf, sizeof(buf), "%ld", (long)((int32_t *)c->values)[row]); break; }
+    case 8:
+    case 2: { snprintf(buf, sizeof(buf), "%lld", (long long)((int64_t *)c->values)[row]); break; }
+    case 3: { snprintf(buf, sizeof(buf), "%g", (double)((float   *)c->values)[row]); break; }
+    case 4: { snprintf(buf, sizeof(buf), "%g",         ((double  *)c->values)[row]); break; }
+    case 5: { unsigned char *b = (unsigned char *)c->values; int bit = (b[row >> 3] >> (row & 7)) & 1; snprintf(buf, sizeof(buf), "%s", bit ? "true" : "false"); break; }
+    case 6: {
+      int32_t *o = (int32_t *)c->offsets;
+      int32_t lo = o[row], hi = o[row + 1], slen = hi - lo;
+      char *out = (char *)malloc((size_t)slen + 1);
+      if (slen > 0) memcpy(out, (char *)c->values + lo, (size_t)slen);
+      out[slen] = '\0';
+      return (const char *)(intptr_t)out;
+    }
+    default: { snprintf(buf, sizeof(buf), "?"); break; }
+  }
+  size_t blen = strlen(buf);
+  char *out = (char *)malloc(blen + 1);
+  memcpy(out, buf, blen + 1);
+  return (const char *)(intptr_t)out;
+  ```)
+
+;;; __pv-append-cell -- append the cell from `src` at row r to builder b,
+;;; dispatching on type tag.  Append-null if src is null at r OR if r == -1.
+(defn __pv-append-cell [b :int src :int r :int t :int] :void
+  (if (< r 0)
+    (builder-append-null b)
+    (if (not (column-valid? src r))
+      (builder-append-null b)
+      (if (= t 1)
+        (builder-append-int64   b (column-int32-at   src r))
+        (if (= t 2)
+          (builder-append-int64   b (column-int64-at   src r))
+          (if (= t 3)
+            (builder-append-float64 b (column-float32-at src r))
+            (if (= t 4)
+              (builder-append-float64 b (column-float64-at src r))
+              (if (= t 5)
+                (builder-append-bool    b (column-bool-at    src r))
+                (if (= t 6)
+                  (builder-append-utf8    b (column-utf8-at    src r))
+                  (builder-append-null b))))))))))
+
+;; Build one pivoted column for output position j.  Length = n-out-rows;
+;; cells from f[value-col][cell_to_src[i*n_out_cols + j]] or null when -1.
+(defn __pv-build-value-col [res :int value-col :int value-type :int
+                             n-out :int j :int i :int b :int] :int
+  (if (>= i n-out)
+    (builder-finish b)
+    (let [src-row (__pv-cell-at res i j)]
+      (do
+        (__pv-append-cell b value-col src-row value-type)
+        (__pv-build-value-col res value-col value-type n-out j (+ i 1) b)))))
+
+;; Build one index column (take from src index col at rows unique_idx_src).
+(defn __pv-build-idx-col [res :int src :int t :int n-out :int i :int b :int] :int
+  (if (>= i n-out)
+    (builder-finish b)
+    (let [src-row (__pv-uidx-at res i)]
+      (do
+        (__pv-append-cell b src src-row t)
+        (__pv-build-idx-col res src t n-out (+ i 1) b)))))
+
+;; Build cons list of index output columns (one per index column).
+(defn __pv-make-idx-cols [f :int index-ixs :int n-idx :int res :int n-out :int
+                          i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [src-ix (__rh-list-nth-int index-ixs i)
+          src    (frame-column-at f src-ix)
+          t      (column-type src)
+          b      (column-builder t n-out)
+          col    (__pv-build-idx-col res src t n-out 0 b)]
+      (__pv-make-idx-cols f index-ixs n-idx res n-out (- i 1) (__rh-cons col acc)))))
+
+;; Build cons list of pivoted value columns (one per unique key).
+(defn __pv-make-value-cols [res :int value-col :int value-type :int
+                             n-out :int n-cols :int j :int acc :int] :int
+  (if (< j 0)
+    acc
+    (let [b   (column-builder value-type n-out)
+          col (__pv-build-value-col res value-col value-type n-out j 0 b)]
+      (__pv-make-value-cols res value-col value-type n-out n-cols (- j 1)
+                            (__rh-cons col acc)))))
+
+;; Build cons list of index field definitions (deep-copied from source schema).
+(defn __pv-make-idx-fields [s :int index-ixs :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [src-ix (__rh-list-nth-int index-ixs i)
+          fd-i   (schema-field-at s src-ix)
+          fd     (field (field-name fd-i) (field-type fd-i) (field-nullable fd-i))]
+      (__pv-make-idx-fields s index-ixs (- i 1) (__rh-cons fd acc)))))
+
+;; Build cons list of pivoted-column fields (name = stringified key, type = value-type).
+(defn __pv-make-value-fields [res :int key-col :int value-type :int
+                               n-cols :int j :int acc :int] :int
+  (if (< j 0)
+    acc
+    (let [key-row (__pv-ukey-at res j)
+          nm      (__pv-cell-to-cstr key-col key-row)
+          fd      (field nm value-type 0)]
+      (__pv-make-value-fields res key-col value-type n-cols (- j 1)
+                              (__rh-cons fd acc)))))
+
+(defn __pv-name-at [xs :int i :int] :cstr
+  ```c
+  #include <stdint.h>
+  struct __cons { int64_t value; int64_t next; };
+  int64_t k = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)xs; p; p = (struct __cons *)(intptr_t)p->next, k++) {
+    if (k == i) return (const char *)(intptr_t)p->value;
+  }
+  return (const char *)(intptr_t)"";
+  ```)
+
+;; Resolve cons list of cstr names to a cons list of column indices.  Returns
+;; -1 if any name is missing from the source schema.
+(defn __pv-names-to-ixs [s :int names :int i :int acc :int] :int
+  (if (< i 0)
+    acc
+    (let [nm (__pv-name-at names i)
+          ix (schema-index-of s nm)]
+      (if (< ix 0)
+        -1
+        (__pv-names-to-ixs s names (- i 1) (__rh-cons ix acc))))))
+
+;;; pivot -- long-format to wide-format reshape.
+;;;
+;;; Parameters:
+;;;   f          -- :int source frame
+;;;   index-cols -- cons list of :cstr names that identify each output row
+;;;   key-col    -- :cstr name of the column whose distinct values become new column names
+;;;   value-col  -- :cstr name of the column whose cells populate the new columns
+;;;
+;;; Returns:
+;;;   :int new frame, or 0 on error:
+;;;        - any name missing from f
+;;;        - any (index-tuple, key) duplicated in f
+;;;
+;;; Output schema:
+;;;   index columns first (cloned types), then one column per unique key value.
+;;;   Pivoted columns are named by stringifying the corresponding key value
+;;;   (e.g. an int key 42 becomes column "42").
+;;;
+;;; Missing (index, key) combinations become null cells.
+;;; Output row order matches first-occurrence order of index tuples in `f`.
+;;; Output column order matches first-occurrence order of key values in `f`.
+;;;
+;;; Since: FR7.5a
+(defn pivot [f :int index-cols :int key-col :cstr value-col :cstr] :int
+  (let [s         (frame-schema f)
+        n-idx     (__rh-list-length index-cols)
+        idx-ixs   (__pv-names-to-ixs s index-cols (- n-idx 1) (__rh-nil))
+        key-ix    (schema-index-of s key-col)
+        value-ix  (schema-index-of s value-col)]
+    (if (or (= idx-ixs -1) (or (< key-ix 0) (< value-ix 0)))
+      0
+      (let [res (__pv-build f idx-ixs n-idx key-ix)]
+        (if (__pv-was-duplicate? res)
+          (do (__pv-free res) 0)
+          (let [n-out      (__pv-n-out-rows res)
+                n-pivot    (__pv-n-out-cols res)
+                value-col-handle (frame-column-at f value-ix)
+                key-col-handle   (frame-column-at f key-ix)
+                value-type (column-type value-col-handle)
+                idx-cols   (__pv-make-idx-cols f idx-ixs n-idx res n-out (- n-idx 1) (__rh-nil))
+                idx-flds   (__pv-make-idx-fields s idx-ixs (- n-idx 1) (__rh-nil))
+                val-cols   (__pv-make-value-cols res value-col-handle value-type n-out n-pivot (- n-pivot 1) (__rh-nil))
+                val-flds   (__pv-make-value-fields res key-col-handle value-type n-pivot (- n-pivot 1) (__rh-nil))
+                all-cols   (__rh-list-concat idx-cols val-cols)
+                all-flds   (__rh-list-concat idx-flds val-flds)
+                g          (frame (schema all-flds) all-cols)]
+            (do (__pv-free res) g)))))))
+
+;; ---------------------------------------------------------------------------
+;; FR7.5b -- transpose, built on the heterogeneous "any" column.
+;;
+;; Output shape:
+;;   - First output column: `new-key-col-name` (utf8) holds the original
+;;     column names; one row per original column.
+;;   - Remaining N output columns: typed "any"; named `row_0..row_{N-1}` where
+;;     N = frame-nrows(f).  Output column k holds, for each original column m,
+;;     the cell that was at original_columns[m][k] -- with its original Arrow
+;;     type tag preserved per cell.
+;; ---------------------------------------------------------------------------
+
+;; Append the cell at (col=src, row=k) into the any-builder `b`, dispatching
+;; on the original column's type tag.
+(defn __ts-append-any [b :int src :int k :int t :int] :void
+  (if (not (column-valid? src k))
+    (builder-any-append-null b)
+    (if (= t 1)
+      (builder-any-append-int32   b (column-int32-at   src k))
+      (if (= t 2)
+        (builder-any-append-int64   b (column-int64-at   src k))
+        (if (= t 3)
+          (builder-any-append-float64 b (column-float32-at src k))
+          (if (= t 4)
+            (builder-any-append-float64 b (column-float64-at src k))
+            (if (= t 5)
+              (builder-any-append-bool    b (column-bool-at    src k))
+              (if (= t 6)
+                (builder-any-append-utf8    b (column-utf8-at    src k))
+                (builder-any-append-null b)))))))))
+
+;; Fill one output any-column for "row index" k: for each original column m,
+;; append the value at (m, k).
+(defn __ts-fill-any-col [f :int ncols :int k :int m :int b :int] :int
+  (if (>= m ncols)
+    (builder-any-finish b)
+    (let [src (frame-column-at f m)
+          t   (column-type src)]
+      (do
+        (__ts-append-any b src k t)
+        (__ts-fill-any-col f ncols k (+ m 1) b)))))
+
+;; Build the first output column (the new key column with original names).
+(defn __ts-fill-key-col [f :int ncols :int m :int b :int] :int
+  (if (>= m ncols)
+    (builder-finish b)
+    (let [nm (field-name (schema-field-at (frame-schema f) m))]
+      (do
+        (builder-append-utf8 b nm)
+        (__ts-fill-key-col f ncols (+ m 1) b)))))
+
+;; Cons list of any-typed value columns: one per original row.
+(defn __ts-build-value-cols [f :int ncols :int nrows :int k :int acc :int] :int
+  (if (< k 0)
+    acc
+    (let [b   (column-any-builder ncols)
+          col (__ts-fill-any-col f ncols k 0 b)]
+      (__ts-build-value-cols f ncols nrows (- k 1) (__rh-cons col acc)))))
+
+(defn __ts-int-to-cstr [n :int] :cstr
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <stdint.h>
+  char *out = (char *)malloc(32);
+  if (!out) return (const char *)(intptr_t)"";
+  snprintf(out, 32, "row_%lld", (long long)n);
+  return (const char *)(intptr_t)out;
+  ```)
+
+;; Cons list of fields: row_0..row_{nrows-1} each typed any.
+(defn __ts-build-value-fields [nrows :int k :int acc :int] :int
+  (if (< k 0)
+    acc
+    (let [nm (__ts-int-to-cstr k)
+          fd (field nm (type-any) 0)]
+      (__ts-build-value-fields nrows (- k 1) (__rh-cons fd acc)))))
+
+;;; transpose -- swap rows and columns.  All cell values are preserved with
+;;; their original Arrow type tags via the heterogeneous "any" column.
+;;;
+;;; Parameters:
+;;;   f                -- :int source frame
+;;;   new-key-col-name -- :cstr name for the first output column (which holds
+;;;                       the original column names; one row per original col)
+;;;
+;;; Returns:
+;;;   :int new frame.  Output has frame-ncols(f) rows and frame-nrows(f)+1
+;;;   columns.  The first column is utf8; the rest are `any`.
+;;;
+;;; Since: FR7.5b
+(defn transpose [f :int new-key-col-name :cstr] :int
+  (let [nrows  (frame-nrows f)
+        ncols  (frame-ncols f)
+        ;; key column: one utf8 cell per original column name; length = ncols.
+        key-b  (column-builder (type-utf8) ncols)
+        key-c  (__ts-fill-key-col f ncols 0 key-b)
+        key-f  (field new-key-col-name (type-utf8) 0)
+        ;; value columns: nrows of them, each "any"-typed with ncols rows.
+        v-cols (__ts-build-value-cols f ncols nrows (- nrows 1) (__rh-nil))
+        v-flds (__ts-build-value-fields nrows (- nrows 1) (__rh-nil))
+        all-cols (__rh-cons key-c v-cols)
+        all-flds (__rh-cons key-f v-flds)]
+    (frame (schema all-flds) all-cols)))
+
+) ;; end defmodule frame/reshape
