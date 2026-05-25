@@ -2,7 +2,7 @@
 ;;
 ;; Pipeline: source -> tokenize -> parse -> expand-all -> generate-all -> sclang
 ;;
-;; compile-text returns result<:cstr> (ok = sclang text, err = error message).
+;; compile-text returns result<:cstr> (lex-ok = sclang text, lex-err = error message).
 ;; compile-file reads the file and delegates to compile-text.
 
 ;; ---- file I/O helper ----
@@ -35,28 +35,28 @@
 ;;;   source -- NUL-terminated scscm source string
 ;;;
 ;;; Returns:
-;;;   ok(sclang-text :cstr) on success.
-;;;   err(message-int :int) on lexer/parser error (cast :int to :cstr for message).
+;;;   lex-ok(sclang-text :cstr) on success.
+;;;   lex-err(message-int :int) on lexer/parser error (cast :int to :cstr for message).
 ;;;
 ;;; Example:
 ;;;   (let [r (compile-text "(+ 1 2)")]
-;;;     (if (ok? r) (ok-val r) "error"))
+;;;     (if (lex-ok? r) (lex-ok-val r) "error"))
 ;;;
 ;;; Since: SC4
 (defn compile-text [source :cstr] #{Unsafe} :ptr<void>
   (let [lex-res (tokenize source)]
-    (if (err? lex-res)
+    (if (lex-err? lex-res)
       lex-res
-      (let [tokens   (ok-val lex-res)
+      (let [tokens   (lex-ok-val lex-res)
             parse-res (parse tokens)]
         (tokens-free tokens)
-        (if (err? parse-res)
+        (if (lex-err? parse-res)
           parse-res
-          (let [ast-list  (ok-val parse-res)
+          (let [ast-list  (lex-ok-val parse-res)
                 expanded  (expand-all ast-list)
                 sclang    (generate-all expanded)]
             (ast-free-all ast-list)
-            (ok (scscm-cstr-as-int sclang))))))))
+            (lex-ok (scscm-cstr-as-int sclang))))))))
 
 ;;; compile-file -- read a file and compile its scscm content to sclang.
 ;;;
@@ -64,18 +64,18 @@
 ;;;   path -- NUL-terminated filesystem path to a .tur or .scscm file
 ;;;
 ;;; Returns:
-;;;   ok(sclang-text :cstr) on success.
-;;;   err(message-int :int) on I/O or compile error.
+;;;   lex-ok(sclang-text :cstr) on success.
+;;;   lex-err(message-int :int) on I/O or compile error.
 ;;;
 ;;; Example:
 ;;;   (let [r (compile-file "my-synth.scscm")]
-;;;     (if (ok? r) (ok-val r) "error"))
+;;;     (if (lex-ok? r) (lex-ok-val r) "error"))
 ;;;
 ;;; Since: SC4
 (defn compile-file [path :cstr] #{Unsafe} :ptr<void>
   (let [buf (scscm-read-file path)]
     (if (= buf 0)
-      (err 0)
+      (lex-err 0)
       (let [src (scscm-int-as-cstr buf)]
         (compile-text src)))))
 

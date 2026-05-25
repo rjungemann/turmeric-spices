@@ -259,19 +259,19 @@
 ;; ---- recursive descent parser ----
 
 ;; Parse items into node until closing token type close-ttyp is seen.
-;; Returns ok(cons(node remaining)) or err.
+;; Returns lex-ok(cons(node remaining)) or lex-err.
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
 (defn scscm-parse-list-body [tokens :int node :int close-ttyp :cstr] #{Unsafe} :ptr<void>
   (if (list-nil? tokens)
-    (err 2)
+    (lex-err 2)
     (let [tok   (head tokens)
           ttyp  (token-type tok)]
       (if (scscm-cstr-eq? ttyp close-ttyp)
-        (ok (cons node (tail tokens)))
+        (lex-ok (cons node (tail tokens)))
         (let [res (scscm-parse-form tokens)]
-          (if (err? res)
+          (if (lex-err? res)
             res
-            (let [pair      (ok-val res)
+            (let [pair      (lex-ok-val res)
                   child     (head pair)
                   remaining (tail pair)]
               (scscm-ast-add-child node child)
@@ -282,49 +282,49 @@
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
 (defn scscm-parse-wrapper [kind :int tokens :int] #{Unsafe} :ptr<void>
   (if (list-nil? tokens)
-    (err 3)
+    (lex-err 3)
     (let [res (scscm-parse-form tokens)]
-      (if (err? res)
+      (if (lex-err? res)
         res
-        (let [pair      (ok-val res)
+        (let [pair      (lex-ok-val res)
               inner     (head pair)
               remaining (tail pair)
               wnode     (scscm-ast-list-node kind)]
           (scscm-ast-add-child wnode inner)
-          (ok (cons wnode remaining)))))))
+          (lex-ok (cons wnode remaining)))))))
 
 ;; Parse all top-level forms, collecting into a cons list (in order).
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
 (defn scscm-parse-all [tokens :int acc :int] #{Unsafe} :ptr<void>
   (if (list-nil? tokens)
-    (ok (scscm-list-rev acc (nil-value)))
+    (lex-ok (scscm-list-rev acc (nil-value)))
     (let [res (scscm-parse-form tokens)]
-      (if (err? res)
+      (if (lex-err? res)
         res
-        (let [pair      (ok-val res)
+        (let [pair      (lex-ok-val res)
               node      (head pair)
               remaining (tail pair)]
           (scscm-parse-all remaining (cons node acc)))))))
 
 ;; parse-form: parse one form from tokens.
-;; Returns ok(cons(node remaining-tokens)) or err(cstr-msg).
+;; Returns lex-ok(cons(node remaining-tokens)) or lex-err(cstr-msg).
 ;; scscm-parse-list-body and scscm-parse-wrapper are defined above.
 (defn scscm-parse-form [tokens :int] #{Unsafe} :ptr<void>
   (if (list-nil? tokens)
-    (err 0)
+    (lex-err 0)
     (let [tok  (head tokens)
           ttyp (token-type tok)
           rest (tail tokens)]
       (if (scscm-cstr-eq? ttyp ":atom")
-        (ok (cons (scscm-ast-leaf 0 (token-value tok)) rest))
+        (lex-ok (cons (scscm-ast-leaf 0 (token-value tok)) rest))
         (if (scscm-cstr-eq? ttyp ":symbol")
-          (ok (cons (scscm-ast-leaf 1 (token-value tok)) rest))
+          (lex-ok (cons (scscm-ast-leaf 1 (token-value tok)) rest))
           (if (scscm-cstr-eq? ttyp ":keyword")
-            (ok (cons (scscm-ast-leaf 2 (token-value tok)) rest))
+            (lex-ok (cons (scscm-ast-leaf 2 (token-value tok)) rest))
             (if (scscm-cstr-eq? ttyp ":number")
-              (ok (cons (scscm-ast-leaf 3 (token-value tok)) rest))
+              (lex-ok (cons (scscm-ast-leaf 3 (token-value tok)) rest))
               (if (scscm-cstr-eq? ttyp ":string")
-                (ok (cons (scscm-ast-leaf 4 (token-value tok)) rest))
+                (lex-ok (cons (scscm-ast-leaf 4 (token-value tok)) rest))
                 (if (scscm-cstr-eq? ttyp ":lparen")
                   (scscm-parse-list-body rest (scscm-ast-list-node 5) ":rparen")
                   (if (scscm-cstr-eq? ttyp ":lbracket")
@@ -339,7 +339,7 @@
                             (scscm-parse-wrapper 9 rest)
                             (if (scscm-cstr-eq? ttyp ":unquote-splice")
                               (scscm-parse-wrapper 10 rest)
-                              (err 1))))))))))))))))
+                              (lex-err 1))))))))))))))))
 
 
 ;;; parse -- parse a token cons list into a cons list of top-level AST nodes.
@@ -348,12 +348,12 @@
 ;;;   tokens -- cons list of token handles returned by tokenize
 ;;;
 ;;; Returns:
-;;;   ok(nodes :int) where nodes is a cons list of AST node handles.
-;;;   err(msg-int :int) on parse error (msg-int is a :cstr cast to :int).
+;;;   lex-ok(nodes :int) where nodes is a cons list of AST node handles.
+;;;   lex-err(msg-int :int) on parse error (msg-int is a :cstr cast to :int).
 ;;;
 ;;; Example:
 ;;;   (let [r (tokenize "(+ 1 2)")]
-;;;     (if (ok? r) (parse (ok-val r)) (err-val r)))
+;;;     (if (lex-ok? r) (parse (lex-ok-val r)) (lex-err-val r)))
 ;;;
 ;;; Since: SC1
 (defn parse [tokens :int] #{Unsafe} :ptr<void>
