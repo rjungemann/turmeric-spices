@@ -15,7 +15,7 @@ batch-process audio offline.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "wav" {:url    "https://github.com/rjungemann/turmeric-spices"
          :ref    "wav-v0.1.0"

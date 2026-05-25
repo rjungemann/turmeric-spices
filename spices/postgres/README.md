@@ -15,7 +15,7 @@ that react to row changes without polling.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "postgres" {:url    "https://github.com/rjungemann/turmeric-spices"
               :ref    "postgres-v0.1.0"

@@ -17,7 +17,7 @@ to the rasterized result.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "plutovg" {:url    "https://github.com/rjungemann/turmeric-spices"
              :ref    "plutovg-v0.1.0"

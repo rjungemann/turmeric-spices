@@ -17,7 +17,7 @@ use `tur-plutovg`; `tur-png` is the I/O layer.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "png" {:url    "https://github.com/rjungemann/turmeric-spices"
          :ref    "png-v0.1.0"

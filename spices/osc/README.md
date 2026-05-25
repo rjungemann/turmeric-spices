@@ -16,7 +16,7 @@ Pairs naturally with `tur-scscm` for SuperCollider synthesis.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "osc" {:url    "https://github.com/rjungemann/turmeric-spices"
          :ref    "osc-v0.1.0"

@@ -17,7 +17,7 @@ in Turmeric services.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "valkey" {:url    "https://github.com/rjungemann/turmeric-spices"
             :ref    "valkey-v0.1.0"

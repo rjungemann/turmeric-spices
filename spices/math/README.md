@@ -15,7 +15,7 @@ used alongside `tur-opengl`, `tur-raylib`, and the GLSL DSL without surprises.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "math" {:url    "https://github.com/rjungemann/turmeric-spices"
           :ref    "math-v0.1.0"

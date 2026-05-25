@@ -15,7 +15,7 @@ code where raylib's "batteries-included" model is a better fit than raw GL.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "raylib" {:url    "https://github.com/rjungemann/turmeric-spices"
             :ref    "raylib-v0.1.0"

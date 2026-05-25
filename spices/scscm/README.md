@@ -123,7 +123,7 @@ argument), `` `(...) `` is `quasiquote`.
 
 ### scscm/lexer
 
-```turmeric
+```turmeric no-check
 (tokenize source :cstr)              ;; => result<tokens :int>
 (token-type tok :int) :cstr          ;; => ":symbol" ":keyword" etc.
 (token-value tok :int) :cstr
@@ -134,7 +134,7 @@ argument), `` `(...) `` is `quasiquote`.
 
 ### scscm/parser
 
-```turmeric
+```turmeric no-check
 (parse tokens :int)                  ;; => result<ast-list :int>
 (ast-kind node :int) :cstr           ;; => ":list" ":symbol" etc.
 (ast-symbol-name node :int) :cstr
@@ -148,21 +148,21 @@ argument), `` `(...) `` is `quasiquote`.
 
 ### scscm/expander
 
-```turmeric
+```turmeric no-check
 (expand ast :int) :int               ;; expand one node
 (expand-all asts :int) :int          ;; expand a cons list
 ```
 
 ### scscm/codegen
 
-```turmeric
+```turmeric no-check
 (generate ast :int) :cstr            ;; sclang text for one node
 (generate-all asts :int) :cstr       ;; joined with ";\n"
 ```
 
 ### scscm/compile
 
-```turmeric
+```turmeric no-check
 (compile-text source :cstr)          ;; => result<sclang :cstr>
 (compile-file path :cstr)            ;; => result<sclang :cstr>
 ```

@@ -16,7 +16,7 @@ defaults.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "sqlite" {:url    "https://github.com/rjungemann/turmeric-spices"
             :ref    "sqlite-v0.1.0"

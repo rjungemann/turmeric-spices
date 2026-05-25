@@ -16,7 +16,7 @@ validation, etc.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "regex" {:url    "https://github.com/rjungemann/turmeric-spices"
            :ref    "regex-v0.1.0"

@@ -15,7 +15,7 @@ pair with `tur-rtaudio` for a complete real-time setup.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "rtmidi" {:url    "https://github.com/rjungemann/turmeric-spices"
             :ref    "rtmidi-v0.1.0"

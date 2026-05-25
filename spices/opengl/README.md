@@ -16,7 +16,7 @@ games-of-modest-size that want direct GL access.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "opengl" {:url    "https://github.com/rjungemann/turmeric-spices"
             :ref    "opengl-v0.1.0"

@@ -16,7 +16,7 @@ want yyjson's speed without dropping to inline C.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "json" {:url    "https://github.com/rjungemann/turmeric-spices"
           :ref    "json-v0.1.0"

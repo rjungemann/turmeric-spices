@@ -15,7 +15,7 @@ HTTP integration that does not need full async or HTTP/2.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "http" {:url    "https://github.com/rjungemann/turmeric-spices"
           :ref    "http-v0.1.0"

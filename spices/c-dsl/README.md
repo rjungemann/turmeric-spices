@@ -15,7 +15,7 @@ string concatenation would be error-prone.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "c-dsl" {:url    "https://github.com/rjungemann/turmeric-spices"
            :ref    "c-dsl-v0.1.0"

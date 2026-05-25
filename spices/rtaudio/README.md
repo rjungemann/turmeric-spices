@@ -15,7 +15,7 @@ and any real-time audio program.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "rtaudio" {:url    "https://github.com/rjungemann/turmeric-spices"
              :ref    "rtaudio-v0.1.0"

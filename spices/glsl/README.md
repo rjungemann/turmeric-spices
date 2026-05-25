@@ -16,7 +16,7 @@ or use it stand-alone to bake GLSL strings at build time.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "glsl" {:url    "https://github.com/rjungemann/turmeric-spices"
           :ref    "glsl-v0.1.0"

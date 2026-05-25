@@ -16,7 +16,7 @@ including the WebAssembly build.
 
 ## Install
 
-```turmeric
+```turmeric no-check
 :spices {
   "test" {:url    "https://github.com/rjungemann/turmeric-spices"
           :ref    "test-v0.1.0"
