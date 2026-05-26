@@ -1,0 +1,78 @@
+;; tests/stats/rng_test.tur -- smoke tests for stats/rng.
+
+(defmodule stats/tests/rng
+  (import stats/rng  :refer [rng-make rng-free rng-uniform rng-int-range
+                               rng-uint32 rng-shuffle! rng-shuffled rng-sample])
+  (import test/assert :refer [assert-eq assert-true])
+  (import test/suite  :refer [describe it])
+  (import test/runner :refer [run-all])
+
+  (defn t-nil [] :int ```c return 0; ```)
+  (defn t-cons [v :int n :int] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    struct __cons { int64_t value; int64_t next; };
+    struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+    c->value = v; c->next = n;
+    return (int64_t)(intptr_t)c;
+    ```)
+  (defn t-list-len [xs :int] :int
+    ```c
+    #include <stdint.h>
+    struct __cons { int64_t value; int64_t next; };
+    int64_t n = 0;
+    struct __cons *c = (struct __cons *)(intptr_t)xs;
+    while (c) { n++; c = (struct __cons *)(intptr_t)c->next; }
+    return n;
+    ```)
+
+  (defn __all-tests [] :void
+
+  (describe "stats/rng"
+    (it "rng-make returns non-zero handle"
+      (let [r (rng-make 42 1)]
+        (assert-true (not= r 0))
+        (rng-free r)))
+
+    (it "rng-uniform returns values in [0,1)"
+      (let [r  (rng-make 0 0)
+            u1 (rng-uniform r)
+            u2 (rng-uniform r)
+            ok (and (>= u1 0.0) (< u1 1.0)
+                    (>= u2 0.0) (< u2 1.0)
+                    (not= u1 u2))]
+        (rng-free r)
+        (assert-true ok)))
+
+    (it "rng-int-range stays in bounds"
+      (let [r  (rng-make 1 3)
+            v1 (rng-int-range r 10 20)
+            v2 (rng-int-range r 10 20)
+            ok (and (>= v1 10) (< v1 20)
+                    (>= v2 10) (< v2 20))]
+        (rng-free r)
+        (assert-true ok)))
+
+    (it "rng-shuffle! returns a list of the same length"
+      (let [r   (rng-make 7 0)
+            xs  (t-cons 1 (t-cons 2 (t-cons 3 (t-cons 4 (t-cons 5 (t-nil))))))
+            sh  (rng-shuffle! r xs)
+            len (t-list-len sh)
+            ok  (= len 5)]
+        (rng-free r)
+        (assert-true ok)))
+
+    (it "rng-sample returns k items"
+      (let [r   (rng-make 99 0)
+            xs  (t-cons 10 (t-cons 20 (t-cons 30 (t-cons 40 (t-cons 50 (t-nil))))))
+            s   (rng-sample r xs 3)
+            len (t-list-len s)
+            ok  (= len 3)]
+        (rng-free r)
+        (assert-true ok)))))
+
+  (defn main [] :int
+    (__all-tests)
+    (run-all)
+    0))

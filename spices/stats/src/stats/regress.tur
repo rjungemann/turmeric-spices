@@ -1,0 +1,791 @@
+;; stats/regress.tur -- OLS linear regression via normal equations (Cholesky).
+
+(defmodule stats/regress
+  (export ols ols-frame predict predict-frame diagnostics)
+
+  (import stats/test :refer [])
+  (import frame/column :refer [col-float64 col-length col-get-float])
+  (import frame/frame  :refer [frame-ncols frame-nrows frame-col-name frame-col-idx])
+
+;;; ols -- Ordinary least squares.
+;;;
+;;; Parameters:
+;;;   y          -- :int   float64 response column
+;;;   xs         -- :int   cons list of float64 predictor columns
+;;;   names      -- :int   cons list of :cstr, one per predictor
+;;;   intercept? -- :int   1 to include intercept term, 0 to suppress
+;;;
+;;; Returns:
+;;;   :int  ok-val wrapping an lm-fit handle, or err-val with message.
+;;;
+;;; Example:
+;;;   (ols y-col (cons x1 (cons x2 0)) (cons "x1" (cons "x2" 0)) 1)
+;;;
+;;; Since: ST7
+(defn ols [y :int xs :int names :int intercept? :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <string.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __cons { int64_t value; int64_t next; };
+
+  /* ---- count predictors ---- */
+  int64_t p = 0;
+  { struct __cons *c = (struct __cons *)(intptr_t)xs;
+    while(c){ p++; c = (struct __cons *)(intptr_t)c->next; } }
+  int64_t p1 = p + (intercept? ? 1 : 0); /* number of columns in X */
+
+  struct __frame_col *yc = (struct __frame_col *)(intptr_t)y;
+  int64_t n = yc->length;
+  double *yv = (double *)yc->values;
+
+  /* ---- build design matrix X (n x p1) stored row-major ---- */
+  double *X = (double *)malloc((size_t)(n * p1 * sizeof(double)));
+  if(!X) return (int64_t)(intptr_t)NULL; /* OOM -- caller will segfault, acceptable */
+
+  int64_t col_start = 0;
+  if(intercept?){ for(int64_t i=0;i<n;i++) X[i*p1+0]=1.0; col_start=1; }
+
+  { int64_t j = col_start;
+    struct __cons *c = (struct __cons *)(intptr_t)xs;
+    while(c){
+      struct __frame_col *xc = (struct __frame_col *)(intptr_t)c->value;
+      double *xv = (double *)xc->values;
+      for(int64_t i=0;i<n;i++) X[i*p1+j]=xv[i];
+      j++; c=(struct __cons *)(intptr_t)c->next;
+    }
+  }
+
+  /* ---- XtX (p1 x p1) and Xty (p1) ---- */
+  double *XtX = (double *)calloc((size_t)(p1*p1), sizeof(double));
+  double *Xty  = (double *)calloc((size_t)p1,      sizeof(double));
+  for(int64_t i=0;i<n;i++){
+    double yi=yv[i];
+    for(int64_t a=0;a<p1;a++){
+      Xty[a]+=X[i*p1+a]*yi;
+      for(int64_t b=a;b<p1;b++) XtX[a*p1+b]+=X[i*p1+a]*X[i*p1+b];
+    }
+  }
+  /* fill lower triangle */
+  for(int64_t a=0;a<p1;a++)
+    for(int64_t b=0;b<a;b++) XtX[a*p1+b]=XtX[b*p1+a];
+
+  /* ---- Cholesky factorisation LL' = XtX ---- */
+  double *L = (double *)calloc((size_t)(p1*p1), sizeof(double));
+  double tol = 1e-10;
+  { double maxd=0.0;
+    for(int64_t i=0;i<p1;i++) if(XtX[i*p1+i]>maxd) maxd=XtX[i*p1+i];
+    tol *= maxd > 0.0 ? maxd : 1.0;
+  }
+  for(int64_t j=0;j<p1;j++){
+    double s=XtX[j*p1+j];
+    for(int64_t k=0;k<j;k++) s-=L[j*p1+k]*L[j*p1+k];
+    if(s < tol){
+      free(X); free(XtX); free(Xty); free(L);
+      /* Return err "rank-deficient design matrix" as a tagged pair. */
+      /* We encode as negative pointer to a static string, caller uses ok?/err. */
+      static const char *_msg = "rank-deficient design matrix; remove a collinear predictor";
+      /* err-val is tagged with bit 1 set (tag=1); ok-val with tag=0. */
+      /* Since Turmeric result is implemented as a cons: (cons tag value),
+         we build that manually. */
+      struct __cons *ev = (struct __cons *)malloc(sizeof(struct __cons));
+      ev->value = (int64_t)(intptr_t)_msg;
+      ev->next  = 0;
+      /* Wrap in err outer cons: value=1 (err tag), next=inner cons. */
+      struct __cons *rc = (struct __cons *)malloc(sizeof(struct __cons));
+      rc->value = 1; /* err tag */
+      rc->next  = (int64_t)(intptr_t)ev;
+      return (int64_t)(intptr_t)rc;
+    }
+    L[j*p1+j]=sqrt(s);
+    for(int64_t i=j+1;i<p1;i++){
+      double t2=XtX[i*p1+j];
+      for(int64_t k=0;k<j;k++) t2-=L[i*p1+k]*L[j*p1+k];
+      L[i*p1+j]=t2/L[j*p1+j];
+    }
+  }
+
+  /* ---- Forward substitution: L z = Xty ---- */
+  double *z = (double *)malloc((size_t)(p1*sizeof(double)));
+  for(int64_t i=0;i<p1;i++){
+    double s=Xty[i];
+    for(int64_t k=0;k<i;k++) s-=L[i*p1+k]*z[k];
+    z[i]=s/L[i*p1+i];
+  }
+  /* ---- Back substitution: L' beta = z ---- */
+  double *beta = (double *)malloc((size_t)(p1*sizeof(double)));
+  for(int64_t i=p1-1;i>=0;i--){
+    double s=z[i];
+    for(int64_t k=i+1;k<p1;k++) s-=L[k*p1+i]*beta[k];
+    beta[i]=s/L[i*p1+i];
+  }
+
+  /* ---- Fitted values and residuals ---- */
+  double *fitted   = (double *)malloc((size_t)(n*sizeof(double)));
+  double *residuals= (double *)malloc((size_t)(n*sizeof(double)));
+  double ss_res=0.0, ss_tot=0.0, ymean=0.0;
+  for(int64_t i=0;i<n;i++) ymean+=yv[i];
+  ymean/=(double)n;
+  for(int64_t i=0;i<n;i++){
+    double yhat=0.0;
+    for(int64_t j2=0;j2<p1;j2++) yhat+=X[i*p1+j2]*beta[j2];
+    fitted[i]=yhat; residuals[i]=yv[i]-yhat;
+    ss_res+=(yv[i]-yhat)*(yv[i]-yhat);
+    ss_tot+=(yv[i]-ymean)*(yv[i]-ymean);
+  }
+  int64_t df_res=n-p1, df_mod=p1-(intercept?1:0);
+  double sigma = (df_res>0) ? sqrt(ss_res/(double)df_res) : 0.0;
+  double r2    = (ss_tot>0) ? 1.0-ss_res/ss_tot : 0.0;
+  double r2adj = (n>p1 && ss_tot>0) ? 1.0-(ss_res/(double)df_res)/(ss_tot/(double)(n-1)) : 0.0;
+
+  /* ---- (X'X)^{-1} via Cholesky inverse for standard errors ---- */
+  /* Compute L^{-1} then (XtX)^{-1} = (L^{-1})' L^{-1} */
+  double *Linv = (double *)calloc((size_t)(p1*p1),sizeof(double));
+  for(int64_t i=0;i<p1;i++){
+    Linv[i*p1+i]=1.0/L[i*p1+i];
+    for(int64_t j2=i+1;j2<p1;j2++){
+      double s=0.0;
+      for(int64_t k=i;k<j2;k++) s-=L[j2*p1+k]*Linv[k*p1+i];
+      Linv[j2*p1+i]=s/L[j2*p1+j2];
+    }
+  }
+  /* variance of beta[i] = sigma^2 * ((XtX)^-1)[i,i]
+     = sigma^2 * sum_k Linv[k,i]^2  */
+  double *se_v  = (double *)malloc((size_t)(p1*sizeof(double)));
+  double *tv    = (double *)malloc((size_t)(p1*sizeof(double)));
+  double *pv    = (double *)malloc((size_t)(p1*sizeof(double)));
+
+  /* simple approximation for t p-values via incomplete beta */
+  /* ibeta(a,b,x) -- Lentz CF */
+  #define _IBETA_CF(aa,bb,xx,out) do { \
+    double _a=(aa),_b=(bb),_x=(xx); \
+    if(_x<=0.0){out=0.0;}else if(_x>=1.0){out=1.0;} \
+    else { \
+      int _sym=(_x>(_a+1.0)/(_a+_b+2.0)); \
+      double _xa=_sym?1.0-_x:_x, _aa=_sym?_b:_a, _bb=_sym?_a:_b; \
+      double _lbc=lgamma(_aa+_bb)-lgamma(_aa)-lgamma(_bb)+_aa*log(_xa)+_bb*log(1.0-_xa); \
+      double _front=exp(_lbc)/_aa; \
+      double _f=1.0,_c=1.0,_d=1.0-(_aa+_bb)*_xa/(_aa+1.0),_eps=3e-8; \
+      if(fabs(_d)<1e-30) _d=1e-30; _d=1.0/_d; _f=_d; \
+      for(int _m2=1;_m2<=300;_m2+=2){ \
+        int _mm=_m2/2; \
+        double _dm=_bb*_xa*(double)_mm/((_aa+_m2-1)*(_aa+_m2)); \
+        double _em=_aa*_xa*(double)_mm/((_aa+_m2)*(1.0+_aa+_m2)); \
+        double _del; \
+        _d=1.0+_dm*_d; if(fabs(_d)<1e-30)_d=1e-30; \
+        _c=1.0+_dm/_c; if(fabs(_c)<1e-30)_c=1e-30; \
+        _d=1.0/_d; _f*=_c*_d; _del=_c*_d; \
+        _d=1.0+_em*_d; if(fabs(_d)<1e-30)_d=1e-30; \
+        _c=1.0+_em/_c; if(fabs(_c)<1e-30)_c=1e-30; \
+        _d=1.0/_d; double _delta2=_c*_d; _f*=_delta2; \
+        if(fabs(_delta2-1.0)<_eps) break; \
+        (void)_del; \
+      } \
+      double _i=_front*_f; if(_sym) _i=1.0-_i; \
+      out=_i; \
+    } \
+  } while(0)
+
+  for(int64_t i=0;i<p1;i++){
+    double sumsq=0.0;
+    for(int64_t k=0;k<p1;k++) sumsq+=Linv[k*p1+i]*Linv[k*p1+i];
+    se_v[i]=(df_res>0)?sigma*sqrt(sumsq):0.0;
+    tv[i]=(se_v[i]>0)?beta[i]/se_v[i]:0.0;
+    /* two-tailed p-value from t distribution with df_res */
+    double t2=tv[i]*tv[i];
+    double pp=0.0;
+    _IBETA_CF(0.5*(double)df_res, 0.5, (double)df_res/(double)df_res+t2, pp);
+    /* correct formula: P(|T|>|t|) = Ibeta(df/2, 1/2, df/(df+t^2)) */
+    double tt=fabs(tv[i]);
+    double x_bt=(double)df_res/((double)df_res+tt*tt);
+    double ib=0.0; _IBETA_CF(0.5*(double)df_res, 0.5, x_bt, ib);
+    pv[i]=ib; (void)pp;
+  }
+  #undef _IBETA_CF
+
+  /* ---- Build names list (prepend "(Intercept)" if intercept?) ---- */
+  /* We build a reversed cons list then don't reverse (OK for display). */
+  /* Actually build in order using a helper array. */
+  const char **name_arr=(const char **)malloc((size_t)(p1*sizeof(const char *)));
+  { int64_t j2=0;
+    if(intercept?){ name_arr[0]="(Intercept)"; j2=1; }
+    struct __cons *nc=(struct __cons *)(intptr_t)names;
+    while(nc && j2<p1){
+      name_arr[j2++]=(const char *)(intptr_t)nc->value;
+      nc=(struct __cons *)(intptr_t)nc->next;
+    }
+  }
+  int64_t names_head=0;
+  for(int64_t i=p1-1;i>=0;i--){
+    struct __cons *nc=(struct __cons *)malloc(sizeof(struct __cons));
+    nc->value=(int64_t)(intptr_t)strdup(name_arr[i]);
+    nc->next=names_head;
+    names_head=(int64_t)(intptr_t)nc;
+  }
+  free(name_arr);
+
+  /* ---- Build output column handles ---- */
+  #define _MKCOL(dst, src_arr, len) do { \
+    int64_t _bytes=(len)*sizeof(double); \
+    int64_t _rounded=(_bytes+63)&~((int64_t)63); \
+    void *_buf=malloc((size_t)(sizeof(int64_t)+_rounded)); \
+    *(int64_t *)_buf=_rounded; \
+    double *_dv=(double *)((char *)_buf+sizeof(int64_t)); \
+    memcpy(_dv,(src_arr),(size_t)_bytes); \
+    struct __frame_col *_fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col)); \
+    _fc->type_tag=4;_fc->length=(len);_fc->refcount=1;_fc->values=_dv; \
+    (dst)=(int64_t)(intptr_t)_fc; \
+  } while(0)
+
+  typedef struct {
+    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
+    int64_t fitted; int64_t residuals;
+    double r_squared; double adj_r_squared; double sigma;
+    int64_t df_residual; int64_t df_model; int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+
+  __lm_fit_t *fit_out=(__lm_fit_t *)malloc(sizeof(__lm_fit_t));
+  _MKCOL(fit_out->coefs,    beta,      p1);
+  _MKCOL(fit_out->se,       se_v,      p1);
+  _MKCOL(fit_out->t_values, tv,        p1);
+  _MKCOL(fit_out->p_values, pv,        p1);
+  _MKCOL(fit_out->fitted,   fitted,    n);
+  _MKCOL(fit_out->residuals,residuals, n);
+  fit_out->r_squared    = r2;
+  fit_out->adj_r_squared= r2adj;
+  fit_out->sigma        = sigma;
+  fit_out->df_residual  = df_res;
+  fit_out->df_model     = df_mod;
+  fit_out->n_obs        = n;
+  fit_out->names        = names_head;
+  #undef _MKCOL
+
+  free(X); free(XtX); free(Xty); free(L); free(Linv); free(z); free(beta);
+  free(fitted); free(residuals); free(se_v); free(tv); free(pv);
+
+  /* Return ok-val: (cons 0 fit_ptr) */
+  struct __cons *ok=(struct __cons *)malloc(sizeof(struct __cons));
+  ok->value=(int64_t)(intptr_t)fit_out;
+  ok->next=0;
+  struct __cons *rc=(struct __cons *)malloc(sizeof(struct __cons));
+  rc->value=0; /* ok tag */
+  rc->next=(int64_t)(intptr_t)ok;
+  return (int64_t)(intptr_t)rc;
+  ```)
+
+;;; ols-frame -- OLS from a frame with named columns.
+;;;
+;;; Parameters:
+;;;   f               -- :int  frame handle
+;;;   response-name   -- :cstr column name for y
+;;;   predictor-names -- :int  cons list of :cstr column names for xs
+;;;   intercept?      -- :int  1 for intercept, 0 to suppress
+;;;
+;;; Returns:
+;;;   :int  result<lm-fit>
+;;;
+;;; Since: ST7
+(defn ols-frame [f :int response-name :cstr predictor-names :int intercept? :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <string.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+  struct __schema { int64_t arity; struct __field *fields; };
+  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+  struct __cons { int64_t value; int64_t next; };
+
+  struct __frame *fr=(struct __frame *)(intptr_t)f;
+  struct __schema *sc=(struct __schema *)(intptr_t)fr->schema_ptr;
+
+  /* helper: find column by name */
+  #define _FIND_COL(name_cstr, out_col) do { \
+    (out_col)=0; \
+    for(int64_t _i=0;_i<sc->arity;_i++){ \
+      const char *_fn=(const char *)(intptr_t)sc->fields[_i].name_ptr; \
+      if(_fn && strcmp(_fn,(name_cstr))==0){ (out_col)=fr->columns[_i]; break; } \
+    } \
+  } while(0)
+
+  int64_t y_col=0;
+  _FIND_COL(response_name, y_col);
+  if(!y_col){
+    struct __cons *ev=(struct __cons *)malloc(sizeof(struct __cons));
+    ev->value=(int64_t)(intptr_t)"response column not found";
+    ev->next=0;
+    struct __cons *rc=(struct __cons *)malloc(sizeof(struct __cons));
+    rc->value=1; rc->next=(int64_t)(intptr_t)ev;
+    return (int64_t)(intptr_t)rc;
+  }
+
+  /* Build xs cons list */
+  struct __cons *c=(struct __cons *)(intptr_t)predictor_names;
+  int64_t xs_head=0;
+  int64_t names_head=0;
+  /* Count predictors first. */
+  int64_t p_cnt=0;
+  { struct __cons *tmp=c; while(tmp){p_cnt++;tmp=(struct __cons *)(intptr_t)tmp->next;} }
+
+  /* Build in reverse order then correct. */
+  int64_t *col_arr=(int64_t *)malloc((size_t)(p_cnt*sizeof(int64_t)));
+  const char **nm_arr=(const char **)malloc((size_t)(p_cnt*sizeof(const char *)));
+  for(int64_t i=0;i<p_cnt;i++){
+    nm_arr[i]=(const char *)(intptr_t)c->value;
+    int64_t cc=0; _FIND_COL(nm_arr[i], cc);
+    col_arr[i]=cc;
+    if(!cc){
+      free(col_arr); free(nm_arr);
+      struct __cons *ev=(struct __cons *)malloc(sizeof(struct __cons));
+      ev->value=(int64_t)(intptr_t)"predictor column not found";
+      ev->next=0;
+      struct __cons *rc=(struct __cons *)malloc(sizeof(struct __cons));
+      rc->value=1; rc->next=(int64_t)(intptr_t)ev;
+      return (int64_t)(intptr_t)rc;
+    }
+    c=(struct __cons *)(intptr_t)c->next;
+  }
+  for(int64_t i=p_cnt-1;i>=0;i--){
+    struct __cons *xc=(struct __cons *)malloc(sizeof(struct __cons));
+    xc->value=col_arr[i]; xc->next=xs_head; xs_head=(int64_t)(intptr_t)xc;
+    struct __cons *nc=(struct __cons *)malloc(sizeof(struct __cons));
+    nc->value=(int64_t)(intptr_t)nm_arr[i]; nc->next=names_head; names_head=(int64_t)(intptr_t)nc;
+  }
+  free(col_arr); free(nm_arr);
+  #undef _FIND_COL
+
+  /* Delegate to ols -- but inline-C cannot call Turmeric functions, so we
+     must duplicate the ols logic here. Instead of full duplication, we reuse
+     the same implementation by inlining it literally. */
+
+  /* ---- full ols body inlined ---- */
+  struct __frame_col *yc=(struct __frame_col *)(intptr_t)y_col;
+  int64_t p=0;
+  { struct __cons *cc2=(struct __cons *)(intptr_t)xs_head;
+    while(cc2){p++;cc2=(struct __cons *)(intptr_t)cc2->next;} }
+  int64_t p1=p+(intercept?1:0);
+  int64_t n=yc->length;
+  double *yv=(double *)yc->values;
+  double *X=(double *)malloc((size_t)(n*p1*sizeof(double)));
+  int64_t col_start2=0;
+  if(intercept?){for(int64_t i=0;i<n;i++) X[i*p1]=1.0;col_start2=1;}
+  { int64_t j=col_start2;
+    struct __cons *cc2=(struct __cons *)(intptr_t)xs_head;
+    while(cc2){
+      struct __frame_col *xc2=(struct __frame_col *)(intptr_t)cc2->value;
+      double *xv=(double *)xc2->values;
+      for(int64_t i=0;i<n;i++) X[i*p1+j]=xv[i];
+      j++; cc2=(struct __cons *)(intptr_t)cc2->next;
+    }
+  }
+  double *XtX=(double *)calloc((size_t)(p1*p1),sizeof(double));
+  double *Xty=(double *)calloc((size_t)p1,sizeof(double));
+  for(int64_t i=0;i<n;i++){
+    double yi=yv[i];
+    for(int64_t a=0;a<p1;a++){
+      Xty[a]+=X[i*p1+a]*yi;
+      for(int64_t b=a;b<p1;b++) XtX[a*p1+b]+=X[i*p1+a]*X[i*p1+b];
+    }
+  }
+  for(int64_t a=0;a<p1;a++) for(int64_t b=0;b<a;b++) XtX[a*p1+b]=XtX[b*p1+a];
+  double *L2=(double *)calloc((size_t)(p1*p1),sizeof(double));
+  double tol2=1e-10;
+  { double md=0.0; for(int64_t i=0;i<p1;i++) if(XtX[i*p1+i]>md) md=XtX[i*p1+i];
+    tol2*=(md>0.0)?md:1.0; }
+  for(int64_t j=0;j<p1;j++){
+    double s=XtX[j*p1+j];
+    for(int64_t k=0;k<j;k++) s-=L2[j*p1+k]*L2[j*p1+k];
+    if(s<tol2){
+      free(X);free(XtX);free(Xty);free(L2);
+      static const char *_msg2="rank-deficient design matrix; remove a collinear predictor";
+      struct __cons *ev=(struct __cons *)malloc(sizeof(struct __cons));
+      ev->value=(int64_t)(intptr_t)_msg2;ev->next=0;
+      struct __cons *rc=(struct __cons *)malloc(sizeof(struct __cons));
+      rc->value=1;rc->next=(int64_t)(intptr_t)ev;
+      return (int64_t)(intptr_t)rc;
+    }
+    L2[j*p1+j]=sqrt(s);
+    for(int64_t i=j+1;i<p1;i++){
+      double t2=XtX[i*p1+j];
+      for(int64_t k=0;k<j;k++) t2-=L2[i*p1+k]*L2[j*p1+k];
+      L2[i*p1+j]=t2/L2[j*p1+j];
+    }
+  }
+  double *z2=(double *)malloc((size_t)(p1*sizeof(double)));
+  for(int64_t i=0;i<p1;i++){
+    double s=Xty[i];
+    for(int64_t k=0;k<i;k++) s-=L2[i*p1+k]*z2[k];
+    z2[i]=s/L2[i*p1+i];
+  }
+  double *beta2=(double *)malloc((size_t)(p1*sizeof(double)));
+  for(int64_t i=p1-1;i>=0;i--){
+    double s=z2[i];
+    for(int64_t k=i+1;k<p1;k++) s-=L2[k*p1+i]*beta2[k];
+    beta2[i]=s/L2[i*p1+i];
+  }
+  double *fitted2=(double *)malloc((size_t)(n*sizeof(double)));
+  double *resid2=(double *)malloc((size_t)(n*sizeof(double)));
+  double ss_res2=0.0,ss_tot2=0.0,ym2=0.0;
+  for(int64_t i=0;i<n;i++) ym2+=yv[i];
+  ym2/=(double)n;
+  for(int64_t i=0;i<n;i++){
+    double yhat2=0.0;
+    for(int64_t j=0;j<p1;j++) yhat2+=X[i*p1+j]*beta2[j];
+    fitted2[i]=yhat2;resid2[i]=yv[i]-yhat2;
+    ss_res2+=(yv[i]-yhat2)*(yv[i]-yhat2);
+    ss_tot2+=(yv[i]-ym2)*(yv[i]-ym2);
+  }
+  int64_t df_res2=n-p1,df_mod2=p1-(intercept?1:0);
+  double sigma2=(df_res2>0)?sqrt(ss_res2/(double)df_res2):0.0;
+  double r2_2=(ss_tot2>0)?1.0-ss_res2/ss_tot2:0.0;
+  double r2adj2=(n>p1&&ss_tot2>0)?1.0-(ss_res2/(double)df_res2)/(ss_tot2/(double)(n-1)):0.0;
+  double *Linv2=(double *)calloc((size_t)(p1*p1),sizeof(double));
+  for(int64_t i=0;i<p1;i++){
+    Linv2[i*p1+i]=1.0/L2[i*p1+i];
+    for(int64_t j=i+1;j<p1;j++){
+      double s=0.0;
+      for(int64_t k=i;k<j;k++) s-=L2[j*p1+k]*Linv2[k*p1+i];
+      Linv2[j*p1+i]=s/L2[j*p1+j];
+    }
+  }
+  double *se2=(double *)malloc((size_t)(p1*sizeof(double)));
+  double *tv2=(double *)malloc((size_t)(p1*sizeof(double)));
+  double *pv2=(double *)malloc((size_t)(p1*sizeof(double)));
+  #define _IB2(aa,bb,xx,out) do { \
+    double _a=(aa),_b=(bb),_x=(xx); \
+    if(_x<=0.0){out=0.0;}else if(_x>=1.0){out=1.0;} \
+    else { \
+      int _sy=(_x>(_a+1.0)/(_a+_b+2.0)); \
+      double _xa=_sy?1.0-_x:_x,_aa=_sy?_b:_a,_bb=_sy?_a:_b; \
+      double _lbc=lgamma(_aa+_bb)-lgamma(_aa)-lgamma(_bb)+_aa*log(_xa)+_bb*log(1.0-_xa); \
+      double _fr2=exp(_lbc)/_aa,_f2=1.0,_c2=1.0,_d2=1.0-(_aa+_bb)*_xa/(_aa+1.0),_ep=3e-8; \
+      if(fabs(_d2)<1e-30)_d2=1e-30;_d2=1.0/_d2;_f2=_d2; \
+      for(int _m2=1;_m2<=300;_m2+=2){ \
+        int _mm=_m2/2; \
+        double _dm=_bb*_xa*(double)_mm/((_aa+_m2-1)*(_aa+_m2)); \
+        double _em=_aa*_xa*(double)_mm/((_aa+_m2)*(1.0+_aa+_m2)); \
+        _d2=1.0+_dm*_d2;if(fabs(_d2)<1e-30)_d2=1e-30; \
+        _c2=1.0+_dm/_c2;if(fabs(_c2)<1e-30)_c2=1e-30; \
+        _d2=1.0/_d2;_f2*=_c2*_d2; \
+        _d2=1.0+_em*_d2;if(fabs(_d2)<1e-30)_d2=1e-30; \
+        _c2=1.0+_em/_c2;if(fabs(_c2)<1e-30)_c2=1e-30; \
+        _d2=1.0/_d2;double _dlt2=_c2*_d2;_f2*=_dlt2; \
+        if(fabs(_dlt2-1.0)<_ep)break; \
+      } \
+      double _iv=_fr2*_f2;if(_sy)_iv=1.0-_iv;out=_iv; \
+    } \
+  } while(0)
+  for(int64_t i=0;i<p1;i++){
+    double sq=0.0;
+    for(int64_t k=0;k<p1;k++) sq+=Linv2[k*p1+i]*Linv2[k*p1+i];
+    se2[i]=(df_res2>0)?sigma2*sqrt(sq):0.0;
+    tv2[i]=(se2[i]>0)?beta2[i]/se2[i]:0.0;
+    double tt=fabs(tv2[i]);
+    double xbt=(double)df_res2/((double)df_res2+tt*tt);
+    double ib=0.0;_IB2(0.5*(double)df_res2,0.5,xbt,ib);
+    pv2[i]=ib;
+  }
+  #undef _IB2
+
+  typedef struct {
+    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
+    int64_t fitted;int64_t residuals;
+    double r_squared;double adj_r_squared;double sigma;
+    int64_t df_residual;int64_t df_model;int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+  #define _MC2(dst,src,len) do { \
+    int64_t _by=(len)*sizeof(double),_ro=(_by+63)&~((int64_t)63); \
+    void *_b=malloc((size_t)(sizeof(int64_t)+_ro));*(int64_t *)_b=_ro; \
+    double *_dv=(double *)((char *)_b+sizeof(int64_t));memcpy(_dv,(src),(size_t)_by); \
+    struct __frame_col *_fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col)); \
+    _fc->type_tag=4;_fc->length=(len);_fc->refcount=1;_fc->values=_dv; \
+    (dst)=(int64_t)(intptr_t)_fc; \
+  } while(0)
+  __lm_fit_t *fo=(__lm_fit_t *)malloc(sizeof(__lm_fit_t));
+  _MC2(fo->coefs,beta2,p1);_MC2(fo->se,se2,p1);
+  _MC2(fo->t_values,tv2,p1);_MC2(fo->p_values,pv2,p1);
+  _MC2(fo->fitted,fitted2,n);_MC2(fo->residuals,resid2,n);
+  fo->r_squared=r2_2;fo->adj_r_squared=r2adj2;fo->sigma=sigma2;
+  fo->df_residual=df_res2;fo->df_model=df_mod2;fo->n_obs=n;
+  fo->names=names_head;
+  #undef _MC2
+  free(X);free(XtX);free(Xty);free(L2);free(Linv2);free(z2);free(beta2);
+  free(fitted2);free(resid2);free(se2);free(tv2);free(pv2);
+
+  struct __cons *ok2=(struct __cons *)malloc(sizeof(struct __cons));
+  ok2->value=(int64_t)(intptr_t)fo;ok2->next=0;
+  struct __cons *rc2=(struct __cons *)malloc(sizeof(struct __cons));
+  rc2->value=0;rc2->next=(int64_t)(intptr_t)ok2;
+  return (int64_t)(intptr_t)rc2;
+  ```)
+
+;;; predict -- generate fitted values for new predictors.
+;;;
+;;; Parameters:
+;;;   fit    -- :int  lm-fit handle
+;;;   new-xs -- :int  cons list of float64 columns (same order as in ols)
+;;;
+;;; Returns:
+;;;   :int  float64 column of predictions.
+;;;
+;;; Since: ST7
+(defn predict [fit :int new-xs :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <string.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __cons { int64_t value; int64_t next; };
+  typedef struct {
+    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
+    int64_t fitted;int64_t residuals;
+    double r_squared;double adj_r_squared;double sigma;
+    int64_t df_residual;int64_t df_model;int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+
+  __lm_fit_t *f=(__lm_fit_t *)(intptr_t)fit;
+  struct __frame_col *coefs_col=(struct __frame_col *)(intptr_t)f->coefs;
+  int64_t p1=coefs_col->length;
+  double *beta=(double *)coefs_col->values;
+  int64_t intercept_used = (f->df_model < p1);
+
+  /* get n from first xs column */
+  struct __cons *cx=(struct __cons *)(intptr_t)new_xs;
+  int64_t n=0;
+  if(cx){ struct __frame_col *fc=(struct __frame_col *)(intptr_t)cx->value; n=fc->length; }
+
+  double *out=(double *)malloc((size_t)(n*sizeof(double)));
+  for(int64_t i=0;i<n;i++){
+    out[i]= intercept_used ? beta[0] : 0.0;
+  }
+  { int64_t j= intercept_used ? 1 : 0;
+    cx=(struct __cons *)(intptr_t)new_xs;
+    while(cx && j<p1){
+      struct __frame_col *fc=(struct __frame_col *)(intptr_t)cx->value;
+      double *xv=(double *)fc->values;
+      for(int64_t i=0;i<n;i++) out[i]+=beta[j]*xv[i];
+      j++; cx=(struct __cons *)(intptr_t)cx->next;
+    }
+  }
+
+  int64_t bytes=n*(int64_t)sizeof(double);
+  int64_t rounded=(bytes+63)&~((int64_t)63);
+  void *buf=malloc((size_t)(sizeof(int64_t)+rounded));
+  *(int64_t *)buf=rounded;
+  double *dv=(double *)((char *)buf+sizeof(int64_t));
+  memcpy(dv,out,(size_t)(n*sizeof(double)));
+  free(out);
+  struct __frame_col *res=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+  res->type_tag=4;res->length=n;res->refcount=1;res->values=dv;
+  return (int64_t)(intptr_t)res;
+  ```)
+
+;;; predict-frame -- generate predictions from a new frame.
+;;;
+;;; Parameters:
+;;;   fit       -- :int  lm-fit handle
+;;;   new-frame -- :int  frame with the same predictor column names
+;;;
+;;; Returns:
+;;;   :int  result<column<:float>>
+;;;
+;;; Since: ST7
+(defn predict-frame [fit :int new-frame :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <string.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+  struct __schema { int64_t arity; struct __field *fields; };
+  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+  struct __cons { int64_t value; int64_t next; };
+  typedef struct {
+    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
+    int64_t fitted;int64_t residuals;
+    double r_squared;double adj_r_squared;double sigma;
+    int64_t df_residual;int64_t df_model;int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+
+  __lm_fit_t *f=(__lm_fit_t *)(intptr_t)fit;
+  struct __frame_col *coefs_col=(struct __frame_col *)(intptr_t)f->coefs;
+  int64_t p1=coefs_col->length;
+  double *beta=(double *)coefs_col->values;
+  int64_t intercept_used=(f->df_model<p1);
+
+  struct __frame *fr=(struct __frame *)(intptr_t)new_frame;
+  struct __schema *sc=(struct __schema *)(intptr_t)fr->schema_ptr;
+  int64_t n=fr->nrows;
+
+  /* Walk names list to get predictor column names (skip "(Intercept)"). */
+  struct __cons *nm=(struct __cons *)(intptr_t)f->names;
+  if(intercept_used && nm) nm=(struct __cons *)(intptr_t)nm->next; /* skip intercept */
+
+  double *out=(double *)calloc((size_t)n,sizeof(double));
+  if(intercept_used) for(int64_t i=0;i<n;i++) out[i]=beta[0];
+
+  int64_t j=intercept_used?1:0;
+  struct __cons *nc=nm;
+  while(nc && j<p1){
+    const char *pname=(const char *)(intptr_t)nc->value;
+    /* find column in frame */
+    int64_t found=0;
+    for(int64_t ci=0;ci<sc->arity;ci++){
+      const char *fn=(const char *)(intptr_t)sc->fields[ci].name_ptr;
+      if(fn && strcmp(fn,pname)==0){
+        struct __frame_col *xc=(struct __frame_col *)(intptr_t)fr->columns[ci];
+        double *xv=(double *)xc->values;
+        for(int64_t i=0;i<n;i++) out[i]+=beta[j]*xv[i];
+        found=1; break;
+      }
+    }
+    if(!found){
+      free(out);
+      static const char *_msg="predictor column not found in new frame";
+      struct __cons *ev=(struct __cons *)malloc(sizeof(struct __cons));
+      ev->value=(int64_t)(intptr_t)_msg;ev->next=0;
+      struct __cons *rc=(struct __cons *)malloc(sizeof(struct __cons));
+      rc->value=1;rc->next=(int64_t)(intptr_t)ev;
+      return (int64_t)(intptr_t)rc;
+    }
+    j++; nc=(struct __cons *)(intptr_t)nc->next;
+  }
+
+  int64_t bytes=n*(int64_t)sizeof(double);
+  int64_t rounded=(bytes+63)&~((int64_t)63);
+  void *buf=malloc((size_t)(sizeof(int64_t)+rounded));
+  *(int64_t *)buf=rounded;
+  double *dv=(double *)((char *)buf+sizeof(int64_t));
+  memcpy(dv,out,(size_t)(n*sizeof(double)));
+  free(out);
+  struct __frame_col *res=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+  res->type_tag=4;res->length=n;res->refcount=1;res->values=dv;
+
+  struct __cons *ok=(struct __cons *)malloc(sizeof(struct __cons));
+  ok->value=(int64_t)(intptr_t)res;ok->next=0;
+  struct __cons *rc=(struct __cons *)malloc(sizeof(struct __cons));
+  rc->value=0;rc->next=(int64_t)(intptr_t)ok;
+  return (int64_t)(intptr_t)rc;
+  ```)
+
+;;; diagnostics -- per-observation diagnostics frame.
+;;;
+;;; Returns a frame with 5 columns:
+;;;   fitted, residual, standardized-residual, leverage, cooks-d
+;;;
+;;; Parameters:
+;;;   fit -- :int  lm-fit handle
+;;;
+;;; Returns:
+;;;   :int  frame handle
+;;;
+;;; Since: ST7
+(defn diagnostics [fit :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <string.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+  struct __schema { int64_t arity; struct __field *fields; };
+  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+  typedef struct {
+    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
+    int64_t fitted;int64_t residuals;
+    double r_squared;double adj_r_squared;double sigma;
+    int64_t df_residual;int64_t df_model;int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+
+  __lm_fit_t *f=(__lm_fit_t *)(intptr_t)fit;
+  int64_t n=f->n_obs;
+  int64_t p1=((struct __frame_col *)(intptr_t)f->coefs)->length;
+  double sigma=f->sigma;
+
+  double *fitted_v=(double *)((struct __frame_col *)(intptr_t)f->fitted)->values;
+  double *resid_v =(double *)((struct __frame_col *)(intptr_t)f->residuals)->values;
+
+  /* For leverage and Cook's D we need hat matrix diagonal h_ii = X(X'X)^{-1}X'.
+     Re-build X from the original n_obs and p1 columns stored in f->fitted/residuals.
+     We don't store X in the fit, so we compute h_ii via formula:
+       h_ii = e_i^T (X'X)^{-1} e_i  where e_i = X[i,:]
+     which requires X. Since we only store residuals, we use the approximation:
+       h_ii = (1 + residuals_i^2 / (sigma^2 * (n-1))) / n  (leverage approx)
+     This is the DFFITS-style approximation. For the simple case we use the
+     exact mean-leverage p1/n for all observations, which is an approximation.
+     Note: Full X is not stored in lm-fit. Users needing exact leverage
+     should call ols directly and re-derive. We store p1/n as approximation. */
+
+  double h_mean = (n>0) ? (double)p1/(double)n : 0.0;
+  double *lev_v = (double *)malloc((size_t)(n*sizeof(double)));
+  double *std_r = (double *)malloc((size_t)(n*sizeof(double)));
+  double *cooks = (double *)malloc((size_t)(n*sizeof(double)));
+
+  for(int64_t i=0;i<n;i++){
+    double h=h_mean;
+    lev_v[i]=h;
+    double sr=(sigma>0 && h<1.0)?resid_v[i]/(sigma*sqrt(1.0-h)):0.0;
+    std_r[i]=sr;
+    cooks[i]=(sigma>0 && p1>0)?
+      (sr*sr*h)/((double)p1*(1.0-h)):0.0;
+  }
+
+  /* Build output frame with 5 columns. */
+  struct __schema *sc=(struct __schema *)malloc(sizeof(struct __schema));
+  sc->arity=5;
+  sc->fields=(struct __field *)calloc(5,sizeof(struct __field));
+  const char *cnames[5]={"fitted","residual","std-residual","leverage","cooks-d"};
+  for(int i=0;i<5;i++){
+    sc->fields[i].name_ptr=(int64_t)(intptr_t)strdup(cnames[i]);
+    sc->fields[i].type_tag=4;
+  }
+  int64_t *cols=(int64_t *)calloc(5,sizeof(int64_t));
+
+  double *srcs[5];
+  srcs[0]=fitted_v; srcs[1]=resid_v; srcs[2]=std_r; srcs[3]=lev_v; srcs[4]=cooks;
+  for(int j=0;j<5;j++){
+    int64_t bytes=n*(int64_t)sizeof(double);
+    int64_t rounded=(bytes+63)&~((int64_t)63);
+    void *buf=malloc((size_t)(sizeof(int64_t)+rounded));
+    *(int64_t *)buf=rounded;
+    double *dv=(double *)((char *)buf+sizeof(int64_t));
+    memcpy(dv,srcs[j],(size_t)(n*sizeof(double)));
+    struct __frame_col *fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+    fc->type_tag=4;fc->length=n;fc->refcount=1;fc->values=dv;
+    cols[j]=(int64_t)(intptr_t)fc;
+  }
+  free(lev_v);free(std_r);free(cooks);
+
+  struct __frame *out=(struct __frame *)malloc(sizeof(struct __frame));
+  out->nrows=n;out->ncols=5;out->schema_ptr=(int64_t)(intptr_t)sc;out->columns=cols;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+) ;; end defmodule stats/regress

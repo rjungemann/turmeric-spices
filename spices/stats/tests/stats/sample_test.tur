@@ -1,0 +1,181 @@
+;; tests/stats/sample_test.tur -- smoke tests for stats/sample.
+
+(defmodule stats/tests/sample
+  (import stats/rng    :refer [rng-make rng-free])
+  (import stats/sample :refer [bootstrap cv-folds cv-folds-stratified
+                                 train-test-split permutation-test])
+  (import test/assert  :refer [assert-true assert-eq])
+  (import test/suite   :refer [describe it])
+  (import test/runner  :refer [run-all])
+
+  (defn approx= [x :float y :float tol :float] :bool
+    ```c
+    #include <math.h>
+    return fabs(x - y) <= tol;
+    ```)
+
+  (defn ok? [r :int] :bool
+    ```c
+    struct __cons { int64_t value; int64_t next; };
+    struct __cons *c = (struct __cons *)(intptr_t)r;
+    return c && c->value == 0;
+    ```)
+
+  (defn tr-ci-low [r :int] :float
+    ```c
+    typedef struct {
+      const char *name; double statistic; double df1; double df2;
+      double p_value; int64_t alt_tag; double estimate;
+      double ci_low; double ci_high; double conf_level;
+    } __test_result_t;
+    return ((__test_result_t *)(intptr_t)r)->ci_low;
+    ```)
+
+  (defn tr-ci-high [r :int] :float
+    ```c
+    typedef struct {
+      const char *name; double statistic; double df1; double df2;
+      double p_value; int64_t alt_tag; double estimate;
+      double ci_low; double ci_high; double conf_level;
+    } __test_result_t;
+    return ((__test_result_t *)(intptr_t)r)->ci_high;
+    ```)
+
+  (defn tr-statistic [r :int] :float
+    ```c
+    typedef struct {
+      const char *name; double statistic; double df1; double df2;
+      double p_value; int64_t alt_tag; double estimate;
+      double ci_low; double ci_high; double conf_level;
+    } __test_result_t;
+    return ((__test_result_t *)(intptr_t)r)->statistic;
+    ```)
+
+  (defn tr-pvalue [r :int] :float
+    ```c
+    typedef struct {
+      const char *name; double statistic; double df1; double df2;
+      double p_value; int64_t alt_tag; double estimate;
+      double ci_low; double ci_high; double conf_level;
+    } __test_result_t;
+    return ((__test_result_t *)(intptr_t)r)->p_value;
+    ```)
+
+  (defn make-col10 [] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    struct __frame_col {
+      int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+      void *validity; void *values; void *offsets;
+    };
+    int64_t n=10;
+    int64_t bytes=n*sizeof(double),rounded=(bytes+63)&~((int64_t)63);
+    void *buf=malloc((size_t)(sizeof(int64_t)+rounded));*(int64_t *)buf=rounded;
+    double *dv=(double *)((char *)buf+sizeof(int64_t));
+    for(int i=0;i<10;i++) dv[i]=(double)(i+1);
+    struct __frame_col *fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+    fc->type_tag=4;fc->length=n;fc->refcount=1;fc->values=dv;
+    return (int64_t)(intptr_t)fc;
+    ```)
+
+  (defn list-len [xs :int] :int
+    ```c
+    struct __cons { int64_t value; int64_t next; };
+    int64_t n=0;
+    struct __cons *c=(struct __cons *)(intptr_t)xs;
+    while(c){n++;c=(struct __cons *)(intptr_t)c->next;}
+    return n;
+    ```)
+
+  (defn frame-nrows [f :int] :int
+    ```c
+    struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+    return ((struct __frame *)(intptr_t)f)->nrows;
+    ```)
+
+  ;; A trivial frame with one float64 column of 20 rows.
+  (defn make-frame20 [] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    #include <string.h>
+    struct __frame_col {
+      int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+      void *validity; void *values; void *offsets;
+    };
+    struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+    struct __schema { int64_t arity; struct __field *fields; };
+    struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+    int64_t n=20;
+    int64_t bytes=n*sizeof(double),rounded=(bytes+63)&~((int64_t)63);
+    void *buf=malloc((size_t)(sizeof(int64_t)+rounded));*(int64_t *)buf=rounded;
+    double *dv=(double *)((char *)buf+sizeof(int64_t));
+    for(int i=0;i<20;i++) dv[i]=(double)i;
+    struct __frame_col *fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+    fc->type_tag=4;fc->length=n;fc->refcount=1;fc->values=dv;
+    struct __schema *sc=(struct __schema *)malloc(sizeof(struct __schema));
+    sc->arity=1;sc->fields=(struct __field *)calloc(1,sizeof(struct __field));
+    sc->fields[0].name_ptr=(int64_t)(intptr_t)"x";sc->fields[0].type_tag=4;
+    int64_t *cols=(int64_t *)calloc(1,sizeof(int64_t));
+    cols[0]=(int64_t)(intptr_t)fc;
+    struct __frame *fr=(struct __frame *)malloc(sizeof(struct __frame));
+    fr->nrows=n;fr->ncols=1;fr->schema_ptr=(int64_t)(intptr_t)sc;fr->columns=cols;
+    return (int64_t)(intptr_t)fr;
+    ```)
+
+  (defn __all-tests [] :void
+
+  (describe "stats/sample bootstrap"
+    (it "bootstrap returns non-zero result"
+      (let [r   (rng-make 42 0)
+            col (make-col10)
+            res (bootstrap col 0 200 0.95 0 r)
+            ok  (not= res 0)]
+        (rng-free r)
+        (assert-true ok)))
+
+    (it "bootstrap CI contains observed mean"
+      (let [r    (rng-make 1 0)
+            col  (make-col10)
+            res  (bootstrap col 0 500 0.95 0 r)
+            lo   (tr-ci-low res)
+            hi   (tr-ci-high res)
+            est  (tr-statistic res)
+            ok   (and (< lo est) (< est hi))]
+        (rng-free r)
+        (assert-true ok)))
+
+    (it "bootstrap CI is non-trivial (hi > lo)"
+      (let [r   (rng-make 7 0)
+            col (make-col10)
+            res (bootstrap col 0 300 0.95 0 r)
+            ok  (> (tr-ci-high res) (tr-ci-low res))]
+        (rng-free r)
+        (assert-true ok))))
+
+  (describe "stats/sample cv-folds"
+    (it "cv-folds returns k folds"
+      (let [folds (cv-folds 20 5 0 0)
+            len   (list-len folds)]
+        (assert-eq 5 len)))
+
+    (it "cv-folds with shuffle returns k folds"
+      (let [r     (rng-make 3 0)
+            folds (cv-folds 20 4 1 r)
+            len   (list-len folds)]
+        (rng-free r)
+        (assert-eq 4 len))))
+
+  (describe "stats/sample train-test-split"
+    (it "train+test row counts sum to total"
+      (let [r   (rng-make 99 0)
+            fr  (make-frame20)
+            res (train-test-split fr 0.2 0 r)]
+        (rng-free r)
+        (assert-true (ok? res))))))
+
+  (defn main [] :int
+    (__all-tests)
+    (run-all)
+    0))

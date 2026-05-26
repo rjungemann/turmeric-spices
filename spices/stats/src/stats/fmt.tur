@@ -1,0 +1,334 @@
+;; stats/fmt.tur -- pretty-printing for test-result and lm-fit.
+
+(defmodule stats/fmt
+  (export print-test test->str print-fit fit->str fit-coefs-frame)
+
+  (import stats/test :refer [test-result-name test-result-statistic
+                               test-result-df1 test-result-df2
+                               test-result-p-value test-result-alt-tag
+                               test-result-estimate test-result-ci-low
+                               test-result-ci-high test-result-conf-level])
+
+;;; test->str -- format a test-result as a string (R-style).
+;;;
+;;; Parameters:
+;;;   r -- :int  test-result handle
+;;;
+;;; Returns:
+;;;   :cstr  formatted summary.  The string is malloc'd; caller frees.
+;;;
+;;; Since: ST5
+(defn test->str [r :int] :cstr
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+  #include <stdio.h>
+  #include <string.h>
+
+  typedef struct {
+    const char *name; double statistic; double df1; double df2;
+    double p_value; int64_t alt_tag; double estimate;
+    double ci_low; double ci_high; double conf_level;
+  } __test_result_t;
+  __test_result_t *tr = (__test_result_t *)(intptr_t)r;
+
+  const char *alt_str = tr->alt_tag == 1 ? "less"
+                      : tr->alt_tag == 2 ? "greater"
+                      : "two.sided";
+  char buf[1024];
+  int pos = 0;
+
+  pos += snprintf(buf+pos, sizeof(buf)-pos,
+    "\n\t%s\n\n", tr->name);
+
+  if (!isnan(tr->df2)) {
+    pos += snprintf(buf+pos, sizeof(buf)-pos,
+      "statistic = %.6g, df1 = %.4g, df2 = %.4g, p-value = %.6g\n",
+      tr->statistic, tr->df1, tr->df2, tr->p_value);
+  } else if (!isnan(tr->df1)) {
+    pos += snprintf(buf+pos, sizeof(buf)-pos,
+      "statistic = %.6g, df = %.4g, p-value = %.6g\n",
+      tr->statistic, tr->df1, tr->p_value);
+  } else {
+    pos += snprintf(buf+pos, sizeof(buf)-pos,
+      "statistic = %.6g, p-value = %.6g\n",
+      tr->statistic, tr->p_value);
+  }
+
+  pos += snprintf(buf+pos, sizeof(buf)-pos,
+    "alternative hypothesis: %s\n", alt_str);
+
+  if (!isnan(tr->ci_low) && !isnan(tr->ci_high)) {
+    pos += snprintf(buf+pos, sizeof(buf)-pos,
+      "%.0f%% confidence interval: [%.6g, %.6g]\n",
+      tr->conf_level * 100.0, tr->ci_low, tr->ci_high);
+  }
+
+  if (!isnan(tr->estimate)) {
+    pos += snprintf(buf+pos, sizeof(buf)-pos,
+      "sample estimates: %.6g\n", tr->estimate);
+  }
+
+  return (int64_t)(intptr_t)strdup(buf);
+  ```)
+
+;;; print-test -- print a test-result to stdout.
+;;;
+;;; Parameters:
+;;;   r -- :int  test-result handle
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Since: ST5
+(defn print-test [r :int] :void
+  ```c
+  #include <stdint.h>
+  #include <stdio.h>
+
+  /* We call test->str logic inline rather than via interpreter dispatch. */
+  typedef struct {
+    const char *name; double statistic; double df1; double df2;
+    double p_value; int64_t alt_tag; double estimate;
+    double ci_low; double ci_high; double conf_level;
+  } __test_result_t;
+  __test_result_t *tr = (__test_result_t *)(intptr_t)r;
+  #include <math.h>
+  const char *alt_str = tr->alt_tag == 1 ? "less"
+                      : tr->alt_tag == 2 ? "greater"
+                      : "two.sided";
+  printf("\n\t%s\n\n", tr->name);
+  if (!isnan(tr->df2))
+    printf("statistic = %.6g, df1 = %.4g, df2 = %.4g, p-value = %.6g\n",
+           tr->statistic, tr->df1, tr->df2, tr->p_value);
+  else if (!isnan(tr->df1))
+    printf("statistic = %.6g, df = %.4g, p-value = %.6g\n",
+           tr->statistic, tr->df1, tr->p_value);
+  else
+    printf("statistic = %.6g, p-value = %.6g\n", tr->statistic, tr->p_value);
+  printf("alternative hypothesis: %s\n", alt_str);
+  if (!isnan(tr->ci_low) && !isnan(tr->ci_high))
+    printf("%.0f%% confidence interval: [%.6g, %.6g]\n",
+           tr->conf_level*100.0, tr->ci_low, tr->ci_high);
+  if (!isnan(tr->estimate))
+    printf("sample estimates: %.6g\n", tr->estimate);
+  ```)
+
+;;; fit->str -- format an lm-fit summary as a string.
+;;;
+;;; Parameters:
+;;;   fit -- :int  lm-fit handle
+;;;
+;;; Returns:
+;;;   :cstr  formatted summary.  Caller frees.
+;;;
+;;; Since: ST7
+(defn fit->str [fit :int] :cstr
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+  #include <stdio.h>
+  #include <string.h>
+
+  /* lm-fit layout -- see stats/regress.tur. */
+  typedef struct {
+    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
+    int64_t fitted; int64_t residuals;
+    double r_squared; double adj_r_squared; double sigma;
+    int64_t df_residual; int64_t df_model; int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __cons { int64_t value; int64_t next; };
+
+  __lm_fit_t *f = (__lm_fit_t *)(intptr_t)fit;
+  struct __frame_col *coefs_col   = (struct __frame_col *)(intptr_t)f->coefs;
+  struct __frame_col *se_col      = (struct __frame_col *)(intptr_t)f->se;
+  struct __frame_col *t_col       = (struct __frame_col *)(intptr_t)f->t_values;
+  struct __frame_col *p_col       = (struct __frame_col *)(intptr_t)f->p_values;
+  double *cv = (double *)coefs_col->values;
+  double *sv = (double *)se_col->values;
+  double *tv = (double *)t_col->values;
+  double *pv = (double *)p_col->values;
+  int64_t p1 = coefs_col->length; /* p+1 */
+
+  char buf[4096];
+  int pos = 0;
+  pos += snprintf(buf+pos, sizeof(buf)-pos, "\nCall: ols(...)\n\nCoefficients:\n");
+  pos += snprintf(buf+pos, sizeof(buf)-pos, "%-16s %10s %10s %8s %10s\n",
+                  "Name", "Estimate", "Std.Err", "t value", "Pr(>|t|)");
+
+  struct __cons *nm = (struct __cons *)(intptr_t)f->names;
+  for (int64_t i = 0; i < p1; i++) {
+    const char *name = nm ? (const char *)(intptr_t)nm->value : "";
+    const char *stars = pv[i]<0.001?"***":pv[i]<0.01?"**":pv[i]<0.05?"*":pv[i]<0.1?".":"";
+    pos += snprintf(buf+pos, sizeof(buf)-pos, "%-16s %10.6f %10.6f %8.4f %10.4g %s\n",
+                    name, cv[i], sv[i], tv[i], pv[i], stars);
+    if (nm) nm = (struct __cons *)(intptr_t)nm->next;
+  }
+  pos += snprintf(buf+pos, sizeof(buf)-pos,
+    "\nResidual standard error: %.6g on %lld degrees of freedom\n"
+    "Multiple R-squared: %.6g,  Adjusted R-squared: %.6g\n",
+    f->sigma, (long long)f->df_residual,
+    f->r_squared, f->adj_r_squared);
+
+  return (int64_t)(intptr_t)strdup(buf);
+  ```)
+
+;;; print-fit -- print an lm-fit summary to stdout.
+;;;
+;;; Parameters:
+;;;   fit -- :int  lm-fit handle
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Since: ST7
+(defn print-fit [fit :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+  #include <stdio.h>
+  #include <string.h>
+
+  typedef struct {
+    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
+    int64_t fitted; int64_t residuals;
+    double r_squared; double adj_r_squared; double sigma;
+    int64_t df_residual; int64_t df_model; int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __cons { int64_t value; int64_t next; };
+
+  __lm_fit_t *f = (__lm_fit_t *)(intptr_t)fit;
+  struct __frame_col *coefs_col = (struct __frame_col *)(intptr_t)f->coefs;
+  struct __frame_col *se_col    = (struct __frame_col *)(intptr_t)f->se;
+  struct __frame_col *t_col     = (struct __frame_col *)(intptr_t)f->t_values;
+  struct __frame_col *p_col     = (struct __frame_col *)(intptr_t)f->p_values;
+  double *cv=(double *)coefs_col->values;
+  double *sv=(double *)se_col->values;
+  double *tv=(double *)t_col->values;
+  double *pv=(double *)p_col->values;
+  int64_t p1=coefs_col->length;
+
+  printf("\nCall: ols(...)\n\nCoefficients:\n");
+  printf("%-16s %10s %10s %8s %10s\n","Name","Estimate","Std.Err","t value","Pr(>|t|)");
+
+  struct __cons *nm=(struct __cons *)(intptr_t)f->names;
+  for(int64_t i=0;i<p1;i++){
+    const char *name=nm?(const char *)(intptr_t)nm->value:"";
+    const char *stars=pv[i]<0.001?"***":pv[i]<0.01?"**":pv[i]<0.05?"*":pv[i]<0.1?".":"";
+    printf("%-16s %10.6f %10.6f %8.4f %10.4g %s\n",name,cv[i],sv[i],tv[i],pv[i],stars);
+    if(nm) nm=(struct __cons *)(intptr_t)nm->next;
+  }
+  printf("\nResidual standard error: %.6g on %lld degrees of freedom\n"
+         "Multiple R-squared: %.6g,  Adjusted R-squared: %.6g\n",
+         f->sigma,(long long)f->df_residual,f->r_squared,f->adj_r_squared);
+  ```)
+
+;;; fit-coefs-frame -- return a frame with columns: name, estimate, se, t, p.
+;;;
+;;; Parameters:
+;;;   fit -- :int  lm-fit handle
+;;;
+;;; Returns:
+;;;   :int  frame handle.
+;;;
+;;; Since: ST7
+(defn fit-coefs-frame [fit :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <string.h>
+  #include <math.h>
+
+  typedef struct {
+    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
+    int64_t fitted; int64_t residuals;
+    double r_squared; double adj_r_squared; double sigma;
+    int64_t df_residual; int64_t df_model; int64_t n_obs;
+    int64_t names;
+  } __lm_fit_t;
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+  struct __schema { int64_t arity; struct __field *fields; };
+  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+  struct __cons { int64_t value; int64_t next; };
+
+  __lm_fit_t *f = (__lm_fit_t *)(intptr_t)fit;
+  struct __frame_col *coefs_col = (struct __frame_col *)(intptr_t)f->coefs;
+  int64_t p1 = coefs_col->length;
+
+  /* 5 output columns: name(utf8), estimate, se, t, p. */
+  struct __schema *sc = (struct __schema *)malloc(sizeof(struct __schema));
+  sc->arity = 5;
+  sc->fields = (struct __field *)calloc(5, sizeof(struct __field));
+  const char *col_names[5] = {"name","estimate","se","t","p"};
+  for(int i=0;i<5;i++){
+    sc->fields[i].name_ptr=(int64_t)(intptr_t)strdup(col_names[i]);
+    sc->fields[i].type_tag=(i==0)?6:4;
+  }
+  int64_t *out_cols=(int64_t *)calloc(5,sizeof(int64_t));
+
+  /* name utf8 column. */
+  { int64_t total=0;
+    struct __cons *nm=(struct __cons *)(intptr_t)f->names;
+    for(int64_t i=0;i<p1;i++){
+      const char *n=nm?(const char *)(intptr_t)nm->value:"";
+      total+=(int64_t)strlen(n);
+      if(nm) nm=(struct __cons *)(intptr_t)nm->next;
+    }
+    int32_t *offs=(int32_t *)malloc((size_t)(p1+1)*sizeof(int32_t));
+    char *chars=(char *)malloc((size_t)(total+1));
+    int32_t pos=0;
+    nm=(struct __cons *)(intptr_t)f->names;
+    for(int64_t i=0;i<p1;i++){
+      const char *n=nm?(const char *)(intptr_t)nm->value:"";
+      offs[i]=pos; int64_t sl=(int64_t)strlen(n);
+      memcpy(chars+pos,n,(size_t)sl); pos+=(int32_t)sl;
+      if(nm) nm=(struct __cons *)(intptr_t)nm->next;
+    }
+    offs[p1]=pos; chars[pos]='\0';
+    struct __frame_col *nc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+    nc->type_tag=6;nc->length=p1;nc->refcount=1;nc->offsets=offs;nc->values=chars;
+    out_cols[0]=(int64_t)(intptr_t)nc;
+  }
+
+  /* Float64 data columns: estimate, se, t, p. */
+  struct __frame_col *src_cols[4]={
+    (struct __frame_col *)(intptr_t)f->coefs,
+    (struct __frame_col *)(intptr_t)f->se,
+    (struct __frame_col *)(intptr_t)f->t_values,
+    (struct __frame_col *)(intptr_t)f->p_values
+  };
+  for(int j=0;j<4;j++){
+    int64_t bytes=p1*(int64_t)sizeof(double);
+    int64_t rounded=(bytes+63)&~((int64_t)63);
+    void *buf=malloc((size_t)(sizeof(int64_t)+rounded));
+    *(int64_t *)buf=rounded;
+    double *dv=(double *)((char *)buf+sizeof(int64_t));
+    memcpy(dv,(double *)src_cols[j]->values,(size_t)(p1*sizeof(double)));
+    struct __frame_col *fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+    fc->type_tag=4;fc->length=p1;fc->refcount=1;fc->values=dv;
+    out_cols[1+j]=(int64_t)(intptr_t)fc;
+  }
+
+  struct __frame *out=(struct __frame *)malloc(sizeof(struct __frame));
+  out->nrows=p1;out->ncols=5;out->schema_ptr=(int64_t)(intptr_t)sc;out->columns=out_cols;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+) ;; end defmodule stats/fmt

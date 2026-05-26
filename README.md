@@ -27,6 +27,7 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 | [`tur-frame`](spices/frame/) | In-memory dataframe (Arrow-compatible columnar) | 1 -- pure Turmeric | -- |
 | [`tur-plot`](spices/plot/) | 2D data visualization (functions, points, histograms, contours) | 1 -- pure Turmeric | tur-plutovg |
 | [`tur-notebook`](spices/notebook/) | Literate `.tur.md` notebooks with TUI, HTML export, and cell execution | 3 -- cmake-dep | libturi (linked against turmeric build) |
+| [`tur-stats`](spices/stats/) | Statistical analysis on dataframes (summary, distributions, hypothesis tests, OLS, resampling) | 1 -- inline-C only | -- |
 
 ---
 

@@ -1,0 +1,63 @@
+;; tests/stats/dist_test.tur -- smoke tests for stats/dist.
+
+(defmodule stats/tests/dist
+  (import stats/dist   :refer [dist-normal dist-t dist-chi2
+                                pdf cdf quantile
+                                dnorm pnorm qnorm
+                                dt pt
+                                pchi2])
+  (import stats/rng    :refer [rng-make rng-free])
+  (import test/assert  :refer [assert-true])
+  (import test/suite   :refer [describe it])
+  (import test/runner  :refer [run-all])
+
+  (defn approx= [x :float y :float tol :float] :bool
+    ```c
+    #include <math.h>
+    return fabs(x - y) <= tol;
+    ```)
+
+  (defn __all-tests [] :void
+
+  (describe "stats/dist normal"
+    (it "pnorm(0) = 0.5"
+      (assert-true (approx= (pnorm 0.0 0.0 1.0) 0.5 1e-9)))
+
+    (it "pnorm(1.96) ~ 0.975"
+      (assert-true (approx= (pnorm 1.96 0.0 1.0) 0.975 2e-3)))
+
+    (it "dnorm(0) = 1/sqrt(2pi)"
+      (assert-true (approx= (dnorm 0.0 0.0 1.0) 0.3989422804 1e-7)))
+
+    (it "qnorm(0.5) = 0"
+      (assert-true (approx= (qnorm 0.5 0.0 1.0) 0.0 1e-6)))
+
+    (it "qnorm(0.975) ~ 1.96"
+      (assert-true (approx= (qnorm 0.975 0.0 1.0) 1.959964 1e-3)))
+
+    (it "pnorm(qnorm(0.9)) ~ 0.9  (round-trip)"
+      (assert-true (approx= (pnorm (qnorm 0.9 0.0 1.0) 0.0 1.0) 0.9 1e-6))))
+
+  (describe "stats/dist t"
+    (it "pt(0, df=10) = 0.5"
+      (assert-true (approx= (pt 0.0 10.0) 0.5 1e-9)))
+
+    (it "pt(1.812, df=10) ~ 0.95  (one-tailed)"
+      (assert-true (approx= (pt 1.812 10.0) 0.95 2e-3))))
+
+  (describe "stats/dist chi2"
+    (it "pchi2(0, df=5) = 0"
+      (assert-true (approx= (pchi2 0.0 5.0) 0.0 1e-9)))
+
+    (it "pchi2(11.07, df=5) ~ 0.95"
+      (assert-true (approx= (pchi2 11.07 5.0) 0.95 2e-2)))
+
+    (it "pdf of normal at 0 via generic pdf"
+      (let [d (dist-normal 0.0 1.0)
+            v (pdf d 0.0)]
+        (assert-true (approx= v 0.3989422804 1e-7))))))
+
+  (defn main [] :int
+    (__all-tests)
+    (run-all)
+    0))
