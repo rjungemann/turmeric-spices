@@ -1,0 +1,30 @@
+;; plot/point.tur -- point-like renderers.
+
+(defmodule plot/point
+  (export points error-bars vector-field arrows)
+
+  (import plot/core :refer [__make-renderer __renderer-floats __renderer-ints __renderer-bounds])
+
+  ;;; points -- scatter plot renderer.
+  (defn points [vs :int style :int label :cstr] :int
+    (__make-renderer 30 style 0 vs 0 0 0 0 label ""))
+
+  ;;; error-bars -- vertical or horizontal error bars.
+  (defn error-bars [bars :int style :int invert :int label :cstr] :int
+    (__renderer-ints (__make-renderer 31 style 0 bars 0 0 0 0 label "") invert 0 0 0))
+
+  ;;; vector-field -- sample f(x,y)->(cons dx dy) over a grid.
+  (defn vector-field [f x-min :float x-max :float y-min :float y-max :float
+                      samples :int scale-mode :int style :int label :cstr] :int
+    (__renderer-bounds
+      (__renderer-ints
+        (__renderer-floats (__make-renderer 32 style 0 f 0 0 0 0 label "")
+                           x-min x-max y-min y-max 0.0 0.0)
+        samples scale-mode 0 0)
+      x-min x-max y-min y-max))
+
+  ;;; arrows -- explicit arrow segments.
+  (defn arrows [arrow-list :int style :int label :cstr] :int
+    (__make-renderer 33 style 0 arrow-list 0 0 0 0 label ""))
+
+) ;; end defmodule plot/point

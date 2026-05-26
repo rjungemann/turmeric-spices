@@ -1,0 +1,449 @@
+;; stats/rng.tur -- seedable PCG32 random-number generator with shuffle and sample helpers.
+;;
+;; rng handles are opaque :int pointers to a heap-allocated pcg32_t struct.
+;; Every randomized routine in tur-stats takes an explicit rng argument so
+;; results are deterministic given the same seed.
+
+(defmodule stats/rng
+  (export rng-make rng-clone rng-free
+          rng-uint32 rng-uint64 rng-uniform
+          rng-uniform-range rng-int-range
+          rng-shuffle! rng-shuffled
+          rng-sample rng-sample-indices)
+
+;;; rng-make -- create a new PCG32 stream seeded with seed.
+;;;
+;;; Parameters:
+;;;   seed   -- :int seed value; 0 uses a default fixed seed (PCG default)
+;;;   stream -- :int stream discriminator; use different values for independent streams
+;;;
+;;; Returns:
+;;;   :int  opaque rng handle.  Free with rng-free.
+;;;
+;;; Example:
+;;;   (let [r (rng-make 42 1)]
+;;;     (rng-uniform r))   ; => deterministic float in [0,1)
+;;;
+;;; Since: ST0
+(defn rng-make [seed :int stream :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include "stats/pcg32.h"
+  pcg32_t *rng = (pcg32_t *)malloc(sizeof(pcg32_t));
+  if (!rng) return 0;
+  uint64_t s = seed ? (uint64_t)seed : UINT64_C(0x853c49e6748fea9b);
+  uint64_t st = stream ? (uint64_t)stream : UINT64_C(0xda3e39cb94b95bdb);
+  pcg32_srandom_r(rng, s, st);
+  return (int64_t)(intptr_t)rng;
+  ```)
+
+;;; rng-clone -- create an independent copy of rng r at the same state.
+;;;
+;;; Parameters:
+;;;   r -- :int source rng handle
+;;;
+;;; Returns:
+;;;   :int  new rng handle at the same state.  Free with rng-free.
+;;;
+;;; Example:
+;;;   (let [a (rng-make 1 1)
+;;;         b (rng-clone a)]
+;;;     (= (rng-uniform a) (rng-uniform b)))  ; => true
+;;;
+;;; Since: ST0
+(defn rng-clone [r :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include "stats/pcg32.h"
+  pcg32_t *src = (pcg32_t *)(intptr_t)r;
+  pcg32_t *dst = (pcg32_t *)malloc(sizeof(pcg32_t));
+  if (!dst) return 0;
+  *dst = *src;
+  return (int64_t)(intptr_t)dst;
+  ```)
+
+;;; rng-free -- free a rng handle.
+;;;
+;;; Parameters:
+;;;   r -- :int rng handle
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (rng-free (rng-make 1 1))
+;;;
+;;; Since: ST0
+(defn rng-free [r :int] :void
+  ```c
+  #include <stdlib.h>
+  free((void *)(intptr_t)r);
+  ```)
+
+;;; rng-uint32 -- draw a uniform 32-bit integer from [0, 2^32).
+;;;
+;;; Parameters:
+;;;   r -- :int rng handle
+;;;
+;;; Returns:
+;;;   :int  value in [0, 2^32).
+;;;
+;;; Example:
+;;;   (rng-uint32 (rng-make 1 1))  ; => some :int
+;;;
+;;; Since: ST0
+(defn rng-uint32 [r :int] :int
+  ```c
+  #include "stats/pcg32.h"
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+  return (int64_t)(uint64_t)pcg32_random_r(rng);
+  ```)
+
+;;; rng-uint64 -- draw a uniform 64-bit integer.
+;;;
+;;; Parameters:
+;;;   r -- :int rng handle
+;;;
+;;; Returns:
+;;;   :int  64-bit random value (sign bit may be set).
+;;;
+;;; Since: ST0
+(defn rng-uint64 [r :int] :int
+  ```c
+  #include "stats/pcg32.h"
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+  return (int64_t)pcg32_uint64_r(rng);
+  ```)
+
+;;; rng-uniform -- draw a uniform float in [0, 1).
+;;;
+;;; Parameters:
+;;;   r -- :int rng handle
+;;;
+;;; Returns:
+;;;   :float in [0, 1).
+;;;
+;;; Example:
+;;;   (rng-uniform (rng-make 42 1))
+;;;
+;;; Since: ST0
+(defn rng-uniform [r :int] :float
+  ```c
+  #include "stats/pcg32.h"
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+  return pcg32_double_r(rng);
+  ```)
+
+;;; rng-uniform-range -- draw a uniform float in [lo, hi).
+;;;
+;;; Parameters:
+;;;   r  -- :int rng handle
+;;;   lo -- :float lower bound (inclusive)
+;;;   hi -- :float upper bound (exclusive)
+;;;
+;;; Returns:
+;;;   :float in [lo, hi).
+;;;
+;;; Example:
+;;;   (rng-uniform-range r -1.0 1.0)
+;;;
+;;; Since: ST0
+(defn rng-uniform-range [r :int lo :float hi :float] :float
+  ```c
+  #include "stats/pcg32.h"
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+  return lo + (hi - lo) * pcg32_double_r(rng);
+  ```)
+
+;;; rng-int-range -- draw a uniform integer in [lo, hi).
+;;;
+;;; Parameters:
+;;;   r  -- :int rng handle
+;;;   lo -- :int lower bound (inclusive)
+;;;   hi -- :int upper bound (exclusive)
+;;;
+;;; Returns:
+;;;   :int in [lo, hi).
+;;;
+;;; Example:
+;;;   (rng-int-range r 0 6)  ; => 0..5
+;;;
+;;; Since: ST0
+(defn rng-int-range [r :int lo :int hi :int] :int
+  ```c
+  #include "stats/pcg32.h"
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+  int64_t range = hi - lo;
+  if (range <= 0) return lo;
+  /* Rejection sampling for unbiased result. */
+  uint32_t threshold = (uint32_t)(-(uint32_t)range % (uint32_t)range);
+  for (;;) {
+      uint32_t r32 = pcg32_random_r(rng);
+      if (r32 >= threshold) return lo + (int64_t)(r32 % (uint32_t)range);
+  }
+  ```)
+
+;;; rng-shuffle! -- in-place Fisher-Yates shuffle of a cons list of :int indices.
+;;;
+;;; Parameters:
+;;;   r       -- :int rng handle
+;;;   indices -- cons list of :int  (modified in-place)
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (let [lst (cons 0 (cons 1 (cons 2 0)))]
+;;;     (rng-shuffle! r lst))
+;;;
+;;; Since: ST0
+(defn rng-shuffle! [r :int indices :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include "stats/pcg32.h"
+
+  struct __cons { int64_t value; int64_t next; };
+
+  /* Collect pointers into a temp array for O(1) indexed access. */
+  int64_t n = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)indices; p;
+       p = (struct __cons *)(intptr_t)p->next) n++;
+  if (n < 2) return;
+
+  struct __cons **arr = (struct __cons **)malloc((size_t)n * sizeof(struct __cons *));
+  if (!arr) return;
+  int64_t i = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)indices; p;
+       p = (struct __cons *)(intptr_t)p->next) arr[i++] = p;
+
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+  for (int64_t k = n - 1; k > 0; k--) {
+      uint32_t threshold = (uint32_t)(-(uint32_t)(k+1) % (uint32_t)(k+1));
+      uint32_t j32;
+      do { j32 = pcg32_random_r(rng); } while (j32 < threshold);
+      int64_t j = (int64_t)(j32 % (uint32_t)(k + 1));
+      /* Swap values (not pointers). */
+      int64_t tmp    = arr[k]->value;
+      arr[k]->value  = arr[j]->value;
+      arr[j]->value  = tmp;
+  }
+  free(arr);
+  ```)
+
+;;; rng-shuffled -- return a new shuffled copy of a cons list of :int.
+;;;
+;;; Parameters:
+;;;   r       -- :int rng handle
+;;;   indices -- cons list of :int
+;;;
+;;; Returns:
+;;;   New cons list of :int in shuffled order.  Caller owns the new list.
+;;;
+;;; Since: ST0
+(defn rng-shuffled [r :int indices :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include "stats/pcg32.h"
+
+  struct __cons { int64_t value; int64_t next; };
+
+  /* Count. */
+  int64_t n = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)indices; p;
+       p = (struct __cons *)(intptr_t)p->next) n++;
+
+  if (n == 0) return 0;
+
+  /* Copy values into array. */
+  int64_t *vals = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+  if (!vals) return 0;
+  int64_t i = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)indices; p;
+       p = (struct __cons *)(intptr_t)p->next) vals[i++] = p->value;
+
+  /* Fisher-Yates in-place on array. */
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+  for (int64_t k = n - 1; k > 0; k--) {
+      uint32_t threshold = (uint32_t)(-(uint32_t)(k+1) % (uint32_t)(k+1));
+      uint32_t j32;
+      do { j32 = pcg32_random_r(rng); } while (j32 < threshold);
+      int64_t j = (int64_t)(j32 % (uint32_t)(k + 1));
+      int64_t tmp = vals[k]; vals[k] = vals[j]; vals[j] = tmp;
+  }
+
+  /* Build cons list from back to front. */
+  int64_t result = 0;
+  for (int64_t k = n - 1; k >= 0; k--) {
+      struct __cons *c = (struct __cons *)malloc(sizeof(struct __cons));
+      if (!c) { free(vals); return result; }
+      c->value = vals[k];
+      c->next  = result;
+      result   = (int64_t)(intptr_t)c;
+  }
+  free(vals);
+  return result;
+  ```)
+
+;;; rng-sample-indices -- sample k indices from [0, n) with or without replacement.
+;;;
+;;; Parameters:
+;;;   r                -- :int rng handle
+;;;   n                -- :int population size
+;;;   k                -- :int sample size
+;;;   with-replacement -- :int  0 = without replacement, 1 = with replacement
+;;;
+;;; Returns:
+;;;   cons list of :int  (k indices in [0, n)).  Caller frees.
+;;;
+;;; Example:
+;;;   (rng-sample-indices r 100 10 0)  ; => 10 distinct indices
+;;;
+;;; Since: ST0
+(defn rng-sample-indices [r :int n :int k :int with-replacement :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include "stats/pcg32.h"
+
+  struct __cons { int64_t value; int64_t next; };
+
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+
+  if (k <= 0 || n <= 0) return 0;
+
+  if (with_replacement) {
+      int64_t result = 0;
+      for (int64_t i = k - 1; i >= 0; i--) {
+          struct __cons *c = (struct __cons *)malloc(sizeof(struct __cons));
+          if (!c) return result;
+          uint32_t threshold = (uint32_t)(-(uint32_t)n % (uint32_t)n);
+          uint32_t r32;
+          do { r32 = pcg32_random_r(rng); } while (r32 < threshold);
+          c->value = (int64_t)(r32 % (uint32_t)n);
+          c->next  = result;
+          result   = (int64_t)(intptr_t)c;
+      }
+      return result;
+  } else {
+      /* Knuth partial Fisher-Yates. */
+      if (k > n) k = n;
+      int64_t *pool = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+      if (!pool) return 0;
+      for (int64_t i = 0; i < n; i++) pool[i] = i;
+      for (int64_t i = 0; i < k; i++) {
+          int64_t range = n - i;
+          uint32_t threshold = (uint32_t)(-(uint32_t)range % (uint32_t)range);
+          uint32_t j32;
+          do { j32 = pcg32_random_r(rng); } while (j32 < threshold);
+          int64_t j = i + (int64_t)(j32 % (uint32_t)range);
+          int64_t tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+      }
+      int64_t result = 0;
+      for (int64_t i = k - 1; i >= 0; i--) {
+          struct __cons *c = (struct __cons *)malloc(sizeof(struct __cons));
+          if (!c) { free(pool); return result; }
+          c->value = pool[i];
+          c->next  = result;
+          result   = (int64_t)(intptr_t)c;
+      }
+      free(pool);
+      return result;
+  }
+  ```)
+
+;;; rng-sample -- sample n rows from a float64 column, with or without replacement.
+;;;
+;;; Parameters:
+;;;   r                -- :int rng handle
+;;;   col              -- :int  tur-frame float64 column handle
+;;;   n                -- :int  number of rows to sample
+;;;   with-replacement -- :int  0 = without, 1 = with
+;;;
+;;; Returns:
+;;;   :int  new float64 column of length n.  Caller frees.
+;;;
+;;; Since: ST0
+(defn rng-sample [r :int col :int n :int with-replacement :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <string.h>
+  #include "stats/pcg32.h"
+
+  /* Minimal frame/column layout mirror. */
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __cons { int64_t value; int64_t next; };
+
+  struct __frame_col *src = (struct __frame_col *)(intptr_t)col;
+  int64_t src_len = src->length;
+
+  pcg32_t *rng = (pcg32_t *)(intptr_t)r;
+
+  if (n <= 0 || src_len <= 0) {
+    /* Return empty column (type_tag=4 = float64). */
+    struct __frame_col *out = (struct __frame_col *)calloc(1, sizeof(struct __frame_col));
+    if (!out) return 0;
+    out->type_tag = 4; out->length = 0; out->refcount = 1;
+    return (int64_t)(intptr_t)out;
+  }
+
+  /* Sample indices. */
+  int64_t k = n;
+  int64_t *pool = NULL;
+  int64_t *indices = (int64_t *)malloc((size_t)k * sizeof(int64_t));
+  if (!indices) return 0;
+
+  if (with_replacement) {
+    for (int64_t i = 0; i < k; i++) {
+      uint32_t threshold = (uint32_t)(-(uint32_t)src_len % (uint32_t)src_len);
+      uint32_t r32;
+      do { r32 = pcg32_random_r(rng); } while (r32 < threshold);
+      indices[i] = (int64_t)(r32 % (uint32_t)src_len);
+    }
+  } else {
+    if (k > src_len) k = src_len;
+    pool = (int64_t *)malloc((size_t)src_len * sizeof(int64_t));
+    if (!pool) { free(indices); return 0; }
+    for (int64_t i = 0; i < src_len; i++) pool[i] = i;
+    for (int64_t i = 0; i < k; i++) {
+      int64_t range = src_len - i;
+      uint32_t threshold = (uint32_t)(-(uint32_t)range % (uint32_t)range);
+      uint32_t j32;
+      do { j32 = pcg32_random_r(rng); } while (j32 < threshold);
+      int64_t j = i + (int64_t)(j32 % (uint32_t)range);
+      int64_t tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+      indices[i] = pool[i];
+    }
+    free(pool);
+  }
+
+  /* Build output float64 column. */
+  double *src_vals = (double *)src->values;
+  int64_t bytes = k * (int64_t)sizeof(double);
+  int64_t rounded = (bytes + 63) & ~((int64_t)63);
+
+  int64_t total = (int64_t)sizeof(int64_t) + rounded;
+  void *buf = malloc((size_t)total);
+  if (!buf) { free(indices); return 0; }
+  *(int64_t *)buf = rounded;
+  double *out_vals = (double *)((char *)buf + sizeof(int64_t));
+  for (int64_t i = 0; i < k; i++) out_vals[i] = src_vals[indices[i]];
+  free(indices);
+
+  struct __frame_col *out = (struct __frame_col *)calloc(1, sizeof(struct __frame_col));
+  if (!out) { free(buf); return 0; }
+  out->type_tag = 4; /* float64 */
+  out->length   = k;
+  out->refcount = 1;
+  out->values   = out_vals;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+) ;; end defmodule stats/rng

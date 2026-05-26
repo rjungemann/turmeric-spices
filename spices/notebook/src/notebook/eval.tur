@@ -1,0 +1,354 @@
+;; notebook/eval -- cell-oriented evaluation over notebook/session.
+
+(defmodule notebook/eval
+  (import notebook/cell :refer [cell-id cell-lang cell-source cell-attrs attr-get attr-get-bool])
+  (import notebook/cache :refer [cache-get cache-put])
+  (import notebook/session :refer [output-status-ok output-status-error output-status-skipped
+                                   session-eval
+                                   cell-output-make
+                                   cell-output-status cell-output-stdout
+                                   cell-output-value-repr cell-output-error-msg
+                                   cell-output-elapsed-ms cell-output-image-paths])
+  (export eval-cell eval-all eval-from)
+
+  (defn __nbe-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __nbe-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn __nbe-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn __nbe-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
+    return cell->head;
+    ```)
+
+  (defn __nbe-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
+    return cell->tail;
+    ```)
+
+  (defn __nbe-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn __nbe-cstr-len [s :cstr] #{Unsafe} :int
+    ```c
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    return (int64_t)strlen(src);
+    ```)
+
+  (defn __nbe-cstr-ptr [s :cstr] #{Unsafe} :int
+    ```c
+    return (int64_t)(intptr_t)s;
+    ```)
+
+  (defn __nbe-cstr-free [s :cstr] #{Unsafe} :void
+    ```c
+    void *p = (void *)(intptr_t)s;
+    if (p) free(p);
+    ```)
+
+  (defn __nbe-hash-entry-make [entry_id :cstr hash_value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { char *id; char *hash; } NotebookHashEntry;
+    NotebookHashEntry *entry = malloc(sizeof(*entry));
+    entry->id = entry_id ? strdup((const char *)(intptr_t)entry_id) : strdup("");
+    entry->hash = hash_value ? strdup((const char *)(intptr_t)hash_value) : strdup("");
+    return (int64_t)(intptr_t)entry;
+    ```)
+
+  (defn __nbe-hash-map-put [entries :int entry_id :cstr hash_value :cstr] #{Unsafe} :int
+    (__nbe-cons (__nbe-hash-entry-make entry_id hash_value) entries))
+
+  (defn __nbe-dep-hashes [depends_spec :cstr entries :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *id; char *hash; } NotebookHashEntry;
+    const char *spec = depends_spec ? (const char *)(intptr_t)depends_spec : "";
+    size_t cap = 128;
+    size_t len = 0;
+    char *out = malloc(cap);
+    out[0] = '\0';
+    const char *p = spec;
+    while (*p) {
+      while (*p == ' ' || *p == '\t' || *p == ',') p++;
+      if (!*p) break;
+      const char *start = p;
+      while (*p && *p != ',') p++;
+      const char *end = p;
+      while (end > start && (end[-1] == ' ' || end[-1] == '\t')) end--;
+      size_t id_len = (size_t)(end - start);
+      char *id = malloc(id_len + 1);
+      memcpy(id, start, id_len);
+      id[id_len] = '\0';
+
+      const char *hash = "";
+      for (Cons *cur = (Cons *)(intptr_t)entries; cur; cur = (Cons *)(intptr_t)cur->tail) {
+        NotebookHashEntry *entry = (NotebookHashEntry *)(intptr_t)cur->head;
+        if (entry && entry->id && strcmp(entry->id, id) == 0) {
+          hash = entry->hash ? entry->hash : "";
+          break;
+        }
+      }
+
+      size_t need = len + id_len + strlen(hash) + 3;
+      while (need > cap) {
+        cap *= 2;
+        out = realloc(out, cap);
+      }
+      memcpy(out + len, id, id_len);
+      len += id_len;
+      out[len++] = '=';
+      memcpy(out + len, hash, strlen(hash));
+      len += strlen(hash);
+      out[len++] = '\n';
+      out[len] = '\0';
+      free(id);
+    }
+    return out;
+    ```)
+
+  (defn __nbe-cache-material [cell :int dep_hashes :cstr] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *name; char *value; } Attr;
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+
+    Cell *c = (Cell *)(intptr_t)cell;
+    const char *source = (c && c->source) ? c->source : "";
+    const char *dep = dep_hashes ? (const char *)(intptr_t)dep_hashes : "";
+
+    size_t attr_count = 0;
+    for (Cons *cur = c ? (Cons *)(intptr_t)c->attrs : NULL; cur; cur = (Cons *)(intptr_t)cur->tail) attr_count++;
+    Attr **arr = attr_count ? malloc(sizeof(Attr *) * attr_count) : NULL;
+    size_t idx = 0;
+    for (Cons *cur = c ? (Cons *)(intptr_t)c->attrs : NULL; cur; cur = (Cons *)(intptr_t)cur->tail) {
+      arr[idx++] = (Attr *)(intptr_t)cur->head;
+    }
+    for (size_t i = 1; i < attr_count; i++) {
+      Attr *item = arr[i];
+      size_t j = i;
+      while (j > 0) {
+        const char *an = arr[j - 1] && arr[j - 1]->name ? arr[j - 1]->name : "";
+        const char *av = arr[j - 1] && arr[j - 1]->value ? arr[j - 1]->value : "";
+        const char *bn = item && item->name ? item->name : "";
+        const char *bv = item && item->value ? item->value : "";
+        int cmp = strcmp(an, bn);
+        if (cmp > 0 || (cmp == 0 && strcmp(av, bv) > 0)) {
+          arr[j] = arr[j - 1];
+          j--;
+        } else {
+          break;
+        }
+      }
+      arr[j] = item;
+    }
+
+    size_t total = strlen(source) + strlen(dep) + 24;
+    for (size_t i = 0; i < attr_count; i++) {
+      const char *name = arr[i] && arr[i]->name ? arr[i]->name : "";
+      const char *value = arr[i] && arr[i]->value ? arr[i]->value : "";
+      total += strlen(name) + strlen(value) + 2;
+    }
+
+    char *out = malloc(total + 1);
+    size_t len = 0;
+    memcpy(out + len, "source:\n", 8);
+    len += 8;
+    memcpy(out + len, source, strlen(source));
+    len += strlen(source);
+    memcpy(out + len, "\nattrs:\n", 8);
+    len += 8;
+    for (size_t i = 0; i < attr_count; i++) {
+      const char *name = arr[i] && arr[i]->name ? arr[i]->name : "";
+      const char *value = arr[i] && arr[i]->value ? arr[i]->value : "";
+      memcpy(out + len, name, strlen(name));
+      len += strlen(name);
+      out[len++] = '=';
+      memcpy(out + len, value, strlen(value));
+      len += strlen(value);
+      out[len++] = '\n';
+    }
+    memcpy(out + len, "deps:\n", 6);
+    len += 6;
+    memcpy(out + len, dep, strlen(dep));
+    len += strlen(dep);
+    out[len] = '\0';
+
+    if (arr) free(arr);
+    return out;
+    ```)
+
+  (defn __nbe-sha256-hex [s :cstr] #{Unsafe} :cstr
+    ```c
+    #include <stdint.h>
+    static const uint32_t K[64] = {
+      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+    };
+    #define NBE_SHA256_TRANSFORM(BLOCK_PTR) do { \
+      uint32_t w[64]; \
+      for (int i = 0; i < 16; i++) w[i] = ((uint32_t)(BLOCK_PTR)[i*4] << 24) | ((uint32_t)(BLOCK_PTR)[i*4+1] << 16) | ((uint32_t)(BLOCK_PTR)[i*4+2] << 8) | (uint32_t)(BLOCK_PTR)[i*4+3]; \
+      for (int i = 16; i < 64; i++) { \
+        uint32_t s0 = ((w[i-15] >> 7) | (w[i-15] << 25)) ^ ((w[i-15] >> 18) | (w[i-15] << 14)) ^ (w[i-15] >> 3); \
+        uint32_t s1 = ((w[i-2] >> 17) | (w[i-2] << 15)) ^ ((w[i-2] >> 19) | (w[i-2] << 13)) ^ (w[i-2] >> 10); \
+        w[i] = w[i-16] + s0 + w[i-7] + s1; \
+      } \
+      uint32_t a = st[0], b = st[1], c = st[2], d = st[3], e = st[4], f = st[5], g = st[6], h = st[7]; \
+      for (int i = 0; i < 64; i++) { \
+        uint32_t S1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7)); \
+        uint32_t ch = (e & f) ^ (~e & g); \
+        uint32_t t1 = h + S1 + ch + K[i] + w[i]; \
+        uint32_t S0 = ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10)); \
+        uint32_t mj = (a & b) ^ (a & c) ^ (b & c); \
+        uint32_t t2 = S0 + mj; \
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2; \
+      } \
+      st[0] += a; st[1] += b; st[2] += c; st[3] += d; st[4] += e; st[5] += f; st[6] += g; st[7] += h; \
+    } while (0)
+    const uint8_t *in = (const uint8_t *)(intptr_t)s;
+    size_t n = strlen((const char *)(intptr_t)s);
+    uint32_t st[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    uint8_t blk[64];
+    size_t i;
+    for (i = 0; i + 64 <= n; i += 64) NBE_SHA256_TRANSFORM(in + i);
+    size_t rem = n - i;
+    memcpy(blk, in + i, rem);
+    blk[rem++] = 0x80;
+    if (rem > 56) { memset(blk + rem, 0, 64 - rem); NBE_SHA256_TRANSFORM(blk); memset(blk, 0, 56); }
+    else memset(blk + rem, 0, 56 - rem);
+    uint64_t bits = (uint64_t)n * 8;
+    for (int j = 0; j < 8; j++) blk[56 + j] = (uint8_t)(bits >> (56 - j * 8));
+    NBE_SHA256_TRANSFORM(blk);
+    #undef NBE_SHA256_TRANSFORM
+    uint8_t digest[32];
+    for (int j = 0; j < 8; j++) { digest[j*4] = (st[j] >> 24) & 0xff; digest[j*4+1] = (st[j] >> 16) & 0xff; digest[j*4+2] = (st[j] >> 8) & 0xff; digest[j*4+3] = st[j] & 0xff; }
+    static const char hex[] = "0123456789abcdef";
+    char *out = malloc(65);
+    for (int j = 0; j < 32; j++) { out[j*2] = hex[digest[j] >> 4]; out[j*2+1] = hex[digest[j] & 0xf]; }
+    out[64] = '\0';
+    return out;
+    ```)
+
+  (defn __nbe-cache-key [cell :int dep_hashes :cstr] #{Unsafe} :cstr
+    (let [material (__nbe-cache-material cell dep_hashes)
+          key (__nbe-sha256-hex material)]
+      (do
+        (__nbe-cstr-free material)
+        key)))
+
+  (defn __nbe-wrap-output [cell-id-value :cstr output :int] #{Unsafe} :int
+    (cell-output-make cell-id-value
+                      (cell-output-status output)
+                      (cell-output-stdout output)
+                      (cell-output-value-repr output)
+                      (cell-output-error-msg output)
+                      (cell-output-elapsed-ms output)
+                      (cell-output-image-paths output)))
+
+  (defn __nbe-fresh-output [session :int cell :int] #{Unsafe} :int
+    (__nbe-wrap-output (cell-id cell)
+                       (session-eval session (cell-source cell) (cell-lang cell))))
+
+  (defn __nbe-eval-cell-with-key [session :int cell :int cache :int key :cstr] #{Unsafe} :int
+    (let [cache-enabled (and (not (= cache 0))
+                             (= (attr-get-bool (cell-attrs cell) "cache" 0) 1))]
+      (if (= (attr-get-bool (cell-attrs cell) "eval" 1) 0)
+        (cell-output-make (cell-id cell)
+                          (output-status-skipped)
+                          ""
+                          ""
+                          ""
+                          0
+                          (__nbe-nil-value))
+        (if cache-enabled
+          (let [cached (cache-get cache key)]
+            (if (not (= cached 0))
+              cached
+              (let [fresh (__nbe-fresh-output session cell)]
+                (do
+                  (cache-put cache key fresh)
+                  fresh))))
+          (__nbe-fresh-output session cell)))))
+
+  ;;; eval-cell -- evaluate one cell, honoring eval=false by skipping it.
+  (defn eval-cell [session :int cell :int cache :int] #{Unsafe} :int
+    (__nbe-eval-cell-with-key session cell cache
+                              (__nbe-cache-key cell "")))
+
+  (defn __nbe-should-continue? [cell :int output :int] #{Unsafe} :bool
+    (if (= (cell-output-status output) (output-status-error))
+      (__nbe-cstr-eq? (attr-get (cell-attrs cell) "error" "halt") "continue")
+      true))
+
+  (defn __nbe-eval-all-rev [session :int cells :int cache :int opts :int acc :int key-map :int] #{Unsafe} :int
+    (let [_ opts]
+      (if (__nbe-list-nil? cells)
+        acc
+        (let [cell (__nbe-head cells)
+              dep-hashes (__nbe-dep-hashes (attr-get (cell-attrs cell) "depends" "") key-map)
+              cell-key (__nbe-cache-key cell dep-hashes)
+              output (__nbe-eval-cell-with-key session cell cache cell-key)
+              next-acc (__nbe-cons output acc)
+              next-map (__nbe-hash-map-put key-map (cell-id cell) cell-key)]
+          (do
+            (__nbe-cstr-free dep-hashes)
+            (__nbe-cstr-free cell-key)
+            (if (__nbe-should-continue? cell output)
+              (__nbe-eval-all-rev session (__nbe-tail cells) cache opts next-acc next-map)
+              next-acc))))))
+
+  (defn __nbe-reverse [lst :int acc :int] #{Unsafe} :int
+    (if (__nbe-list-nil? lst)
+      acc
+      (__nbe-reverse (__nbe-tail lst) (__nbe-cons (__nbe-head lst) acc))))
+
+  ;;; eval-all -- evaluate cells in order, halting on error unless error=continue.
+  (defn eval-all [session :int cells :int cache :int opts :int] #{Unsafe} :int
+    (__nbe-reverse (__nbe-eval-all-rev session cells cache opts (__nbe-nil-value) (__nbe-nil-value))
+                   (__nbe-nil-value)))
+
+  (defn __nbe-find-start [cells :int start-id :cstr] #{Unsafe} :int
+    (if (__nbe-list-nil? cells)
+      (__nbe-nil-value)
+      (if (__nbe-cstr-eq? (cell-id (__nbe-head cells)) start-id)
+        cells
+        (__nbe-find-start (__nbe-tail cells) start-id))))
+
+  ;;; eval-from -- evaluate cells starting from a named cell id.
+  (defn eval-from [session :int cells :int start-id :cstr cache :int opts :int] #{Unsafe} :int
+    (eval-all session (__nbe-find-start cells start-id) cache opts))
+
+) ;; end defmodule notebook/eval

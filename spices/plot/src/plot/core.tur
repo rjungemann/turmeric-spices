@@ -1,0 +1,1158 @@
+;; plot/core.tur -- renderer representation and plot entrypoints.
+
+(defmodule plot/core
+  (export plot plot-write-png plot-into-canvas
+          __make-renderer __renderer-floats __renderer-ints __renderer-bounds
+          __surface-create __surface-destroy __surface-write-png
+          __canvas-create __canvas-destroy)
+
+  (import plot/style :refer [plot-opts-width plot-opts-height])
+
+  ;;; __ok -- create an ok result wrapping integer value v.
+  (defn __ok [v :int] :ptr<void>
+    ```c
+    #include <stdlib.h>
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+    ```)
+
+  ;;; __err -- create an err result wrapping integer error value e.
+  (defn __err [e :int] :ptr<void>
+    ```c
+    #include <stdlib.h>
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+    ```)
+
+  ;;; __make-renderer -- allocate the generic opaque renderer handle used by all plot modules.
+  (defn __make-renderer [kind :int
+                         style1 :int style2 :int
+                         data1 :int data2 :int data3 :int data4 :int data5 :int
+                         label :cstr text :cstr] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    #include <string.h>
+    typedef struct __plot_renderer {
+      int64_t kind;
+      int64_t style1, style2;
+      int64_t data1, data2, data3, data4, data5;
+      double f1, f2, f3, f4, f5, f6;
+      int64_t i1, i2, i3, i4;
+      char *label;
+      char *text;
+      double x_min, x_max, y_min, y_max;
+    } PlotRenderer;
+    PlotRenderer *r = (PlotRenderer *)malloc(sizeof(*r));
+    const char *src_label = (const char *)(intptr_t)label;
+    const char *src_text = (const char *)(intptr_t)text;
+    if (!r) return 0;
+    r->kind = kind;
+    r->style1 = style1; r->style2 = style2;
+    r->data1 = data1; r->data2 = data2; r->data3 = data3; r->data4 = data4; r->data5 = data5;
+    r->f1 = 0.0; r->f2 = 0.0; r->f3 = 0.0; r->f4 = 0.0; r->f5 = 0.0; r->f6 = 0.0;
+    r->i1 = 0; r->i2 = 0; r->i3 = 0; r->i4 = 0;
+    if (src_label) {
+      size_t len = strlen(src_label);
+      r->label = (char *)malloc(len + 1);
+      if (r->label) memcpy(r->label, src_label, len + 1);
+    } else {
+      r->label = NULL;
+    }
+    if (src_text) {
+      size_t len = strlen(src_text);
+      r->text = (char *)malloc(len + 1);
+      if (r->text) memcpy(r->text, src_text, len + 1);
+    } else {
+      r->text = NULL;
+    }
+    r->x_min = 0.0 / 0.0; r->x_max = 0.0 / 0.0; r->y_min = 0.0 / 0.0; r->y_max = 0.0 / 0.0;
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  ;;; __renderer-floats -- attach the six generic float payload slots to a renderer.
+  (defn __renderer-floats [renderer :int
+                           f1 :float f2 :float f3 :float f4 :float f5 :float f6 :float] :int
+    ```c
+    typedef struct __plot_renderer {
+      int64_t kind;
+      int64_t style1, style2;
+      int64_t data1, data2, data3, data4, data5;
+      double f1, f2, f3, f4, f5, f6;
+      int64_t i1, i2, i3, i4;
+      char *label;
+      char *text;
+      double x_min, x_max, y_min, y_max;
+    } PlotRenderer;
+    PlotRenderer *r = (PlotRenderer *)(intptr_t)renderer;
+    if (!r) return 0;
+    r->f1 = f1; r->f2 = f2; r->f3 = f3; r->f4 = f4; r->f5 = f5; r->f6 = f6;
+    return renderer;
+    ```)
+
+  ;;; __renderer-ints -- attach the four generic integer payload slots to a renderer.
+  (defn __renderer-ints [renderer :int i1 :int i2 :int i3 :int i4 :int] :int
+    ```c
+    typedef struct __plot_renderer {
+      int64_t kind;
+      int64_t style1, style2;
+      int64_t data1, data2, data3, data4, data5;
+      double f1, f2, f3, f4, f5, f6;
+      int64_t i1, i2, i3, i4;
+      char *label;
+      char *text;
+      double x_min, x_max, y_min, y_max;
+    } PlotRenderer;
+    PlotRenderer *r = (PlotRenderer *)(intptr_t)renderer;
+    if (!r) return 0;
+    r->i1 = i1; r->i2 = i2; r->i3 = i3; r->i4 = i4;
+    return renderer;
+    ```)
+
+  ;;; __renderer-bounds -- attach explicit bounds hints to a renderer.
+  (defn __renderer-bounds [renderer :int x-min :float x-max :float y-min :float y-max :float] :int
+    ```c
+    typedef struct __plot_renderer {
+      int64_t kind;
+      int64_t style1, style2;
+      int64_t data1, data2, data3, data4, data5;
+      double f1, f2, f3, f4, f5, f6;
+      int64_t i1, i2, i3, i4;
+      char *label;
+      char *text;
+      double x_min, x_max, y_min, y_max;
+    } PlotRenderer;
+    PlotRenderer *r = (PlotRenderer *)(intptr_t)renderer;
+    if (!r) return 0;
+    r->x_min = x_min; r->x_max = x_max; r->y_min = y_min; r->y_max = y_max;
+    return renderer;
+    ```)
+
+  ;;; __surface-create -- allocate a new plutovg surface.
+  (defn __surface-create [width :int height :int] :ptr<void>
+    ```c
+    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
+    extern void* plutovg_surface_create(int width, int height);
+    void *s = plutovg_surface_create((int)width, (int)height);
+    PlotResult *r = (PlotResult *)malloc(sizeof(*r));
+    r->is_ok = s != NULL;
+    r->ok_val = s ? (int64_t)(intptr_t)s : 0;
+    r->err_val = s ? 0 : 1;
+    return r;
+    ```)
+
+  ;;; __surface-destroy -- destroy a plutovg surface.
+  (defn __surface-destroy [surface :int] :void
+    ```c
+    extern void plutovg_surface_destroy(void* surface);
+    if (surface) plutovg_surface_destroy((void *)(intptr_t)surface);
+    ```)
+
+  ;;; __surface-write-png -- write a plutovg surface to a PNG file.
+  (defn __surface-write-png [surface :int path :cstr] :ptr<void>
+    ```c
+    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
+    extern bool plutovg_surface_write_to_png(const void* surface, const char* filename);
+    bool ok = plutovg_surface_write_to_png((void *)(intptr_t)surface,
+                                           (const char *)(intptr_t)path);
+    PlotResult *r = (PlotResult *)malloc(sizeof(*r));
+    r->is_ok = ok;
+    r->ok_val = 0;
+    r->err_val = ok ? 0 : 1;
+    return r;
+    ```)
+
+  ;;; __canvas-create -- allocate a canvas for an existing surface.
+  (defn __canvas-create [surface :int] :ptr<void>
+    ```c
+    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
+    extern void* plutovg_canvas_create(void* surface);
+    void *c = plutovg_canvas_create((void *)(intptr_t)surface);
+    PlotResult *r = (PlotResult *)malloc(sizeof(*r));
+    r->is_ok = c != NULL;
+    r->ok_val = c ? (int64_t)(intptr_t)c : 0;
+    r->err_val = c ? 0 : 1;
+    return r;
+    ```)
+
+  ;;; __canvas-destroy -- destroy a plutovg canvas.
+  (defn __canvas-destroy [canvas :int] :void
+    ```c
+    extern void plutovg_canvas_destroy(void* canvas);
+    if (canvas) plutovg_canvas_destroy((void *)(intptr_t)canvas);
+    ```)
+
+  ;;; data->viewport -- map data coordinates to viewport coordinates.
+  (defn data->viewport [x :float y :float bx-min :float bx-max :float
+                        by-min :float by-max :float
+                        px :int py :int pw :int ph :int] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    typedef struct { double x; double y; } Pt;
+    Pt *p = (Pt *)malloc(sizeof(*p));
+    double tx = (x - bx_min) / (bx_max - bx_min);
+    double ty = (y - by_min) / (by_max - by_min);
+    p->x = (double)px + tx * (double)pw;
+    p->y = (double)py + (1.0 - ty) * (double)ph;
+    return (int64_t)(intptr_t)p;
+    ```)
+
+  ;;; viewport->data -- map viewport coordinates back to data coordinates.
+  (defn viewport->data [vx :float vy :float bx-min :float bx-max :float
+                        by-min :float by-max :float
+                        px :int py :int pw :int ph :int] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    typedef struct { double x; double y; } Pt;
+    Pt *p = (Pt *)malloc(sizeof(*p));
+    double tx = (vx - (double)px) / (double)pw;
+    double ty = 1.0 - ((vy - (double)py) / (double)ph);
+    p->x = bx_min + tx * (bx_max - bx_min);
+    p->y = by_min + ty * (by_max - by_min);
+    return (int64_t)(intptr_t)p;
+    ```)
+
+  ;;; plot-into-canvas -- render into an existing canvas and viewport.
+  (defn plot-into-canvas [canvas :int renderers :int opts :int
+                          px :int py :int pw :int ph :int] :ptr<void>
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    #include <stdbool.h>
+    #include <string.h>
+    #include <stdio.h>
+    #include <float.h>
+    #include <unistd.h>
+    extern double floor(double);
+    extern double ceil(double);
+    extern double log10(double);
+    extern double pow(double, double);
+    extern double sqrt(double);
+    extern double cos(double);
+    extern double sin(double);
+    extern double atan2(double, double);
+    extern double exp(double);
+    extern double fabs(double);
+    extern double fmin(double, double);
+    typedef void plutovg_surface_t;
+    typedef void plutovg_canvas_t;
+    typedef void plutovg_font_face_t;
+    typedef int plutovg_text_encoding_t;
+    #define PLUTOVG_TEXT_ENCODING_UTF8 1
+    extern void plutovg_surface_destroy(void* surface);
+    extern void* plutovg_font_face_load_from_file(const char* filename, int ttcindex);
+    extern void plutovg_font_face_destroy(void* face);
+    extern void plutovg_canvas_save(void* canvas);
+    extern void plutovg_canvas_restore(void* canvas);
+    extern void plutovg_canvas_set_rgba(void* canvas, float r, float g, float b, float a);
+    extern void plutovg_canvas_set_font_face(void* canvas, void* face);
+    extern void plutovg_canvas_set_font_size(void* canvas, float size);
+    extern void plutovg_canvas_set_line_width(void* canvas, float line_width);
+    extern void plutovg_canvas_set_dash_array(void* canvas, const float* dashes, int ndashes);
+    extern void plutovg_canvas_move_to(void* canvas, float x, float y);
+    extern void plutovg_canvas_line_to(void* canvas, float x, float y);
+    extern void plutovg_canvas_rect(void* canvas, float x, float y, float w, float h);
+    extern void plutovg_canvas_circle(void* canvas, float cx, float cy, float r);
+    extern void plutovg_canvas_close_path(void* canvas);
+    extern void plutovg_canvas_fill(void* canvas);
+    extern void plutovg_canvas_stroke(void* canvas);
+    extern void plutovg_canvas_clip(void* canvas);
+    extern void plutovg_canvas_fill_rect(void* canvas, float x, float y, float w, float h);
+    extern float plutovg_canvas_fill_text(void* canvas, const void* text, int length,
+                                          int encoding, float x, float y);
+
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
+    #define RETURN_ERR(CODE) do { \
+      PlotResult *__r = (PlotResult *)malloc(sizeof(*__r)); \
+      __r->is_ok = false; __r->ok_val = 0; __r->err_val = (CODE); \
+      return __r; \
+    } while (0)
+    #define RETURN_OK(VALUE) do { \
+      PlotResult *__r = (PlotResult *)malloc(sizeof(*__r)); \
+      __r->is_ok = true; __r->ok_val = (VALUE); __r->err_val = 0; \
+      return __r; \
+    } while (0)
+    typedef struct __plot_renderer {
+      int64_t kind;
+      int64_t style1, style2;
+      int64_t data1, data2, data3, data4, data5;
+      double f1, f2, f3, f4, f5, f6;
+      int64_t i1, i2, i3, i4;
+      char *label;
+      char *text;
+      double x_min, x_max, y_min, y_max;
+    } PlotRenderer;
+    typedef struct { int64_t color; double width; int64_t dash; double alpha; } LineStyle;
+    typedef struct { int64_t color; int64_t fill_color; int64_t sym; double size; double alpha; } PointStyle;
+    typedef struct { int64_t color; double alpha; int64_t line_color; double line_width; } FillStyle;
+    typedef struct {
+      int64_t width; int64_t height;
+      char *title; char *x_label; char *y_label;
+      double x_min, x_max, y_min, y_max;
+      int64_t legend_pos;
+    } PlotOpts;
+
+    enum {
+      RK_X_AXIS = 1, RK_Y_AXIS = 2, RK_AXES = 3,
+      RK_X_TICKS = 4, RK_Y_TICKS = 5, RK_GRID = 6,
+      RK_HRULE = 7, RK_VRULE = 8, RK_LABEL = 9,
+      RK_LINES = 20, RK_FUNCTION = 21, RK_PARAMETRIC = 22, RK_POLAR = 23, RK_INVERSE = 24, RK_DENSITY = 25,
+      RK_POINTS = 30, RK_ERROR_BARS = 31, RK_VECTOR_FIELD = 32, RK_ARROWS = 33,
+      RK_FUNCTION_INTERVAL = 40, RK_LINES_INTERVAL = 41, RK_PARAM_INTERVAL = 42, RK_POLAR_INTERVAL = 43,
+      RK_RECTANGLES = 50, RK_AREA_HIST = 51, RK_DISCRETE_HIST = 52, RK_STACKED_HIST = 53,
+      RK_ISOLINE = 60, RK_CONTOURS = 61, RK_CONTOUR_INTERVALS = 62, RK_COLOR_FIELD = 63
+    };
+
+    static const double palette[8][3] = {
+      {31.0/255.0, 119.0/255.0, 180.0/255.0},
+      {214.0/255.0, 39.0/255.0, 40.0/255.0},
+      {44.0/255.0, 160.0/255.0, 44.0/255.0},
+      {255.0/255.0, 127.0/255.0, 14.0/255.0},
+      {148.0/255.0, 103.0/255.0, 189.0/255.0},
+      {140.0/255.0, 86.0/255.0, 75.0/255.0},
+      {227.0/255.0, 119.0/255.0, 194.0/255.0},
+      {127.0/255.0, 127.0/255.0, 127.0/255.0}
+    };
+
+    #define DBL_BITS(v) (((union { double d; int64_t i; }){.d=(v)}).i)
+    #define BITS_DBL(v) (((union { double d; int64_t i; }){.i=(v)}).d)
+    #define ISNAN(v) ((v) != (v))
+
+    double bx_min = 0.0, bx_max = 1.0, by_min = 0.0, by_max = 1.0;
+    bool have_bounds = false;
+    bool want_x_axis = false, want_y_axis = false, want_grid_x = false, want_grid_y = false;
+    int64_t categorical = 0;
+    int64_t categories = 0;
+    PlotOpts *po = (PlotOpts *)(intptr_t)opts;
+    int legend_pos = po && po->legend_pos ? (int)po->legend_pos : 1;
+    int font_ok = 0;
+    plutovg_font_face_t *font = NULL;
+    const char *font_candidates[] = {
+      "/System/Library/Fonts/Supplemental/Arial.ttf",
+      "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+      "/System/Library/Fonts/Helvetica.ttc",
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+      "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+      NULL
+    };
+    for (int fi = 0; font_candidates[fi]; fi++) {
+      if (access(font_candidates[fi], R_OK) == 0) {
+        font = plutovg_font_face_load_from_file(font_candidates[fi], 0);
+        if (font) { font_ok = 1; break; }
+      }
+    }
+
+    #define UNION_POINT(X, Y) do { \
+      double __ux = (X), __uy = (Y); \
+      if (!ISNAN(__ux) && !ISNAN(__uy)) { \
+        if (!have_bounds) { \
+          bx_min = bx_max = __ux; \
+          by_min = by_max = __uy; \
+          have_bounds = true; \
+        } else { \
+          if (__ux < bx_min) bx_min = __ux; \
+          if (__ux > bx_max) bx_max = __ux; \
+          if (__uy < by_min) by_min = __uy; \
+          if (__uy > by_max) by_max = __uy; \
+        } \
+      } \
+    } while (0)
+    #define UNION_LIST_POINTS(LST) do { \
+      for (Cons *__p = (Cons *)(intptr_t)(LST); __p; __p = (Cons *)(intptr_t)__p->tail) { \
+        Cons *__pt = (Cons *)(intptr_t)__p->head; \
+        if (!__pt) continue; \
+        UNION_POINT(BITS_DBL(__pt->head), BITS_DBL(__pt->tail)); \
+      } \
+    } while (0)
+
+    for (Cons *node = (Cons *)(intptr_t)renderers; node; node = (Cons *)(intptr_t)node->tail) {
+      PlotRenderer *r = (PlotRenderer *)(intptr_t)node->head;
+      if (!r) continue;
+      if (r->kind == RK_X_AXIS || r->kind == RK_AXES) want_x_axis = true;
+      if (r->kind == RK_Y_AXIS || r->kind == RK_AXES) want_y_axis = true;
+      if (r->kind == RK_X_TICKS || r->kind == RK_GRID) want_grid_x = true;
+      if (r->kind == RK_Y_TICKS || r->kind == RK_GRID) want_grid_y = true;
+      if ((r->kind == RK_DISCRETE_HIST || r->kind == RK_STACKED_HIST) && !categorical) {
+        categorical = 1;
+        categories = r->data2;
+      }
+      switch ((int)r->kind) {
+        case RK_LINES:
+        case RK_POINTS:
+        case RK_ARROWS:
+          UNION_LIST_POINTS(r->data1);
+          break;
+        case RK_ERROR_BARS: {
+          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+            Cons *a = (Cons *)(intptr_t)p->head;
+            if (!a) continue;
+            double x = BITS_DBL(a->head);
+            Cons *b = (Cons *)(intptr_t)a->tail;
+            if (!b) continue;
+            double y = BITS_DBL(b->head);
+            double h = BITS_DBL(b->tail);
+            if (r->i1) { UNION_POINT(x - h, y); UNION_POINT(x + h, y); }
+            else { UNION_POINT(x, y - h); UNION_POINT(x, y + h); }
+          }
+        } break;
+        case RK_HRULE: UNION_POINT(0.0, r->f1); break;
+        case RK_VRULE: UNION_POINT(r->f1, 0.0); break;
+        case RK_LABEL: UNION_POINT(r->f1, r->f2); break;
+        case RK_RECTANGLES:
+        case RK_AREA_HIST: {
+          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+            Cons *a = (Cons *)(intptr_t)p->head;
+            if (!a) continue;
+            double x0 = BITS_DBL(a->head);
+            Cons *b = (Cons *)(intptr_t)a->tail;
+            double x1 = BITS_DBL(b->head);
+            Cons *c = (Cons *)(intptr_t)b->tail;
+            double y0 = BITS_DBL(c->head);
+            double y1 = BITS_DBL(c->tail);
+            UNION_POINT(x0, y0);
+            UNION_POINT(x1, y1);
+          }
+        } break;
+        case RK_DISCRETE_HIST: {
+          int idx = 0;
+          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail, idx++) {
+            Cons *bar = (Cons *)(intptr_t)p->head;
+            if (!bar) continue;
+            double h = BITS_DBL(bar->tail);
+            if (r->i1) { UNION_POINT(0.0, idx); UNION_POINT(h, idx + 0.8); }
+            else { UNION_POINT(idx, 0.0); UNION_POINT(idx + 0.8, h); }
+          }
+        } break;
+        case RK_STACKED_HIST: {
+          int idx = 0;
+          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail, idx++) {
+            Cons *grp = (Cons *)(intptr_t)p->head;
+            double sum = 0.0;
+            for (Cons *vals = (Cons *)(intptr_t)grp->tail; vals; vals = (Cons *)(intptr_t)vals->tail)
+              sum += BITS_DBL(vals->head);
+            if (r->i1) { UNION_POINT(0.0, idx); UNION_POINT(sum, idx + 0.8); }
+            else { UNION_POINT(idx, 0.0); UNION_POINT(idx + 0.8, sum); }
+          }
+        } break;
+        case RK_FUNCTION:
+        case RK_INVERSE:
+        case RK_DENSITY:
+        case RK_PARAMETRIC:
+        case RK_POLAR:
+        case RK_FUNCTION_INTERVAL:
+        case RK_PARAM_INTERVAL:
+        case RK_POLAR_INTERVAL:
+        case RK_ISOLINE:
+        case RK_CONTOURS:
+        case RK_CONTOUR_INTERVALS:
+        case RK_COLOR_FIELD:
+        case RK_VECTOR_FIELD:
+          if (!ISNAN(r->x_min) && !ISNAN(r->x_max) && !ISNAN(r->y_min) && !ISNAN(r->y_max)) {
+            UNION_POINT(r->x_min, r->y_min);
+            UNION_POINT(r->x_max, r->y_max);
+          }
+          break;
+        case RK_LINES_INTERVAL: UNION_LIST_POINTS(r->data1); UNION_LIST_POINTS(r->data2); break;
+        default: break;
+      }
+    }
+
+    if (!have_bounds) { bx_min = 0.0; bx_max = 1.0; by_min = 0.0; by_max = 1.0; }
+    if (po) {
+      if (!ISNAN(po->x_min)) bx_min = po->x_min;
+      if (!ISNAN(po->x_max)) bx_max = po->x_max;
+      if (!ISNAN(po->y_min)) by_min = po->y_min;
+      if (!ISNAN(po->y_max)) by_max = po->y_max;
+    }
+    if (!(bx_max > bx_min)) { bx_min -= 1.0; bx_max += 1.0; }
+    if (!(by_max > by_min)) { by_min -= 1.0; by_max += 1.0; }
+    double padx = (bx_max - bx_min) * 0.05;
+    double pady = (by_max - by_min) * 0.05;
+    if (padx == 0.0) padx = 1.0;
+    if (pady == 0.0) pady = 1.0;
+    bx_min -= padx; bx_max += padx;
+    by_min -= pady; by_max += pady;
+
+    int left = px + 64;
+    int right = px + pw - 24;
+    int top = py + ((po && po->title) ? 44 : 24);
+    int bottom = py + ph - ((po && (po->x_label || categorical)) ? 58 : 44);
+    int plot_w = right - left;
+    int plot_h = bottom - top;
+    if (plot_w < 32 || plot_h < 32) RETURN_ERR(1);
+
+    plutovg_canvas_save((plutovg_canvas_t *)(intptr_t)canvas);
+    plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, 1.0f, 1.0f, 1.0f, 1.0f);
+    plutovg_canvas_fill_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)px, (float)py, (float)pw, (float)ph);
+    plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, 0.98f, 0.98f, 0.98f, 1.0f);
+    plutovg_canvas_fill_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)left, (float)top, (float)plot_w, (float)plot_h);
+    plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, 0.7f, 0.7f, 0.7f, 1.0f);
+    plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)left, (float)top, (float)plot_w, (float)plot_h);
+    plutovg_canvas_set_line_width((plutovg_canvas_t *)(intptr_t)canvas, 1.0f);
+    plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+
+    if (font_ok) {
+      plutovg_canvas_set_font_face((plutovg_canvas_t *)(intptr_t)canvas, font);
+      plutovg_canvas_set_font_size((plutovg_canvas_t *)(intptr_t)canvas, 12.0f);
+    }
+
+    int tick_n = 6;
+    double x_ticks[32], y_ticks[32];
+    const char *x_labels[32], *y_labels[32];
+    int x_count = 0, y_count = 0;
+
+    if (categorical) {
+      int idx = 0;
+      for (Cons *p = (Cons *)(intptr_t)categories; p && idx < 32; p = (Cons *)(intptr_t)p->tail, idx++) {
+        x_ticks[idx] = (double)idx + 0.4;
+        x_labels[idx] = (const char *)(intptr_t)p->head;
+      }
+      x_count = idx;
+    } else {
+      double span = bx_max - bx_min;
+      double raw = span / (double)(tick_n - 1);
+      double mag = pow(10.0, floor(log10(raw)));
+      double norm = raw / mag;
+      double step = (norm < 1.5 ? 1.0 : (norm < 3.0 ? 2.0 : (norm < 7.0 ? 5.0 : 10.0))) * mag;
+      double start = ceil(bx_min / step) * step;
+      int prec = step >= 1.0 ? 2 : (int)ceil(-log10(step)) + 1;
+      if (prec < 0) prec = 0; if (prec > 8) prec = 8;
+      char xbuf[32][64];
+      for (double v = start; v <= bx_max + step * 0.25 && x_count < 32; v += step) {
+        x_ticks[x_count] = v;
+        snprintf(xbuf[x_count], sizeof(xbuf[x_count]), "%.*f", prec, v);
+        x_labels[x_count] = xbuf[x_count];
+        x_count++;
+      }
+    }
+    {
+      double span = by_max - by_min;
+      double raw = span / (double)(tick_n - 1);
+      double mag = pow(10.0, floor(log10(raw)));
+      double norm = raw / mag;
+      double step = (norm < 1.5 ? 1.0 : (norm < 3.0 ? 2.0 : (norm < 7.0 ? 5.0 : 10.0))) * mag;
+      double start = ceil(by_min / step) * step;
+      int prec = step >= 1.0 ? 2 : (int)ceil(-log10(step)) + 1;
+      if (prec < 0) prec = 0; if (prec > 8) prec = 8;
+      char ybuf[32][64];
+      for (double v = start; v <= by_max + step * 0.25 && y_count < 32; v += step) {
+        y_ticks[y_count] = v;
+        snprintf(ybuf[y_count], sizeof(ybuf[y_count]), "%.*f", prec, v);
+        y_labels[y_count] = ybuf[y_count];
+        y_count++;
+      }
+    }
+
+    if (!want_x_axis && by_min <= 0.0 && by_max >= 0.0) want_x_axis = true;
+    if (!want_y_axis && bx_min <= 0.0 && bx_max >= 0.0) want_y_axis = true;
+
+    if (want_grid_x || want_grid_y) {
+      plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, 0.90f, 0.90f, 0.90f, 1.0f);
+      plutovg_canvas_set_line_width((plutovg_canvas_t *)(intptr_t)canvas, 1.0f);
+      if (want_grid_x) for (int i = 0; i < x_count; i++) {
+        double tx = (x_ticks[i] - bx_min) / (bx_max - bx_min);
+        double vx = left + tx * plot_w;
+        plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)top);
+        plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)bottom);
+      }
+      if (want_grid_y) for (int i = 0; i < y_count; i++) {
+        double ty = (y_ticks[i] - by_min) / (by_max - by_min);
+        double vy = bottom - ty * plot_h;
+        plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)left, (float)vy);
+        plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)right, (float)vy);
+      }
+      plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+    }
+
+    plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, 0.2f, 0.2f, 0.2f, 1.0f);
+    if (want_x_axis) {
+      double vy = bottom - ((0.0 - by_min) / (by_max - by_min)) * plot_h;
+      plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)left, (float)vy);
+      plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)right, (float)vy);
+      plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+    }
+    if (want_y_axis) {
+      double vx = left + ((0.0 - bx_min) / (bx_max - bx_min)) * plot_w;
+      plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)top);
+      plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)bottom);
+      plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+    }
+
+    if (font_ok) {
+      plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, 0.15f, 0.15f, 0.15f, 1.0f);
+      for (int i = 0; i < x_count; i++) {
+        double tx = (x_ticks[i] - bx_min) / (bx_max - bx_min);
+        double vx = left + tx * plot_w;
+        plutovg_canvas_fill_text((plutovg_canvas_t *)(intptr_t)canvas,
+                                 x_labels[i], (int)strlen(x_labels[i]),
+                                 PLUTOVG_TEXT_ENCODING_UTF8,
+                                 (float)(vx - 10.0), (float)(bottom + 18.0));
+      }
+      for (int i = 0; i < y_count; i++) {
+        double ty = (y_ticks[i] - by_min) / (by_max - by_min);
+        double vy = bottom - ty * plot_h;
+        plutovg_canvas_fill_text((plutovg_canvas_t *)(intptr_t)canvas,
+                                 y_labels[i], (int)strlen(y_labels[i]),
+                                 PLUTOVG_TEXT_ENCODING_UTF8,
+                                 (float)(left - 48.0), (float)(vy + 4.0));
+      }
+      if (po && po->title) {
+        plutovg_canvas_set_font_size((plutovg_canvas_t *)(intptr_t)canvas, 16.0f);
+        plutovg_canvas_fill_text((plutovg_canvas_t *)(intptr_t)canvas,
+                                 po->title, (int)strlen(po->title),
+                                 PLUTOVG_TEXT_ENCODING_UTF8,
+                                 (float)left, (float)(py + 24));
+        plutovg_canvas_set_font_size((plutovg_canvas_t *)(intptr_t)canvas, 12.0f);
+      }
+      if (po && po->x_label) {
+        plutovg_canvas_fill_text((plutovg_canvas_t *)(intptr_t)canvas,
+                                 po->x_label, (int)strlen(po->x_label),
+                                 PLUTOVG_TEXT_ENCODING_UTF8,
+                                 (float)(left + plot_w / 2 - 20), (float)(py + ph - 16));
+      }
+      if (po && po->y_label) {
+        plutovg_canvas_fill_text((plutovg_canvas_t *)(intptr_t)canvas,
+                                 po->y_label, (int)strlen(po->y_label),
+                                 PLUTOVG_TEXT_ENCODING_UTF8,
+                                 (float)(px + 8), (float)(top - 8));
+      }
+    }
+
+    int auto_color = 0;
+    #define NEXT_AUTO() ((auto_color++) % 8)
+    #define SET_LINE_STYLE(HANDLE, RESOLVED_COLOR) do { \
+      LineStyle *__ls = (LineStyle *)(intptr_t)(HANDLE); \
+      int *__resolved_color = (RESOLVED_COLOR); \
+      int __color = __ls ? (int)__ls->color : -1; \
+      if (__color < 0) __color = NEXT_AUTO(); \
+      __color %= 8; if (__color < 0) __color += 8; \
+      double __alpha = (__ls && __ls->alpha > 0.0) ? __ls->alpha : 1.0; \
+      double __width = (__ls && __ls->width > 0.0) ? __ls->width : 1.5; \
+      plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, \
+                              (float)palette[__color][0], (float)palette[__color][1], \
+                              (float)palette[__color][2], (float)__alpha); \
+      plutovg_canvas_set_line_width((plutovg_canvas_t *)(intptr_t)canvas, (float)__width); \
+      if (__resolved_color) *__resolved_color = __color; \
+      plutovg_canvas_set_dash_array((plutovg_canvas_t *)(intptr_t)canvas, NULL, 0); \
+    } while (0)
+    #define SET_FILL_STYLE(HANDLE, RESOLVED_FILL, RESOLVED_LINE) do { \
+      FillStyle *__fs = (FillStyle *)(intptr_t)(HANDLE); \
+      int *__resolved_fill = (RESOLVED_FILL); \
+      int *__resolved_line = (RESOLVED_LINE); \
+      int __color = __fs ? (int)__fs->color : -1; \
+      if (__color < 0) __color = NEXT_AUTO(); \
+      __color %= 8; if (__color < 0) __color += 8; \
+      int __lcolor = (__fs && __fs->line_color >= 0) ? (int)__fs->line_color : __color; \
+      double __alpha = (__fs && __fs->alpha > 0.0) ? __fs->alpha : 0.5; \
+      if (__resolved_fill) *__resolved_fill = __color; \
+      if (__resolved_line) *__resolved_line = __lcolor; \
+      plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, \
+                              (float)palette[__color][0], (float)palette[__color][1], \
+                              (float)palette[__color][2], (float)__alpha); \
+    } while (0)
+    #define SET_POINT_STYLE(HANDLE, RESOLVED_STROKE, RESOLVED_FILL) do { \
+      PointStyle *__ps = (PointStyle *)(intptr_t)(HANDLE); \
+      int *__resolved_stroke = (RESOLVED_STROKE); \
+      int *__resolved_fill = (RESOLVED_FILL); \
+      int __stroke = __ps ? (int)__ps->color : -1; \
+      if (__stroke < 0) __stroke = NEXT_AUTO(); \
+      __stroke %= 8; if (__stroke < 0) __stroke += 8; \
+      int __fill = (__ps && __ps->fill_color >= 0) ? (int)__ps->fill_color : __stroke; \
+      if (__resolved_stroke) *__resolved_stroke = __stroke; \
+      if (__resolved_fill) *__resolved_fill = __fill; \
+    } while (0)
+    #define MAP_POINT(X, Y, VX, VY) do { \
+      double __tx = ((X) - bx_min) / (bx_max - bx_min); \
+      double __ty = ((Y) - by_min) / (by_max - by_min); \
+      *(VX) = (double)left + __tx * (double)plot_w; \
+      *(VY) = (double)bottom - __ty * (double)plot_h; \
+    } while (0)
+
+    plutovg_canvas_save((plutovg_canvas_t *)(intptr_t)canvas);
+    plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)left, (float)top, (float)plot_w, (float)plot_h);
+    plutovg_canvas_clip((plutovg_canvas_t *)(intptr_t)canvas);
+
+    for (Cons *node = (Cons *)(intptr_t)renderers; node; node = (Cons *)(intptr_t)node->tail) {
+      PlotRenderer *r = (PlotRenderer *)(intptr_t)node->head;
+      if (!r) continue;
+      switch ((int)r->kind) {
+        case RK_HRULE:
+        case RK_VRULE: {
+          SET_LINE_STYLE(r->style1, ((int *)0));
+          if (r->kind == RK_HRULE) {
+            double __tmpx = 0.0, vy = 0.0; MAP_POINT(bx_min, r->f1, &__tmpx, &vy);
+            plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)left, (float)vy);
+            plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)right, (float)vy);
+          } else {
+            double vx = 0.0, __tmpy = 0.0; MAP_POINT(r->f1, by_min, &vx, &__tmpy);
+            plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)top);
+            plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)bottom);
+          }
+          plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        } break;
+        case RK_LABEL: {
+          if (font_ok && r->text) {
+            int stroke = 0;
+            SET_LINE_STYLE(r->style1, &stroke);
+            double vx, vy; MAP_POINT(r->f1, r->f2, &vx, &vy);
+            plutovg_canvas_fill_text((plutovg_canvas_t *)(intptr_t)canvas, r->text, (int)strlen(r->text),
+                                     PLUTOVG_TEXT_ENCODING_UTF8, (float)(vx + 4.0), (float)(vy - 4.0));
+          }
+        } break;
+        case RK_LINES: {
+          SET_LINE_STYLE(r->style1, ((int *)0));
+          bool have = false; double px0 = 0.0, py0 = 0.0;
+          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+            Cons *pt = (Cons *)(intptr_t)p->head;
+            if (!pt) continue;
+            double x = BITS_DBL(pt->head), y = BITS_DBL(pt->tail);
+            if (ISNAN(x) || ISNAN(y)) { have = false; continue; }
+            double vx, vy; MAP_POINT(x, y, &vx, &vy);
+            if (!have) plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            else plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            px0 = vx; py0 = vy; have = true;
+          }
+          if (have) plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        } break;
+        case RK_FUNCTION:
+        case RK_INVERSE:
+        case RK_DENSITY:
+        case RK_PARAMETRIC:
+        case RK_POLAR: {
+          SET_LINE_STYLE(r->style1, ((int *)0));
+          int n = (int)r->i1; if (n < 32) n = 32;
+          bool started = false;
+          if (r->kind == RK_DENSITY) {
+            double xs[2048]; int m = 0;
+            double mean = 0.0, sd = 0.0;
+            for (Cons *p = (Cons *)(intptr_t)r->data1; p && m < 2048; p = (Cons *)(intptr_t)p->tail) {
+              xs[m++] = BITS_DBL(p->head);
+              mean += xs[m - 1];
+            }
+            if (m == 0) break;
+            mean /= (double)m;
+            for (int i = 0; i < m; i++) { double d = xs[i] - mean; sd += d * d; }
+            sd = sqrt(sd / (double)(m > 1 ? m - 1 : 1));
+            double bw = r->f1 > 0.0 ? r->f1 : (1.06 * sd * pow((double)m, -0.2));
+            if (!(bw > 0.0)) bw = 1.0;
+            for (int i = 0; i < n; i++) {
+              double x = bx_min + (bx_max - bx_min) * ((double)i / (double)(n - 1));
+              double sum = 0.0;
+              for (int j = 0; j < m; j++) {
+                double u = (x - xs[j]) / bw;
+                sum += exp(-0.5 * u * u);
+              }
+              double y = sum / ((double)m * bw * sqrt(2.0 * 3.14159265358979323846));
+              double vx, vy; MAP_POINT(x, y, &vx, &vy);
+              if (!started) { plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy); started = true; }
+              else plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            }
+          } else {
+            for (int i = 0; i < n; i++) {
+              double t = r->f1 + (r->f2 - r->f1) * ((double)i / (double)(n - 1));
+              double x = 0.0, y = 0.0;
+              if (r->kind == RK_FUNCTION) { x = t; y = ((double(*)(double))(intptr_t)r->data1)(t); }
+              else if (r->kind == RK_INVERSE) { y = t; x = ((double(*)(double))(intptr_t)r->data1)(t); }
+              else if (r->kind == RK_PARAMETRIC) {
+                Cons *pair = (Cons *)(intptr_t)((int64_t(*)(double))(intptr_t)r->data1)(t);
+                x = BITS_DBL(pair->head); y = BITS_DBL(pair->tail);
+              } else if (r->kind == RK_POLAR) {
+                double radius = ((double(*)(double))(intptr_t)r->data1)(t);
+                x = radius * cos(t); y = radius * sin(t);
+              }
+              if (ISNAN(x) || ISNAN(y)) { started = false; continue; }
+              double vx, vy; MAP_POINT(x, y, &vx, &vy);
+              if (!started) { plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy); started = true; }
+              else plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            }
+          }
+          if (started) plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        } break;
+        case RK_POINTS: {
+          PointStyle *ps = (PointStyle *)(intptr_t)r->style1;
+          int stroke, fill;
+          SET_POINT_STYLE(r->style1, &stroke, &fill);
+          double size = (ps && ps->size > 0.0) ? ps->size : 6.0;
+          double alpha = (ps && ps->alpha > 0.0) ? ps->alpha : 1.0;
+          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+            Cons *pt = (Cons *)(intptr_t)p->head;
+            if (!pt) continue;
+            double x = BITS_DBL(pt->head), y = BITS_DBL(pt->tail);
+            double vx, vy; MAP_POINT(x, y, &vx, &vy);
+            plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas,
+                                    (float)palette[fill][0], (float)palette[fill][1],
+                                    (float)palette[fill][2], (float)alpha);
+            switch (ps ? (int)ps->sym : 0) {
+              case 1: plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)(vy - size / 2), (float)size, (float)size); break;
+              case 2:
+                plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy - size / 2));
+                plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx + size / 2), (float)(vy + size / 2));
+                plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)(vy + size / 2));
+                plutovg_canvas_close_path((plutovg_canvas_t *)(intptr_t)canvas);
+                break;
+              case 5:
+                plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy - size / 2));
+                plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx + size / 2), (float)vy);
+                plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy + size / 2));
+                plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)vy);
+                plutovg_canvas_close_path((plutovg_canvas_t *)(intptr_t)canvas);
+                break;
+              default: plutovg_canvas_circle((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy, (float)(size / 2)); break;
+            }
+            plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)canvas);
+            plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas,
+                                    (float)palette[stroke][0], (float)palette[stroke][1],
+                                    (float)palette[stroke][2], (float)alpha);
+            plutovg_canvas_set_line_width((plutovg_canvas_t *)(intptr_t)canvas, 1.0f);
+            if (ps && ps->sym == 3) {
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)(vy - size / 2));
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx + size / 2), (float)(vy + size / 2));
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)(vy + size / 2));
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx + size / 2), (float)(vy - size / 2));
+              plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+            } else if (ps && ps->sym == 4) {
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)vy);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx + size / 2), (float)vy);
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy - size / 2));
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy + size / 2));
+              plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+            } else {
+              switch (ps ? (int)ps->sym : 0) {
+                case 1: plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)(vy - size / 2), (float)size, (float)size); break;
+                case 2:
+                  plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy - size / 2));
+                  plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx + size / 2), (float)(vy + size / 2));
+                  plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)(vy + size / 2));
+                  plutovg_canvas_close_path((plutovg_canvas_t *)(intptr_t)canvas);
+                  break;
+                case 5:
+                  plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy - size / 2));
+                  plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx + size / 2), (float)vy);
+                  plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)(vy + size / 2));
+                  plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx - size / 2), (float)vy);
+                  plutovg_canvas_close_path((plutovg_canvas_t *)(intptr_t)canvas);
+                  break;
+                default: plutovg_canvas_circle((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy, (float)(size / 2)); break;
+              }
+              plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+            }
+          }
+        } break;
+        case RK_ERROR_BARS: {
+          SET_LINE_STYLE(r->style1, ((int *)0));
+          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+            Cons *a = (Cons *)(intptr_t)p->head;
+            if (!a) continue;
+            double x = BITS_DBL(a->head);
+            Cons *b = (Cons *)(intptr_t)a->tail;
+            double y = BITS_DBL(b->head);
+            double h = BITS_DBL(b->tail);
+            if (r->i1) {
+              double vxa, vya, vxb, vyb; MAP_POINT(x - h, y, &vxa, &vya); MAP_POINT(x + h, y, &vxb, &vyb);
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vxa, (float)vya);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vxb, (float)vyb);
+            } else {
+              double vxa, vya, vxb, vyb; MAP_POINT(x, y - h, &vxa, &vya); MAP_POINT(x, y + h, &vxb, &vyb);
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vxa, (float)vya);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vxb, (float)vyb);
+            }
+          }
+          plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        } break;
+        case RK_ARROWS:
+        case RK_VECTOR_FIELD: {
+          SET_LINE_STYLE(r->style1, ((int *)0));
+          if (r->kind == RK_ARROWS) {
+            for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+              Cons *a = (Cons *)(intptr_t)p->head;
+              double x1 = BITS_DBL(a->head);
+              Cons *b = (Cons *)(intptr_t)a->tail;
+              double y1 = BITS_DBL(b->head);
+              Cons *c = (Cons *)(intptr_t)b->tail;
+              double x2 = BITS_DBL(c->head);
+              double y2 = BITS_DBL(c->tail);
+              double vx1, vy1, vx2, vy2; MAP_POINT(x1, y1, &vx1, &vy1); MAP_POINT(x2, y2, &vx2, &vy2);
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx1, (float)vy1);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx2, (float)vy2);
+              double ang = atan2(vy2 - vy1, vx2 - vx1);
+              double ah = 6.0;
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx2, (float)vy2);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx2 - ah * cos(ang - 0.45)), (float)(vy2 - ah * sin(ang - 0.45)));
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx2, (float)vy2);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(vx2 - ah * cos(ang + 0.45)), (float)(vy2 - ah * sin(ang + 0.45)));
+            }
+          } else {
+            int samples = (int)r->i1; if (samples < 2) samples = 2;
+            for (int iy = 0; iy < samples; iy++) for (int ix = 0; ix < samples; ix++) {
+              double x = r->f1 + (r->f2 - r->f1) * ((double)ix / (double)(samples - 1));
+              double y = r->f3 + (r->f4 - r->f3) * ((double)iy / (double)(samples - 1));
+              Cons *pair = (Cons *)(intptr_t)((int64_t(*)(double,double))(intptr_t)r->data1)(x, y);
+              double dx = BITS_DBL(pair->head), dy = BITS_DBL(pair->tail);
+              if (r->i2 == 1) {
+                double len = sqrt(dx * dx + dy * dy);
+                if (len > 1e-12) { dx /= len; dy /= len; }
+              }
+              double scale = (r->i2 == 2) ? 0.15 : 0.10;
+              double x2 = x + dx * (r->f2 - r->f1) * scale;
+              double y2 = y + dy * (r->f4 - r->f3) * scale;
+              double vx1, vy1, vx2, vy2; MAP_POINT(x, y, &vx1, &vy1); MAP_POINT(x2, y2, &vx2, &vy2);
+              plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx1, (float)vy1);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx2, (float)vy2);
+            }
+          }
+          plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        } break;
+        case RK_FUNCTION_INTERVAL:
+        case RK_PARAM_INTERVAL:
+        case RK_POLAR_INTERVAL:
+        case RK_LINES_INTERVAL: {
+          SET_FILL_STYLE(r->style1, ((int *)0), ((int *)0));
+          int n = (int)r->i1; if (n < 32) n = 32;
+          bool started = false;
+          if (r->kind == RK_LINES_INTERVAL) {
+            int count = 0;
+            for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) count++;
+            double *xs = (double *)malloc(sizeof(double) * count);
+            double *ya = (double *)malloc(sizeof(double) * count);
+            double *yb = (double *)malloc(sizeof(double) * count);
+            int idx = 0;
+            for (Cons *p = (Cons *)(intptr_t)r->data1, *q = (Cons *)(intptr_t)r->data2; p && q && idx < count; p = (Cons *)(intptr_t)p->tail, q = (Cons *)(intptr_t)q->tail, idx++) {
+              Cons *pa = (Cons *)(intptr_t)p->head; Cons *pb = (Cons *)(intptr_t)q->head;
+              xs[idx] = BITS_DBL(pa->head); ya[idx] = BITS_DBL(pa->tail); yb[idx] = BITS_DBL(pb->tail);
+            }
+            for (int i = 0; i < idx; i++) {
+              double vx, vy; MAP_POINT(xs[i], ya[i], &vx, &vy);
+              if (!started) { plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy); started = true; }
+              else plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            }
+            for (int i = idx - 1; i >= 0; i--) {
+              double vx, vy; MAP_POINT(xs[i], yb[i], &vx, &vy);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            }
+            free(xs); free(ya); free(yb);
+          } else {
+            double *xs = (double *)malloc(sizeof(double) * n);
+            double *ya = (double *)malloc(sizeof(double) * n);
+            double *yb = (double *)malloc(sizeof(double) * n);
+            for (int i = 0; i < n; i++) {
+              double t = r->f1 + (r->f2 - r->f1) * ((double)i / (double)(n - 1));
+              if (r->kind == RK_FUNCTION_INTERVAL) {
+                xs[i] = t;
+                ya[i] = ((double(*)(double))(intptr_t)r->data1)(t);
+                yb[i] = ((double(*)(double))(intptr_t)r->data2)(t);
+              } else if (r->kind == RK_PARAM_INTERVAL) {
+                Cons *pa = (Cons *)(intptr_t)((int64_t(*)(double))(intptr_t)r->data1)(t);
+                Cons *pb = (Cons *)(intptr_t)((int64_t(*)(double))(intptr_t)r->data2)(t);
+                xs[i] = BITS_DBL(pa->head); ya[i] = BITS_DBL(pa->tail); yb[i] = BITS_DBL(pb->tail);
+              } else {
+                double ra = ((double(*)(double))(intptr_t)r->data1)(t);
+                double rb = ((double(*)(double))(intptr_t)r->data2)(t);
+                xs[i] = ra * cos(t); ya[i] = ra * sin(t); yb[i] = rb * sin(t);
+              }
+            }
+            for (int i = 0; i < n; i++) {
+              double vx, vy; MAP_POINT(xs[i], ya[i], &vx, &vy);
+              if (!started) { plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy); started = true; }
+              else plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            }
+            for (int i = n - 1; i >= 0; i--) {
+              double vx, vy;
+              if (r->kind == RK_POLAR_INTERVAL) {
+                double x2 = ((double(*)(double))(intptr_t)r->data2)(r->f1 + (r->f2 - r->f1) * ((double)i / (double)(n - 1))) * cos(r->f1 + (r->f2 - r->f1) * ((double)i / (double)(n - 1)));
+                MAP_POINT(x2, yb[i], &vx, &vy);
+              } else MAP_POINT(xs[i], yb[i], &vx, &vy);
+              plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
+            }
+            free(xs); free(ya); free(yb);
+          }
+          plutovg_canvas_close_path((plutovg_canvas_t *)(intptr_t)canvas);
+          plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)canvas);
+          SET_LINE_STYLE(r->style2, ((int *)0));
+          plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        } break;
+        case RK_RECTANGLES:
+        case RK_AREA_HIST:
+        case RK_DISCRETE_HIST:
+        case RK_STACKED_HIST: {
+          if (r->kind == RK_DISCRETE_HIST || r->kind == RK_STACKED_HIST) {
+            int idx = 0, fill_idx = 0;
+            for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail, idx++) {
+              double x0 = idx, x1 = idx + 0.8;
+              if (r->kind == RK_DISCRETE_HIST) {
+                Cons *bar = (Cons *)(intptr_t)p->head;
+                double h = BITS_DBL(bar->tail);
+                SET_FILL_STYLE(r->style1, ((int *)0), ((int *)0));
+                double vx0, vy0, vx1, vy1;
+                if (r->i1) { MAP_POINT(0.0, x0, &vx0, &vy0); MAP_POINT(h, x1, &vx1, &vy1); }
+                else { MAP_POINT(x0, 0.0, &vx0, &vy0); MAP_POINT(x1, h, &vx1, &vy1); }
+                plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)vx0, (float)fmin(vy0, vy1), (float)(vx1 - vx0), (float)fabs(vy1 - vy0));
+                plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)canvas);
+              } else {
+                Cons *grp = (Cons *)(intptr_t)p->head;
+                double acc = 0.0;
+                Cons *vals = (Cons *)(intptr_t)grp->tail;
+                Cons *fills = (Cons *)(intptr_t)r->data3;
+                while (vals) {
+                  int64_t fill = fills ? fills->head : r->style1;
+                  SET_FILL_STYLE(fill, ((int *)0), ((int *)0));
+                  double h = BITS_DBL(vals->head);
+                  double vx0, vy0, vx1, vy1;
+                  if (r->i1) { MAP_POINT(acc, x0, &vx0, &vy0); MAP_POINT(acc + h, x1, &vx1, &vy1); }
+                  else { MAP_POINT(x0, acc, &vx0, &vy0); MAP_POINT(x1, acc + h, &vx1, &vy1); }
+                  plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)vx0, (float)fmin(vy0, vy1), (float)(vx1 - vx0), (float)fabs(vy1 - vy0));
+                  plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)canvas);
+                  acc += h;
+                  vals = (Cons *)(intptr_t)vals->tail;
+                  fills = fills ? (Cons *)(intptr_t)fills->tail : NULL;
+                }
+              }
+            }
+          } else {
+            Cons *fills = (Cons *)(intptr_t)r->data2;
+            for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+              int64_t fill = (r->kind == RK_AREA_HIST) ? (fills ? fills->head : r->style1) : r->style1;
+              SET_FILL_STYLE(fill, ((int *)0), ((int *)0));
+              Cons *a = (Cons *)(intptr_t)p->head;
+              double x0 = BITS_DBL(a->head);
+              Cons *b = (Cons *)(intptr_t)a->tail;
+              double x1 = BITS_DBL(b->head);
+              Cons *c = (Cons *)(intptr_t)b->tail;
+              double y0 = BITS_DBL(c->head);
+              double y1 = BITS_DBL(c->tail);
+              double vx0, vy0, vx1, vy1; MAP_POINT(x0, y0, &vx0, &vy0); MAP_POINT(x1, y1, &vx1, &vy1);
+              plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)fmin(vx0, vx1), (float)fmin(vy0, vy1), (float)fabs(vx1 - vx0), (float)fabs(vy1 - vy0));
+              plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)canvas);
+              fills = fills ? (Cons *)(intptr_t)fills->tail : NULL;
+            }
+          }
+        } break;
+        case RK_COLOR_FIELD:
+        case RK_CONTOUR_INTERVALS: {
+          int samples = (int)r->i1; if (samples < 8) samples = 8;
+          Cons *fills = (Cons *)(intptr_t)r->style1;
+          for (int iy = 0; iy < samples - 1; iy++) for (int ix = 0; ix < samples - 1; ix++) {
+            double x0 = r->f1 + (r->f2 - r->f1) * ((double)ix / (double)(samples - 1));
+            double x1 = r->f1 + (r->f2 - r->f1) * ((double)(ix + 1) / (double)(samples - 1));
+            double y0 = r->f3 + (r->f4 - r->f3) * ((double)iy / (double)(samples - 1));
+            double y1 = r->f3 + (r->f4 - r->f3) * ((double)(iy + 1) / (double)(samples - 1));
+            double v = ((double(*)(double,double))(intptr_t)r->data1)((x0 + x1) * 0.5, (y0 + y1) * 0.5);
+            int color = 0;
+            double alpha = (r->kind == RK_COLOR_FIELD) ? r->f5 : 0.55;
+            if (r->kind == RK_COLOR_FIELD) {
+              color = ((int(*)(double,double))(intptr_t)r->data1)((x0 + x1) * 0.5, (y0 + y1) * 0.5);
+              color %= 8; if (color < 0) color += 8;
+            } else {
+              int bands = (int)r->i2 + 1;
+              double t = (v - r->f5) / (r->f6 - r->f5);
+              if (!(t == t)) t = 0.0;
+              if (t < 0.0) t = 0.0; if (t > 0.999) t = 0.999;
+              int band = (int)floor(t * bands);
+              Cons *fs = (Cons *)(intptr_t)r->style1;
+              for (int bi = 0; bi < band && fs; bi++) fs = (Cons *)(intptr_t)fs->tail;
+              FillStyle *fill = (FillStyle *)(intptr_t)(fs ? fs->head : 0);
+              color = fill ? (int)fill->color : band % 8;
+              if (color < 0) color = band % 8;
+            }
+            double vx0, vy0, vx1, vy1; MAP_POINT(x0, y0, &vx0, &vy0); MAP_POINT(x1, y1, &vx1, &vy1);
+            plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, (float)palette[color][0], (float)palette[color][1], (float)palette[color][2], (float)alpha);
+            plutovg_canvas_fill_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)fmin(vx0, vx1), (float)fmin(vy0, vy1), (float)fabs(vx1 - vx0), (float)fabs(vy1 - vy0));
+          }
+        } break;
+        case RK_ISOLINE:
+        case RK_CONTOURS: {
+          SET_LINE_STYLE(r->style1, ((int *)0));
+          int samples = (int)r->i1; if (samples < 8) samples = 8;
+          int nlevels = (r->kind == RK_CONTOURS) ? (int)r->i2 : 1;
+          for (int li = 0; li < nlevels; li++) {
+            double level = (r->kind == RK_ISOLINE) ? r->f5 : (r->f5 + (r->f6 - r->f5) * ((double)(li + 1) / (double)(nlevels + 1)));
+            for (int iy = 0; iy < samples - 1; iy++) for (int ix = 0; ix < samples - 1; ix++) {
+              double x0 = r->f1 + (r->f2 - r->f1) * ((double)ix / (double)(samples - 1));
+              double x1 = r->f1 + (r->f2 - r->f1) * ((double)(ix + 1) / (double)(samples - 1));
+              double y0 = r->f3 + (r->f4 - r->f3) * ((double)iy / (double)(samples - 1));
+              double y1 = r->f3 + (r->f4 - r->f3) * ((double)(iy + 1) / (double)(samples - 1));
+              double v00 = ((double(*)(double,double))(intptr_t)r->data1)(x0, y0) - level;
+              double v10 = ((double(*)(double,double))(intptr_t)r->data1)(x1, y0) - level;
+              double v01 = ((double(*)(double,double))(intptr_t)r->data1)(x0, y1) - level;
+              double v11 = ((double(*)(double,double))(intptr_t)r->data1)(x1, y1) - level;
+              double ptsx[4], ptsy[4]; int pc = 0;
+              if ((v00 <= 0 && v10 > 0) || (v00 > 0 && v10 <= 0)) { double t = v00 / (v00 - v10); ptsx[pc] = x0 + (x1 - x0) * t; ptsy[pc++] = y0; }
+              if ((v10 <= 0 && v11 > 0) || (v10 > 0 && v11 <= 0)) { double t = v10 / (v10 - v11); ptsx[pc] = x1; ptsy[pc++] = y0 + (y1 - y0) * t; }
+              if ((v11 <= 0 && v01 > 0) || (v11 > 0 && v01 <= 0)) { double t = v11 / (v11 - v01); ptsx[pc] = x1 + (x0 - x1) * t; ptsy[pc++] = y1; }
+              if ((v01 <= 0 && v00 > 0) || (v01 > 0 && v00 <= 0)) { double t = v01 / (v01 - v00); ptsx[pc] = x0; ptsy[pc++] = y1 + (y0 - y1) * t; }
+              if (pc >= 2) {
+                double vx0, vy0, vx1, vy1; MAP_POINT(ptsx[0], ptsy[0], &vx0, &vy0); MAP_POINT(ptsx[1], ptsy[1], &vx1, &vy1);
+                plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx0, (float)vy0);
+                plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx1, (float)vy1);
+              }
+            }
+          }
+          plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        } break;
+        default: break;
+      }
+    }
+
+    plutovg_canvas_restore((plutovg_canvas_t *)(intptr_t)canvas);
+
+    if (font_ok && legend_pos != 0) {
+      double lx = (legend_pos == 2 || legend_pos == 4) ? left + 12.0 : right - 120.0;
+      double ly = (legend_pos == 3 || legend_pos == 4) ? bottom - 16.0 : top + 16.0;
+      plutovg_canvas_set_font_face((plutovg_canvas_t *)(intptr_t)canvas, font);
+      plutovg_canvas_set_font_size((plutovg_canvas_t *)(intptr_t)canvas, 12.0f);
+      int row = 0;
+      for (Cons *node = (Cons *)(intptr_t)renderers; node; node = (Cons *)(intptr_t)node->tail) {
+        PlotRenderer *r = (PlotRenderer *)(intptr_t)node->head;
+        if (!r || !r->label || !r->label[0]) continue;
+        double y = ly + row * 16.0;
+        int color = row % 8;
+        plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas,
+                                (float)palette[color][0], (float)palette[color][1],
+                                (float)palette[color][2], 1.0f);
+        plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)lx, (float)y);
+        plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)(lx + 12.0), (float)y);
+        plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
+        plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)canvas, 0.15f, 0.15f, 0.15f, 1.0f);
+        plutovg_canvas_fill_text((plutovg_canvas_t *)(intptr_t)canvas, r->label, (int)strlen(r->label),
+                                 PLUTOVG_TEXT_ENCODING_UTF8, (float)(lx + 18.0), (float)(y + 4.0));
+        row++;
+      }
+    }
+    if (font) plutovg_font_face_destroy(font);
+    RETURN_OK(0);
+    ```)
+
+  ;;; plot -- render a renderer list to a new surface and return it.
+  (defn plot [renderers :int opts :int] :ptr<void>
+    (let [w (if (> (plot-opts-width opts) 0) (plot-opts-width opts) 600)
+          h (if (> (plot-opts-height opts) 0) (plot-opts-height opts) 450)
+          sr (__surface-create w h)]
+      (if (ok? sr)
+        (let [surface (ok-val sr)
+              cr (__canvas-create surface)]
+          (if (ok? cr)
+            (let [canvas (ok-val cr)
+                  rr (plot-into-canvas canvas renderers opts 0 0 w h)]
+              (__canvas-destroy canvas)
+              (if (ok? rr)
+                (__ok surface)
+                (do
+                  (__surface-destroy surface)
+                  (__err (err-val rr)))))
+            (__err (err-val cr))))
+        (__err (err-val sr)))))
+
+  ;;; plot-write-png -- render a plot and write it to a PNG file.
+  (defn plot-write-png [renderers :int opts :int path :cstr] :ptr<void>
+    (let [r (plot renderers opts)]
+      (if (ok? r)
+        (let [s (ok-val r)
+              wr (__surface-write-png s path)]
+          (__surface-destroy s)
+          wr)
+        (__err (err-val r)))))
+
+) ;; end defmodule plot/core

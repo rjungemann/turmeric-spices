@@ -1,0 +1,859 @@
+;; stats/summary.tur -- descriptive statistics on tur-frame float64 columns.
+;;
+;; All col-* functions accept a tur-frame float64 column handle (:int).
+;; Nulls are skipped (validity bitmap is consulted when present).
+;; Returns NaN on empty / all-null input.
+;;
+;; frame-* wrappers look up a column by name from a frame and delegate to col-*.
+;; describe returns a frame with rows: count, mean, sd, min, 25%, 50%, 75%, max.
+
+(defmodule stats/summary
+  (export col-count col-sum col-mean col-median col-mode
+          col-var col-sd col-min col-max col-range
+          col-quantile col-iqr col-skewness col-kurtosis
+          frame-count frame-sum frame-mean frame-median frame-mode
+          frame-var frame-sd frame-min frame-max frame-range
+          frame-quantile frame-iqr frame-skewness frame-kurtosis
+          describe)
+
+;; ---------------------------------------------------------------------------
+;; Internal C helpers (not exported).  Included once via the first defn that
+;; uses them; the interpreter deduplicates #include guards.
+;; ---------------------------------------------------------------------------
+
+;;; col-count -- count non-null values in a float64 column.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :int  number of non-null elements.
+;;;
+;;; Example:
+;;;   (col-count c)  ; => 100
+;;;
+;;; Since: ST1
+(defn col-count [col :int] :int
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) n++;
+  return n;
+  ```)
+
+;;; col-sum -- sum of non-null values in a float64 column.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  sum (0.0 if all null / empty).
+;;;
+;;; Since: ST1
+(defn col-sum [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double sum = 0.0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) sum += vals[i];
+  return sum;
+  ```)
+
+;;; col-mean -- arithmetic mean of non-null values.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  mean, or NaN if empty.
+;;;
+;;; Since: ST1
+(defn col-mean [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double sum = 0.0; int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) { sum += vals[i]; n++; }
+  return n ? sum / (double)n : 0.0/0.0;
+  ```)
+
+;;; col-median -- median of non-null values (type-7 interpolation).
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  median, or NaN if empty.
+;;;
+;;; Since: ST1
+(defn col-median [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <stdlib.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+  static int __cmp_dbl(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) n++;
+  if (!n) return 0.0/0.0;
+  double *tmp = (double *)malloc((size_t)n * sizeof(double));
+  if (!tmp) return 0.0/0.0;
+  int64_t k = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) tmp[k++] = vals[i];
+  qsort(tmp, (size_t)n, sizeof(double), __cmp_dbl);
+  double med;
+  if (n & 1) med = tmp[n/2];
+  else       med = 0.5 * (tmp[n/2 - 1] + tmp[n/2]);
+  free(tmp);
+  return med;
+  ```)
+
+;;; col-mode -- most frequent value (first occurrence on tie).
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  mode, or NaN if empty.
+;;;
+;;; Since: ST1
+(defn col-mode [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <stdlib.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+  static int __cmp_dbl(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) n++;
+  if (!n) return 0.0/0.0;
+  double *tmp = (double *)malloc((size_t)n * sizeof(double));
+  if (!tmp) return 0.0/0.0;
+  int64_t k = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) tmp[k++] = vals[i];
+  qsort(tmp, (size_t)n, sizeof(double), __cmp_dbl);
+  double mode = tmp[0]; int64_t best = 1, cur = 1;
+  for (int64_t i = 1; i < n; i++) {
+    if (tmp[i] == tmp[i-1]) { cur++; if (cur > best) { best = cur; mode = tmp[i]; } }
+    else cur = 1;
+  }
+  free(tmp);
+  return mode;
+  ```)
+
+;;; col-var -- sample variance (n-1 denominator) of non-null values.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  variance, or NaN if fewer than 2 values.
+;;;
+;;; Since: ST1
+(defn col-var [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  /* Two-pass for numerical stability. */
+  double sum = 0.0; int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) { sum += vals[i]; n++; }
+  if (n < 2) return 0.0/0.0;
+  double mean = sum / (double)n;
+  double ss = 0.0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) { double d = vals[i] - mean; ss += d*d; }
+  return ss / (double)(n - 1);
+  ```)
+
+;;; col-sd -- sample standard deviation of non-null values.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  standard deviation, or NaN if fewer than 2 values.
+;;;
+;;; Since: ST1
+(defn col-sd [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double sum = 0.0; int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) { sum += vals[i]; n++; }
+  if (n < 2) return 0.0/0.0;
+  double mean = sum / (double)n;
+  double ss = 0.0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) { double d = vals[i] - mean; ss += d*d; }
+  return sqrt(ss / (double)(n - 1));
+  ```)
+
+;;; col-min -- minimum non-null value.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  minimum, or NaN if empty.
+;;;
+;;; Since: ST1
+(defn col-min [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+  #include <float.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double m = 0.0/0.0; int found = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) {
+      if (!found || vals[i] < m) { m = vals[i]; found = 1; }
+    }
+  return m;
+  ```)
+
+;;; col-max -- maximum non-null value.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  maximum, or NaN if empty.
+;;;
+;;; Since: ST1
+(defn col-max [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double m = 0.0/0.0; int found = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) {
+      if (!found || vals[i] > m) { m = vals[i]; found = 1; }
+    }
+  return m;
+  ```)
+
+;;; col-range -- max - min of non-null values.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  range, or NaN if empty.
+;;;
+;;; Since: ST1
+(defn col-range [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double lo = 0.0/0.0, hi = 0.0/0.0; int found = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) {
+      if (!found || vals[i] < lo) lo = vals[i];
+      if (!found || vals[i] > hi) hi = vals[i];
+      found = 1;
+    }
+  return found ? hi - lo : 0.0/0.0;
+  ```)
+
+;;; col-quantile -- quantile via type-7 linear interpolation.
+;;;
+;;; Parameters:
+;;;   col -- :int   tur-frame float64 column handle
+;;;   q   -- :float quantile in [0, 1]
+;;;
+;;; Returns:
+;;;   :float  quantile value, or NaN if empty.
+;;;
+;;; Example:
+;;;   (col-quantile c 0.25)  ; => first quartile
+;;;
+;;; Since: ST1
+(defn col-quantile [col :int q :float] :float
+  ```c
+  #include <stdint.h>
+  #include <stdlib.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+  static int __cmp_dbl(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) n++;
+  if (!n) return 0.0/0.0;
+  double *tmp = (double *)malloc((size_t)n * sizeof(double));
+  if (!tmp) return 0.0/0.0;
+  int64_t k = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) tmp[k++] = vals[i];
+  qsort(tmp, (size_t)n, sizeof(double), __cmp_dbl);
+  /* Type-7: h = (n-1)*q */
+  double h = (double)(n - 1) * q;
+  int64_t lo = (int64_t)h;
+  int64_t hi = lo + 1;
+  double frac = h - (double)lo;
+  double result;
+  if (hi >= n) result = tmp[n-1];
+  else         result = tmp[lo] + frac * (tmp[hi] - tmp[lo]);
+  free(tmp);
+  return result;
+  ```)
+
+;;; col-iqr -- interquartile range (Q3 - Q1).
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  IQR, or NaN if empty.
+;;;
+;;; Since: ST1
+(defn col-iqr [col :int] :float
+  (let [q1 (col-quantile col 0.25)
+        q3 (col-quantile col 0.75)]
+    (- q3 q1)))
+
+;;; col-skewness -- Fisher-Pearson skewness coefficient.
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  skewness, or NaN if fewer than 3 values.
+;;;
+;;; Since: ST1
+(defn col-skewness [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double sum = 0.0; int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) { sum += vals[i]; n++; }
+  if (n < 3) return 0.0/0.0;
+  double mean = sum / (double)n;
+  double m2 = 0.0, m3 = 0.0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) {
+      double d = vals[i] - mean;
+      m2 += d*d; m3 += d*d*d;
+    }
+  double s = sqrt(m2 / (double)n);
+  if (s == 0.0) return 0.0/0.0;
+  return (m3 / (double)n) / (s * s * s);
+  ```)
+
+;;; col-kurtosis -- excess kurtosis (Fisher's definition, = 0 for normal).
+;;;
+;;; Parameters:
+;;;   col -- :int  tur-frame float64 column handle
+;;;
+;;; Returns:
+;;;   :float  excess kurtosis, or NaN if fewer than 4 values.
+;;;
+;;; Since: ST1
+(defn col-kurtosis [col :int] :float
+  ```c
+  #include <stdint.h>
+  #include <math.h>
+
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
+  double *vals = (double *)c->values;
+  double sum = 0.0; int64_t n = 0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) { sum += vals[i]; n++; }
+  if (n < 4) return 0.0/0.0;
+  double mean = sum / (double)n;
+  double m2 = 0.0, m4 = 0.0;
+  for (int64_t i = 0; i < c->length; i++)
+    if (__valid(c->validity, i)) {
+      double d = vals[i] - mean; double d2 = d*d;
+      m2 += d2; m4 += d2*d2;
+    }
+  double var = m2 / (double)n;
+  if (var == 0.0) return 0.0/0.0;
+  return (m4 / (double)n) / (var * var) - 3.0;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Frame wrappers -- look up a named column and delegate to col-* above.
+;; Each returns result<:float> (ok-val / err "...").
+;; We use inline-C for the frame/column lookup to avoid importing frame/frame
+;; here (that would create a circular dep path if frame imports stats later).
+;; ---------------------------------------------------------------------------
+
+(defn __frame-col-by-name [f :int name :cstr] :int
+  ```c
+  #include <stdint.h>
+  #include <string.h>
+
+  /* Minimal mirror of frame/schema and frame/frame layout. */
+  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+  struct __schema { int64_t arity; struct __field *fields; };
+  struct __frame {
+    int64_t nrows; int64_t ncols;
+    int64_t schema_ptr; int64_t *columns;
+  };
+
+  struct __frame *fr = (struct __frame *)(intptr_t)f;
+  struct __schema *sc = (struct __schema *)(intptr_t)fr->schema_ptr;
+  for (int64_t i = 0; i < sc->arity; i++) {
+    const char *fn = (const char *)(intptr_t)sc->fields[i].name_ptr;
+    if (fn && strcmp(fn, (const char *)(intptr_t)name) == 0)
+      return fr->columns[i];
+  }
+  return -1; /* not found */
+  ```)
+
+;;; frame-count -- count non-null values in a named column of a frame.
+;;;
+;;; Parameters:
+;;;   f    -- :int  frame handle
+;;;   name -- :cstr column name
+;;;
+;;; Returns:
+;;;   :int  non-null count, or -1 if column not found.
+;;;
+;;; Since: ST1
+(defn frame-count [f :int name :cstr] :int
+  (let [col (__frame-col-by-name f name)]
+    (if (= col -1)
+      -1
+      (col-count col))))
+
+;;; frame-sum -- sum of a named column.
+;;;
+;;; Since: ST1
+(defn frame-sum [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-sum col)))
+
+;;; frame-mean -- mean of a named column.
+;;;
+;;; Since: ST1
+(defn frame-mean [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-mean col)))
+
+;;; frame-median -- median of a named column.
+;;;
+;;; Since: ST1
+(defn frame-median [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-median col)))
+
+;;; frame-mode -- mode of a named column.
+;;;
+;;; Since: ST1
+(defn frame-mode [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-mode col)))
+
+;;; frame-var -- sample variance of a named column.
+;;;
+;;; Since: ST1
+(defn frame-var [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-var col)))
+
+;;; frame-sd -- sample standard deviation of a named column.
+;;;
+;;; Since: ST1
+(defn frame-sd [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-sd col)))
+
+;;; frame-min -- minimum of a named column.
+;;;
+;;; Since: ST1
+(defn frame-min [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-min col)))
+
+;;; frame-max -- maximum of a named column.
+;;;
+;;; Since: ST1
+(defn frame-max [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-max col)))
+
+;;; frame-range -- range (max-min) of a named column.
+;;;
+;;; Since: ST1
+(defn frame-range [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-range col)))
+
+;;; frame-quantile -- quantile of a named column.
+;;;
+;;; Since: ST1
+(defn frame-quantile [f :int name :cstr q :float] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-quantile col q)))
+
+;;; frame-iqr -- IQR of a named column.
+;;;
+;;; Since: ST1
+(defn frame-iqr [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-iqr col)))
+
+;;; frame-skewness -- skewness of a named column.
+;;;
+;;; Since: ST1
+(defn frame-skewness [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-skewness col)))
+
+;;; frame-kurtosis -- excess kurtosis of a named column.
+;;;
+;;; Since: ST1
+(defn frame-kurtosis [f :int name :cstr] :float
+  (let [col (__frame-col-by-name f name)]
+    (col-kurtosis col)))
+
+;;; describe -- pandas-style descriptive summary of all float64 columns.
+;;;
+;;; Parameters:
+;;;   f -- :int  frame handle
+;;;
+;;; Returns:
+;;;   :int  new frame with columns: stat (utf8), then one column per numeric
+;;;         input column.  Rows: count, mean, sd, min, 25%, 50%, 75%, max.
+;;;
+;;; Example:
+;;;   (describe my-frame)
+;;;
+;;; Since: ST1
+(defn describe [f :int] :int
+  ```c
+  #include <stdint.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  #include <stdio.h>
+
+  /* Inline column and frame mirror (same as frame/column.tur). */
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+  struct __schema { int64_t arity; struct __field *fields; };
+  struct __frame {
+    int64_t nrows; int64_t ncols;
+    int64_t schema_ptr; int64_t *columns;
+  };
+  static inline int __valid(void *validity, int64_t i) {
+    if (!validity) return 1;
+    uint8_t *bm = (uint8_t *)validity;
+    return (bm[i >> 3] >> (i & 7)) & 1;
+  }
+  static int __cmp_dbl(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+  }
+
+  struct __frame *fr = (struct __frame *)(intptr_t)f;
+  struct __schema *sc = (struct __schema *)(intptr_t)fr->schema_ptr;
+
+  /* Collect float64 column indices (type_tag == 4). */
+  int64_t *num_idx = (int64_t *)malloc((size_t)sc->arity * sizeof(int64_t));
+  int64_t num_count = 0;
+  for (int64_t i = 0; i < sc->arity; i++) {
+    struct __frame_col *c = (struct __frame_col *)(intptr_t)fr->columns[i];
+    if (c->type_tag == 4) num_idx[num_count++] = i;
+  }
+
+  /* 8 stat rows: count, mean, sd, min, 25%, 50%, 75%, max. */
+  const int64_t NROWS = 8;
+  const char *stat_names[8] = {"count","mean","sd","min","25%","50%","75%","max"};
+
+  /* Total output columns: 1 (stat label) + num_count. */
+  int64_t out_ncols = 1 + num_count;
+
+  /* Allocate output schema. */
+  struct __schema *out_sc = (struct __schema *)malloc(sizeof(struct __schema));
+  out_sc->arity  = out_ncols;
+  out_sc->fields = (struct __field *)calloc((size_t)out_ncols, sizeof(struct __field));
+
+  /* "stat" column (type 6 = utf8). */
+  out_sc->fields[0].name_ptr = (int64_t)(intptr_t)strdup("stat");
+  out_sc->fields[0].type_tag = 6;
+  out_sc->fields[0].nullable = 0;
+
+  for (int64_t j = 0; j < num_count; j++) {
+    const char *cname = (const char *)(intptr_t)sc->fields[num_idx[j]].name_ptr;
+    out_sc->fields[1+j].name_ptr = (int64_t)(intptr_t)strdup(cname ? cname : "");
+    out_sc->fields[1+j].type_tag = 4; /* float64 */
+    out_sc->fields[1+j].nullable = 0;
+  }
+
+  /* Allocate output columns array. */
+  int64_t *out_cols = (int64_t *)calloc((size_t)out_ncols, sizeof(int64_t));
+
+  /* --- Build "stat" utf8 column --- */
+  /* We store offsets as int32 and values as char bytes (Arrow style). */
+  /* For simplicity use a flat cstr-pointer column (type_tag=6) with offsets. */
+  {
+    int64_t total_chars = 0;
+    for (int64_t r = 0; r < NROWS; r++) total_chars += (int64_t)strlen(stat_names[r]);
+    int64_t offsets_bytes = (NROWS + 1) * (int64_t)sizeof(int32_t);
+    int64_t data_bytes    = total_chars;
+    struct __frame_col *sc_col = (struct __frame_col *)calloc(1, sizeof(struct __frame_col));
+    sc_col->type_tag = 6; sc_col->length = NROWS; sc_col->refcount = 1;
+    int32_t *offs  = (int32_t *)malloc((size_t)offsets_bytes);
+    char    *chars = (char    *)malloc((size_t)(data_bytes + 1));
+    int32_t pos = 0;
+    for (int64_t r = 0; r < NROWS; r++) {
+      offs[r] = pos;
+      int64_t slen = (int64_t)strlen(stat_names[r]);
+      memcpy(chars + pos, stat_names[r], (size_t)slen);
+      pos += (int32_t)slen;
+    }
+    offs[NROWS] = pos; chars[pos] = '\0';
+    sc_col->offsets = offs;
+    sc_col->values  = chars;
+    out_cols[0] = (int64_t)(intptr_t)sc_col;
+  }
+
+  /* --- Build numeric stat columns --- */
+  for (int64_t j = 0; j < num_count; j++) {
+    struct __frame_col *src = (struct __frame_col *)(intptr_t)fr->columns[num_idx[j]];
+    double *sv = (double *)src->values;
+    int64_t n = 0;
+    double sum = 0.0;
+    for (int64_t i = 0; i < src->length; i++)
+      if (__valid(src->validity, i)) { sum += sv[i]; n++; }
+    double mean = n ? sum / (double)n : 0.0/0.0;
+    double ss = 0.0;
+    for (int64_t i = 0; i < src->length; i++)
+      if (__valid(src->validity, i)) { double d = sv[i]-mean; ss += d*d; }
+    double sd = (n>=2) ? sqrt(ss/(double)(n-1)) : 0.0/0.0;
+
+    /* Build sorted array for quantiles. */
+    double *tmp = (double *)malloc((size_t)n * sizeof(double));
+    int64_t k = 0;
+    for (int64_t i = 0; i < src->length; i++)
+      if (__valid(src->validity, i)) tmp[k++] = sv[i];
+    qsort(tmp, (size_t)n, sizeof(double), __cmp_dbl);
+
+    /* Type-7 quantile helper. */
+    #define Q7(arr,sz,q) ({ \
+      double _h = (double)((sz)-1)*(q); \
+      int64_t _lo = (int64_t)_h, _hi = _lo+1; \
+      double _f = _h-(double)_lo; \
+      (_hi>=(sz)) ? (arr)[(sz)-1] : (arr)[_lo]+_f*((arr)[_hi]-(arr)[_lo]); })
+
+    double stats[8];
+    stats[0] = (double)n;
+    stats[1] = mean;
+    stats[2] = sd;
+    stats[3] = n ? tmp[0]    : 0.0/0.0;
+    stats[4] = n ? Q7(tmp,n,0.25) : 0.0/0.0;
+    stats[5] = n ? Q7(tmp,n,0.50) : 0.0/0.0;
+    stats[6] = n ? Q7(tmp,n,0.75) : 0.0/0.0;
+    stats[7] = n ? tmp[n-1]  : 0.0/0.0;
+    #undef Q7
+    free(tmp);
+
+    int64_t bytes = NROWS * (int64_t)sizeof(double);
+    int64_t rounded = (bytes + 63) & ~((int64_t)63);
+    void *buf = malloc((size_t)(sizeof(int64_t) + rounded));
+    *(int64_t *)buf = rounded;
+    double *dv = (double *)((char *)buf + sizeof(int64_t));
+    memcpy(dv, stats, (size_t)(NROWS * sizeof(double)));
+
+    struct __frame_col *oc = (struct __frame_col *)calloc(1, sizeof(struct __frame_col));
+    oc->type_tag = 4; oc->length = NROWS; oc->refcount = 1; oc->values = dv;
+    out_cols[1+j] = (int64_t)(intptr_t)oc;
+  }
+
+  free(num_idx);
+
+  struct __frame *out = (struct __frame *)malloc(sizeof(struct __frame));
+  out->nrows      = NROWS;
+  out->ncols      = out_ncols;
+  out->schema_ptr = (int64_t)(intptr_t)out_sc;
+  out->columns    = out_cols;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+) ;; end defmodule stats/summary

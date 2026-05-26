@@ -1,0 +1,35 @@
+;; plot/interval.tur -- filled interval renderers.
+
+(defmodule plot/interval
+  (export function-interval lines-interval parametric-interval polar-interval)
+
+  (import plot/core :refer [__make-renderer __renderer-floats __renderer-ints __renderer-bounds])
+
+  ;;; function-interval -- shade between f1(x) and f2(x).
+  (defn function-interval [f1 f2 x-min :float x-max :float samples :int fill :int style :int label :cstr] :int
+    (__renderer-bounds
+      (__renderer-ints
+        (__renderer-floats (__make-renderer 40 fill style f1 f2 0 0 0 label "")
+                           x-min x-max 0.0 0.0 0.0 0.0)
+        samples 0 0 0)
+      x-min x-max (/ 0.0 0.0) (/ 0.0 0.0)))
+
+  ;;; lines-interval -- shade between two sampled line lists.
+  (defn lines-interval [vs1 :int vs2 :int fill :int style :int label :cstr] :int
+    (__make-renderer 41 fill style vs1 vs2 0 0 0 label ""))
+
+  ;;; parametric-interval -- shade between two parametric curves.
+  (defn parametric-interval [f1 f2 t-min :float t-max :float samples :int fill :int style :int label :cstr] :int
+    (__renderer-ints
+      (__renderer-floats (__make-renderer 42 fill style f1 f2 0 0 0 label "")
+                         t-min t-max 0.0 0.0 0.0 0.0)
+      samples 0 0 0))
+
+  ;;; polar-interval -- shade between two polar curves.
+  (defn polar-interval [f1 f2 theta-min :float theta-max :float samples :int fill :int style :int label :cstr] :int
+    (__renderer-ints
+      (__renderer-floats (__make-renderer 43 fill style f1 f2 0 0 0 label "")
+                         theta-min theta-max 0.0 0.0 0.0 0.0)
+      samples 0 0 0))
+
+) ;; end defmodule plot/interval

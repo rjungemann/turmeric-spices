@@ -1,0 +1,1268 @@
+;;; notebook/cli -- command-line entrypoint for tur-notebook.
+;; notebook/cli -- argv dispatch for render/export/exec/new workflows.
+
+(defmodule notebook/cli
+  (import notebook/render-md :refer [render-opts-make render-md])
+  (import notebook/render-html :refer [render-html])
+  (import notebook/tui :refer [tui-opts-make tui-run])
+  (import notebook/format :refer [parse-file node-tag node-cell])
+  (import notebook/session :refer [session-open session-close
+                                   cell-output-cell-id cell-output-status
+                                   cell-output-stdout cell-output-value-repr
+                                   cell-output-error-msg cell-output-elapsed-ms
+                                   output-status-ok output-status-error output-status-skipped])
+  (import notebook/eval :refer [eval-all eval-from])
+  (import notebook/cell :refer [cell-id cells-assign-ids])
+  (export cli-main)
+
+  (defn __cli-build-hint [] :int
+    ```c
+    /* __tur_include__: #ifdef __APPLE__ */
+    /* __tur_include__: #include <sys/event.h> */
+    /* __tur_include__: #endif */
+    /* __tur_include__: #ifdef __linux__ */
+    /* __tur_include__: #include <poll.h> */
+    /* __tur_include__: #include <sys/inotify.h> */
+    /* __tur_include__: #endif */
+    return 0;
+    ```)
+
+  (defn __cli-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __cli-null-cstr [] #{Unsafe} :cstr
+    ```c
+    return (const char *)(intptr_t)0;
+    ```)
+
+  (defn __cli-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn __cli-head [lst :int] #{Unsafe} :cstr
+    ```c
+    int64_t *cell = (int64_t *)(intptr_t)lst;
+    return cell ? (const char *)(intptr_t)cell[0] : 0;
+    ```)
+
+  (defn __cli-tail [lst :int] #{Unsafe} :int
+    ```c
+    int64_t *cell = (int64_t *)(intptr_t)lst;
+    return cell ? cell[1] : 0;
+    ```)
+
+  (defn __cli-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn __cli-cstr-null? [s :cstr] #{Unsafe} :bool
+    ```c
+    return ((const void *)(intptr_t)s) == NULL;
+    ```)
+
+  (defn __cli-cstr-empty? [s :cstr] #{Unsafe} :bool
+    ```c
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    return src[0] == '\0';
+    ```)
+
+  (defn __cli-puts [s :cstr] #{Unsafe} :int
+    ```c
+    const char *text = s ? (const char *)(intptr_t)s : "";
+    printf("%s\n", text);
+    return 0;
+    ```)
+
+  (defn __cli-eputs [s :cstr] #{Unsafe} :int
+    ```c
+    const char *text = s ? (const char *)(intptr_t)s : "";
+    fprintf(stderr, "%s\n", text);
+    return 0;
+    ```)
+
+  (defn __cli-result-ok? [result :int] #{Unsafe} :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return r && r->is_ok;
+    ```)
+
+  (defn __cli-result-ok-cstr [result :int] #{Unsafe} :cstr
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return (r && r->is_ok) ? (const char *)(intptr_t)r->ok_val : "";
+    ```)
+
+  (defn __cli-result-ok-int [result :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return (r && r->is_ok) ? r->ok_val : 0;
+    ```)
+
+  (defn __cli-result-err-cstr [result :int] #{Unsafe} :cstr
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return (r && !r->is_ok) ? (const char *)(intptr_t)r->err_val : "";
+    ```)
+
+  (defn __cli-pos-count [lst :int] #{Unsafe} :int
+    (if (__cli-list-nil? lst)
+      0
+      (+ 1 (__cli-pos-count (__cli-tail lst)))))
+
+  (defn __cli-pos-first [lst :int] #{Unsafe} :cstr
+    (if (__cli-list-nil? lst) (__cli-null-cstr) (__cli-head lst)))
+
+  (defn __cli-pos-second [lst :int] #{Unsafe} :cstr
+    (if (__cli-list-nil? lst)
+      (__cli-null-cstr)
+      (__cli-pos-first (__cli-tail lst))))
+
+  (defn __cli-parse-state-make [] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+      char *keybindings_file;
+      int64_t no_color;
+      char *cell_id;
+      int64_t exec_all;
+    } CliParseState;
+    CliParseState *st = calloc(1, sizeof(*st));
+    st->command = strdup("");
+    st->target = strdup("");
+    st->path = strdup("");
+    st->out = strdup("");
+    st->error_msg = strdup("");
+    st->keybindings_file = strdup("");
+    st->cell_id = strdup("");
+    st->no_color = 0;
+    st->exec_all = 0;
+    return (int64_t)(intptr_t)st;
+    ```)
+
+  (defn __cli-state-command [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st && st->command ? st->command : "";
+    ```)
+
+  (defn __cli-state-target [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st && st->target ? st->target : "";
+    ```)
+
+  (defn __cli-state-path [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st && st->path ? st->path : "";
+    ```)
+
+  (defn __cli-state-out [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st && st->out ? st->out : "";
+    ```)
+
+  (defn __cli-state-error [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st && st->error_msg ? st->error_msg : "";
+    ```)
+
+  (defn __cli-state-use-cache [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->use_cache : 0;
+    ```)
+
+  (defn __cli-state-watch [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->watch : 0;
+    ```)
+
+  (defn __cli-state-no-output [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->no_output : 0;
+    ```)
+
+  (defn __cli-state-no-source [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->no_source : 0;
+    ```)
+
+  (defn __cli-state-help [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->help : 0;
+    ```)
+
+  (defn __cli-state-set-command [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    free(st->command);
+    st->command = strdup(value ? (const char *)(intptr_t)value : "");
+    return state;
+    ```)
+
+  (defn __cli-state-set-target [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    free(st->target);
+    st->target = strdup(value ? (const char *)(intptr_t)value : "");
+    return state;
+    ```)
+
+  (defn __cli-state-set-path [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    free(st->path);
+    st->path = strdup(value ? (const char *)(intptr_t)value : "");
+    return state;
+    ```)
+
+  (defn __cli-state-set-out [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    free(st->out);
+    st->out = strdup(value ? (const char *)(intptr_t)value : "");
+    return state;
+    ```)
+
+  (defn __cli-state-set-error [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    free(st->error_msg);
+    st->error_msg = strdup(value ? (const char *)(intptr_t)value : "");
+    return state;
+    ```)
+
+  (defn __cli-state-set-use-cache [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->use_cache = value;
+    return state;
+    ```)
+
+  (defn __cli-state-set-watch [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->watch = value;
+    return state;
+    ```)
+
+  (defn __cli-state-set-no-output [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->no_output = value;
+    return state;
+    ```)
+
+  (defn __cli-state-set-no-source [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->no_source = value;
+    return state;
+    ```)
+
+  (defn __cli-state-set-help [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->help = value;
+    return state;
+    ```)
+
+  (defn __cli-state-keybindings-file [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+      char *keybindings_file;
+      int64_t no_color;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return (st && st->keybindings_file) ? st->keybindings_file : "";
+    ```)
+
+  (defn __cli-state-set-keybindings-file [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+      char *keybindings_file;
+      int64_t no_color;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    free(st->keybindings_file);
+    st->keybindings_file = strdup(value ? (const char *)(intptr_t)value : "");
+    return state;
+    ```)
+
+  (defn __cli-state-no-color [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+      char *keybindings_file;
+      int64_t no_color;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->no_color : 0;
+    ```)
+
+  (defn __cli-state-set-no-color [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+      char *keybindings_file;
+      int64_t no_color;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->no_color = value;
+    return state;
+    ```)
+
+  (defn __cli-prefix-value [token :cstr prefix :cstr] #{Unsafe} :cstr
+    ```c
+    const char *tok = token ? (const char *)(intptr_t)token : "";
+    const char *pre = prefix ? (const char *)(intptr_t)prefix : "";
+    size_t n = strlen(pre);
+    if (strncmp(tok, pre, n) != 0) return (const char *)(intptr_t)0;
+    return (const char *)(intptr_t)(tok + n);
+    ```)
+
+  (defn __cli-state-cell-id [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st && st->cell_id ? st->cell_id : "";
+    ```)
+
+  (defn __cli-state-exec-all [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->exec_all : 0;
+    ```)
+
+  (defn __cli-state-set-cell-id [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    free(st->cell_id);
+    st->cell_id = value ? strdup((const char *)(intptr_t)value) : strdup("");
+    return state;
+    ```)
+
+  (defn __cli-state-set-exec-all [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return state;
+    st->exec_all = value;
+    return state;
+    ```)
+
+  (defn __cli-output-opts [state :int] #{Unsafe} :int
+    (render-opts-make
+      (__cli-state-out state)
+      (__cli-state-use-cache state)
+      (if (= (__cli-state-no-source state) 1) 0 1)
+      (if (= (__cli-state-no-output state) 1) 0 1)
+      1))
+
+  (defn __cli-print-help [] #{Unsafe} :int
+    ```c
+    printf("Usage: tur-nb <subcommand> [options] <args>\n\n");
+    printf("Subcommands:\n");
+    printf("  render <file.tur.md> [--to md|html] [--out DIR] [--cache] [--watch] [--no-output] [--no-source]\n");
+    printf("  export md|html <file.tur.md> [--out DIR] [--cache] [--watch] [--no-output] [--no-source]\n");
+    printf("  tui <file.tur.md> [--keybindings FILE] [--no-color]\n");
+    printf("  exec <file.tur.md> (--cell <id> | --all)\n");
+    printf("  new <file.tur.md>\n");
+    return 0;
+    ```)
+
+  (defn __cli-render-once [path :cstr target :cstr opts :int] #{Unsafe} :int
+    (let [result (if (__cli-cstr-eq? target "html")
+                   (render-html path opts)
+                   (render-md path opts))]
+      (if (__cli-result-ok? result)
+        (do
+          (__cli-puts (__cli-result-ok-cstr result))
+          0)
+        (do
+          (__cli-eputs (__cli-result-err-cstr result))
+          1))))
+
+  (defn __cli-watch-open [path :cstr] #{Unsafe} :int
+    ```c
+    #include <sys/stat.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+    #include <limits.h>
+    #ifdef __linux__
+    #include <poll.h>
+    #include <sys/inotify.h>
+    #endif
+    #ifdef __APPLE__
+    #include <sys/event.h>
+    #endif
+
+    typedef struct {
+      char *path;
+      char *dir;
+      char *base;
+      int exists;
+      long long mtime_sec;
+      long long mtime_nsec;
+      long long size;
+      long long ino;
+    #ifdef __linux__
+      int fd;
+      int wd;
+    #endif
+    #ifdef __APPLE__
+      int kq;
+      int dir_fd;
+    #endif
+    } NotebookWatcher;
+
+    const char *src = path ? (const char *)(intptr_t)path : "";
+    if (!src[0]) return 0;
+
+    NotebookWatcher *w = calloc(1, sizeof(*w));
+    w->path = strdup(src);
+
+    const char *slash = strrchr(src, '/');
+    if (slash) {
+      size_t dir_len = (size_t)(slash - src);
+      w->dir = malloc(dir_len + 1);
+      memcpy(w->dir, src, dir_len);
+      w->dir[dir_len] = '\0';
+      w->base = strdup(slash + 1);
+    } else {
+      w->dir = strdup(".");
+      w->base = strdup(src);
+    }
+
+    struct stat st;
+    if (stat(src, &st) == 0) {
+      w->exists = 1;
+      w->mtime_sec = (long long)st.st_mtimespec.tv_sec;
+      w->mtime_nsec = (long long)st.st_mtimespec.tv_nsec;
+      w->size = (long long)st.st_size;
+      w->ino = (long long)st.st_ino;
+    }
+
+    #ifdef __linux__
+    w->fd = inotify_init1(IN_NONBLOCK);
+    if (w->fd < 0) {
+      free(w->path); free(w->dir); free(w->base); free(w);
+      return 0;
+    }
+    w->wd = inotify_add_watch(w->fd, w->dir,
+      IN_CLOSE_WRITE | IN_CREATE | IN_MODIFY | IN_MOVED_TO |
+      IN_ATTRIB | IN_DELETE | IN_MOVE_SELF | IN_DELETE_SELF);
+    if (w->wd < 0) {
+      close(w->fd);
+      free(w->path); free(w->dir); free(w->base); free(w);
+      return 0;
+    }
+    #elif defined(__APPLE__)
+    w->dir_fd = open(w->dir, O_RDONLY);
+    if (w->dir_fd < 0) {
+      free(w->path); free(w->dir); free(w->base); free(w);
+      return 0;
+    }
+    w->kq = kqueue();
+    if (w->kq < 0) {
+      close(w->dir_fd);
+      free(w->path); free(w->dir); free(w->base); free(w);
+      return 0;
+    }
+    struct kevent ev;
+    EV_SET(&ev, w->dir_fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR,
+           NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB | NOTE_LINK |
+           NOTE_RENAME | NOTE_DELETE | NOTE_REVOKE, 0, NULL);
+    if (kevent(w->kq, &ev, 1, NULL, 0, NULL) != 0) {
+      close(w->kq);
+      close(w->dir_fd);
+      free(w->path); free(w->dir); free(w->base); free(w);
+      return 0;
+    }
+    #else
+    free(w->path); free(w->dir); free(w->base); free(w);
+    return 0;
+    #endif
+
+    return (int64_t)(intptr_t)w;
+    ```)
+
+  (defn __cli-watch-close [watcher :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      char *dir;
+      char *base;
+      int exists;
+      long long mtime_sec;
+      long long mtime_nsec;
+      long long size;
+      long long ino;
+    #ifdef __linux__
+      int fd;
+      int wd;
+    #endif
+    #ifdef __APPLE__
+      int kq;
+      int dir_fd;
+    #endif
+    } NotebookWatcher;
+    NotebookWatcher *w = (NotebookWatcher *)(intptr_t)watcher;
+    if (!w) return 0;
+    #ifdef __linux__
+    if (w->wd >= 0 && w->fd >= 0) inotify_rm_watch(w->fd, w->wd);
+    if (w->fd >= 0) close(w->fd);
+    #endif
+    #ifdef __APPLE__
+    if (w->kq >= 0) close(w->kq);
+    if (w->dir_fd >= 0) close(w->dir_fd);
+    #endif
+    if (w->path) free(w->path);
+    if (w->dir) free(w->dir);
+    if (w->base) free(w->base);
+    free(w);
+    return 0;
+    ```)
+
+  (defn __cli-watch-wait [watcher :int debounce-ms :int] #{Unsafe} :int
+    ```c
+    #include <sys/stat.h>
+    #include <unistd.h>
+    #ifdef __linux__
+    #include <poll.h>
+    #include <sys/inotify.h>
+    #endif
+    #ifdef __APPLE__
+    #include <sys/event.h>
+    #endif
+
+    typedef struct {
+      char *path;
+      char *dir;
+      char *base;
+      int exists;
+      long long mtime_sec;
+      long long mtime_nsec;
+      long long size;
+      long long ino;
+    #ifdef __linux__
+      int fd;
+      int wd;
+    #endif
+    #ifdef __APPLE__
+      int kq;
+      int dir_fd;
+    #endif
+    } NotebookWatcher;
+
+    NotebookWatcher *w = (NotebookWatcher *)(intptr_t)watcher;
+    if (!w) return 0;
+
+    for (;;) {
+      int matched = 0;
+
+      #ifdef __linux__
+      struct pollfd pfd;
+      pfd.fd = w->fd;
+      pfd.events = POLLIN;
+      if (poll(&pfd, 1, -1) <= 0) return 0;
+      for (;;) {
+        char buf[4096];
+        ssize_t n = read(w->fd, buf, sizeof(buf));
+        if (n <= 0) break;
+        ssize_t off = 0;
+        while (off < n) {
+          struct inotify_event *ev = (struct inotify_event *)(buf + off);
+          if (ev->len > 0) {
+            if (strcmp(ev->name, w->base) == 0) matched = 1;
+          } else {
+            matched = 1;
+          }
+          off += sizeof(struct inotify_event) + ev->len;
+        }
+      }
+      #elif defined(__APPLE__)
+      struct kevent ev;
+      if (kevent(w->kq, NULL, 0, &ev, 1, NULL) <= 0) return 0;
+      matched = 1;
+      #else
+      return 0;
+      #endif
+
+      if (!matched) continue;
+      if (debounce_ms > 0) usleep((useconds_t)(debounce_ms * 1000));
+
+      struct stat st;
+      int exists = stat(w->path, &st) == 0;
+      long long mtime_sec = exists ? (long long)st.st_mtimespec.tv_sec : 0;
+      long long mtime_nsec = exists ? (long long)st.st_mtimespec.tv_nsec : 0;
+      long long size = exists ? (long long)st.st_size : 0;
+      long long ino = exists ? (long long)st.st_ino : 0;
+
+      if (exists != w->exists ||
+          mtime_sec != w->mtime_sec ||
+          mtime_nsec != w->mtime_nsec ||
+          size != w->size ||
+          ino != w->ino) {
+        w->exists = exists;
+        w->mtime_sec = mtime_sec;
+        w->mtime_nsec = mtime_nsec;
+        w->size = size;
+        w->ino = ino;
+        return 1;
+      }
+    }
+    ```)
+
+  (defn __cli-watch-loop [watcher :int path :cstr target :cstr opts :int] #{Unsafe} :int
+    (if (= (__cli-watch-wait watcher 150) 1)
+      (let [code (__cli-render-once path target opts)]
+        (if (= code 0)
+          (__cli-watch-loop watcher path target opts)
+          code))
+      1))
+
+  (defn __cli-render-or-watch [path :cstr target :cstr opts :int watch? :bool] #{Unsafe} :int
+    (if watch?
+      (let [watcher (__cli-watch-open path)]
+        (if (= watcher 0)
+          (do
+            (__cli-eputs "failed to initialize watch mode")
+            1)
+          (let [code (__cli-render-once path target opts)]
+            (if (= code 0)
+              (let [loop-code (__cli-watch-loop watcher path target opts)]
+                (do
+                  (__cli-watch-close watcher)
+                  loop-code))
+              (do
+                (__cli-watch-close watcher)
+                code)))))
+      (__cli-render-once path target opts)))
+
+  (defn __cli-parse-positional [rest :int state :int tok :cstr] #{Unsafe} :int
+    (if (__cli-cstr-empty? (__cli-state-command state))
+      (if (or (__cli-cstr-eq? tok "render")
+              (or (__cli-cstr-eq? tok "export")
+                  (or (__cli-cstr-eq? tok "tui")
+                      (or (__cli-cstr-eq? tok "exec")
+                          (__cli-cstr-eq? tok "new")))))
+        (__cli-state-set-command state tok)
+        (__cli-state-set-error state "unknown subcommand"))
+    (if (__cli-cstr-eq? (__cli-state-command state) "render")
+      (if (__cli-cstr-empty? (__cli-state-path state))
+        (__cli-state-set-path state tok)
+          (__cli-state-set-error state "render accepts exactly one notebook path"))
+        (if (__cli-cstr-eq? (__cli-state-command state) "export")
+          (if (__cli-cstr-empty? (__cli-state-target state))
+            (__cli-state-set-target state tok)
+            (if (__cli-cstr-empty? (__cli-state-path state))
+              (__cli-state-set-path state tok)
+              (__cli-state-set-error state "export accepts exactly a format and notebook path")))
+          (if (__cli-cstr-eq? (__cli-state-command state) "tui")
+          (if (__cli-cstr-empty? (__cli-state-path state))
+            (__cli-state-set-path state tok)
+            (__cli-state-set-error state "tui accepts exactly one notebook path"))
+          (if (__cli-cstr-eq? (__cli-state-command state) "exec")
+            (if (__cli-cstr-empty? (__cli-state-path state))
+              (__cli-state-set-path state tok)
+              (__cli-state-set-error state "exec accepts exactly one notebook path"))
+            (if (__cli-cstr-eq? (__cli-state-command state) "new")
+              (if (__cli-cstr-empty? (__cli-state-path state))
+                (__cli-state-set-path state tok)
+                (__cli-state-set-error state "new accepts exactly one file path"))
+              (__cli-state-set-error state "unknown subcommand"))))))))
+
+  (defn __cli-parse-args [tokens :int state :int pending :cstr] #{Unsafe} :int
+    (if (or (not (__cli-cstr-empty? (__cli-state-error state)))
+            (__cli-list-nil? tokens))
+      (if (and (__cli-list-nil? tokens) (not (__cli-cstr-empty? pending)))
+        (__cli-state-set-error state "option requires a value")
+        state)
+      (let [tok (__cli-head tokens)
+            rest (__cli-tail tokens)]
+        (if (__cli-cstr-eq? pending "out")
+          (__cli-parse-args rest (__cli-state-set-out state tok) "")
+          (if (__cli-cstr-eq? pending "to")
+            (__cli-parse-args rest (__cli-state-set-target state tok) "")
+            (if (__cli-cstr-eq? pending "keybindings")
+              (__cli-parse-args rest (__cli-state-set-keybindings-file state tok) "")
+              (if (__cli-cstr-eq? pending "cell")
+                (__cli-parse-args rest (__cli-state-set-cell-id state tok) "")
+                (if (or (__cli-cstr-eq? tok "--help")
+                       (__cli-cstr-eq? tok "help"))
+                  (__cli-state-set-help state 1)
+                  (let [out-eq (__cli-prefix-value tok "--out=")
+                       to-eq (__cli-prefix-value tok "--to=")
+                       keybindings-eq (__cli-prefix-value tok "--keybindings=")
+                       cell-eq (__cli-prefix-value tok "--cell=")]
+                    (if (not (__cli-cstr-null? out-eq))
+                     (__cli-parse-args rest (__cli-state-set-out state out-eq) "")
+                     (if (not (__cli-cstr-null? to-eq))
+                       (__cli-parse-args rest (__cli-state-set-target state to-eq) "")
+                       (if (not (__cli-cstr-null? keybindings-eq))
+                         (__cli-parse-args rest (__cli-state-set-keybindings-file state keybindings-eq) "")
+                         (if (not (__cli-cstr-null? cell-eq))
+                           (__cli-parse-args rest (__cli-state-set-cell-id state cell-eq) "")
+                           (if (__cli-cstr-eq? tok "--out")
+                             (__cli-parse-args rest state "out")
+                             (if (__cli-cstr-eq? tok "--to")
+                               (__cli-parse-args rest state "to")
+                               (if (__cli-cstr-eq? tok "--keybindings")
+                                 (__cli-parse-args rest state "keybindings")
+                                 (if (__cli-cstr-eq? tok "--cell")
+                                   (__cli-parse-args rest state "cell")
+                                   (if (__cli-cstr-eq? tok "--all")
+                                     (__cli-parse-args rest (__cli-state-set-exec-all state 1) "")
+                                     (if (__cli-cstr-eq? tok "--cache")
+                                       (__cli-parse-args rest (__cli-state-set-use-cache state 1) "")
+                                       (if (__cli-cstr-eq? tok "--watch")
+                                         (__cli-parse-args rest (__cli-state-set-watch state 1) "")
+                                         (if (__cli-cstr-eq? tok "--no-output")
+                                           (__cli-parse-args rest (__cli-state-set-no-output state 1) "")
+                                           (if (__cli-cstr-eq? tok "--no-source")
+                                             (__cli-parse-args rest (__cli-state-set-no-source state 1) "")
+                                             (if (__cli-cstr-eq? tok "--no-color")
+                                               (__cli-parse-args rest (__cli-state-set-no-color state 1) "")
+                                               (if (not (__cli-cstr-null? (__cli-prefix-value tok "--")))
+                                                 (__cli-state-set-error state "unknown option")
+                                                 (__cli-parse-args rest (__cli-parse-positional rest state tok) "")))))))))))))))))))))))))
+
+  (defn __cli-handle-render [state :int] #{Unsafe} :int
+    (let [path (__cli-state-path state)
+          target (if (__cli-cstr-empty? (__cli-state-target state))
+                  "md"
+                  (__cli-state-target state))
+          opts (__cli-output-opts state)]
+      (if (__cli-cstr-empty? path)
+        (do
+          (__cli-eputs "render requires a notebook path")
+          1)
+        (if (and (not (__cli-cstr-eq? target "md"))
+                 (not (__cli-cstr-eq? target "html")))
+          (do
+            (__cli-eputs "render supports only md or html")
+            1)
+          (__cli-render-or-watch path target opts (= (__cli-state-watch state) 1))))))
+
+  (defn __cli-handle-export [state :int] #{Unsafe} :int
+    (let [path (__cli-state-path state)
+          fmt (__cli-state-target state)
+          opts (__cli-output-opts state)]
+      (if (or (__cli-cstr-empty? fmt) (__cli-cstr-empty? path))
+        (do
+          (__cli-eputs "export requires a format and notebook path")
+          1)
+        (if (and (not (__cli-cstr-eq? fmt "md"))
+                 (not (__cli-cstr-eq? fmt "html")))
+          (do
+            (__cli-eputs "export supports only md or html")
+            1)
+          (__cli-render-or-watch path fmt opts (= (__cli-state-watch state) 1))))))
+
+  (defn __cli-handle-tui [state :int] #{Unsafe} :int
+    (let [path (__cli-state-path state)
+          opts (tui-opts-make
+                 (if (= (__cli-state-no-color state) 1) 0 1)
+                 0
+                 1000
+                 (__cli-state-keybindings-file state))]
+      (if (__cli-cstr-empty? path)
+        (do
+          (__cli-eputs "tui requires a notebook path")
+          1)
+        (let [result (tui-run path opts)]
+          (if (__cli-result-ok? result)
+           (__cli-result-ok-int result)
+           (do
+             (__cli-eputs (__cli-result-err-cstr result))
+             1))))))
+
+  (defn __cli-cells-from-nodes [nodes :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } __NbCons;
+    typedef struct { int64_t tag; int64_t prose; int64_t cell; } __NbNode;
+    int64_t cell_list = 0;
+    int64_t cur = (int64_t)nodes;
+    while (cur != 0) {
+      __NbCons *cons = (__NbCons*)cur;
+      __NbNode *node = (__NbNode*)cons->head;
+      if (node->tag == 1) {
+        __NbCons *nc = (__NbCons*)malloc(sizeof(__NbCons));
+        nc->head = node->cell;
+        nc->tail = cell_list;
+        cell_list = (int64_t)nc;
+      }
+      cur = cons->tail;
+    }
+    int64_t rev = 0;
+    while (cell_list != 0) {
+      __NbCons *c = (__NbCons*)cell_list;
+      __NbCons *n = (__NbCons*)malloc(sizeof(__NbCons));
+      n->head = c->head;
+      n->tail = rev;
+      rev = (int64_t)n;
+      cell_list = c->tail;
+    }
+    return (int64_t)rev;
+    ```)
+
+  (defn __cli-print-outputs [outputs :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } __NbCons;
+    typedef struct {
+      char *cell_id; int64_t status; char *stdout_text;
+      char *value_repr; char *error_msg; int64_t elapsed_ms;
+      int64_t image_paths;
+    } __NbOutput;
+    int64_t cur = (int64_t)outputs;
+    int rc = 0;
+    while (cur != 0) {
+      __NbCons *c = (__NbCons*)cur;
+      __NbOutput *out = (__NbOutput*)c->head;
+      if (out->cell_id) printf("[%s] ", out->cell_id);
+      if (out->status == 1) {
+        printf("ERROR");
+        if (out->error_msg) printf(": %s", out->error_msg);
+        printf("\n");
+        rc = 1;
+      } else if (out->status == 2) {
+        printf("skipped\n");
+      } else {
+        if (out->stdout_text && out->stdout_text[0]) printf("%s", out->stdout_text);
+        if (out->value_repr && out->value_repr[0]) printf("=> %s\n", out->value_repr);
+        else printf("ok\n");
+      }
+      cur = c->tail;
+    }
+    return (int64_t)rc;
+    ```)
+
+  (defn __cli-file-exists? [path :cstr] #{Unsafe} :int
+    ```c
+    FILE *f = fopen((char*)path, "r");
+    if (f) { fclose(f); return 1; }
+    return 0;
+    ```)
+
+  (defn __cli-write-file [path :cstr contents :cstr] #{Unsafe} :int
+    ```c
+    FILE *f = fopen((char*)path, "w");
+    if (!f) return 1;
+    fputs((char*)contents, f);
+    fclose(f);
+    return 0;
+    ```)
+
+  (defn __cli-handle-exec [state :int] #{Unsafe} :int
+    (let [path (__cli-state-path state)
+          cell-id (__cli-state-cell-id state)
+          exec-all (__cli-state-exec-all state)]
+      (if (__cli-cstr-empty? path)
+        (do
+          (__cli-eputs "exec requires a notebook path")
+          1)
+        (if (and (= exec-all 0) (__cli-cstr-empty? cell-id))
+          (do
+            (__cli-eputs "exec requires --cell <id> or --all")
+            1)
+          (let [parse-result (parse-file path)]
+            (if (not (__cli-result-ok? parse-result))
+              (do
+                (__cli-eputs (__cli-result-err-cstr parse-result))
+                1)
+              (let [nodes (__cli-result-ok-int parse-result)
+                    cells (__cli-cells-from-nodes nodes)
+                    session (session-open)]
+                (if (= session 0)
+                  (do
+                    (__cli-eputs "failed to open eval session")
+                    1)
+                  (let [outputs (if (= exec-all 0)
+                                  (eval-from session cells cell-id 0 0)
+                                    (eval-all session cells 0 0))]
+                    (do
+                      (session-close session)
+                      (__cli-print-outputs outputs)))))))))))
+
+  (defn __cli-handle-new [state :int] #{Unsafe} :int
+    (let [path (__cli-state-path state)]
+      (if (__cli-cstr-empty? path)
+        (do
+          (__cli-eputs "new requires a file path")
+          1)
+        (if (= (__cli-file-exists? path) 1)
+          (do
+            (__cli-eputs "file already exists")
+            1)
+          (let [template "# My Notebook\n\nA Turmeric notebook.\n\n```turmeric\n(println \"Hello, notebook!\")\n```\n"
+                rc (__cli-write-file path template)]
+            (if (= rc 0)
+              (do
+                (__cli-puts path)
+                0)
+              (do
+                (__cli-eputs "failed to write file")
+                1)))))))
+
+  ;;; cli-main -- parse notebook CLI args and execute the chosen subcommand.
+  (defn cli-main [argv :int] #{Unsafe} :int
+    (let [args (if (and (not (__cli-list-nil? argv))
+                       (__cli-cstr-eq? (__cli-head argv) "nb"))
+                 (__cli-tail argv)
+                 argv)
+          state (__cli-parse-args args (__cli-parse-state-make) "")]
+      (if (not (__cli-cstr-empty? (__cli-state-error state)))
+        (do
+          (__cli-eputs (__cli-state-error state))
+          (__cli-print-help)
+          2)
+        (if (or (= (__cli-state-help state) 1)
+                (__cli-cstr-empty? (__cli-state-command state)))
+          (do
+            (__cli-print-help)
+            0)
+          (if (__cli-cstr-eq? (__cli-state-command state) "render")
+            (__cli-handle-render state)
+            (if (__cli-cstr-eq? (__cli-state-command state) "export")
+              (__cli-handle-export state)
+              (if (__cli-cstr-eq? (__cli-state-command state) "tui")
+                (__cli-handle-tui state)
+                (if (__cli-cstr-eq? (__cli-state-command state) "exec")
+                  (__cli-handle-exec state)
+                  (if (__cli-cstr-eq? (__cli-state-command state) "new")
+                    (__cli-handle-new state)
+                    (do
+                      (__cli-eputs "unknown subcommand")
+                      2))))))))))
+
+) ;; end defmodule notebook/cli

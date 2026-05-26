@@ -1,0 +1,90 @@
+;; tests/plot/line_test.tur -- line renderer smoke tests.
+
+(defmodule plot/tests/line
+  (import plot/core  :refer [plot-write-png])
+  (import plot/line  :refer [function lines parametric polar inverse density])
+  (import plot/decor :refer [axes tick-grid])
+  (import plot/style :refer [default-line-style default-plot-opts])
+  (import test/assert :refer [assert-ok assert-true])
+  (import test/suite  :refer [describe it])
+  (import test/runner :refer [run-all])
+
+  (defn pair [x :float y :float] :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *p = malloc(sizeof(*p));
+    union { double d; int64_t i; } ux, uy;
+    ux.d = x; uy.d = y;
+    p->head = ux.i; p->tail = uy.i;
+    return (int64_t)(intptr_t)p;
+    ```)
+
+  (defn t-cons [v :int n :int] :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *c = malloc(sizeof(*c));
+    c->head = v; c->tail = n;
+    return (int64_t)(intptr_t)c;
+    ```)
+
+  (defn f-cons [x :float n :int] :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    union { double d; int64_t i; } u; u.d = x;
+    Cons *c = malloc(sizeof(*c));
+    c->head = u.i; c->tail = n;
+    return (int64_t)(intptr_t)c;
+    ```)
+
+  (defn file-size [path :cstr] :int
+    ```c
+    #include <sys/stat.h>
+    struct stat st;
+    if (stat((const char *)(intptr_t)path, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+    ```)
+
+  (defn line-renderers [] :int
+    (t-cons (tick-grid)
+      (t-cons (axes)
+        (t-cons (function (fn [x :float] :float (* x x))
+                        -2.0 2.0 96
+                        (default-line-style)
+                        "f")
+          (t-cons (lines (t-cons (pair -2.0 -1.0)
+                            (t-cons (pair -1.0 0.5)
+                              (t-cons (pair 1.0 1.5) 0)))
+                       (default-line-style)
+                       "l")
+            (t-cons (parametric (fn [t :float] :int (pair t (* 0.5 t)))
+                              -1.0 1.0 96
+                              (default-line-style)
+                              "p")
+              (t-cons (polar (fn [t :float] :float (+ 0.4 (* 0.1 (* t t))))
+                           -1.0 1.0 96
+                           (default-line-style)
+                           "r")
+                (t-cons (inverse (fn [y :float] :float (* y y))
+                               -1.0 1.0 96
+                               (default-line-style)
+                               "i")
+                  (t-cons (density (f-cons 0.0 (f-cons 1.0 (f-cons 1.1 (f-cons 1.2 (f-cons 2.0 0)))))
+                                 0.0 64
+                                 (default-line-style)
+                                 "d")
+                        0)))))))))
+
+  (defn write-line-png-ok [] :bool
+    (let [rs (line-renderers)]
+      (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-line.png"))
+           (assert-true (>i (file-size "/tmp/tur-plot-line.png") 100)))))
+
+  (describe "plot/line"
+    (it "renders line-like plots"
+      (write-line-png-ok)))
+
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
+  (defn main [] :int
+    (run-all)
+    0))

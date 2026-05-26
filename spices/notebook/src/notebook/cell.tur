@@ -1,0 +1,329 @@
+;; notebook/cell -- notebook cell handles and fence attribute parsing.
+
+(defmodule notebook/cell
+  (export parse-attrs attr-get attr-get-bool attr-get-int
+          attr-name attr-value
+          cell-make cell-id cell-lang cell-source cell-attrs
+          cell-start-line cell-end-line
+          cells-assign-ids)
+
+  ;; Minimal cons helpers so the module stays self-contained.
+  (defn __cell-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __cell-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn __cell-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn __cell-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
+    return cell->head;
+    ```)
+
+  (defn __cell-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
+    return cell->tail;
+    ```)
+
+  (defn __cell-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn __cell-str-concat [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    size_t la = strlen(sa), lb = strlen(sb);
+    char *out = malloc(la + lb + 1);
+    memcpy(out, sa, la);
+    memcpy(out + la, sb, lb);
+    out[la + lb] = '\0';
+    return out;
+    ```)
+
+  (defn __cell-int->cstr [value :int] #{Unsafe} :cstr
+    ```c
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    return strdup(buf);
+    ```)
+
+  (defn __reverse-list [lst :int acc :int] #{Unsafe} :int
+    (if (__cell-list-nil? lst)
+      acc
+      (__reverse-list (__cell-tail lst) (__cell-cons (__cell-head lst) acc))))
+
+  (defn __attr-make [name :cstr value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { char *name; char *value; } Attr;
+    Attr *attr = malloc(sizeof(*attr));
+    attr->name = name ? strdup((const char *)(intptr_t)name) : strdup("");
+    attr->value = value ? strdup((const char *)(intptr_t)value) : strdup("");
+    return (int64_t)(intptr_t)attr;
+    ```)
+
+  (defn attr-name [attr :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { char *name; char *value; } Attr;
+    Attr *a = (Attr *)(intptr_t)attr;
+    return a && a->name ? a->name : "";
+    ```)
+
+  (defn attr-value [attr :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { char *name; char *value; } Attr;
+    Attr *a = (Attr *)(intptr_t)attr;
+    return a && a->value ? a->value : "";
+    ```)
+
+  ;;; parse-attrs -- parse a Quarto-style attribute block from a fence info string.
+  (defn parse-attrs [s :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { char *name; char *value; } Attr;
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    const char *open = strchr(src, '{');
+    if (!open) return 0;
+    const char *close = strrchr(open + 1, '}');
+    if (!close || close <= open) return 0;
+    const char *p = open + 1;
+    int64_t out = 0;
+    while (p < close) {
+      while (p < close && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+      if (p >= close) break;
+      const char *k0 = p;
+      while (p < close && *p != '=' && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '}') p++;
+      if (p == k0) break;
+      size_t klen = (size_t)(p - k0);
+      char *key = malloc(klen + 1);
+      memcpy(key, k0, klen);
+      key[klen] = '\0';
+      while (p < close && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+      char *value = NULL;
+      if (p < close && *p == '=') {
+        p++;
+        while (p < close && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+        if (p < close && (*p == '"' || *p == '\'')) {
+          char quote = *p++;
+          const char *v0 = p;
+          while (p < close && *p != quote) p++;
+          size_t vlen = (size_t)(p - v0);
+          value = malloc(vlen + 1);
+          memcpy(value, v0, vlen);
+          value[vlen] = '\0';
+          if (p < close && *p == quote) p++;
+        } else {
+          const char *v0 = p;
+          while (p < close && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '}') p++;
+          size_t vlen = (size_t)(p - v0);
+          value = malloc(vlen + 1);
+          memcpy(value, v0, vlen);
+          value[vlen] = '\0';
+        }
+      } else {
+        value = strdup("true");
+      }
+      Attr *attr = malloc(sizeof(*attr));
+      attr->name = key;
+      attr->value = value;
+      Cons *cell = malloc(sizeof(*cell));
+      cell->head = (int64_t)(intptr_t)attr;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    return out;
+    ```)
+
+  ;;; attr-get -- fetch an attribute value or return the provided default.
+  (defn attr-get [attrs :int name :cstr fallback :cstr] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *name; char *value; } Attr;
+    const char *want = name ? (const char *)(intptr_t)name : "";
+    const char *fallback_value = fallback ? (const char *)(intptr_t)fallback : "";
+    Cons *lst = (Cons *)(intptr_t)attrs;
+    while (lst) {
+      Attr *attr = (Attr *)(intptr_t)lst->head;
+      if (attr && attr->name && strcmp(attr->name, want) == 0) {
+        return attr->value ? attr->value : fallback_value;
+      }
+      lst = (Cons *)(intptr_t)lst->tail;
+    }
+    return fallback_value;
+    ```)
+
+  ;;; attr-get-bool -- parse a boolean attribute into 0 or 1.
+  (defn attr-get-bool [attrs :int name :cstr fallback :int] #{Unsafe} :int
+    (let [value (attr-get attrs name "")]
+      (if (__cell-cstr-eq? value "")
+        fallback
+          (if (or (__cell-cstr-eq? value "true")
+                  (or (__cell-cstr-eq? value "1")
+                      (or (__cell-cstr-eq? value "yes")
+                          (__cell-cstr-eq? value "on"))))
+          1
+          0))))
+
+  ;;; attr-get-int -- parse an integer attribute with a default fallback.
+  (defn attr-get-int [attrs :int name :cstr fallback :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *name; char *value; } Attr;
+    const char *want = name ? (const char *)(intptr_t)name : "";
+    Cons *lst = (Cons *)(intptr_t)attrs;
+    while (lst) {
+      Attr *attr = (Attr *)(intptr_t)lst->head;
+      if (attr && attr->name && strcmp(attr->name, want) == 0) {
+        return attr->value ? atoi(attr->value) : fallback;
+      }
+      lst = (Cons *)(intptr_t)lst->tail;
+    }
+    return fallback;
+    ```)
+
+  ;;; cell-make -- create a notebook cell handle.
+  (defn cell-make [id :cstr lang :int source :cstr attrs :int start-line :int end-line :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *cell = malloc(sizeof(*cell));
+    cell->id = id ? strdup((const char *)(intptr_t)id) : strdup("");
+    cell->lang = lang;
+    cell->source = source ? strdup((const char *)(intptr_t)source) : strdup("");
+    cell->attrs = attrs;
+    cell->start_line = start_line;
+    cell->end_line = end_line;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn cell-id [cell :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    return c && c->id ? c->id : "";
+    ```)
+
+  (defn cell-lang [cell :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    return c ? c->lang : -1;
+    ```)
+
+  (defn cell-source [cell :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    return c && c->source ? c->source : "";
+    ```)
+
+  (defn cell-attrs [cell :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    return c ? c->attrs : 0;
+    ```)
+
+  (defn cell-start-line [cell :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    return c ? c->start_line : 0;
+    ```)
+
+  (defn cell-end-line [cell :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    return c ? c->end_line : 0;
+    ```)
+
+  (defn __assign-cell-id [cell :int idx :int] #{Unsafe} :int
+    (if (__cell-cstr-eq? (cell-id cell) "")
+      (cell-make (__cell-str-concat "cell-" (__cell-int->cstr idx))
+                 (cell-lang cell)
+                 (cell-source cell)
+                 (cell-attrs cell)
+                 (cell-start-line cell)
+                 (cell-end-line cell))
+      cell))
+
+  ;;; cells-assign-ids -- fill in missing cell ids with sequential cell-N names.
+  (defn cells-assign-ids [cells :int] #{Unsafe} :int
+    (let [rev (__cells-assign-ids-rev cells 1 (__cell-nil-value))]
+      (__reverse-list rev (__cell-nil-value))))
+
+  (defn __cells-assign-ids-rev [cells :int idx :int acc :int] #{Unsafe} :int
+    (if (__cell-list-nil? cells)
+      acc
+      (__cells-assign-ids-rev (__cell-tail cells)
+                              (+ idx 1)
+                              (__cell-cons (__assign-cell-id (__cell-head cells) idx) acc))))
+
+) ;; end defmodule notebook/cell

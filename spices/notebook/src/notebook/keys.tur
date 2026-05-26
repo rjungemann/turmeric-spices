@@ -1,0 +1,240 @@
+;;; notebook/keys -- keybinding defaults and action dispatch for the notebook TUI.
+;; notebook/keys -- default bindings, keybinding-file loading, and action routing.
+
+(defmodule notebook/keys
+  (export default-keybindings load-keybindings action-dispatch)
+
+  (defn __keys-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __keys-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn __keys-ok [value :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = true;
+    r->ok_val = value;
+    r->err_val = 0;
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __keys-err [value :cstr] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false;
+    r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)(value ? strdup((const char *)(intptr_t)value) : strdup("error"));
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __keys-binding [key :cstr action :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { char *key; char *action; } NotebookKeyBinding;
+    NotebookKeyBinding *binding = malloc(sizeof(*binding));
+    binding->key = key ? strdup((const char *)(intptr_t)key) : strdup("");
+    binding->action = action ? strdup((const char *)(intptr_t)action) : strdup("");
+    return (int64_t)(intptr_t)binding;
+    ```)
+
+  ;;; default-keybindings -- return the built-in command-mode key map.
+  (defn default-keybindings [] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *key; char *action; } NotebookKeyBinding;
+    static const struct { const char *key; const char *action; } pairs[] = {
+      {"j", "cell-next"},
+      {"<Down>", "cell-next"},
+      {"k", "cell-prev"},
+      {"<Up>", "cell-prev"},
+      {"gg", "cell-top"},
+      {"G", "cell-bottom"},
+      {"<Enter>", "cell-run"},
+      {"<S-Enter>", "cell-run-and-next"},
+      {"r", "cell-run"},
+      {"R", "run-all"},
+      {"e", "cell-edit"},
+      {"a", "cell-add-above"},
+      {"b", "cell-add-below"},
+      {"dd", "cell-delete"},
+      {"p", "cell-paste"},
+      {"/", "search-prompt"},
+      {"n", "search-next"},
+      {"N", "search-prev"},
+      {"?", "help-toggle"},
+      {"o", "output-toggle"},
+      {"s", "save"},
+      {"q", "quit"},
+    };
+    int64_t out = 0;
+    for (size_t i = sizeof(pairs) / sizeof(pairs[0]); i > 0; i--) {
+      NotebookKeyBinding *binding = malloc(sizeof(*binding));
+      binding->key = strdup(pairs[i - 1].key);
+      binding->action = strdup(pairs[i - 1].action);
+      Cons *cell = malloc(sizeof(*cell));
+      cell->head = (int64_t)(intptr_t)binding;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    return out;
+    ```)
+
+  ;;; load-keybindings -- read a simple "key action" binding file.
+  (defn load-keybindings [path :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *key; char *action; } NotebookKeyBinding;
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = NULL;
+    const char *src = path ? (const char *)(intptr_t)path : "";
+    FILE *fp = fopen(src, "rb");
+    if (!fp) {
+      res = malloc(sizeof(*res));
+      res->is_ok = false;
+      res->ok_val = 0;
+      res->err_val = (int64_t)(intptr_t)strdup("failed to open keybindings file");
+      return (int64_t)(intptr_t)res;
+    }
+
+    int64_t out = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+      char *p = line;
+      while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+      if (*p == '\0' || *p == '#') continue;
+
+      char *key = p;
+      while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
+      if (*p == '\0') {
+        fclose(fp);
+        res = malloc(sizeof(*res));
+        res->is_ok = false;
+        res->ok_val = 0;
+        res->err_val = (int64_t)(intptr_t)strdup("invalid keybindings line");
+        return (int64_t)(intptr_t)res;
+      }
+      *p++ = '\0';
+      while (*p == ' ' || *p == '\t') p++;
+      if (*p == '\0' || *p == '\r' || *p == '\n') {
+        fclose(fp);
+        res = malloc(sizeof(*res));
+        res->is_ok = false;
+        res->ok_val = 0;
+        res->err_val = (int64_t)(intptr_t)strdup("invalid keybindings line");
+        return (int64_t)(intptr_t)res;
+      }
+
+      char *action = p;
+      while (*p && *p != '\r' && *p != '\n') p++;
+      *p = '\0';
+
+      while (*action == ' ' || *action == '\t') action++;
+      char *end = action + strlen(action);
+      while (end > action && (end[-1] == ' ' || end[-1] == '\t')) end--;
+      *end = '\0';
+      if (*action == '\0') {
+        fclose(fp);
+        res = malloc(sizeof(*res));
+        res->is_ok = false;
+        res->ok_val = 0;
+        res->err_val = (int64_t)(intptr_t)strdup("invalid keybindings line");
+        return (int64_t)(intptr_t)res;
+      }
+
+      NotebookKeyBinding *binding = malloc(sizeof(*binding));
+      binding->key = strdup(key);
+      binding->action = strdup(action);
+      Cons *cell = malloc(sizeof(*cell));
+      cell->head = (int64_t)(intptr_t)binding;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    fclose(fp);
+
+    res = malloc(sizeof(*res));
+    res->is_ok = true;
+    res->ok_val = out;
+    res->err_val = 0;
+    return (int64_t)(intptr_t)res;
+    ```)
+
+  ;;; action-dispatch -- mutate the shared TUI state for a named action.
+  (defn action-dispatch [tui_state :int action :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)tui_state;
+    const char *act = action ? (const char *)(intptr_t)action : "";
+    if (!st) return tui_state;
+
+    if (strcmp(act, "cell-next") == 0) {
+      if (st->focus + 1 < st->cell_count) st->focus++;
+    } else if (strcmp(act, "cell-prev") == 0) {
+      if (st->focus > 0) st->focus--;
+    } else if (strcmp(act, "cell-top") == 0) {
+      st->focus = 0;
+    } else if (strcmp(act, "cell-bottom") == 0) {
+      if (st->cell_count > 0) st->focus = st->cell_count - 1;
+    } else if (strcmp(act, "cell-run") == 0) {
+      st->pending_effect = 1;
+    } else if (strcmp(act, "cell-run-and-next") == 0) {
+      st->pending_effect = 2;
+    } else if (strcmp(act, "run-all") == 0) {
+      st->pending_effect = 3;
+    } else if (strcmp(act, "save") == 0) {
+      st->pending_effect = 4;
+    } else if (strcmp(act, "cell-edit") == 0) {
+      st->pending_effect = 5;
+    } else if (strcmp(act, "cell-add-above") == 0) {
+      st->pending_effect = 6;
+    } else if (strcmp(act, "cell-add-below") == 0) {
+      st->pending_effect = 7;
+    } else if (strcmp(act, "cell-delete") == 0) {
+      st->pending_effect = 8;
+    } else if (strcmp(act, "cell-paste") == 0) {
+      st->pending_effect = 9;
+    } else if (strcmp(act, "quit") == 0) {
+      st->pending_effect = 10;
+    } else if (strcmp(act, "search-prompt") == 0) {
+      st->pending_effect = 11;
+    } else if (strcmp(act, "search-next") == 0) {
+      st->pending_effect = 12;
+    } else if (strcmp(act, "search-prev") == 0) {
+      st->pending_effect = 13;
+    } else if (strcmp(act, "help-toggle") == 0) {
+      st->pending_effect = 14;
+    } else if (strcmp(act, "output-toggle") == 0) {
+      st->pending_effect = 15;
+    }
+    return tui_state;
+    ```)
+
+) ;; end defmodule notebook/keys

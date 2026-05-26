@@ -1,0 +1,1183 @@
+;; stats/dist.tur -- probability distributions: pdf / cdf / quantile / random.
+;;
+;; Distribution objects are heap-allocated structs tagged by a type byte.
+;; All handles are :int (pointer-as-int).  Free with dist-free.
+;;
+;; Continuous CDFs:
+;;   normal  -- erf from <math.h>
+;;   t / F / chi2 / beta / gamma -- regularized incomplete beta / gamma via
+;;               Lentz continued-fraction (numerical recipes, 3rd ed., 6.4)
+;;   uniform -- closed form
+;;   exponential -- closed form
+;;
+;; Discrete CDFs (binomial, poisson) -- direct summation with normal approx
+;;   for large parameters.
+;;
+;; Quantile:
+;;   normal  -- Beasley-Springer-Moro rational approximation
+;;   others  -- bisection on CDF (tolerance 1e-12, max 100 iterations)
+;;
+;; Random:
+;;   uniform  -- PCG32 double
+;;   normal   -- Box-Muller
+;;   others   -- inverse-CDF via quantile
+
+(defmodule stats/dist
+  (export dist-normal dist-t dist-chi2 dist-f
+          dist-uniform dist-binomial dist-poisson
+          dist-exponential dist-beta dist-gamma
+          dist-free
+          pdf cdf quantile random random-n
+          dnorm pnorm qnorm rnorm
+          dt pt qt rt
+          dchi2 pchi2 qchi2 rchi2
+          df-dist pf-dist qf-dist rf-dist
+          dunif punif qunif runif
+          dbinom pbinom qbinom rbinom
+          dpois ppois qpois rpois
+          dexp pexp qexp rexp
+          dbeta pbeta qbeta rbeta
+          dgamma pgamma qgamma rgamma)
+
+;; ---------------------------------------------------------------------------
+;; Inline-C implementation block.
+;; All distribution logic lives in a single large C helper that is included
+;; by the first defn below.  Subsequent defn bodies just call wrapper macros.
+;; ---------------------------------------------------------------------------
+
+;;; dist-normal -- construct a Normal(mu, sigma) distribution object.
+;;;
+;;; Parameters:
+;;;   mu    -- :float mean
+;;;   sigma -- :float standard deviation (> 0)
+;;;
+;;; Returns:
+;;;   :int  dist handle.  Free with dist-free.
+;;;
+;;; Example:
+;;;   (let [d (dist-normal 0.0 1.0)] (pdf d 0.0))  ; => ~0.3989
+;;;
+;;; Since: ST3
+(defn dist-normal [mu :float sigma :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+  #include <string.h>
+  #include "stats/pcg32.h"
+
+  /* Distribution type tags. */
+  #define DIST_NORMAL  1
+  #define DIST_T       2
+  #define DIST_CHI2    3
+  #define DIST_F       4
+  #define DIST_UNIFORM 5
+  #define DIST_BINOM   6
+  #define DIST_POISSON 7
+  #define DIST_EXP     8
+  #define DIST_BETA    9
+  #define DIST_GAMMA  10
+
+  typedef struct {
+    int64_t  tag;
+    double   p1, p2; /* parameters (meaning depends on tag) */
+    int64_t  ip1;    /* integer parameter (n for binomial) */
+  } __dist_t;
+
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_NORMAL; d->p1 = mu; d->p2 = sigma; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-t -- construct a Student t(df) distribution.
+;;;
+;;; Parameters:
+;;;   df -- :float degrees of freedom (> 0)
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST3
+(defn dist-t [df :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_T 2
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_T; d->p1 = df; d->p2 = 0.0; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-chi2 -- construct a chi-squared(df) distribution.
+;;;
+;;; Parameters:
+;;;   df -- :float degrees of freedom (> 0)
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST3
+(defn dist-chi2 [df :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_CHI2 3
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_CHI2; d->p1 = df; d->p2 = 0.0; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-f -- construct an F(df1, df2) distribution.
+;;;
+;;; Parameters:
+;;;   df1 -- :float numerator df
+;;;   df2 -- :float denominator df
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST3
+(defn dist-f [df1 :float df2 :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_F 4
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_F; d->p1 = df1; d->p2 = df2; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-uniform -- construct a Uniform(a, b) distribution.
+;;;
+;;; Parameters:
+;;;   a -- :float lower bound
+;;;   b -- :float upper bound (b > a)
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST4
+(defn dist-uniform [a :float b :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_UNIFORM 5
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_UNIFORM; d->p1 = a; d->p2 = b; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-binomial -- construct a Binomial(n, p) distribution.
+;;;
+;;; Parameters:
+;;;   n -- :int   number of trials
+;;;   p -- :float success probability in [0,1]
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST4
+(defn dist-binomial [n :int p :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_BINOM 6
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_BINOM; d->p1 = p; d->p2 = 0.0; d->ip1 = n;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-poisson -- construct a Poisson(lambda) distribution.
+;;;
+;;; Parameters:
+;;;   lambda -- :float rate parameter (> 0)
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST4
+(defn dist-poisson [lambda :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_POISSON 7
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_POISSON; d->p1 = lambda; d->p2 = 0.0; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-exponential -- construct an Exponential(rate) distribution.
+;;;
+;;; Parameters:
+;;;   rate -- :float rate = 1/mean (> 0)
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST4
+(defn dist-exponential [rate :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_EXP 8
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_EXP; d->p1 = rate; d->p2 = 0.0; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-beta -- construct a Beta(alpha, beta) distribution.
+;;;
+;;; Parameters:
+;;;   alpha -- :float shape1 (> 0)
+;;;   beta  -- :float shape2 (> 0)
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST4
+(defn dist-beta [alpha :float beta :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_BETA 9
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_BETA; d->p1 = alpha; d->p2 = beta; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-gamma -- construct a Gamma(shape, rate) distribution.
+;;;
+;;; Parameters:
+;;;   shape -- :float shape parameter (> 0)
+;;;   rate  -- :float rate = 1/scale (> 0)
+;;;
+;;; Returns:
+;;;   :int  dist handle.
+;;;
+;;; Since: ST4
+(defn dist-gamma [shape :float rate :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+
+  #define DIST_GAMMA 10
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *d = (__dist_t *)malloc(sizeof(__dist_t));
+  d->tag = DIST_GAMMA; d->p1 = shape; d->p2 = rate; d->ip1 = 0;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; dist-free -- free a distribution object.
+;;;
+;;; Since: ST3
+(defn dist-free [d :int] :void
+  ```c
+  #include <stdlib.h>
+  free((void *)(intptr_t)d);
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Core C math engine (shared across pdf/cdf/quantile/random).
+;; ---------------------------------------------------------------------------
+
+;;; pdf -- probability density (or mass) at x.
+;;;
+;;; Parameters:
+;;;   d -- :int  dist handle
+;;;   x -- :float argument
+;;;
+;;; Returns:
+;;;   :float density / PMF value.
+;;;
+;;; Since: ST3
+(defn pdf [d :int x :float] :float
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+
+  #define DIST_NORMAL  1
+  #define DIST_T       2
+  #define DIST_CHI2    3
+  #define DIST_F       4
+  #define DIST_UNIFORM 5
+  #define DIST_BINOM   6
+  #define DIST_POISSON 7
+  #define DIST_EXP     8
+  #define DIST_BETA    9
+  #define DIST_GAMMA  10
+
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *dist = (__dist_t *)(intptr_t)d;
+
+  static const double M_2PI = 6.28318530717958647692;
+  static const double M_SQRT2PI = 2.50662827463100050241;
+
+  /* log-sum-exp-safe lgamma for integer-like n. */
+  static double __lbeta(double a, double b) { return lgamma(a)+lgamma(b)-lgamma(a+b); }
+
+  switch (dist->tag) {
+    case DIST_NORMAL: {
+      double z = (x - dist->p1) / dist->p2;
+      return exp(-0.5*z*z) / (dist->p2 * M_SQRT2PI);
+    }
+    case DIST_T: {
+      double v = dist->p1;
+      return exp(lgamma((v+1.0)/2.0) - lgamma(v/2.0))
+             / (sqrt(v*M_PI) * pow(1.0 + x*x/v, (v+1.0)/2.0));
+    }
+    case DIST_CHI2: {
+      double k = dist->p1;
+      if (x <= 0.0) return 0.0;
+      return exp((k/2.0-1.0)*log(x) - x/2.0 - (k/2.0)*log(2.0) - lgamma(k/2.0));
+    }
+    case DIST_F: {
+      double d1=dist->p1, d2=dist->p2;
+      if (x <= 0.0) return 0.0;
+      double lp = 0.5*d1*log(d1)+0.5*d2*log(d2)+(0.5*d1-1.0)*log(x)
+                  -(0.5*(d1+d2))*log(d1*x+d2) - __lbeta(d1/2.0,d2/2.0);
+      return exp(lp);
+    }
+    case DIST_UNIFORM: {
+      double a=dist->p1, b=dist->p2;
+      return (x >= a && x < b) ? 1.0/(b-a) : 0.0;
+    }
+    case DIST_BINOM: {
+      int64_t n = dist->ip1; double p = dist->p1;
+      int64_t k = (int64_t)x;
+      if (k < 0 || k > n) return 0.0;
+      /* log-space: lgamma(n+1) - lgamma(k+1) - lgamma(n-k+1) + k*log(p) + (n-k)*log(1-p) */
+      double lp = lgamma((double)(n+1))-lgamma((double)(k+1))-lgamma((double)(n-k+1))
+                  + (double)k*log(p) + (double)(n-k)*log(1.0-p);
+      return exp(lp);
+    }
+    case DIST_POISSON: {
+      double lam=dist->p1;
+      int64_t k=(int64_t)x;
+      if(k<0) return 0.0;
+      return exp((double)k*log(lam)-lam-lgamma((double)(k+1)));
+    }
+    case DIST_EXP: {
+      double rate=dist->p1;
+      return x<0.0?0.0:rate*exp(-rate*x);
+    }
+    case DIST_BETA: {
+      double a=dist->p1,b2=dist->p2;
+      if(x<=0.0||x>=1.0) return 0.0;
+      return exp((a-1.0)*log(x)+(b2-1.0)*log(1.0-x)-__lbeta(a,b2));
+    }
+    case DIST_GAMMA: {
+      double shape=dist->p1,rate=dist->p2;
+      if(x<=0.0) return 0.0;
+      return exp((shape-1.0)*log(x)-rate*x+shape*log(rate)-lgamma(shape));
+    }
+    default: return 0.0/0.0;
+  }
+  ```)
+
+;;; cdf -- cumulative distribution function P(X <= x).
+;;;
+;;; Parameters:
+;;;   d -- :int  dist handle
+;;;   x -- :float argument
+;;;
+;;; Returns:
+;;;   :float  P(X <= x) in [0, 1].
+;;;
+;;; Since: ST3
+(defn cdf [d :int x :float] :float
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+
+  #define DIST_NORMAL  1
+  #define DIST_T       2
+  #define DIST_CHI2    3
+  #define DIST_F       4
+  #define DIST_UNIFORM 5
+  #define DIST_BINOM   6
+  #define DIST_POISSON 7
+  #define DIST_EXP     8
+  #define DIST_BETA    9
+  #define DIST_GAMMA  10
+
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *dist = (__dist_t *)(intptr_t)d;
+
+  /* Regularized incomplete gamma (lower) P(a, x). */
+  static double __igamma_p(double a, double x) {
+    if (x <= 0.0) return 0.0;
+    if (x > a + 1.0) {
+      /* Use upper and return 1 - Q. */
+      /* Lentz CF for Q(a,x). */
+      double fpmin = 1e-300, b = x+1.0-a, c = 1.0/fpmin, dd = 1.0/b, h = dd;
+      for (int i = 1; i <= 200; i++) {
+        double an = -(double)i*((double)i-a);
+        b += 2.0; c = b+an/c; if(fabs(c)<fpmin)c=fpmin;
+        dd = b+an*dd; if(fabs(dd)<fpmin)dd=fpmin;
+        dd = 1.0/dd; double del = dd*c; h *= del;
+        if(fabs(del-1.0) < 1e-12) break;
+      }
+      return 1.0 - exp(-x+a*log(x)-lgamma(a))*h;
+    }
+    /* Series for P(a,x). */
+    double ap = a, sum = 1.0/a, del = sum;
+    for (int i = 0; i < 200; i++) {
+      ap++; del *= x/ap; sum += del;
+      if(fabs(del) < fabs(sum)*1e-12) break;
+    }
+    return sum * exp(-x+a*log(x)-lgamma(a));
+  }
+
+  /* Regularized incomplete beta I_x(a,b). */
+  static double __ibeta(double x, double a, double b) {
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+    /* Use symmetry relation when x > (a+1)/(a+b+2). */
+    int swapped = 0;
+    if (x > (a+1.0)/(a+b+2.0)) { double t=a;a=b;b=t; x=1.0-x; swapped=1; }
+    /* Lentz CF. */
+    double lbeta = lgamma(a)+lgamma(b)-lgamma(a+b);
+    double front = exp(a*log(x)+b*log(1.0-x)-lbeta)/a;
+    /* Continued fraction via even-term recurrence. */
+    double fpmin=1e-300, c=1.0, dd=1.0-((a+b)*x/(a+1.0));
+    if(fabs(dd)<fpmin)dd=fpmin; dd=1.0/dd; double h=dd;
+    for(int m=1;m<=200;m++){
+      /* Even step. */
+      double m2=2.0*(double)m;
+      double num=((double)m*(b-(double)m)*x)/((a+m2-1.0)*(a+m2));
+      dd=1.0+num*dd; if(fabs(dd)<fpmin)dd=fpmin;
+      c=1.0+num/c;   if(fabs(c)<fpmin)c=fpmin;
+      dd=1.0/dd; h*=dd*c;
+      /* Odd step. */
+      num=-(a+(double)m)*(a+b+(double)m)*x/((a+m2)*(a+m2+1.0));
+      dd=1.0+num*dd; if(fabs(dd)<fpmin)dd=fpmin;
+      c=1.0+num/c;   if(fabs(c)<fpmin)c=fpmin;
+      dd=1.0/dd; double del=dd*c; h*=del;
+      if(fabs(del-1.0)<1e-12) break;
+    }
+    double val = front*h;
+    return swapped ? 1.0-val : val;
+  }
+
+  switch (dist->tag) {
+    case DIST_NORMAL: {
+      double z = (x - dist->p1) / (dist->p2 * 1.41421356237309504880);
+      return 0.5 * (1.0 + erf(z));
+    }
+    case DIST_T: {
+      double v = dist->p1;
+      double ib = __ibeta(v/(v+x*x), v/2.0, 0.5);
+      return x >= 0.0 ? 1.0 - 0.5*ib : 0.5*ib;
+    }
+    case DIST_CHI2: {
+      return __igamma_p(dist->p1/2.0, x/2.0);
+    }
+    case DIST_F: {
+      double d1=dist->p1, d2=dist->p2;
+      if (x <= 0.0) return 0.0;
+      return __ibeta(d1*x/(d1*x+d2), d1/2.0, d2/2.0);
+    }
+    case DIST_UNIFORM: {
+      double a=dist->p1, b=dist->p2;
+      if(x<=a) return 0.0;
+      if(x>=b) return 1.0;
+      return (x-a)/(b-a);
+    }
+    case DIST_BINOM: {
+      int64_t n=dist->ip1; double p=dist->p1;
+      int64_t kk=(int64_t)floor(x);
+      if(kk<0) return 0.0;
+      if(kk>=n) return 1.0;
+      /* Regularized incomplete beta: CDF = I_{1-p}(n-k, k+1). */
+      return __ibeta(1.0-p, (double)(n-kk), (double)(kk+1));
+    }
+    case DIST_POISSON: {
+      double lam=dist->p1;
+      int64_t kk=(int64_t)floor(x);
+      if(kk<0) return 0.0;
+      /* CDF = 1 - P(kk+1, lambda) = Q(kk+1, lambda). */
+      return 1.0 - __igamma_p((double)(kk+1), lam);
+    }
+    case DIST_EXP: {
+      return x<=0.0?0.0:1.0-exp(-dist->p1*x);
+    }
+    case DIST_BETA: {
+      return __ibeta(x, dist->p1, dist->p2);
+    }
+    case DIST_GAMMA: {
+      return __igamma_p(dist->p1, dist->p2*x);
+    }
+    default: return 0.0/0.0;
+  }
+  ```)
+
+;;; quantile -- inverse CDF (quantile function).
+;;;
+;;; Parameters:
+;;;   d -- :int  dist handle
+;;;   p -- :float probability in [0, 1]
+;;;
+;;; Returns:
+;;;   :float  x such that CDF(x) ~= p.
+;;;
+;;; Since: ST3
+(defn quantile [d :int p :float] :float
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+
+  #define DIST_NORMAL  1
+  #define DIST_UNIFORM 5
+  #define DIST_EXP     8
+
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *dist = (__dist_t *)(intptr_t)d;
+
+  if (p <= 0.0) { /* return lower bound or -inf */
+    if (dist->tag == DIST_UNIFORM) return dist->p1;
+    if (dist->tag == DIST_EXP)     return 0.0;
+    return -1.0/0.0;
+  }
+  if (p >= 1.0) {
+    if (dist->tag == DIST_UNIFORM) return dist->p2;
+    return 1.0/0.0;
+  }
+
+  /* Beasley-Springer-Moro for normal. */
+  if (dist->tag == DIST_NORMAL) {
+    /* Rational approximation (Shore, 1982 / BSM). */
+    double q = p - 0.5;
+    double r, z;
+    if (fabs(q) <= 0.425) {
+      r = 0.180625 - q*q;
+      z = q * (((((((2.5090809287301226727e3*r + 3.3430575583588128105e4)*r
+                    + 6.7265770927008700853e4)*r + 4.5921953931549871457e4)*r
+                   + 1.3731693765509461125e4)*r + 1.9715909503065514427e3)*r
+                 + 1.3316569099890803853e2)*r + 3.3871328727963666080e0) /
+               (((((((5.2264952788528545610e3*r + 2.8729085735721942674e4)*r
+                     + 3.9307895800092710610e4)*r + 2.1213794301586595867e4)*r
+                    + 5.3941960214247511077e3)*r + 6.8718700749205790830e2)*r
+                  + 4.2313330701600911252e1)*r + 1.0);
+    } else {
+      r = q < 0 ? p : 1.0 - p;
+      r = sqrt(-log(r));
+      if (r <= 5.0) {
+        r -= 1.6;
+        z = (((((((7.7133361990500040960e-5*r + 2.3963401700983000e-4)*r
+                  - 1.1442551915761419e-2)*r - 5.4778498729749716e-2)*r
+                 + 1.7879817650500000e-1)*r + 2.1588308770578490e-1)*r
+               - 3.4706540684485630e-1)*r + 1.2337162697978050e0)*r
+              + 2.9330906714999970e-2) /
+             ((((((1.0547813827028230e-4*r + 5.4757180637549590e-4)*r
+                  - 1.3432698018534220e-2)*r - 1.1549074978491840e-1)*r
+                + 5.4648958671660100e-2)*r + 3.9498139756408520e-1)*r
+              + 1.0);
+      } else {
+        r -= 5.0;
+        z = (((((((2.0103343992922633e-9*r + 2.7115555687715776e-7)*r
+                  + 1.2426609473880784e-5)*r + 1.3268639543050516e-4)*r
+                + 7.8988228842924420e-4)*r + 3.2068818757597594e-3)*r
+               + 6.5950111680060590e-3)*r + 8.9375373020549920e-3) /
+             ((((((1.0504500716444399e-10*r + 1.2999948076827520e-8)*r
+                  + 5.9480792415440830e-7)*r + 6.4641379217350380e-6)*r
+                + 3.9128697264580680e-5)*r + 1.4782069267428530e-4)*r
+              + 2.8484798892705990e-4)*r + 7.1760084262060990e-5) / 1.0;
+      }
+      if (q < 0.0) z = -z;
+    }
+    return dist->p1 + dist->p2 * z;
+  }
+
+  /* Uniform: closed form. */
+  if (dist->tag == DIST_UNIFORM) return dist->p1 + p * (dist->p2 - dist->p1);
+
+  /* Exponential: closed form. */
+  if (dist->tag == DIST_EXP) return -log(1.0 - p) / dist->p1;
+
+  /* All others: bisection on CDF. */
+  /* We need the cdf function -- call it through the same dist pointer. */
+  /* We replicate cdf logic inline for the supported tags. */
+
+  /* --- inline cdf helper --- */
+  static double __igamma_p2(double a, double x2) {
+    if(x2<=0.0) return 0.0;
+    if(x2>a+1.0){
+      double fpmin=1e-300,b=x2+1.0-a,c=1.0/fpmin,dd=1.0/b,h=dd;
+      for(int i=1;i<=200;i++){
+        double an=-(double)i*((double)i-a);
+        b+=2.0;c=b+an/c;if(fabs(c)<fpmin)c=fpmin;
+        dd=b+an*dd;if(fabs(dd)<fpmin)dd=fpmin;
+        dd=1.0/dd;double del=dd*c;h*=del;
+        if(fabs(del-1.0)<1e-12)break;
+      }
+      return 1.0-exp(-x2+a*log(x2)-lgamma(a))*h;
+    }
+    double ap=a,sum=1.0/a,del=sum;
+    for(int i=0;i<200;i++){ap++;del*=x2/ap;sum+=del;if(fabs(del)<fabs(sum)*1e-12)break;}
+    return sum*exp(-x2+a*log(x2)-lgamma(a));
+  }
+  static double __ibeta2(double x2,double a,double b){
+    if(x2<=0.0)return 0.0;if(x2>=1.0)return 1.0;
+    int swapped=0;
+    if(x2>(a+1.0)/(a+b+2.0)){double t=a;a=b;b=t;x2=1.0-x2;swapped=1;}
+    double lbeta=lgamma(a)+lgamma(b)-lgamma(a+b);
+    double front=exp(a*log(x2)+b*log(1.0-x2)-lbeta)/a;
+    double fpmin=1e-300,c=1.0,dd=1.0-((a+b)*x2/(a+1.0));
+    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
+    for(int m=1;m<=200;m++){
+      double m2=2.0*(double)m;
+      double num=((double)m*(b-(double)m)*x2)/((a+m2-1.0)*(a+m2));
+      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;
+      c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;
+      dd=1.0/dd;h*=dd*c;
+      num=-(a+(double)m)*(a+b+(double)m)*x2/((a+m2)*(a+m2+1.0));
+      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;
+      c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;
+      dd=1.0/dd;double del=dd*c;h*=del;
+      if(fabs(del-1.0)<1e-12)break;
+    }
+    double val=front*h;
+    return swapped?1.0-val:val;
+  }
+
+  #define DIST_T    2
+  #define DIST_CHI2 3
+  #define DIST_F    4
+  #define DIST_BINOM  6
+  #define DIST_POISSON 7
+  #define DIST_BETA 9
+  #define DIST_GAMMA 10
+
+  double cdf_val(double xv) {
+    switch(dist->tag){
+      case DIST_T:{
+        double v=dist->p1,ib=__ibeta2(v/(v+xv*xv),v/2.0,0.5);
+        return xv>=0.0?1.0-0.5*ib:0.5*ib;
+      }
+      case DIST_CHI2: return __igamma_p2(dist->p1/2.0,xv/2.0);
+      case DIST_F:{
+        double d1=dist->p1,d2=dist->p2;
+        return xv<=0.0?0.0:__ibeta2(d1*xv/(d1*xv+d2),d1/2.0,d2/2.0);
+      }
+      case DIST_BINOM:{
+        int64_t n=dist->ip1;double pp=dist->p1;int64_t kk=(int64_t)floor(xv);
+        if(kk<0)return 0.0;if(kk>=n)return 1.0;
+        return __ibeta2(1.0-pp,(double)(n-kk),(double)(kk+1));
+      }
+      case DIST_POISSON:{
+        double lam=dist->p1;int64_t kk=(int64_t)floor(xv);
+        if(kk<0)return 0.0;
+        return 1.0-__igamma_p2((double)(kk+1),lam);
+      }
+      case DIST_BETA: return __ibeta2(xv,dist->p1,dist->p2);
+      case DIST_GAMMA: return __igamma_p2(dist->p1,dist->p2*xv);
+      default: return 0.0/0.0;
+    }
+  }
+
+  /* Initial bracket. */
+  double lo = -1e10, hi = 1e10;
+  if (dist->tag == DIST_CHI2 || dist->tag == DIST_GAMMA ||
+      dist->tag == DIST_BINOM || dist->tag == DIST_POISSON ||
+      dist->tag == DIST_F) lo = 0.0;
+  if (dist->tag == DIST_BETA) { lo = 0.0; hi = 1.0; }
+
+  /* Bisect. */
+  for (int iter = 0; iter < 200; iter++) {
+    double mid = 0.5*(lo+hi);
+    double c = cdf_val(mid);
+    if (c < p) lo = mid; else hi = mid;
+    if (hi-lo < 1e-12) break;
+  }
+  return 0.5*(lo+hi);
+  ```)
+
+;;; random -- draw one sample from a distribution.
+;;;
+;;; Parameters:
+;;;   d   -- :int  dist handle
+;;;   rng -- :int  rng handle (from rng-make)
+;;;
+;;; Returns:
+;;;   :float  one sample.
+;;;
+;;; Since: ST3
+(defn random [d :int rng :int] :float
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+  #include "stats/pcg32.h"
+
+  #define DIST_NORMAL  1
+  #define DIST_UNIFORM 5
+  #define DIST_EXP     8
+
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  __dist_t *dist = (__dist_t *)(intptr_t)d;
+  pcg32_t *r = (pcg32_t *)(intptr_t)rng;
+
+  if (dist->tag == DIST_NORMAL) {
+    /* Box-Muller. */
+    double u1 = pcg32_double_r(r);
+    double u2 = pcg32_double_r(r);
+    while (u1 == 0.0) u1 = pcg32_double_r(r);
+    double z = sqrt(-2.0*log(u1)) * cos(6.28318530717958647692*u2);
+    return dist->p1 + dist->p2 * z;
+  }
+  if (dist->tag == DIST_UNIFORM) {
+    double a=dist->p1, b=dist->p2;
+    return a + (b-a)*pcg32_double_r(r);
+  }
+  if (dist->tag == DIST_EXP) {
+    double u = pcg32_double_r(r);
+    while (u == 0.0) u = pcg32_double_r(r);
+    return -log(u)/dist->p1;
+  }
+  /* Inverse-CDF fallback.  We inline the quantile logic here. */
+  double p2 = pcg32_double_r(r);
+  /* Guard edge. */
+  if (p2 <= 0.0) p2 = 1e-15;
+  if (p2 >= 1.0) p2 = 1.0-1e-15;
+
+  /* The quantile function is implemented in the 'quantile' defn above. */
+  /* For the random() call we reproduce a simplified bisection here.     */
+  /* This avoids cross-defn calls which need the full interpreter path.  */
+
+  /* Needed: ibeta, igamma. */
+  static double __igamma_r(double a, double x2) {
+    if(x2<=0.0)return 0.0;
+    if(x2>a+1.0){
+      double fpmin=1e-300,b=x2+1.0-a,c=1.0/fpmin,dd=1.0/b,h=dd;
+      for(int i=1;i<=200;i++){
+        double an=-(double)i*((double)i-a);
+        b+=2.0;c=b+an/c;if(fabs(c)<fpmin)c=fpmin;
+        dd=b+an*dd;if(fabs(dd)<fpmin)dd=fpmin;
+        dd=1.0/dd;double del=dd*c;h*=del;
+        if(fabs(del-1.0)<1e-12)break;
+      }
+      return 1.0-exp(-x2+a*log(x2)-lgamma(a))*h;
+    }
+    double ap=a,sum=1.0/a,del=sum;
+    for(int i=0;i<200;i++){ap++;del*=x2/ap;sum+=del;if(fabs(del)<fabs(sum)*1e-12)break;}
+    return sum*exp(-x2+a*log(x2)-lgamma(a));
+  }
+  static double __ibeta_r(double x2,double a,double b){
+    if(x2<=0.0)return 0.0;if(x2>=1.0)return 1.0;
+    int sw=0;
+    if(x2>(a+1.0)/(a+b+2.0)){double t=a;a=b;b=t;x2=1.0-x2;sw=1;}
+    double lb=lgamma(a)+lgamma(b)-lgamma(a+b);
+    double front=exp(a*log(x2)+b*log(1.0-x2)-lb)/a;
+    double fpmin=1e-300,c=1.0,dd=1.0-(a+b)*x2/(a+1.0);
+    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
+    for(int m=1;m<=200;m++){
+      double m2=2.0*(double)m;
+      double num=((double)m*(b-(double)m)*x2)/((a+m2-1.0)*(a+m2));
+      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;
+      c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;
+      dd=1.0/dd;h*=dd*c;
+      num=-(a+(double)m)*(a+b+(double)m)*x2/((a+m2)*(a+m2+1.0));
+      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;
+      c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;
+      dd=1.0/dd;double del=dd*c;h*=del;
+      if(fabs(del-1.0)<1e-12)break;
+    }
+    double val=front*h;
+    return sw?1.0-val:val;
+  }
+
+  #define DIST_T    2
+  #define DIST_CHI2 3
+  #define DIST_F    4
+  #define DIST_BINOM  6
+  #define DIST_POISSON 7
+  #define DIST_BETA 9
+  #define DIST_GAMMA 10
+
+  double cdf_r(double xv) {
+    switch(dist->tag){
+      case DIST_T:{double v=dist->p1,ib=__ibeta_r(v/(v+xv*xv),v/2.0,0.5);return xv>=0.0?1.0-0.5*ib:0.5*ib;}
+      case DIST_CHI2:return __igamma_r(dist->p1/2.0,xv/2.0);
+      case DIST_F:{double d1=dist->p1,d2=dist->p2;return xv<=0.0?0.0:__ibeta_r(d1*xv/(d1*xv+d2),d1/2.0,d2/2.0);}
+      case DIST_BINOM:{int64_t n=dist->ip1;double pp=dist->p1;int64_t kk=(int64_t)floor(xv);
+        if(kk<0)return 0.0;if(kk>=n)return 1.0;return __ibeta_r(1.0-pp,(double)(n-kk),(double)(kk+1));}
+      case DIST_POISSON:{double lam=dist->p1;int64_t kk=(int64_t)floor(xv);
+        if(kk<0)return 0.0;return 1.0-__igamma_r((double)(kk+1),lam);}
+      case DIST_BETA:return __ibeta_r(xv,dist->p1,dist->p2);
+      case DIST_GAMMA:return __igamma_r(dist->p1,dist->p2*xv);
+      default:return 0.0/0.0;
+    }
+  }
+
+  double lo=-1e10,hi=1e10;
+  if(dist->tag==DIST_CHI2||dist->tag==DIST_GAMMA||dist->tag==DIST_F)lo=0.0;
+  if(dist->tag==DIST_BINOM||dist->tag==DIST_POISSON)lo=0.0;
+  if(dist->tag==DIST_BETA){lo=0.0;hi=1.0;}
+  for(int iter=0;iter<200;iter++){
+    double mid=0.5*(lo+hi);
+    if(cdf_r(mid)<p2)lo=mid;else hi=mid;
+    if(hi-lo<1e-12)break;
+  }
+  return 0.5*(lo+hi);
+  ```)
+
+;;; random-n -- draw n samples from a distribution into a float64 column.
+;;;
+;;; Parameters:
+;;;   d   -- :int  dist handle
+;;;   rng -- :int  rng handle
+;;;   n   -- :int  number of samples
+;;;
+;;; Returns:
+;;;   :int  new float64 column of length n.  Caller frees.
+;;;
+;;; Since: ST3
+(defn random-n [d :int rng :int n :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  #include <math.h>
+  #include "stats/pcg32.h"
+
+  #define DIST_NORMAL  1
+  #define DIST_UNIFORM 5
+  #define DIST_EXP     8
+
+  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+  struct __frame_col {
+    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+    void *validity; void *values; void *offsets;
+  };
+  __dist_t *dist = (__dist_t *)(intptr_t)d;
+  pcg32_t  *r    = (pcg32_t  *)(intptr_t)rng;
+
+  int64_t bytes   = n * (int64_t)sizeof(double);
+  int64_t rounded = (bytes+63)&~((int64_t)63);
+  void *buf = malloc((size_t)(sizeof(int64_t)+rounded));
+  if (!buf) return 0;
+  *(int64_t *)buf = rounded;
+  double *vals = (double *)((char *)buf+sizeof(int64_t));
+
+  if (dist->tag == DIST_NORMAL) {
+    for (int64_t i = 0; i < n; i += 2) {
+      double u1 = pcg32_double_r(r);
+      double u2 = pcg32_double_r(r);
+      while (u1 == 0.0) u1 = pcg32_double_r(r);
+      double z0 = sqrt(-2.0*log(u1))*cos(6.28318530717958647692*u2);
+      double z1 = sqrt(-2.0*log(u1))*sin(6.28318530717958647692*u2);
+      vals[i]   = dist->p1 + dist->p2*z0;
+      if (i+1 < n) vals[i+1] = dist->p1 + dist->p2*z1;
+    }
+  } else if (dist->tag == DIST_UNIFORM) {
+    double a=dist->p1,b=dist->p2;
+    for(int64_t i=0;i<n;i++) vals[i]=a+(b-a)*pcg32_double_r(r);
+  } else if (dist->tag == DIST_EXP) {
+    for(int64_t i=0;i<n;i++){
+      double u=pcg32_double_r(r);while(u==0.0)u=pcg32_double_r(r);
+      vals[i]=-log(u)/dist->p1;
+    }
+  } else {
+    /* Inverse-CDF via bisection for each draw (slower but correct). */
+    /* Inline ibeta/igamma as before. */
+    static double __igamma_n(double a, double x2) {
+      if(x2<=0.0)return 0.0;
+      if(x2>a+1.0){
+        double fpmin=1e-300,b2=x2+1.0-a,c=1.0/fpmin,dd=1.0/b2,h=dd;
+        for(int i=1;i<=200;i++){double an=-(double)i*((double)i-a);b2+=2.0;c=b2+an/c;if(fabs(c)<fpmin)c=fpmin;dd=b2+an*dd;if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double del=dd*c;h*=del;if(fabs(del-1.0)<1e-12)break;}
+        return 1.0-exp(-x2+a*log(x2)-lgamma(a))*h;
+      }
+      double ap=a,sum=1.0/a,del=sum;
+      for(int i=0;i<200;i++){ap++;del*=x2/ap;sum+=del;if(fabs(del)<fabs(sum)*1e-12)break;}
+      return sum*exp(-x2+a*log(x2)-lgamma(a));
+    }
+    static double __ibeta_n(double x2,double a,double b){
+      if(x2<=0.0)return 0.0;if(x2>=1.0)return 1.0;
+      int sw=0;if(x2>(a+1.0)/(a+b+2.0)){double t=a;a=b;b=t;x2=1.0-x2;sw=1;}
+      double lb=lgamma(a)+lgamma(b)-lgamma(a+b);
+      double front=exp(a*log(x2)+b*log(1.0-x2)-lb)/a;
+      double fpmin=1e-300,c=1.0,dd=1.0-(a+b)*x2/(a+1.0);
+      if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
+      for(int m=1;m<=200;m++){
+        double m2=2.0*(double)m;
+        double num=((double)m*(b-(double)m)*x2)/((a+m2-1.0)*(a+m2));
+        dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
+        num=-(a+(double)m)*(a+b+(double)m)*x2/((a+m2)*(a+m2+1.0));
+        dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
+        if(fabs(del-1.0)<1e-12)break;
+      }
+      double val=front*h;return sw?1.0-val:val;
+    }
+    #define DIST_T    2
+    #define DIST_CHI2 3
+    #define DIST_F    4
+    #define DIST_BINOM  6
+    #define DIST_POISSON 7
+    #define DIST_BETA 9
+    #define DIST_GAMMA 10
+    double cdf_n(double xv){
+      switch(dist->tag){
+        case DIST_T:{double v=dist->p1,ib=__ibeta_n(v/(v+xv*xv),v/2.0,0.5);return xv>=0.0?1.0-0.5*ib:0.5*ib;}
+        case DIST_CHI2:return __igamma_n(dist->p1/2.0,xv/2.0);
+        case DIST_F:{double d1=dist->p1,d2=dist->p2;return xv<=0.0?0.0:__ibeta_n(d1*xv/(d1*xv+d2),d1/2.0,d2/2.0);}
+        case DIST_BINOM:{int64_t nn=dist->ip1;double pp=dist->p1;int64_t kk=(int64_t)floor(xv);if(kk<0)return 0.0;if(kk>=nn)return 1.0;return __ibeta_n(1.0-pp,(double)(nn-kk),(double)(kk+1));}
+        case DIST_POISSON:{double lam=dist->p1;int64_t kk=(int64_t)floor(xv);if(kk<0)return 0.0;return 1.0-__igamma_n((double)(kk+1),lam);}
+        case DIST_BETA:return __ibeta_n(xv,dist->p1,dist->p2);
+        case DIST_GAMMA:return __igamma_n(dist->p1,dist->p2*xv);
+        default:return 0.0/0.0;
+      }
+    }
+    for(int64_t i=0;i<n;i++){
+      double pp=pcg32_double_r(r);if(pp<=0.0)pp=1e-15;if(pp>=1.0)pp=1.0-1e-15;
+      double lo=-1e10,hi=1e10;
+      if(dist->tag==DIST_CHI2||dist->tag==DIST_GAMMA||dist->tag==DIST_F)lo=0.0;
+      if(dist->tag==DIST_BINOM||dist->tag==DIST_POISSON)lo=0.0;
+      if(dist->tag==DIST_BETA){lo=0.0;hi=1.0;}
+      for(int iter=0;iter<200;iter++){
+        double mid=0.5*(lo+hi);if(cdf_n(mid)<pp)lo=mid;else hi=mid;
+        if(hi-lo<1e-12)break;
+      }
+      vals[i]=0.5*(lo+hi);
+    }
+  }
+
+  struct __frame_col *out=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+  out->type_tag=4;out->length=n;out->refcount=1;out->values=vals;
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;; ---------------------------------------------------------------------------
+;; Convenience top-level helpers (no constructor needed).
+;; ---------------------------------------------------------------------------
+
+;;; dnorm -- normal density at x.
+;;; Since: ST4
+(defn dnorm [x :float mu :float sigma :float] :float
+  (let [d (dist-normal mu sigma)
+        v (pdf d x)]
+    (dist-free d)
+    v))
+
+;;; pnorm -- normal CDF at x.
+;;; Since: ST4
+(defn pnorm [x :float mu :float sigma :float] :float
+  (let [d (dist-normal mu sigma)
+        v (cdf d x)]
+    (dist-free d)
+    v))
+
+;;; qnorm -- normal quantile at p.
+;;; Since: ST4
+(defn qnorm [p :float mu :float sigma :float] :float
+  (let [d (dist-normal mu sigma)
+        v (quantile d p)]
+    (dist-free d)
+    v))
+
+;;; rnorm -- n normal samples.
+;;; Since: ST4
+(defn rnorm [rng :int n :int mu :float sigma :float] :int
+  (let [d (dist-normal mu sigma)
+        v (random-n d rng n)]
+    (dist-free d)
+    v))
+
+;;; dt -- t density.
+;;; Since: ST4
+(defn dt [x :float df :float] :float
+  (let [d (dist-t df) v (pdf d x)] (dist-free d) v))
+
+;;; pt -- t CDF.
+;;; Since: ST4
+(defn pt [x :float df :float] :float
+  (let [d (dist-t df) v (cdf d x)] (dist-free d) v))
+
+;;; qt -- t quantile.
+;;; Since: ST4
+(defn qt [p :float df :float] :float
+  (let [d (dist-t df) v (quantile d p)] (dist-free d) v))
+
+;;; rt -- n t samples.
+;;; Since: ST4
+(defn rt [rng :int n :int df :float] :int
+  (let [d (dist-t df) v (random-n d rng n)] (dist-free d) v))
+
+;;; dchi2 -- chi-squared density.
+;;; Since: ST4
+(defn dchi2 [x :float df :float] :float
+  (let [d (dist-chi2 df) v (pdf d x)] (dist-free d) v))
+
+;;; pchi2 -- chi-squared CDF.
+;;; Since: ST4
+(defn pchi2 [x :float df :float] :float
+  (let [d (dist-chi2 df) v (cdf d x)] (dist-free d) v))
+
+;;; qchi2 -- chi-squared quantile.
+;;; Since: ST4
+(defn qchi2 [p :float df :float] :float
+  (let [d (dist-chi2 df) v (quantile d p)] (dist-free d) v))
+
+;;; rchi2 -- n chi-squared samples.
+;;; Since: ST4
+(defn rchi2 [rng :int n :int df :float] :int
+  (let [d (dist-chi2 df) v (random-n d rng n)] (dist-free d) v))
+
+;;; df-dist -- F density.
+;;; Since: ST4
+(defn df-dist [x :float df1 :float df2 :float] :float
+  (let [d (dist-f df1 df2) v (pdf d x)] (dist-free d) v))
+
+;;; pf-dist -- F CDF.
+;;; Since: ST4
+(defn pf-dist [x :float df1 :float df2 :float] :float
+  (let [d (dist-f df1 df2) v (cdf d x)] (dist-free d) v))
+
+;;; qf-dist -- F quantile.
+;;; Since: ST4
+(defn qf-dist [p :float df1 :float df2 :float] :float
+  (let [d (dist-f df1 df2) v (quantile d p)] (dist-free d) v))
+
+;;; rf-dist -- n F samples.
+;;; Since: ST4
+(defn rf-dist [rng :int n :int df1 :float df2 :float] :int
+  (let [d (dist-f df1 df2) v (random-n d rng n)] (dist-free d) v))
+
+;;; dunif -- uniform density.
+;;; Since: ST4
+(defn dunif [x :float a :float b :float] :float
+  (let [d (dist-uniform a b) v (pdf d x)] (dist-free d) v))
+
+;;; punif -- uniform CDF.
+;;; Since: ST4
+(defn punif [x :float a :float b :float] :float
+  (let [d (dist-uniform a b) v (cdf d x)] (dist-free d) v))
+
+;;; qunif -- uniform quantile.
+;;; Since: ST4
+(defn qunif [p :float a :float b :float] :float
+  (let [d (dist-uniform a b) v (quantile d p)] (dist-free d) v))
+
+;;; runif -- n uniform samples.
+;;; Since: ST4
+(defn runif [rng :int n :int a :float b :float] :int
+  (let [d (dist-uniform a b) v (random-n d rng n)] (dist-free d) v))
+
+;;; dbinom -- binomial PMF.
+;;; Since: ST4
+(defn dbinom [x :float n :int p :float] :float
+  (let [d (dist-binomial n p) v (pdf d x)] (dist-free d) v))
+
+;;; pbinom -- binomial CDF.
+;;; Since: ST4
+(defn pbinom [x :float n :int p :float] :float
+  (let [d (dist-binomial n p) v (cdf d x)] (dist-free d) v))
+
+;;; qbinom -- binomial quantile.
+;;; Since: ST4
+(defn qbinom [p :float n :int pp :float] :float
+  (let [d (dist-binomial n pp) v (quantile d p)] (dist-free d) v))
+
+;;; rbinom -- n binomial samples.
+;;; Since: ST4
+(defn rbinom [rng :int n-samp :int n-trials :int p :float] :int
+  (let [d (dist-binomial n-trials p) v (random-n d rng n-samp)] (dist-free d) v))
+
+;;; dpois -- Poisson PMF.
+;;; Since: ST4
+(defn dpois [x :float lambda :float] :float
+  (let [d (dist-poisson lambda) v (pdf d x)] (dist-free d) v))
+
+;;; ppois -- Poisson CDF.
+;;; Since: ST4
+(defn ppois [x :float lambda :float] :float
+  (let [d (dist-poisson lambda) v (cdf d x)] (dist-free d) v))
+
+;;; qpois -- Poisson quantile.
+;;; Since: ST4
+(defn qpois [p :float lambda :float] :float
+  (let [d (dist-poisson lambda) v (quantile d p)] (dist-free d) v))
+
+;;; rpois -- n Poisson samples.
+;;; Since: ST4
+(defn rpois [rng :int n :int lambda :float] :int
+  (let [d (dist-poisson lambda) v (random-n d rng n)] (dist-free d) v))
+
+;;; dexp -- exponential density.
+;;; Since: ST4
+(defn dexp [x :float rate :float] :float
+  (let [d (dist-exponential rate) v (pdf d x)] (dist-free d) v))
+
+;;; pexp -- exponential CDF.
+;;; Since: ST4
+(defn pexp [x :float rate :float] :float
+  (let [d (dist-exponential rate) v (cdf d x)] (dist-free d) v))
+
+;;; qexp -- exponential quantile.
+;;; Since: ST4
+(defn qexp [p :float rate :float] :float
+  (let [d (dist-exponential rate) v (quantile d p)] (dist-free d) v))
+
+;;; rexp -- n exponential samples.
+;;; Since: ST4
+(defn rexp [rng :int n :int rate :float] :int
+  (let [d (dist-exponential rate) v (random-n d rng n)] (dist-free d) v))
+
+;;; dbeta -- beta density.
+;;; Since: ST4
+(defn dbeta [x :float alpha :float beta :float] :float
+  (let [d (dist-beta alpha beta) v (pdf d x)] (dist-free d) v))
+
+;;; pbeta -- beta CDF.
+;;; Since: ST4
+(defn pbeta [x :float alpha :float beta :float] :float
+  (let [d (dist-beta alpha beta) v (cdf d x)] (dist-free d) v))
+
+;;; qbeta -- beta quantile.
+;;; Since: ST4
+(defn qbeta [p :float alpha :float beta :float] :float
+  (let [d (dist-beta alpha beta) v (quantile d p)] (dist-free d) v))
+
+;;; rbeta -- n beta samples.
+;;; Since: ST4
+(defn rbeta [rng :int n :int alpha :float beta :float] :int
+  (let [d (dist-beta alpha beta) v (random-n d rng n)] (dist-free d) v))
+
+;;; dgamma -- gamma density.
+;;; Since: ST4
+(defn dgamma [x :float shape :float rate :float] :float
+  (let [d (dist-gamma shape rate) v (pdf d x)] (dist-free d) v))
+
+;;; pgamma -- gamma CDF.
+;;; Since: ST4
+(defn pgamma [x :float shape :float rate :float] :float
+  (let [d (dist-gamma shape rate) v (cdf d x)] (dist-free d) v))
+
+;;; qgamma -- gamma quantile.
+;;; Since: ST4
+(defn qgamma [p :float shape :float rate :float] :float
+  (let [d (dist-gamma shape rate) v (quantile d p)] (dist-free d) v))
+
+;;; rgamma -- n gamma samples.
+;;; Since: ST4
+(defn rgamma [rng :int n :int shape :float rate :float] :int
+  (let [d (dist-gamma shape rate) v (random-n d rng n)] (dist-free d) v))
+
+) ;; end defmodule stats/dist

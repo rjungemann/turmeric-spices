@@ -1,0 +1,244 @@
+;; tests/cmark_test.tur -- NB0 tests for notebook/cmark.
+
+(defmodule notebook/tests/cmark
+  (import notebook/cmark :refer [md-tag-document md-tag-heading md-tag-paragraph
+                                 md-tag-blockquote md-tag-list md-tag-list-item
+                                 md-tag-code-block md-tag-thematic-break
+                                 md-tag-table md-tag-table-row md-tag-table-cell
+                                 md-tag-text md-tag-emph md-tag-strong
+                                 md-tag-code-span md-tag-link md-tag-image
+                                 md-tag-strikethrough
+                                 md-tag-autolink md-tag-hard-break md-tag-soft-break
+                                 md-parse md-node-tag md-node-children md-node-text
+                                 md-node-info md-node-meta md-source-span md-emit
+                                 md-emit-html])
+
+  (defn test-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn test-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    return cell ? cell->head : 0;
+    ```)
+
+  (defn test-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    return cell ? cell->tail : 0;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (fails == 0) {
+      fprintf(stderr, "# All %lld notebook tests passed.\n", (long long)count);
+    } else {
+      fprintf(stderr, "# %lld notebook tests failed.\n", (long long)fails);
+    }
+    ```)
+
+  (defn span-start [pair :int] #{Unsafe} :int
+    (test-head pair))
+
+  (defn span-end [pair :int] #{Unsafe} :int
+    (test-head (test-tail pair)))
+
+  (defn first-child [node :int] #{Unsafe} :int
+    (test-head (md-node-children node)))
+
+  (defn second-child [node :int] #{Unsafe} :int
+    (test-head (test-tail (md-node-children node))))
+
+  (defn third-child [node :int] #{Unsafe} :int
+    (test-head (test-tail (test-tail (md-node-children node)))))
+
+  (defn fourth-child [node :int] #{Unsafe} :int
+    (test-head (test-tail (test-tail (test-tail (md-node-children node))))))
+
+  (defn bool->fail [ok :bool] :int
+    (if ok 0 1))
+
+  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+    (do
+      (tap-line idx name ok)
+      (bool->fail ok)))
+
+  (defn test-atx [] #{Unsafe} :bool
+    (let [doc (md-parse "# Hello")
+          node (first-child doc)]
+      (and (= (md-node-tag doc) (md-tag-document))
+           (and (= (md-node-tag node) (md-tag-heading))
+                (and (= (md-node-meta node) 1)
+                     (cstr-eq? (md-node-text node) "Hello"))))))
+
+  (defn test-setext [] #{Unsafe} :bool
+    (let [doc (md-parse "Hello\n---")
+          node (first-child doc)
+          span (md-source-span node)]
+      (and (= (md-node-tag node) (md-tag-heading))
+           (and (= (md-node-meta node) 2)
+                (and (= (span-start span) 1)
+                     (= (span-end span) 2))))))
+
+  (defn test-fence [] #{Unsafe} :bool
+    (let [doc (md-parse "```turmeric\n(+ 1 2)\n```")
+          node (first-child doc)]
+      (and (= (md-node-tag node) (md-tag-code-block))
+           (and (cstr-eq? (md-node-info node) "turmeric")
+              (cstr-eq? (md-node-text node) "(+ 1 2)")))))
+
+  (defn test-indented-code [] #{Unsafe} :bool
+    (let [doc (md-parse "    alpha\n    beta")
+          node (first-child doc)]
+      (and (= (md-node-tag node) (md-tag-code-block))
+           (cstr-eq? (md-node-text node) "alpha\nbeta"))))
+
+  (defn test-blockquote [] #{Unsafe} :bool
+    (let [doc (md-parse "> quoted line\n> second line")
+          quote (first-child doc)
+          para (first-child quote)]
+      (and (= (md-node-tag quote) (md-tag-blockquote))
+           (and (= (md-node-tag para) (md-tag-paragraph))
+                (cstr-eq? (md-node-text para) "quoted line\nsecond line")))))
+
+  (defn test-unordered-list [] #{Unsafe} :bool
+    (let [doc (md-parse "- one\n- two")
+          lst (first-child doc)
+          item (test-head (md-node-children lst))
+          para (first-child item)]
+      (and (= (md-node-tag lst) (md-tag-list))
+           (and (= (md-node-meta lst) 0)
+                (and (cstr-eq? (md-node-info lst) "-")
+                     (and (= (md-node-tag item) (md-tag-list-item))
+                          (cstr-eq? (md-node-text para) "one")))))))
+
+  (defn test-ordered-list [] #{Unsafe} :bool
+    (let [doc (md-parse "3. three\n4. four")
+          lst (first-child doc)]
+      (and (= (md-node-tag lst) (md-tag-list))
+           (and (= (md-node-meta lst) 3)
+                (cstr-eq? (md-node-info lst) ".")))))
+
+  (defn test-thematic-break [] #{Unsafe} :bool
+    (let [doc (md-parse "***")
+          node (first-child doc)]
+      (= (md-node-tag node) (md-tag-thematic-break))))
+
+  (defn test-roundtrip [] #{Unsafe} :bool
+    (cstr-eq?
+      "# Title\n\nParagraph one\nparagraph two\n\n> quoted\n\n- one\n- two\n\n1. first\n2. second\n\n```turmeric\n(+ 1 2)\n```\n\n---"
+      (md-emit
+        (md-parse
+          "# Title\n\nParagraph one\nparagraph two\n\n> quoted\n\n- one\n- two\n\n1. first\n2. second\n\n```turmeric\n(+ 1 2)\n```\n\n---"))))
+
+  (defn test-inline-tags [] #{Unsafe} :bool
+    (let [doc (md-parse "Hello *world* and **bold** `code`")
+          para (first-child doc)
+          a (first-child para)
+          b (second-child para)
+          c (third-child para)
+          d (fourth-child para)]
+      (and (= (md-node-tag para) (md-tag-paragraph))
+           (and (= (md-node-tag a) (md-tag-text))
+                (and (cstr-eq? (md-node-text a) "Hello ")
+                     (and (= (md-node-tag b) (md-tag-emph))
+                          (and (= (md-node-tag (first-child b)) (md-tag-text))
+                               (and (= (md-node-tag c) (md-tag-text))
+                                    (and (cstr-eq? (md-node-text c) " and ")
+                                         (= (md-node-tag d) (md-tag-strong)))))))))))
+
+  (defn test-link-image-autolink-html [] #{Unsafe} :bool
+    (cstr-eq?
+      "<p><a href=\"https://example.com\" title=\"Title\">link</a> <img src=\"img.png\" alt=\"alt\" title=\"Pic\" /> <a href=\"https://example.com\">https://example.com</a></p>"
+      (md-emit-html
+        (md-parse "[link](https://example.com \"Title\") ![alt](img.png \"Pic\") <https://example.com>"))))
+
+  (defn test-hard-break-html [] #{Unsafe} :bool
+    (cstr-eq?
+      "<p>one<br />\ntwo</p>"
+      (md-emit-html (md-parse "one\\\ntwo"))))
+
+  (defn test-entity-and-escape-html [] #{Unsafe} :bool
+    (cstr-eq?
+      "<p>Fish &amp; Chips*</p>"
+      (md-emit-html (md-parse "Fish &amp; Chips\\*"))))
+
+  (defn test-gfm-table [] #{Unsafe} :bool
+    (let [doc (md-parse "| name | value |\n| :--- | ---: |\n| foo | ~~bar~~ |")
+          table (first-child doc)
+          header (first-child table)
+          body (second-child table)
+          h1 (first-child header)
+          h2 (second-child header)
+          c2 (second-child body)]
+      (and (= (md-node-tag table) (md-tag-table))
+           (and (= (md-node-tag header) (md-tag-table-row))
+                (and (= (md-node-tag h1) (md-tag-table-cell))
+                     (and (= (md-node-meta h1) 1)
+                          (and (= (md-node-meta h2) 3)
+                               (and (cstr-eq? (md-node-text h1) "name")
+                                    (= (md-node-tag (first-child c2)) (md-tag-strikethrough))))))))))
+
+  (defn test-gfm-table-html [] #{Unsafe} :bool
+    (cstr-eq?
+      "<table>\n<thead>\n<tr><th align=\"left\">name</th><th align=\"right\">value</th></tr>\n</thead>\n<tbody>\n<tr><td align=\"left\">foo</td><td align=\"right\"><del>bar</del></td></tr>\n</tbody>\n</table>"
+      (md-emit-html (md-parse "| name | value |\n| :--- | ---: |\n| foo | ~~bar~~ |"))))
+
+  (defn test-task-list [] #{Unsafe} :bool
+    (let [doc (md-parse "- [ ] todo\n- [x] done")
+          lst (first-child doc)
+          item1 (first-child lst)
+          item2 (second-child lst)
+          para1 (first-child item1)
+          para2 (first-child item2)]
+      (and (= (md-node-tag lst) (md-tag-list))
+           (and (= (md-node-meta item1) 1)
+                (and (= (md-node-meta item2) 2)
+                     (and (cstr-eq? (md-node-text para1) "todo")
+                          (and (cstr-eq? (md-node-text para2) "done")
+                               (cstr-eq? (md-emit doc) "- [ ] todo\n- [x] done"))))))))
+
+  (defn test-fence-attrs [] #{Unsafe} :bool
+    (let [doc (md-parse "```turmeric {id=demo eval=false}\n(+ 1 2)\n```")
+          node (first-child doc)]
+      (and (= (md-node-tag node) (md-tag-code-block))
+           (and (cstr-eq? (md-node-info node) "turmeric {id=demo eval=false}")
+                (cstr-eq? (md-emit doc) "```turmeric {id=demo eval=false}\n(+ 1 2)\n```")))))
+
+  (defn main [] #{Unsafe} :int
+    (let [f1 (run-case 1 "parses an ATX heading" (test-atx))
+          f2 (run-case 2 "parses a setext heading" (test-setext))
+          f3 (run-case 3 "parses fenced code blocks" (test-fence))
+          f4 (run-case 4 "parses indented code blocks" (test-indented-code))
+          f5 (run-case 5 "parses blockquotes" (test-blockquote))
+          f6 (run-case 6 "parses unordered lists" (test-unordered-list))
+          f7 (run-case 7 "parses ordered lists" (test-ordered-list))
+          f8 (run-case 8 "parses thematic breaks" (test-thematic-break))
+          f9 (run-case 9 "round-trips a mixed document" (test-roundtrip))
+          f10 (run-case 10 "parses inline tags inside paragraphs" (test-inline-tags))
+          f11 (run-case 11 "emits html for links images and autolinks" (test-link-image-autolink-html))
+          f12 (run-case 12 "emits html for hard breaks" (test-hard-break-html))
+          f13 (run-case 13 "handles entities and escapes in html" (test-entity-and-escape-html))
+          f14 (run-case 14 "parses gfm tables and strikethrough" (test-gfm-table))
+          f15 (run-case 15 "emits html for gfm tables" (test-gfm-table-html))
+          f16 (run-case 16 "parses and re-emits task lists" (test-task-list))
+          f17 (run-case 17 "preserves fence attribute strings" (test-fence-attrs))]
+      (tap-plan 17 (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 f17)))))))))))))))))
+      (if (= (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 f17)))))))))))))))) 0)
+        0
+        1)))
+
+) ;; end defmodule notebook/tests/cmark

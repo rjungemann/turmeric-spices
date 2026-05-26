@@ -1,0 +1,374 @@
+;; notebook/session -- libturi-backed notebook execution sessions.
+
+(defmodule notebook/session
+  (export notebook-session-autolink-hint
+          output-status-ok output-status-error output-status-skipped
+          session-open session-close session-reset session-eval
+          cell-output-make
+          cell-output-cell-id cell-output-status cell-output-stdout
+          cell-output-value-repr cell-output-error-msg
+          cell-output-elapsed-ms cell-output-image-paths)
+
+  ;;; notebook-session-autolink-hint -- inject libturi linker and header hints.
+  (defn notebook-session-autolink-hint [] :int
+    ```c
+    /* __tur_autolink__: -Lbuild/src -lturi -fsanitize=address,undefined -Isrc -Isrc/compiler -Isrc/runtime */
+    /* __tur_include__: #include "turi/eval.h" */
+    /* __tur_include__: #include "turi/env.h" */
+    /* __tur_include__: #include "turi/value.h" */
+    /* __tur_include__: #include <unistd.h> */
+    /* __tur_include__: #include <fcntl.h> */
+    /* __tur_include__: #include <sys/time.h> */
+    return 0;
+    ```)
+
+  (defn output-status-ok [] :int 0)
+  (defn output-status-error [] :int 1)
+  (defn output-status-skipped [] :int 2)
+
+  (defn cell-output-make [cell-id :cstr status :int stdout :cstr value-repr-text :cstr
+                          error-msg-text :cstr elapsed-ms-value :int image-paths-list :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = malloc(sizeof(*out));
+    out->cell_id = cell_id ? strdup((const char *)(intptr_t)cell_id) : strdup("");
+    out->status = status;
+    out->stdout_text = stdout ? strdup((const char *)(intptr_t)stdout) : strdup("");
+    out->value_repr = value_repr_text ? strdup((const char *)(intptr_t)value_repr_text) : strdup("");
+    out->error_msg = error_msg_text ? strdup((const char *)(intptr_t)error_msg_text) : strdup("");
+    out->elapsed_ms = elapsed_ms_value;
+    out->image_paths = image_paths_list;
+    return (int64_t)(intptr_t)out;
+    ```)
+
+  (defn cell-output-cell-id [output :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    return out && out->cell_id ? out->cell_id : "";
+    ```)
+
+  (defn cell-output-status [output :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    return out ? out->status : 1;
+    ```)
+
+  (defn cell-output-stdout [output :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    return out && out->stdout_text ? out->stdout_text : "";
+    ```)
+
+  (defn cell-output-value-repr [output :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    return out && out->value_repr ? out->value_repr : "";
+    ```)
+
+  (defn cell-output-error-msg [output :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    return out && out->error_msg ? out->error_msg : "";
+    ```)
+
+  (defn cell-output-elapsed-ms [output :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    return out ? out->elapsed_ms : 0;
+    ```)
+
+  (defn cell-output-image-paths [output :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    return out ? out->image_paths : 0;
+    ```)
+
+  ;;; session-open -- create a fresh libturi-backed notebook session.
+  (defn session-open [] #{Unsafe} :int
+    ```c
+    typedef struct {
+      TuriEnv *env;
+    } NotebookSession;
+    static bool inited = false;
+    if (!inited) {
+      turi_init(false);
+      inited = true;
+    }
+    NotebookSession *session = malloc(sizeof(*session));
+    session->env = turi_env_new();
+    return (int64_t)(intptr_t)session;
+    ```)
+
+  ;;; session-close -- free a notebook session and its embedded environment.
+  (defn session-close [session :int] #{Unsafe} :void
+    ```c
+    typedef struct {
+      TuriEnv *env;
+    } NotebookSession;
+    NotebookSession *s = (NotebookSession *)(intptr_t)session;
+    if (!s) return;
+    if (s->env) turi_env_free(s->env);
+    free(s);
+    ```)
+
+  ;;; session-reset -- replace the current environment with a fresh one.
+  (defn session-reset [session :int] #{Unsafe} :void
+    ```c
+    typedef struct {
+      TuriEnv *env;
+    } NotebookSession;
+    NotebookSession *s = (NotebookSession *)(intptr_t)session;
+    if (!s) return;
+    if (s->env) turi_env_free(s->env);
+    s->env = turi_env_new();
+    ```)
+
+  ;;; session-eval -- evaluate one cell source string in the current session.
+  (defn session-eval [session :int source :cstr lang :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      TuriEnv *env;
+    } NotebookSession;
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+
+    NotebookSession *s = (NotebookSession *)(intptr_t)session;
+    if (!s || !s->env) {
+      NotebookCellOutput *out = malloc(sizeof(*out));
+      out->cell_id = strdup("");
+      out->status = 1;
+      out->stdout_text = strdup("");
+      out->value_repr = strdup("");
+      out->error_msg = strdup("session is not open");
+      out->elapsed_ms = 0;
+      out->image_paths = 0;
+      return (int64_t)(intptr_t)out;
+    }
+
+    const char *src = source ? (const char *)(intptr_t)source : "";
+    char *wrapped = NULL;
+    if (lang == 1) {
+      const char *prefix = "#lang sweet-exp\n";
+      size_t plen = strlen(prefix);
+      size_t slen = strlen(src);
+      wrapped = malloc(plen + slen + 1);
+      memcpy(wrapped, prefix, plen);
+      memcpy(wrapped + plen, src, slen + 1);
+      src = wrapped;
+    }
+
+    struct timeval tv0, tv1;
+    gettimeofday(&tv0, NULL);
+
+    fflush(stdout);
+    fflush(stderr);
+    int saved_stdout = dup(STDOUT_FILENO);
+    int saved_stderr = dup(STDERR_FILENO);
+    char tmpl[] = "/tmp/turnb-capture-XXXXXX";
+    int capture_fd = mkstemp(tmpl);
+    if (capture_fd >= 0) unlink(tmpl);
+    if (capture_fd >= 0) {
+      dup2(capture_fd, STDOUT_FILENO);
+      dup2(capture_fd, STDERR_FILENO);
+    }
+
+    char type_tag[128] = {0};
+    TuriValue result = turi_eval_typed(s->env, src, type_tag, sizeof(type_tag));
+
+    fflush(stdout);
+    fflush(stderr);
+    if (saved_stdout >= 0) { dup2(saved_stdout, STDOUT_FILENO); close(saved_stdout); }
+    if (saved_stderr >= 0) { dup2(saved_stderr, STDERR_FILENO); close(saved_stderr); }
+
+    char *captured = NULL;
+    if (capture_fd < 0 || lseek(capture_fd, 0, SEEK_SET) < 0) {
+      captured = strdup("");
+    } else {
+      size_t cap = 256;
+      size_t len = 0;
+      captured = malloc(cap);
+      captured[0] = '\0';
+      for (;;) {
+        if (len + 129 > cap) {
+          while (len + 129 > cap) cap *= 2;
+          captured = realloc(captured, cap);
+        }
+        ssize_t n = read(capture_fd, captured + len, cap - len - 1);
+        if (n <= 0) break;
+        len += (size_t)n;
+      }
+      captured[len] = '\0';
+    }
+    if (capture_fd >= 0) close(capture_fd);
+
+    gettimeofday(&tv1, NULL);
+    int64_t elapsed = (int64_t)(tv1.tv_sec - tv0.tv_sec) * 1000LL +
+                      (int64_t)(tv1.tv_usec - tv0.tv_usec) / 1000LL;
+
+    char *value_repr = strdup("");
+    char *error_msg = strdup("");
+    int64_t status = 0;
+
+    if (turi_is_error(result)) {
+      status = 1;
+      free(error_msg);
+      error_msg = strdup(turi_error_message(result) ? turi_error_message(result) : "");
+    } else {
+      const char *show_str = turi_try_show(s->env, result);
+      if (!show_str) show_str = turi_show_result(s->env, result, type_tag);
+      if (show_str) {
+        free(value_repr);
+        value_repr = strdup(show_str ? show_str : "");
+        free((char *)show_str);
+      } else {
+        char repr[2048];
+        turi_value_repr(repr, sizeof(repr), result);
+        free(value_repr);
+        value_repr = strdup(repr);
+      }
+    }
+
+    if (wrapped) free(wrapped);
+
+    /* Parse __NB_IMG__: markers out of captured stdout.
+       Lines of the form "__NB_IMG__: <path>" are stripped from the
+       visible output and their paths are collected into image_paths. */
+    typedef struct { int64_t head; int64_t tail; } NbCons;
+    static const char img_marker[] = "__NB_IMG__: ";
+    static const size_t img_marker_len = sizeof(img_marker) - 1;
+    char *clean = malloc(strlen(captured) + 1);
+    size_t clean_len = 0;
+    int64_t image_paths = 0; /* nil list */
+    /* Build image list in reverse; will be reversed below. */
+    int64_t img_rev = 0;
+    const char *p = captured;
+    while (*p) {
+      const char *line_end = strchr(p, '\n');
+      size_t line_len = line_end ? (size_t)(line_end - p) : strlen(p);
+      if (strncmp(p, img_marker, img_marker_len) == 0) {
+        /* Extract path (strip trailing whitespace). */
+        const char *path_start = p + img_marker_len;
+        size_t path_len = line_len > img_marker_len ? line_len - img_marker_len : 0;
+        while (path_len > 0 && (path_start[path_len - 1] == '\r' ||
+                                 path_start[path_len - 1] == ' ')) path_len--;
+        if (path_len > 0) {
+          char *img_path = malloc(path_len + 1);
+          memcpy(img_path, path_start, path_len);
+          img_path[path_len] = '\0';
+          NbCons *node = malloc(sizeof(NbCons));
+          node->head = (int64_t)(intptr_t)img_path;
+          node->tail = img_rev;
+          img_rev = (int64_t)(intptr_t)node;
+        }
+      } else {
+        /* Keep this line in clean output. */
+        memcpy(clean + clean_len, p, line_len);
+        clean_len += line_len;
+        if (line_end) { clean[clean_len++] = '\n'; }
+      }
+      if (!line_end) break;
+      p = line_end + 1;
+    }
+    clean[clean_len] = '\0';
+
+    /* Reverse img_rev to get document order. */
+    image_paths = 0;
+    for (NbCons *cur = (NbCons *)(intptr_t)img_rev; cur; ) {
+      NbCons *next = (NbCons *)(intptr_t)cur->tail;
+      cur->tail = image_paths;
+      image_paths = (int64_t)(intptr_t)cur;
+      cur = next;
+    }
+
+    free(captured);
+
+    NotebookCellOutput *out = malloc(sizeof(*out));
+    out->cell_id = strdup("");
+    out->status = status;
+    out->stdout_text = clean;
+    out->value_repr = value_repr;
+    out->error_msg = error_msg;
+    out->elapsed_ms = elapsed;
+    out->image_paths = image_paths;
+    return (int64_t)(intptr_t)out;
+    ```)
+
+) ;; end defmodule notebook/session

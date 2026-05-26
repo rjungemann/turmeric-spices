@@ -1,0 +1,1949 @@
+;;; notebook/tui -- command-mode terminal UI for .tur.md notebooks.
+;; notebook/tui -- focus navigation, per-cell execution, and notebook redraws.
+
+(defmodule notebook/tui
+  (import notebook/format :refer [parse-file node-tag node-cell nodes->str nodes-update-cell])
+  (import notebook/cell :refer [cell-make cells-assign-ids cell-id cell-lang cell-source
+                                cell-attrs cell-start-line cell-end-line])
+  (import notebook/session :refer [session-open session-close session-reset
+                                   cell-output-status cell-output-elapsed-ms cell-output-stdout
+                                   cell-output-value-repr cell-output-error-msg])
+  (import notebook/eval :refer [eval-cell eval-all])
+  (import notebook/ansi :refer [ansi-reset term-enable-raw term-disable-raw term-read-key])
+  (import notebook/keys :refer [default-keybindings load-keybindings action-dispatch])
+  (export tui-opts-make default-tui-opts tui-run tui-run-nodes)
+
+  (defn __tui-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __tui-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn __tui-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn __tui-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void *)(intptr_t)lst;
+    return cell ? cell->head : 0;
+    ```)
+
+  (defn __tui-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void *)(intptr_t)lst;
+    return cell ? cell->tail : 0;
+    ```)
+
+  (defn __tui-ok [value :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = true;
+    r->ok_val = value;
+    r->err_val = 0;
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __tui-err [value :cstr] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false;
+    r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)(value ? strdup((const char *)(intptr_t)value) : strdup("error"));
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __tui-result-ok? [result :int] #{Unsafe} :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void *)(intptr_t)result;
+    return r && r->is_ok;
+    ```)
+
+  (defn __tui-result-ok-val [result :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void *)(intptr_t)result;
+    return r ? r->ok_val : 0;
+    ```)
+
+  (defn __tui-result-err-val [result :int] #{Unsafe} :cstr
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void *)(intptr_t)result;
+    return (r && !r->is_ok) ? (const char *)(intptr_t)r->err_val : "";
+    ```)
+
+  (defn __tui-cstr-empty? [s :cstr] #{Unsafe} :bool
+    ```c
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    return src[0] == '\0';
+    ```)
+
+  (defn __tui-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn __tui-str-concat [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    size_t la = strlen(sa), lb = strlen(sb);
+    char *out = malloc(la + lb + 1);
+    memcpy(out, sa, la);
+    memcpy(out + la, sb, lb);
+    out[la + lb] = '\0';
+    return out;
+    ```)
+
+  (defn __tui-cstr-drop-last [s :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    size_t len = strlen(src);
+    if (len == 0) return strdup("");
+    char *out = malloc(len);
+    memcpy(out, src, len - 1);
+    out[len - 1] = '\0';
+    return out;
+    ```)
+
+  (defn __tui-cstr-contains-ci? [haystack :cstr needle :cstr] #{Unsafe} :bool
+    ```c
+    /* __tur_include__: #include <ctype.h> */
+    const char *hay = haystack ? (const char *)(intptr_t)haystack : "";
+    const char *need = needle ? (const char *)(intptr_t)needle : "";
+    if (!need[0]) return false;
+    size_t hn = strlen(hay);
+    size_t nn = strlen(need);
+    if (nn > hn) return false;
+    for (size_t i = 0; i + nn <= hn; i++) {
+      size_t j = 0;
+      while (j < nn && tolower((unsigned char)hay[i + j]) == tolower((unsigned char)need[j])) j++;
+      if (j == nn) return true;
+    }
+    return false;
+    ```)
+
+  (defn __tui-int->cstr [value :int] #{Unsafe} :cstr
+    ```c
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    return strdup(buf);
+    ```)
+
+  ;;; tui-opts-make -- build notebook/tui options.
+  (defn tui-opts-make [color :int cell_width :int scrollback :int keybindings_file :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      char *keybindings_file;
+    } NotebookTuiOpts;
+    NotebookTuiOpts *opts = malloc(sizeof(*opts));
+    opts->color = color;
+    opts->cell_width = cell_width;
+    opts->scrollback = scrollback;
+    opts->keybindings_file = keybindings_file ? strdup((const char *)(intptr_t)keybindings_file) : strdup("");
+    return (int64_t)(intptr_t)opts;
+    ```)
+
+  (defn __tui-opts-color [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      char *keybindings_file;
+    } NotebookTuiOpts;
+    NotebookTuiOpts *o = (NotebookTuiOpts *)(intptr_t)opts;
+    return o ? o->color : 1;
+    ```)
+
+  (defn __tui-opts-cell-width [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      char *keybindings_file;
+    } NotebookTuiOpts;
+    NotebookTuiOpts *o = (NotebookTuiOpts *)(intptr_t)opts;
+    return o ? o->cell_width : 0;
+    ```)
+
+  (defn __tui-opts-scrollback [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      char *keybindings_file;
+    } NotebookTuiOpts;
+    NotebookTuiOpts *o = (NotebookTuiOpts *)(intptr_t)opts;
+    return o ? o->scrollback : 1000;
+    ```)
+
+  (defn __tui-opts-keybindings-file [opts :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      char *keybindings_file;
+    } NotebookTuiOpts;
+    NotebookTuiOpts *o = (NotebookTuiOpts *)(intptr_t)opts;
+    return (o && o->keybindings_file) ? o->keybindings_file : "";
+    ```)
+
+  ;;; default-tui-opts -- default options for the command-mode notebook TUI.
+  (defn default-tui-opts [] #{Unsafe} :int
+    (tui-opts-make 1 0 1000 ""))
+
+  (defn __tui-node-cell-make [cell :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
+    NotebookNode *node = malloc(sizeof(*node));
+    node->tag = 1;
+    node->prose = 0;
+    node->cell = cell;
+    return (int64_t)(intptr_t)node;
+    ```)
+
+  (defn __tui-copy-cell [cell :int next_id :cstr next_source :cstr] #{Unsafe} :int
+    (cell-make next_id
+               (cell-lang cell)
+               next_source
+               (cell-attrs cell)
+               (cell-start-line cell)
+               (cell-end-line cell)))
+
+  (defn __tui-current-cell [state :int] #{Unsafe} :int
+    (__tui-list-nth (__tui-state-cells state) (__tui-state-focus state)))
+
+  (defn __tui-cells-have-id? [cells :int want :cstr] #{Unsafe} :bool
+    (if (__tui-list-nil? cells)
+      false
+      (if (__tui-cstr-eq? (cell-id (__tui-head cells)) want)
+        true
+        (__tui-cells-have-id? (__tui-tail cells) want))))
+
+  (defn __tui-fresh-cell-id [cells :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    for (int idx = 1;; idx++) {
+      char buf[64];
+      snprintf(buf, sizeof(buf), "cell-%d", idx);
+      int found = 0;
+      for (Cons *cur = (Cons *)(intptr_t)cells; cur; cur = (Cons *)(intptr_t)cur->tail) {
+        Cell *cell = (Cell *)(intptr_t)cur->head;
+        if (cell && cell->id && strcmp(cell->id, buf) == 0) {
+          found = 1;
+          break;
+        }
+      }
+      if (!found) return strdup(buf);
+    }
+    ```)
+
+  (defn __tui-append-node [nodes :int new_node :int] #{Unsafe} :int
+    (if (__tui-list-nil? nodes)
+      (__tui-cons new_node (__tui-nil-value))
+      (__tui-cons (__tui-head nodes) (__tui-append-node (__tui-tail nodes) new_node))))
+
+  (defn __tui-insert-node-before [nodes :int target_id :cstr new_node :int] #{Unsafe} :int
+    (if (__tui-list-nil? nodes)
+      (__tui-cons new_node (__tui-nil-value))
+      (let [node (__tui-head nodes)]
+        (if (and (= (node-tag node) 1)
+                 (__tui-cstr-eq? (cell-id (node-cell node)) target_id))
+          (__tui-cons new_node nodes)
+          (__tui-cons node (__tui-insert-node-before (__tui-tail nodes) target_id new_node))))))
+
+  (defn __tui-insert-node-after [nodes :int target_id :cstr new_node :int] #{Unsafe} :int
+    (if (__tui-list-nil? nodes)
+      (__tui-cons new_node (__tui-nil-value))
+      (let [node (__tui-head nodes)]
+        (if (and (= (node-tag node) 1)
+                 (__tui-cstr-eq? (cell-id (node-cell node)) target_id))
+          (__tui-cons node (__tui-cons new_node (__tui-tail nodes)))
+          (__tui-cons node (__tui-insert-node-after (__tui-tail nodes) target_id new_node))))))
+
+  (defn __tui-delete-node-pair [nodes :int target_id :cstr] #{Unsafe} :int
+    (if (__tui-list-nil? nodes)
+      (__tui-cons (__tui-nil-value) 0)
+      (let [node (__tui-head nodes)]
+        (if (and (= (node-tag node) 1)
+                 (__tui-cstr-eq? (cell-id (node-cell node)) target_id))
+          (__tui-cons (__tui-tail nodes) (node-cell node))
+          (let [rest (__tui-delete-node-pair (__tui-tail nodes) target_id)]
+            (__tui-cons (__tui-cons node (__tui-head rest))
+                        (__tui-tail rest)))))))
+
+  (defn __tui-blank-cell [state :int current :int] #{Unsafe} :int
+    (let [lang (if (= current 0) 0 (cell-lang current))
+          fresh_id (__tui-fresh-cell-id (__tui-state-cells state))]
+      (cell-make fresh_id lang "" (__tui-nil-value) 0 0)))
+
+  (defn __tui-cells-from-nodes-rev [nodes :int acc :int] #{Unsafe} :int
+    (if (__tui-list-nil? nodes)
+      acc
+      (let [node (__tui-head nodes)]
+        (if (= (node-tag node) 1)
+          (__tui-cells-from-nodes-rev (__tui-tail nodes) (__tui-cons (node-cell node) acc))
+          (__tui-cells-from-nodes-rev (__tui-tail nodes) acc)))))
+
+  (defn __tui-reverse [lst :int acc :int] #{Unsafe} :int
+    (if (__tui-list-nil? lst)
+      acc
+      (__tui-reverse (__tui-tail lst) (__tui-cons (__tui-head lst) acc))))
+
+  (defn __tui-list-length [lst :int] #{Unsafe} :int
+    (if (__tui-list-nil? lst)
+      0
+      (+ 1 (__tui-list-length (__tui-tail lst)))))
+
+  (defn __tui-zero-list [count :int] #{Unsafe} :int
+    (if (<= count 0)
+      (__tui-nil-value)
+      (__tui-cons 0 (__tui-zero-list (- count 1)))))
+
+  (defn __tui-list-nth [lst :int idx :int] #{Unsafe} :int
+    (if (__tui-list-nil? lst)
+      0
+      (if (<= idx 0)
+        (__tui-head lst)
+        (__tui-list-nth (__tui-tail lst) (- idx 1)))))
+
+  (defn __tui-list-set [lst :int idx :int value :int] #{Unsafe} :int
+    (if (<= idx 0)
+      (__tui-cons value (if (__tui-list-nil? lst) (__tui-nil-value) (__tui-tail lst)))
+      (if (__tui-list-nil? lst)
+        (__tui-cons 0 (__tui-list-set (__tui-nil-value) (- idx 1) value))
+        (__tui-cons (__tui-head lst) (__tui-list-set (__tui-tail lst) (- idx 1) value)))))
+
+  (defn __tui-concat-lists [left :int right :int] #{Unsafe} :int
+    (if (__tui-list-nil? left)
+      right
+      (__tui-cons (__tui-head left) (__tui-concat-lists (__tui-tail left) right))))
+
+  (defn __tui-write-file [path :cstr text :cstr] #{Unsafe} :bool
+    ```c
+    const char *dst = path ? (const char *)(intptr_t)path : "";
+    const char *src = text ? (const char *)(intptr_t)text : "";
+    FILE *fp = fopen(dst, "wb");
+    if (!fp) return false;
+    size_t want = strlen(src);
+    size_t wrote = fwrite(src, 1, want, fp);
+    fclose(fp);
+    return wrote == want;
+    ```)
+
+  (defn __tui-state-make [path :cstr nodes :int cells :int bindings :int session :int opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    typedef struct {
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      char *keybindings_file;
+    } NotebookTuiOpts;
+    NotebookTuiOpts *o = (NotebookTuiOpts *)(intptr_t)opts;
+    NotebookTuiState *st = malloc(sizeof(*st));
+    st->path = path ? strdup((const char *)(intptr_t)path) : strdup("");
+    st->nodes = nodes;
+    st->cells = cells;
+    st->outputs = 0;
+    st->cell_count = 0;
+    for (struct { int64_t head; int64_t tail; } *cur = (void *)(intptr_t)cells; cur; cur = (void *)(intptr_t)cur->tail) st->cell_count++;
+    st->focus = 0;
+    st->session = session;
+    st->color = o ? o->color : 1;
+    st->cell_width = o ? o->cell_width : 0;
+    st->scrollback = o ? o->scrollback : 1000;
+    st->keybindings = bindings;
+    st->status = strdup("command mode");
+    st->pending_effect = 0;
+    st->quit_requested = 0;
+    st->exit_code = 0;
+    st->clipboard = 0;
+    st->dirty = 0;
+    st->quit_confirm = 0;
+    st->output_hidden = 0;
+    st->search_query = strdup("");
+    st->help_visible = 0;
+    return (int64_t)(intptr_t)st;
+    ```)
+
+  (defn __tui-state-cells [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->cells : 0;
+    ```)
+
+  (defn __tui-state-outputs [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->outputs : 0;
+    ```)
+
+  (defn __tui-state-set-outputs [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->outputs = value;
+    return state;
+    ```)
+
+  (defn __tui-state-set-cells [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->cells = value;
+    return state;
+    ```)
+
+  (defn __tui-state-set-nodes [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->nodes = value;
+    return state;
+    ```)
+
+  (defn __tui-state-set-cell-count [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->cell_count = value;
+    return state;
+    ```)
+
+  (defn __tui-state-set-focus [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) {
+      st->focus = value;
+      const char *trace = getenv("TURNB_TEST_TRACE");
+      if (trace && trace[0]) {
+        FILE *fp = fopen(trace, "ab");
+        if (fp) {
+          fprintf(fp, "focus:%lld\n", (long long)value);
+          fclose(fp);
+        }
+      }
+    }
+    return state;
+    ```)
+
+  (defn __tui-state-focus [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->focus : 0;
+    ```)
+
+  (defn __tui-state-cell-count [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->cell_count : 0;
+    ```)
+
+  (defn __tui-state-session [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->session : 0;
+    ```)
+
+  (defn __tui-state-bindings [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->keybindings : 0;
+    ```)
+
+  (defn __tui-state-path [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return (st && st->path) ? st->path : "";
+    ```)
+
+  (defn __tui-state-nodes [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->nodes : 0;
+    ```)
+
+  (defn __tui-state-status [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return (st && st->status) ? st->status : "";
+    ```)
+
+  (defn __tui-state-set-status [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (!st) return state;
+    if (st->status) free(st->status);
+    st->status = value ? strdup((const char *)(intptr_t)value) : strdup("");
+    const char *trace = getenv("TURNB_TEST_TRACE");
+    if (trace && trace[0]) {
+      FILE *fp = fopen(trace, "ab");
+      if (fp) {
+        fprintf(fp, "status:%s\n", st->status ? st->status : "");
+        fclose(fp);
+      }
+    }
+    return state;
+    ```)
+
+  (defn __tui-state-pending-effect [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->pending_effect : 0;
+    ```)
+
+  (defn __tui-state-set-pending-effect [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->pending_effect = value;
+    return state;
+    ```)
+
+  (defn __tui-state-exit-code [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->exit_code : 0;
+    ```)
+
+  (defn __tui-state-set-quit [state :int quit_requested :int exit_code :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (!st) return state;
+    st->quit_requested = quit_requested;
+    st->exit_code = exit_code;
+    return state;
+    ```)
+
+  (defn __tui-state-dirty [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->dirty : 0;
+    ```)
+
+  (defn __tui-state-set-dirty [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->dirty = value;
+    return state;
+    ```)
+
+  (defn __tui-state-output-hidden [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->output_hidden : 0;
+    ```)
+
+  (defn __tui-state-set-output-hidden [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->output_hidden = value;
+    return state;
+    ```)
+
+  (defn __tui-state-search-query [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return (st && st->search_query) ? st->search_query : "";
+    ```)
+
+  (defn __tui-state-set-search-query [state :int value :cstr] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (!st) return state;
+    if (st->search_query) free(st->search_query);
+    st->search_query = value ? strdup((const char *)(intptr_t)value) : strdup("");
+    return state;
+    ```)
+
+  (defn __tui-state-help-visible [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->help_visible : 0;
+    ```)
+
+  (defn __tui-state-set-help-visible [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->help_visible = value;
+    return state;
+    ```)
+
+  (defn __tui-state-clipboard [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->clipboard : 0;
+    ```)
+
+  (defn __tui-state-set-clipboard [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->clipboard = value;
+    return state;
+    ```)
+
+  (defn __tui-state-quit-confirm [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->quit_confirm : 0;
+    ```)
+
+  (defn __tui-state-set-quit-confirm [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (st) st->quit_confirm = value;
+    return state;
+    ```)
+
+  (defn __tui-state-quit? [state :int] #{Unsafe} :bool
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    return st ? st->quit_requested != 0 : true;
+    ```)
+
+  (defn __tui-binding-action [bindings :int key :cstr] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *key; char *action; } NotebookKeyBinding;
+    const char *want = key ? (const char *)(intptr_t)key : "";
+    for (Cons *cur = (Cons *)(intptr_t)bindings; cur; cur = (Cons *)(intptr_t)cur->tail) {
+      NotebookKeyBinding *binding = (NotebookKeyBinding *)(intptr_t)cur->head;
+      if (binding && binding->key && strcmp(binding->key, want) == 0) {
+        return binding->action ? binding->action : "";
+      }
+    }
+    return "";
+    ```)
+
+  (defn __tui-binding-has-prefix [bindings :int key :cstr] #{Unsafe} :bool
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *key; char *action; } NotebookKeyBinding;
+    const char *want = key ? (const char *)(intptr_t)key : "";
+    size_t n = strlen(want);
+    for (Cons *cur = (Cons *)(intptr_t)bindings; cur; cur = (Cons *)(intptr_t)cur->tail) {
+      NotebookKeyBinding *binding = (NotebookKeyBinding *)(intptr_t)cur->head;
+      if (!binding || !binding->key) continue;
+      if (strncmp(binding->key, want, n) == 0 && strlen(binding->key) > n) return true;
+    }
+    return false;
+    ```)
+
+  (defn __tui-output-message [cell :int output :int] #{Unsafe} :cstr
+    (let [cell-name (cell-id cell)
+          elapsed (__tui-int->cstr (cell-output-elapsed-ms output))]
+      (if (= (cell-output-status output) 0)
+        (__tui-str-concat "ran " (__tui-str-concat cell-name (__tui-str-concat " in " (__tui-str-concat elapsed "ms"))))
+        (if (= (cell-output-status output) 2)
+          (__tui-str-concat "skipped " cell-name)
+          (__tui-str-concat "error in " (__tui-str-concat cell-name (__tui-str-concat ": " (cell-output-error-msg output))))))))
+
+  (defn __tui-cell-matches-query? [cell :int output :int query :cstr] #{Unsafe} :bool
+    (or (__tui-cstr-contains-ci? (cell-source cell) query)
+        (__tui-cstr-contains-ci? (cell-output-stdout output) query)
+        (__tui-cstr-contains-ci? (cell-output-value-repr output) query)
+        (__tui-cstr-contains-ci? (cell-output-error-msg output) query)))
+
+  (defn __tui-wrap-index [idx :int count :int] #{Unsafe} :int
+    ```c
+    int64_t n = count;
+    int64_t i = idx;
+    if (n <= 0) return 0;
+    while (i < 0) i += n;
+    while (i >= n) i -= n;
+    return i;
+    ```)
+
+  (defn __tui-find-match [cells :int outputs :int query :cstr idx :int step :int count :int remaining :int] #{Unsafe} :int
+    (if (or (<= remaining 0) (__tui-cstr-empty? query))
+      -1
+      (let [wrapped (__tui-wrap-index idx count)
+            cell (__tui-list-nth cells wrapped)
+            output (__tui-list-nth outputs wrapped)]
+        (if (__tui-cell-matches-query? cell output query)
+          wrapped
+          (__tui-find-match cells outputs query (+ wrapped step) step count (- remaining 1))))))
+
+  (defn __tui-read-search-query [] #{Unsafe} :cstr
+    ```c
+    const char *override = getenv("TURNB_TEST_SEARCH_QUERY");
+    if (override) return strdup(override);
+
+    char buf[1024];
+    fprintf(stdout, "/");
+    fflush(stdout);
+    if (!fgets(buf, sizeof(buf), stdin)) return strdup("");
+    size_t len = strlen(buf);
+    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+      buf[len - 1] = '\0';
+      len--;
+    }
+    return strdup(buf);
+    ```)
+
+  (defn __tui-search [state :int query :cstr step :int from-current? :bool] #{Unsafe} :int
+    (let [count (__tui-state-cell-count state)]
+      (if (or (<= count 0) (__tui-cstr-empty? query))
+        (__tui-state-set-status state "no active search")
+        (let [start (if from-current?
+                      (__tui-state-focus state)
+                      (+ (__tui-state-focus state) step))
+              found (__tui-find-match (__tui-state-cells state)
+                                      (__tui-state-outputs state)
+                                      query
+                                      start
+                                      step
+                                      count
+                                      count)]
+          (if (< found 0)
+            (__tui-state-set-status state (__tui-str-concat "no matches for " query))
+            (do
+              (__tui-state-set-focus state found)
+              (__tui-state-set-status state (__tui-str-concat "search: " query))))))))
+
+  (defn __tui-rebuild-state [state :int new_nodes :int focus_idx :int status :cstr dirty_value :int] #{Unsafe} :int
+    (let [new_cells (cells-assign-ids (__tui-reverse (__tui-cells-from-nodes-rev new_nodes (__tui-nil-value))
+                                                     (__tui-nil-value)))
+          count (__tui-list-length new_cells)
+          clamped_focus (if (<= count 0)
+                          0
+                          (if (>= focus_idx count) (- count 1) (if (< focus_idx 0) 0 focus_idx)))]
+      (do
+        (__tui-state-set-nodes state new_nodes)
+        (__tui-state-set-cells state new_cells)
+        (__tui-state-set-cell-count state count)
+        (__tui-state-set-focus state clamped_focus)
+        (session-reset (__tui-state-session state))
+        (__tui-state-set-outputs state (if (<= count 0) (__tui-nil-value) (eval-all (__tui-state-session state) new_cells 0 0)))
+        (__tui-state-set-output-hidden state (__tui-zero-list count))
+        (__tui-state-set-dirty state dirty_value)
+        (__tui-state-set-help-visible state 0)
+        (__tui-state-set-quit-confirm state 0)
+        (__tui-state-set-status state status))))
+
+  (defn __tui-edit-source [source :cstr] #{Unsafe} :cstr
+    ```c
+    /* __tur_include__: #include <unistd.h> */
+    const char *override = getenv("TURNB_TEST_EDITOR_TEXT");
+    if (override) return strdup(override);
+
+    const char *src = source ? (const char *)(intptr_t)source : "";
+    char tmpl[] = "/tmp/turnb-edit-XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return (const char *)(intptr_t)0;
+    size_t want = strlen(src);
+    if (want > 0) {
+      ssize_t wrote = write(fd, src, want);
+      if (wrote < 0 || (size_t)wrote != want) {
+        close(fd);
+        unlink(tmpl);
+        return (const char *)(intptr_t)0;
+      }
+    }
+    close(fd);
+
+    const char *editor = getenv("VISUAL");
+    if (!editor || !editor[0]) editor = getenv("EDITOR");
+    if (!editor || !editor[0]) editor = "vi";
+
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd), "%s \"%s\"", editor, tmpl);
+    if (system(cmd) != 0) {
+      unlink(tmpl);
+      return (const char *)(intptr_t)0;
+    }
+
+    FILE *fp = fopen(tmpl, "rb");
+    if (!fp) { unlink(tmpl); return (const char *)(intptr_t)0; }
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); unlink(tmpl); return (const char *)(intptr_t)0; }
+    long sz = ftell(fp);
+    if (sz < 0) { fclose(fp); unlink(tmpl); return (const char *)(intptr_t)0; }
+    rewind(fp);
+    char *buf = malloc((size_t)sz + 1);
+    size_t got = fread(buf, 1, (size_t)sz, fp);
+    fclose(fp);
+    unlink(tmpl);
+    buf[got] = '\0';
+    return buf;
+    ```)
+
+  (defn __tui-run-current [state :int move-next? :bool] #{Unsafe} :int
+    (let [idx (__tui-state-focus state)
+          cell (__tui-list-nth (__tui-state-cells state) idx)
+          output (eval-cell (__tui-state-session state) cell 0)
+          outputs (__tui-list-set (__tui-state-outputs state) idx output)
+          _ (__tui-state-set-outputs state outputs)
+          _ (__tui-state-set-quit-confirm state 0)
+          _ (__tui-state-set-status state (__tui-output-message cell output))]
+      (if (and move-next? (< (+ idx 1) (__tui-state-cell-count state)))
+        (action-dispatch state "cell-next")
+        state)))
+
+  (defn __tui-run-all [state :int] #{Unsafe} :int
+    (do
+      (session-reset (__tui-state-session state))
+      (__tui-state-set-outputs state (eval-all (__tui-state-session state) (__tui-state-cells state) 0 0))
+      (__tui-state-set-quit-confirm state 0)
+      (__tui-state-set-status state "reran notebook")
+      state))
+
+  (defn __tui-save [state :int] #{Unsafe} :int
+    (let [path (__tui-state-path state)]
+      (if (__tui-cstr-empty? path)
+        (__tui-state-set-status state "save unavailable for in-memory notebook")
+        (if (__tui-write-file path (nodes->str (__tui-state-nodes state)))
+          (do
+            (__tui-state-set-dirty state 0)
+            (__tui-state-set-quit-confirm state 0)
+            (__tui-state-set-status state (__tui-str-concat "saved " path)))
+          (__tui-state-set-status state (__tui-str-concat "failed to save " path))))))
+
+  (defn __tui-edit-current [state :int] #{Unsafe} :int
+    (let [current (__tui-current-cell state)]
+      (if (= current 0)
+        (__tui-state-set-status state "no cell selected to edit")
+        (do
+          (term-disable-raw)
+          (let [edited (__tui-edit-source (cell-source current))]
+            (do
+              (term-enable-raw)
+              (if (not (__tui-cstr-empty? edited))
+                (let [updated (if (__tui-cstr-eq? edited (cell-source current))
+                                0
+                                (nodes-update-cell (__tui-state-nodes state) (cell-id current) edited))]
+                  (if (__tui-cstr-eq? edited (cell-source current))
+                    (__tui-state-set-status state (__tui-str-concat "no changes to " (cell-id current)))
+                    (if (__tui-result-ok? updated)
+                      (__tui-rebuild-state state
+                                           (__tui-result-ok-val updated)
+                                           (__tui-state-focus state)
+                                           (__tui-str-concat "edited " (cell-id current))
+                                           1)
+                      (__tui-state-set-status state (__tui-str-concat "failed to edit " (cell-id current))))))
+                (__tui-state-set-status state (__tui-str-concat "editor failed for " (cell-id current))))))))))
+
+  (defn __tui-add-cell [state :int above? :bool] #{Unsafe} :int
+    (let [current (__tui-current-cell state)
+          new_cell (__tui-blank-cell state current)
+          new_node (__tui-node-cell-make new_cell)
+          current_id (if (= current 0) "" (cell-id current))
+          current_idx (__tui-state-focus state)
+          new_nodes (if (= current 0)
+                      (__tui-append-node (__tui-state-nodes state) new_node)
+                      (if above?
+                        (__tui-insert-node-before (__tui-state-nodes state) current_id new_node)
+                        (__tui-insert-node-after (__tui-state-nodes state) current_id new_node)))
+          next_focus (if above? current_idx (+ current_idx 1))]
+      (__tui-rebuild-state state
+                           new_nodes
+                           (if (= current 0) 0 next_focus)
+                           (__tui-str-concat "inserted " (cell-id new_cell))
+                           1)))
+
+  (defn __tui-delete-current [state :int] #{Unsafe} :int
+    (let [current (__tui-current-cell state)]
+      (if (= current 0)
+        (__tui-state-set-status state "no cell selected to delete")
+        (let [deleted (__tui-delete-node-pair (__tui-state-nodes state) (cell-id current))
+              new_nodes (__tui-head deleted)
+              clip (__tui-tail deleted)]
+          (if (= clip 0)
+            (__tui-state-set-status state (__tui-str-concat "failed to delete " (cell-id current)))
+            (do
+              (__tui-state-set-clipboard state clip)
+              (__tui-rebuild-state state
+                                   new_nodes
+                                   (__tui-state-focus state)
+                                   (__tui-str-concat "deleted " (cell-id current))
+                                   1)))))))
+
+  (defn __tui-paste-cell [state :int] #{Unsafe} :int
+    (let [clip (__tui-state-clipboard state)
+          current (__tui-current-cell state)]
+      (if (= clip 0)
+        (__tui-state-set-status state "clipboard is empty")
+        (let [fresh_id (__tui-fresh-cell-id (__tui-state-cells state))
+              copy (__tui-copy-cell clip fresh_id (cell-source clip))
+              new_node (__tui-node-cell-make copy)
+              new_nodes (if (= current 0)
+                          (__tui-append-node (__tui-state-nodes state) new_node)
+                          (__tui-insert-node-after (__tui-state-nodes state) (cell-id current) new_node))
+              next_focus (if (= current 0) 0 (+ (__tui-state-focus state) 1))]
+          (__tui-rebuild-state state
+                               new_nodes
+                               next_focus
+                               (__tui-str-concat "pasted " fresh_id)
+                               1)))))
+
+  (defn __tui-request-quit [state :int] #{Unsafe} :int
+    (if (= (__tui-state-dirty state) 1)
+      (if (= (__tui-state-quit-confirm state) 1)
+        (do
+          (__tui-state-set-quit state 1 1)
+          (__tui-state-set-status state "quit with unsaved changes"))
+        (do
+          (__tui-state-set-quit-confirm state 1)
+          (__tui-state-set-status state "unsaved changes: press q again to quit or s to save")))
+      (do
+        (__tui-state-set-quit state 1 0)
+        (__tui-state-set-status state "quit"))))
+
+  (defn __tui-search-prompt [state :int] #{Unsafe} :int
+    (do
+      (__tui-state-set-status state "/")
+      (__tui-render state)
+      (term-disable-raw)
+      (let [query (__tui-read-search-query)]
+        (do
+          (term-enable-raw)
+          (if (__tui-cstr-empty? query)
+            (__tui-state-set-status state "search cancelled")
+            (do
+              (__tui-state-set-search-query state query)
+              (__tui-search state query 1 true)))))))
+
+  (defn __tui-search-next [state :int] #{Unsafe} :int
+    (__tui-search state (__tui-state-search-query state) 1 false))
+
+  (defn __tui-search-prev [state :int] #{Unsafe} :int
+    (__tui-search state (__tui-state-search-query state) -1 false))
+
+  (defn __tui-toggle-help [state :int] #{Unsafe} :int
+    (let [next (if (= (__tui-state-help-visible state) 1) 0 1)]
+      (do
+        (__tui-state-set-help-visible state next)
+        (__tui-state-set-status state (if (= next 1) "help overlay" "command mode")))))
+
+  (defn __tui-toggle-output [state :int] #{Unsafe} :int
+    (let [idx (__tui-state-focus state)
+          hidden (__tui-state-output-hidden state)
+          next (if (= (__tui-list-nth hidden idx) 1) 0 1)
+          updated (__tui-list-set hidden idx next)]
+      (do
+        (__tui-state-set-output-hidden state updated)
+        (__tui-state-set-status state (if (= next 1) "hid output" "showed output")))))
+
+  (defn __tui-apply-effect [state :int] #{Unsafe} :int
+    (let [effect (__tui-state-pending-effect state)
+          _ (__tui-state-set-pending-effect state 0)]
+      (if (= effect 1)
+        (__tui-run-current state false)
+        (if (= effect 2)
+          (__tui-run-current state true)
+          (if (= effect 3)
+            (__tui-run-all state)
+            (if (= effect 4)
+              (__tui-save state)
+              (if (= effect 5)
+                (__tui-edit-current state)
+                (if (= effect 6)
+                  (__tui-add-cell state true)
+                  (if (= effect 7)
+                    (__tui-add-cell state false)
+                    (if (= effect 8)
+                      (__tui-delete-current state)
+                      (if (= effect 9)
+                        (__tui-paste-cell state)
+                        (if (= effect 10)
+                          (__tui-request-quit state)
+                          (if (= effect 11)
+                            (__tui-search-prompt state)
+                            (if (= effect 12)
+                              (__tui-search-next state)
+                              (if (= effect 13)
+                                (__tui-search-prev state)
+                                (if (= effect 14)
+                                  (__tui-toggle-help state)
+                                  (if (= effect 15)
+                                    (__tui-toggle-output state)
+                                    state)))))))))))))))))
+
+  (defn __tui-render [state :int] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <sys/ioctl.h> */
+    /* __tur_include__: #include <unistd.h> */
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (!st) return 0;
+
+    struct winsize ws;
+    int cols = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) cols = ws.ws_col;
+
+    fputs("\033[2J\033[H", stdout);
+    if (st->color) fputs("\033[1;38;5;111m", stdout);
+    fprintf(stdout, "tur-notebook -- command mode");
+    if (st->color) fputs("\033[0m", stdout);
+    fprintf(stdout, "%s    j/k gg G Enter Shift-Enter r R e a b dd p / n N ? o s q\n",
+            st->dirty ? " [modified]" : "");
+    fprintf(stdout, "status: %s\n\n", st->status ? st->status : "");
+
+    if (st->help_visible) {
+      fprintf(stdout, "----- help -----\n");
+      fprintf(stdout, "j/k or arrows  move between cells\n");
+      fprintf(stdout, "Enter / Shift-Enter / r / R  run cells\n");
+      fprintf(stdout, "e edit   a/b insert   dd delete   p paste\n");
+      fprintf(stdout, "/ search   n/N next/prev match   o toggle output\n");
+      fprintf(stdout, "s save   q quit   ? close help\n");
+      fprintf(stdout, "\npress any key to return\n");
+      fflush(stdout);
+      return 0;
+    }
+
+    int idx = 0;
+    for (Cons *cur = (Cons *)(intptr_t)st->cells; cur; cur = (Cons *)(intptr_t)cur->tail, idx++) {
+      Cell *cell = (Cell *)(intptr_t)cur->head;
+      NotebookCellOutput *out = NULL;
+      Cons *out_cur = (Cons *)(intptr_t)st->outputs;
+      for (int j = 0; out_cur && j < idx; j++) out_cur = (Cons *)(intptr_t)out_cur->tail;
+      if (out_cur) out = (NotebookCellOutput *)(intptr_t)out_cur->head;
+
+      const char *marker = idx == st->focus ? ">" : " ";
+      const char *status = "pending";
+      if (out) {
+        if (out->status == 0) status = "ok";
+        else if (out->status == 1) status = "error";
+        else if (out->status == 2) status = "skipped";
+      }
+
+      const char *src = cell && cell->source ? cell->source : "";
+      char preview[96];
+      size_t i = 0;
+      while (src[i] && src[i] != '\n' && i + 1 < sizeof(preview)) {
+        preview[i] = src[i];
+        i++;
+      }
+      preview[i] = '\0';
+      if (st->color && idx == st->focus) fputs("\033[38;5;81m", stdout);
+      fprintf(stdout, "%s [%s] %s -- %s\n",
+              marker,
+              status,
+              cell && cell->id ? cell->id : "cell",
+              preview[0] ? preview : "(empty cell)");
+      if (st->color && idx == st->focus) fputs("\033[0m", stdout);
+    }
+
+    Cell *focus_cell = NULL;
+    NotebookCellOutput *focus_out = NULL;
+    int focus_hidden = 0;
+    Cons *cell_cur = (Cons *)(intptr_t)st->cells;
+    for (int j = 0; cell_cur && j < st->focus; j++) cell_cur = (Cons *)(intptr_t)cell_cur->tail;
+    if (cell_cur) focus_cell = (Cell *)(intptr_t)cell_cur->head;
+    Cons *out_cur = (Cons *)(intptr_t)st->outputs;
+    for (int j = 0; out_cur && j < st->focus; j++) out_cur = (Cons *)(intptr_t)out_cur->tail;
+    if (out_cur) focus_out = (NotebookCellOutput *)(intptr_t)out_cur->head;
+    Cons *hidden_cur = (Cons *)(intptr_t)st->output_hidden;
+    for (int j = 0; hidden_cur && j < st->focus; j++) hidden_cur = (Cons *)(intptr_t)hidden_cur->tail;
+    if (hidden_cur) focus_hidden = ((Cons *)(intptr_t)hidden_cur)->head != 0;
+
+    fprintf(stdout, "\n");
+    if (focus_cell) {
+      if (st->color) fputs("\033[1m", stdout);
+      fprintf(stdout, "cell %s\n", focus_cell->id ? focus_cell->id : "cell");
+      if (st->color) fputs("\033[0m", stdout);
+      fprintf(stdout, "----- source -----\n");
+      fprintf(stdout, "%s\n", focus_cell->source ? focus_cell->source : "");
+      if (focus_hidden) {
+        fprintf(stdout, "(output hidden; press o to show)\n");
+      } else {
+        fprintf(stdout, "----- output -----\n");
+        if (!focus_out) {
+          fprintf(stdout, "(not run yet)\n");
+        } else if (focus_out->status == 0) {
+          if (focus_out->stdout_text && focus_out->stdout_text[0]) fprintf(stdout, "%s", focus_out->stdout_text);
+          if (focus_out->value_repr && focus_out->value_repr[0]) fprintf(stdout, "=> %s\n", focus_out->value_repr);
+          if ((!focus_out->stdout_text || !focus_out->stdout_text[0]) &&
+              (!focus_out->value_repr || !focus_out->value_repr[0])) fprintf(stdout, "(ok)\n");
+        } else if (focus_out->status == 2) {
+          fprintf(stdout, "(skipped)\n");
+        } else {
+          fprintf(stdout, "%s\n", focus_out->error_msg ? focus_out->error_msg : "error");
+        }
+        /* Display any captured image paths using the best available protocol. */
+        if (focus_out && focus_out->image_paths) {
+          const char *term_prog = getenv("TERM_PROGRAM") ? getenv("TERM_PROGRAM") : "";
+          const char *kit_win  = getenv("KITTY_WINDOW_ID") ? getenv("KITTY_WINDOW_ID") : "";
+          int use_kitty  = kit_win[0] != '\0';
+          int use_iterm2 = !use_kitty &&
+            (strstr(term_prog, "iTerm") || strstr(term_prog, "WezTerm") ||
+             strstr(term_prog, "Hyper"));
+
+          for (Cons *img_cur = (Cons *)(intptr_t)focus_out->image_paths;
+               img_cur; img_cur = (Cons *)(intptr_t)img_cur->tail) {
+            const char *img_path = (const char *)(intptr_t)img_cur->head;
+            if (!img_path || !img_path[0]) continue;
+
+            if (!use_kitty && !use_iterm2) {
+              fprintf(stdout, "[image: %s]\n", img_path);
+              continue;
+            }
+
+            FILE *imgf = fopen(img_path, "rb");
+            if (!imgf) { fprintf(stdout, "[image: %s (not found)]\n", img_path); continue; }
+            fseek(imgf, 0, SEEK_END);
+            long imgfsz = ftell(imgf);
+            fseek(imgf, 0, SEEK_SET);
+            if (imgfsz <= 0) { fclose(imgf); fprintf(stdout, "[image: %s (empty)]\n", img_path); continue; }
+            unsigned char *imgraw = malloc((size_t)imgfsz);
+            if (!imgraw) { fclose(imgf); fprintf(stdout, "[image: %s (oom)]\n", img_path); continue; }
+            if ((long)fread(imgraw, 1, (size_t)imgfsz, imgf) != imgfsz) {
+              free(imgraw); fclose(imgf);
+              fprintf(stdout, "[image: %s (read error)]\n", img_path); continue;
+            }
+            fclose(imgf);
+
+            static const char imgb64[] =
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            size_t enc_len = ((size_t)imgfsz + 2) / 3 * 4 + 1;
+            char *imgenc = malloc(enc_len);
+            char *imgdst = imgenc;
+            const unsigned char *imgsrc = imgraw;
+            size_t imgrem = (size_t)imgfsz;
+            while (imgrem >= 3) {
+              imgdst[0] = imgb64[imgsrc[0] >> 2];
+              imgdst[1] = imgb64[((imgsrc[0] & 0x03) << 4) | (imgsrc[1] >> 4)];
+              imgdst[2] = imgb64[((imgsrc[1] & 0x0f) << 2) | (imgsrc[2] >> 6)];
+              imgdst[3] = imgb64[imgsrc[2] & 0x3f];
+              imgsrc += 3; imgdst += 4; imgrem -= 3;
+            }
+            if (imgrem == 1) {
+              imgdst[0] = imgb64[imgsrc[0] >> 2];
+              imgdst[1] = imgb64[(imgsrc[0] & 0x03) << 4];
+              imgdst[2] = '='; imgdst[3] = '='; imgdst += 4;
+            } else if (imgrem == 2) {
+              imgdst[0] = imgb64[imgsrc[0] >> 2];
+              imgdst[1] = imgb64[((imgsrc[0] & 0x03) << 4) | (imgsrc[1] >> 4)];
+              imgdst[2] = imgb64[(imgsrc[1] & 0x0f) << 2];
+              imgdst[3] = '='; imgdst += 4;
+            }
+            *imgdst = '\0';
+            free(imgraw);
+            size_t imgtotal = (size_t)(imgdst - imgenc);
+
+            if (use_kitty) {
+              size_t imgpos = 0;
+              int imgfirst = 1;
+              while (imgpos < imgtotal) {
+                size_t chunk = imgtotal - imgpos;
+                if (chunk > 4096) chunk = 4096;
+                int more = (imgpos + chunk < imgtotal) ? 1 : 0;
+                if (imgfirst) {
+                  fprintf(stdout, "\033_Ga=T,f=100,m=%d;", more);
+                  imgfirst = 0;
+                } else {
+                  fprintf(stdout, "\033_Gm=%d;", more);
+                }
+                fwrite(imgenc + imgpos, 1, chunk, stdout);
+                fputs("\033\\", stdout);
+                imgpos += chunk;
+              }
+              fputc('\n', stdout);
+            } else {
+              fprintf(stdout, "\033]1337;File=inline=1;size=%zu:", (size_t)imgfsz);
+              fwrite(imgenc, 1, imgtotal, stdout);
+              fputs("\a\n", stdout);
+            }
+            free(imgenc);
+          }
+        }
+      }
+    } else {
+      fprintf(stdout, "no executable cells found\n");
+    }
+
+    fflush(stdout);
+    return 0;
+    ```)
+
+  (defn __tui-handle-key [state :int pending :cstr key :cstr] #{Unsafe} :cstr
+    (if (= (__tui-state-help-visible state) 1)
+      (do
+        (__tui-state-set-help-visible state 0)
+        (__tui-state-set-status state "command mode")
+        "")
+      (let [_ (if (and (= (__tui-state-quit-confirm state) 1)
+                     (not (__tui-cstr-eq? key "q")))
+              (__tui-state-set-quit-confirm state 0)
+              state)
+          bindings (__tui-state-bindings state)
+          combo (if (__tui-cstr-empty? pending) key (__tui-str-concat pending key))
+          combo-action (__tui-binding-action bindings combo)]
+        (if (not (__tui-cstr-empty? combo-action))
+        (do
+          (action-dispatch state combo-action)
+          (__tui-apply-effect state)
+          "")
+        (if (__tui-binding-has-prefix bindings combo)
+          combo
+          (let [single-action (__tui-binding-action bindings key)]
+            (if (not (__tui-cstr-empty? single-action))
+              (do
+                (action-dispatch state single-action)
+                (__tui-apply-effect state)
+                "")
+              (do
+                (__tui-state-set-status state (__tui-str-concat "unbound key: " key))
+                ""))))))))
+
+  (defn __tui-loop [state :int pending :cstr] #{Unsafe} :int
+    (do
+      (__tui-render state)
+      (if (__tui-state-quit? state)
+        (__tui-ok (__tui-state-exit-code state))
+        (let [key (term-read-key)
+              next-pending (__tui-handle-key state pending key)]
+          (__tui-loop state next-pending)))))
+
+  (defn __tui-load-bindings [opts :int] #{Unsafe} :int
+    (let [path (__tui-opts-keybindings-file opts)]
+      (if (__tui-cstr-empty? path)
+        (__tui-ok (default-keybindings))
+        (let [loaded (load-keybindings path)]
+          (if (__tui-result-ok? loaded)
+            (__tui-ok (__tui-concat-lists (__tui-result-ok-val loaded) (default-keybindings)))
+            (__tui-err (__tui-result-err-val loaded)))))))
+
+  (defn __tui-run-with-path [path :cstr nodes :int opts :int] #{Unsafe} :int
+    (let [cells (cells-assign-ids (__tui-reverse (__tui-cells-from-nodes-rev nodes (__tui-nil-value))
+                                                 (__tui-nil-value)))
+          bindings-result (__tui-load-bindings opts)]
+      (if (not (__tui-result-ok? bindings-result))
+        (__tui-err (__tui-result-err-val bindings-result))
+        (let [session (session-open)
+              state (__tui-state-make path
+                                      nodes
+                                      cells
+                                      (__tui-result-ok-val bindings-result)
+                                      session
+                                      opts)
+              _ (__tui-state-set-outputs state (__tui-zero-list (__tui-state-cell-count state)))
+              _ (__tui-state-set-output-hidden state (__tui-zero-list (__tui-state-cell-count state)))]
+          (do
+            (term-enable-raw)
+            (let [result (__tui-loop state "")]
+              (do
+                (term-disable-raw)
+                (ansi-reset)
+                (session-close session)
+                result)))))))
+
+  ;;; tui-run -- parse a notebook file and launch the command-mode TUI.
+  (defn tui-run [path :cstr opts :int] #{Unsafe} :int
+    (let [parsed (parse-file path)]
+      (if (not (__tui-result-ok? parsed))
+        (__tui-err "failed to parse notebook file")
+        (__tui-run-with-path path (__tui-result-ok-val parsed) opts))))
+
+  ;;; tui-run-nodes -- launch the command-mode TUI with an already-parsed node list.
+  (defn tui-run-nodes [nodes :int opts :int] #{Unsafe} :int
+    (__tui-run-with-path "" nodes opts))
+
+) ;; end defmodule notebook/tui

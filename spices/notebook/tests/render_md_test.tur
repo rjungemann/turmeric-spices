@@ -1,0 +1,167 @@
+;; tests/render_md_test.tur -- NB6 tests for notebook/render-md.
+
+(defmodule notebook/tests/render-md
+  (import notebook/format :refer [parse-string])
+  (import notebook/session :refer [cell-output-make])
+  (import notebook/render-md :refer [render-opts-make default-render-opts
+                                     render-md-string render-md])
+
+  (defn test-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn test-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    return cell ? cell->head : 0;
+    ```)
+
+  (defn test-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    return cell ? cell->tail : 0;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn cstr-contains? [haystack :cstr needle :cstr] #{Unsafe} :bool
+    ```c
+    const char *h = haystack ? (const char *)(intptr_t)haystack : "";
+    const char *n = needle ? (const char *)(intptr_t)needle : "";
+    return strstr(h, n) != NULL;
+    ```)
+
+  (defn test-ok? [r :int] #{Unsafe} :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
+    return res && res->is_ok;
+    ```)
+
+  (defn test-ok-val [r :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
+    return res ? res->ok_val : 0;
+    ```)
+
+  (defn int-as-cstr [value :int] #{Unsafe} :cstr
+    ```c
+    return (const char *)(intptr_t)value;
+    ```)
+
+  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (fails == 0) {
+      fprintf(stderr, "# All %lld notebook render-md tests passed.\n", (long long)count);
+    } else {
+      fprintf(stderr, "# %lld notebook render-md tests failed.\n", (long long)fails);
+    }
+    ```)
+
+  (defn bool->fail [ok :bool] :int
+    (if ok 0 1))
+
+  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+    (do
+      (tap-line idx name ok)
+      (bool->fail ok)))
+
+  (defn __write-file [path :cstr s :cstr] #{Unsafe} :int
+    ```c
+    const char *p = (const char *)(intptr_t)path;
+    const char *bs = s ? (const char *)(intptr_t)s : "";
+    FILE *fp = fopen(p, "wb");
+    if (!fp) return 0;
+    size_t len = strlen(bs);
+    size_t wrote = fwrite(bs, 1, len, fp);
+    fclose(fp);
+    return wrote == len ? 1 : 0;
+    ```)
+
+  (defn __slurp [path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *p = path ? (const char *)(intptr_t)path : "";
+    FILE *fp = fopen(p, "rb");
+    if (!fp) return strdup("");
+    fseek(fp, 0, SEEK_END);
+    long sz = ftell(fp);
+    rewind(fp);
+    char *buf = malloc((size_t)sz + 1);
+    size_t got = fread(buf, 1, (size_t)sz, fp);
+    fclose(fp);
+    buf[got] = '\0';
+    return buf;
+    ```)
+
+  (defn temp-dir [label :cstr] #{Unsafe} :cstr
+    ```c
+    char buf[256];
+    snprintf(buf, sizeof(buf), "/tmp/%s-%lld-%d", (const char *)label, (long long)time(NULL), (int)getpid());
+    mkdir(buf, 0755);
+    return strdup(buf);
+    ```)
+
+  (defn path-join [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    size_t need = strlen(sa) + strlen(sb) + 2;
+    char *out = malloc(need);
+    snprintf(out, need, "%s/%s", sa, sb);
+    return out;
+    ```)
+
+  (defn test-render-md-string [] #{Unsafe} :bool
+    (let [parsed (parse-string "# Title\n\n```turmeric {id=calc}\n(+ 1 2)\n```")
+          nodes (test-ok-val parsed)
+          outputs (test-cons (cell-output-make "calc" 0 "" "3" "" 12 0) 0)
+          rendered (render-md-string nodes outputs (default-render-opts))]
+      (and (cstr-contains? rendered "# Title")
+           (and (cstr-contains? rendered "```turmeric {id=calc}")
+                (and (cstr-contains? rendered "```output")
+                     (cstr-contains? rendered ";; => 3"))))))
+
+  (defn test-hide-source-and-output [] #{Unsafe} :bool
+    (let [parsed (parse-string "```turmeric {id=calc echo=false output=false}\n(+ 1 2)\n```")
+          nodes (test-ok-val parsed)
+          outputs (test-cons (cell-output-make "calc" 0 "" "3" "" 4 0) 0)
+          opts (render-opts-make "" 0 1 1 1)
+          rendered (render-md-string nodes outputs opts)]
+      (cstr-eq? rendered "")))
+
+  (defn test-render-md-writes-file [] #{Unsafe} :bool
+    (let [dir (temp-dir "turnb-render-md")
+          src (path-join dir "sample.tur.md")
+          outdir (path-join dir "site")
+          _ (__write-file src "# Demo\n\n```turmeric {id=demo}\n(+ 20 22)\n```")
+          opts (render-opts-make outdir 0 1 1 1)
+          r (render-md src opts)
+          out-path (if (test-ok? r) (int-as-cstr (test-ok-val r)) "")
+          text (__slurp out-path)]
+      (and (test-ok? r)
+           (and (cstr-contains? out-path "/site/sample.md")
+                (and (cstr-contains? text "# Demo")
+                     (cstr-contains? text ";; => 42"))))))
+
+  (defn main [] #{Unsafe} :int
+    (let [f1 (run-case 1 "renders markdown strings with output fences" (test-render-md-string))
+          f2 (run-case 2 "omits hidden source and suppressed output blocks" (test-hide-source-and-output))
+          f3 (run-case 3 "writes rendered markdown beside or under output dirs" (test-render-md-writes-file))]
+      (tap-plan 3 (+ f1 (+ f2 f3)))
+      (if (= (+ f1 (+ f2 f3)) 0) 0 1)))
+
+) ;; end defmodule notebook/tests/render-md

@@ -1,0 +1,122 @@
+;; tests/exec_test.tur -- NB12 tests for cli exec/new subcommands.
+
+(defmodule notebook/tests/exec
+  (import notebook/cli :refer [cli-main])
+
+  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (fails == 0) {
+      fprintf(stderr, "# All %lld notebook exec/new tests passed.\n", (long long)count);
+    } else {
+      fprintf(stderr, "# %lld notebook exec/new tests failed.\n", (long long)fails);
+    }
+    ```)
+
+  (defn test-cons [head :cstr tail :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *c = malloc(sizeof(*c));
+    c->head = (int64_t)(intptr_t)head;
+    c->tail = tail;
+    return (int64_t)(intptr_t)c;
+    ```)
+
+  (defn file-exists? [path :cstr] #{Unsafe} :bool
+    ```c
+    FILE *f = fopen((const char *)path, "r");
+    if (f) { fclose(f); return 1; }
+    return 0;
+    ```)
+
+  (defn file-contents [path :cstr] #{Unsafe} :cstr
+    ```c
+    FILE *f = fopen((const char *)path, "r");
+    if (!f) return "";
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc(sz + 1);
+    fread(buf, 1, sz, f);
+    buf[sz] = 0;
+    fclose(f);
+    return buf;
+    ```)
+
+  (defn remove-file [path :cstr] #{Unsafe} :void
+    ```c
+    remove((const char *)path);
+    ```)
+
+  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+    (do
+      (tap-line idx name ok)
+      (if ok 0 1)))
+
+  (defn write-temp-notebook [path :cstr] #{Unsafe} :void
+    ```c
+    // Write a minimal notebook without raw triple-backticks in the C source
+    // Use char arrays to avoid confusing the Turmeric block parser
+    char fence[4] = {'`','`','`',0};
+    FILE *f = fopen((const char *)path, "w");
+    fprintf(f, "# Test\n\n%sturmeric\n(+ 1 2)\n%s\n", fence, fence);
+    fclose(f);
+    ```)
+
+  (defn main [] #{Unsafe} :int
+    (let [tmp-nb "/tmp/exec_test_nb.tur.md"
+          tmp-new "/tmp/exec_test_new.tur.md"]
+      (do
+        (write-temp-notebook tmp-nb)
+        (remove-file tmp-new)
+        (let [;; NB12.1: exec --all runs all cells successfully
+              argv-exec-all2 (test-cons "nb"
+                               (test-cons "exec"
+                                 (test-cons "--all"
+                                   (test-cons tmp-nb 0))))
+              rc-exec-all (cli-main argv-exec-all2)
+              t1 (run-case 1 "exec --all returns 0" (= rc-exec-all 0))
+
+              ;; NB12.2: new creates a file
+              argv-new (test-cons "nb"
+                         (test-cons "new"
+                           (test-cons tmp-new 0)))
+              rc-new (cli-main argv-new)
+              t2 (run-case 2 "new returns 0" (= rc-new 0))
+              t3 (run-case 3 "new created file" (file-exists? tmp-new))
+
+              ;; NB12.3: new refuses to overwrite
+              rc-new2 (cli-main argv-new)
+              t4 (run-case 4 "new refuses to overwrite existing file" (= rc-new2 1))
+
+              ;; NB12.4: exec missing path returns error
+              argv-no-path (test-cons "nb"
+                             (test-cons "exec"
+                               (test-cons "--all" 0)))
+              rc-no-path (cli-main argv-no-path)
+              t5 (run-case 5 "exec missing path returns error" (= rc-no-path 1))
+
+              ;; NB12.5: exec missing --cell/--all returns error
+              argv-no-flag (test-cons "nb"
+                              (test-cons "exec"
+                                (test-cons tmp-nb 0)))
+              rc-no-flag (cli-main argv-no-flag)
+              t6 (run-case 6 "exec without --cell/--all returns error" (= rc-no-flag 1))
+
+              fails (+ t1 (+ t2 (+ t3 (+ t4 (+ t5 t6)))))]
+          (do
+            (remove-file tmp-nb)
+            (remove-file tmp-new)
+            (tap-plan 6 fails)
+            0)))))
+
+) ;; end defmodule notebook/tests/exec

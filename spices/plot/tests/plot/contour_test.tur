@@ -1,0 +1,54 @@
+;; tests/plot/contour_test.tur -- contour renderer smoke tests.
+
+(defmodule plot/tests/contour
+  (import plot/core    :refer [plot-write-png])
+  (import plot/contour :refer [isoline contours contour-intervals color-field])
+  (import plot/style   :refer [default-line-style default-fill-style default-plot-opts])
+  (import test/assert  :refer [assert-ok assert-true])
+  (import test/suite   :refer [describe it])
+  (import test/runner  :refer [run-all])
+
+  (defn saddle [x :float y :float] :float
+    (- (* x x) (* y y)))
+
+  (defn t-cons [v :int n :int] :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *c = malloc(sizeof(*c));
+    c->head = v; c->tail = n;
+    return (int64_t)(intptr_t)c;
+    ```)
+
+  (defn colorize [x :float y :float] :int
+    (if (> (+ x y) 0.0) 1 0))
+
+  (defn file-size [path :cstr] :int
+    ```c
+    #include <sys/stat.h>
+    struct stat st;
+    if (stat((const char *)(intptr_t)path, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+    ```)
+
+  (defn contour-renderers [] :int
+    (let [fills (t-cons (default-fill-style) (t-cons (default-fill-style) (t-cons (default-fill-style) 0)))]
+      (t-cons (color-field colorize -2.0 2.0 -2.0 2.0 32 0.35)
+        (t-cons (contour-intervals saddle -2.0 2.0 -2.0 2.0 32 3 fills "bands")
+          (t-cons (contours saddle -2.0 2.0 -2.0 2.0 32 4 0 "contours")
+            (t-cons (isoline saddle -2.0 2.0 -2.0 2.0 32 0.0 (default-line-style) "zero")
+                  0))))))
+
+  (defn write-contour-png-ok [] :bool
+    (let [rs (contour-renderers)]
+      (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-contour.png"))
+           (assert-true (>i (file-size "/tmp/tur-plot-contour.png") 100)))))
+
+  (describe "plot/contour"
+    (it "renders contour-like plots"
+      (write-contour-png-ok)))
+
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
+  (defn main [] :int
+    (run-all)
+    0))

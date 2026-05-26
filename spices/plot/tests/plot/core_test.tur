@@ -1,0 +1,66 @@
+;; tests/plot/core_test.tur -- basic plot surface smoke tests.
+
+(defmodule plot/tests/core
+  (import plot/core  :refer [plot plot-write-png])
+  (import plot/style :refer [default-plot-opts])
+  (import plot/decor :refer [axes tick-grid])
+  (import test/assert :refer [assert-ok assert-true])
+  (import test/suite  :refer [describe it])
+  (import test/runner :refer [run-all])
+
+  (defn file-exists? [path :cstr] :bool
+    ```c
+    #include <unistd.h>
+    return access((const char *)(intptr_t)path, F_OK) == 0;
+    ```)
+
+  (defn t-cons [v :int n :int] :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *c = malloc(sizeof(*c));
+    c->head = v; c->tail = n;
+    return (int64_t)(intptr_t)c;
+    ```)
+
+  (defn file-size [path :cstr] :int
+    ```c
+    #include <sys/stat.h>
+    struct stat st;
+    if (stat((const char *)(intptr_t)path, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+    ```)
+
+  (defn unlink-file [path :cstr] :void
+    ```c
+    #include <unistd.h>
+    unlink((const char *)(intptr_t)path);
+    ```)
+
+  (defn core-renderers [] :int
+    (t-cons (tick-grid) (t-cons (axes) 0)))
+
+  (defn render-blank-ok [] :bool
+    (assert-ok (plot (core-renderers) (default-plot-opts))))
+
+  (defn write-core-png-ok [] :bool
+    (let [out "/tmp/tur-plot-core.png"
+          wr  (do
+                (unlink-file out)
+                (plot-write-png (core-renderers)
+                                (default-plot-opts)
+                                out))]
+      (and (assert-ok wr)
+           (assert-true (file-exists? out))
+           (assert-true (>i (file-size out) 100)))))
+
+  (describe "plot/core"
+    (it "renders a blank plot surface"
+      (render-blank-ok))
+    (it "writes a PNG"
+      (write-core-png-ok)))
+
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
+  (defn main [] :int
+    (run-all)
+    0))

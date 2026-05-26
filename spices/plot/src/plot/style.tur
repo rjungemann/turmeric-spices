@@ -1,0 +1,196 @@
+;; plot/style.tur -- style structs, defaults, and palette helpers.
+
+(defmodule plot/style
+  (export line-style point-style fill-style plot-opts
+          default-line-style default-point-style default-fill-style default-plot-opts
+          palette-color palette-size color-seq
+          dash-solid dash-dash dash-dot dash-dash-dot
+          sym-circle sym-square sym-triangle sym-cross sym-plus sym-diamond
+          plot-opts-width plot-opts-height)
+
+  ;;; __nan -- quiet NaN sentinel for auto bounds.
+  (defn __nan [] :float
+    ```c
+    return 0.0 / 0.0;
+    ```)
+
+  ;;; __null-cstr -- typed nil cstr sentinel.
+  (defn __null-cstr [] :cstr
+    ```c
+    return (char *)(intptr_t)0;
+    ```)
+
+  ;;; line-style -- allocate a line-style value.
+  (defn line-style [color :int width :float dash :int alpha :float] :int
+    ```c
+    typedef struct { int64_t color; double width; int64_t dash; double alpha; } LineStyle;
+    LineStyle *s = malloc(sizeof(*s));
+    s->color = color; s->width = width; s->dash = dash; s->alpha = alpha;
+    return (int64_t)(intptr_t)s;
+    ```)
+
+  ;;; point-style -- allocate a point-style value.
+  (defn point-style [color :int fill-color :int sym :int size :float alpha :float] :int
+    ```c
+    typedef struct { int64_t color; int64_t fill_color; int64_t sym; double size; double alpha; } PointStyle;
+    PointStyle *s = malloc(sizeof(*s));
+    s->color = color; s->fill_color = fill_color; s->sym = sym; s->size = size; s->alpha = alpha;
+    return (int64_t)(intptr_t)s;
+    ```)
+
+  ;;; fill-style -- allocate a fill-style value.
+  (defn fill-style [color :int alpha :float line-color :int line-width :float] :int
+    ```c
+    typedef struct { int64_t color; double alpha; int64_t line_color; double line_width; } FillStyle;
+    FillStyle *s = malloc(sizeof(*s));
+    s->color = color; s->alpha = alpha; s->line_color = line_color; s->line_width = line_width;
+    return (int64_t)(intptr_t)s;
+    ```)
+
+  ;;; plot-opts -- allocate a plot-opts value.
+  (defn plot-opts [width :int height :int title :cstr x-label :cstr y-label :cstr
+                   x-min :float x-max :float y-min :float y-max :float
+                   legend-pos :int] :int
+    ```c
+    typedef struct {
+      int64_t width; int64_t height;
+      char *title; char *x_label; char *y_label;
+      double x_min; double x_max; double y_min; double y_max;
+      int64_t legend_pos;
+    } PlotOpts;
+    PlotOpts *o = malloc(sizeof(*o));
+    o->width = width; o->height = height;
+    o->title = (char *)(intptr_t)title;
+    o->x_label = (char *)(intptr_t)x_label;
+    o->y_label = (char *)(intptr_t)y_label;
+    o->x_min = x_min; o->x_max = x_max; o->y_min = y_min; o->y_max = y_max;
+    o->legend_pos = legend_pos;
+    return (int64_t)(intptr_t)o;
+    ```)
+
+  ;;; plot-opts-width -- read the configured output width.
+  (defn plot-opts-width [opts :int] :int
+    ```c
+    typedef struct {
+      int64_t width; int64_t height;
+      char *title; char *x_label; char *y_label;
+      double x_min; double x_max; double y_min; double y_max;
+      int64_t legend_pos;
+    } PlotOpts;
+    return opts ? ((PlotOpts *)(intptr_t)opts)->width : 0;
+    ```)
+
+  ;;; plot-opts-height -- read the configured output height.
+  (defn plot-opts-height [opts :int] :int
+    ```c
+    typedef struct {
+      int64_t width; int64_t height;
+      char *title; char *x_label; char *y_label;
+      double x_min; double x_max; double y_min; double y_max;
+      int64_t legend_pos;
+    } PlotOpts;
+    return opts ? ((PlotOpts *)(intptr_t)opts)->height : 0;
+    ```)
+
+  ;;; default-line-style -- default line style with auto color.
+  (defn default-line-style [] :int
+    (line-style -1 0.0 0 0.0))
+
+  ;;; default-point-style -- default point style with auto color.
+  (defn default-point-style [] :int
+    (point-style -1 -1 0 0.0 0.0))
+
+  ;;; default-fill-style -- default fill style with auto color.
+  (defn default-fill-style [] :int
+    (fill-style -1 0.0 -1 0.0))
+
+  ;;; default-plot-opts -- default plot options.
+  (defn default-plot-opts [] :int
+    (plot-opts 0 0 (__null-cstr) (__null-cstr) (__null-cstr)
+               (__nan) (__nan) (__nan) (__nan) 1))
+
+  ;;; dash-solid -- solid stroke constant.
+  (defn dash-solid [] :int 0)
+  ;;; dash-dash -- dashed stroke constant.
+  (defn dash-dash [] :int 1)
+  ;;; dash-dot -- dotted stroke constant.
+  (defn dash-dot [] :int 2)
+  ;;; dash-dash-dot -- dash-dot stroke constant.
+  (defn dash-dash-dot [] :int 3)
+
+  ;;; sym-circle -- circle point symbol constant.
+  (defn sym-circle [] :int 0)
+  ;;; sym-square -- square point symbol constant.
+  (defn sym-square [] :int 1)
+  ;;; sym-triangle -- triangle point symbol constant.
+  (defn sym-triangle [] :int 2)
+  ;;; sym-cross -- cross point symbol constant.
+  (defn sym-cross [] :int 3)
+  ;;; sym-plus -- plus point symbol constant.
+  (defn sym-plus [] :int 4)
+  ;;; sym-diamond -- diamond point symbol constant.
+  (defn sym-diamond [] :int 5)
+
+  ;;; palette-size -- number of built-in palette entries.
+  (defn palette-size [] :int
+    8)
+
+  ;;; palette-color -- return (r g b) for palette index idx.
+  (defn palette-color [idx :int] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    static const int palette[8][3] = {
+      {31, 119, 180}, {214, 39, 40}, {44, 160, 44}, {255, 127, 14},
+      {148, 103, 189}, {140, 86, 75}, {227, 119, 194}, {127, 127, 127}
+    };
+    int i = (int)(idx % 8);
+    if (i < 0) i += 8;
+    Cons *c3 = (Cons *)malloc(sizeof(*c3));
+    Cons *c2 = (Cons *)malloc(sizeof(*c2));
+    Cons *c1 = (Cons *)malloc(sizeof(*c1));
+    c3->head = palette[i][2]; c3->tail = 0;
+    c2->head = palette[i][1]; c2->tail = (int64_t)(intptr_t)c3;
+    c1->head = palette[i][0]; c1->tail = (int64_t)(intptr_t)c2;
+    return (int64_t)(intptr_t)c1;
+    ```)
+
+  ;;; color-seq -- interpolate between palette anchors and return nearest palette indices.
+  (defn color-seq [start-idx :int end-idx :int n :int] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    static const double palette[8][3] = {
+      {31, 119, 180}, {214, 39, 40}, {44, 160, 44}, {255, 127, 14},
+      {148, 103, 189}, {140, 86, 75}, {227, 119, 194}, {127, 127, 127}
+    };
+    int si = (int)(start_idx % 8), ei = (int)(end_idx % 8);
+    if (si < 0) si += 8;
+    if (ei < 0) ei += 8;
+    if (n <= 0) return 0;
+    int64_t out = 0;
+    for (int i = n - 1; i >= 0; i--) {
+      double t = (n == 1) ? 0.0 : (double)i / (double)(n - 1);
+      double r = palette[si][0] + (palette[ei][0] - palette[si][0]) * t;
+      double g = palette[si][1] + (palette[ei][1] - palette[si][1]) * t;
+      double b = palette[si][2] + (palette[ei][2] - palette[si][2]) * t;
+      int best = 0;
+      double bestd = 1e300;
+      for (int p = 0; p < 8; p++) {
+        double dr = palette[p][0] - r;
+        double dg = palette[p][1] - g;
+        double db = palette[p][2] - b;
+        double d = dr * dr + dg * dg + db * db;
+        if (d < bestd) { bestd = d; best = p; }
+      }
+      Cons *cell = (Cons *)malloc(sizeof(*cell));
+      cell->head = best;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    return out;
+    ```)
+
+) ;; end defmodule plot/style

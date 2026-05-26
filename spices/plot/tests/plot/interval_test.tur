@@ -1,0 +1,67 @@
+;; tests/plot/interval_test.tur -- interval renderer smoke tests.
+
+(defmodule plot/tests/interval
+  (import plot/core     :refer [plot-write-png])
+  (import plot/interval :refer [function-interval lines-interval parametric-interval polar-interval])
+  (import plot/decor    :refer [axes])
+  (import plot/style    :refer [default-fill-style default-line-style default-plot-opts])
+  (import test/assert   :refer [assert-ok assert-true])
+  (import test/suite    :refer [describe it])
+  (import test/runner   :refer [run-all])
+
+  (defn pair [x :float y :float] :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *p = malloc(sizeof(*p));
+    union { double d; int64_t i; } ux, uy; ux.d = x; uy.d = y;
+    p->head = ux.i; p->tail = uy.i; return (int64_t)(intptr_t)p;
+    ```)
+
+  (defn t-cons [v :int n :int] :int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *c = malloc(sizeof(*c));
+    c->head = v; c->tail = n;
+    return (int64_t)(intptr_t)c;
+    ```)
+
+  (defn file-size [path :cstr] :int
+    ```c
+    #include <sys/stat.h>
+    struct stat st;
+    if (stat((const char *)(intptr_t)path, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+    ```)
+
+  (defn interval-renderers [fill :int line :int] :int
+    (t-cons (axes)
+      (t-cons (function-interval (fn [x :float] :float (* x x))
+                               (fn [x :float] :float (+ (* x x) 0.5))
+                               -1.5 1.5 96 fill line "fi")
+        (t-cons (lines-interval (t-cons (pair -1.0 -0.5) (t-cons (pair 0.0 0.0) (t-cons (pair 1.0 0.5) 0)))
+                              (t-cons (pair -1.0 0.2) (t-cons (pair 0.0 0.7) (t-cons (pair 1.0 1.1) 0)))
+                              fill line "li")
+          (t-cons (parametric-interval (fn [t :float] :int (pair t (* 0.5 t)))
+                                     (fn [t :float] :int (pair t (+ (* 0.5 t) 0.3)))
+                                     -1.0 1.0 72 fill line "pi")
+            (t-cons (polar-interval (fn [t :float] :float 0.4)
+                                  (fn [t :float] :float 0.8)
+                                  -1.0 1.0 72 fill line "po")
+                  0))))))
+
+  (defn write-interval-png-ok [] :bool
+    (let [fill (default-fill-style)
+          line (default-line-style)
+          rs   (interval-renderers fill line)]
+      (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-interval.png"))
+           (assert-true (>i (file-size "/tmp/tur-plot-interval.png") 100)))))
+
+  (describe "plot/interval"
+    (it "renders interval fills"
+      (write-interval-png-ok)))
+
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
+  (defn main [] :int
+    (run-all)
+    0))

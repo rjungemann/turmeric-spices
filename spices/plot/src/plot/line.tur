@@ -1,0 +1,49 @@
+;; plot/line.tur -- line-like renderers.
+
+(defmodule plot/line
+  (export function lines parametric polar inverse density)
+
+  (import plot/core :refer [__make-renderer __renderer-floats __renderer-ints __renderer-bounds])
+
+  ;;; function -- sample y=f(x) over [x-min, x-max].
+  (defn function [f x-min :float x-max :float samples :int style :int label :cstr] :int
+    (__renderer-bounds
+      (__renderer-ints
+        (__renderer-floats (__make-renderer 21 style 0 f 0 0 0 0 label "")
+                           x-min x-max 0.0 0.0 0.0 0.0)
+        samples 0 0 0)
+      x-min x-max (/ 0.0 0.0) (/ 0.0 0.0)))
+
+  ;;; lines -- draw a polyline through a cons list of (cons x y) points.
+  (defn lines [vs :int style :int label :cstr] :int
+    (__make-renderer 20 style 0 vs 0 0 0 0 label ""))
+
+  ;;; parametric -- sample f(t) -> (cons x y).
+  (defn parametric [f t-min :float t-max :float samples :int style :int label :cstr] :int
+    (__renderer-ints
+      (__renderer-floats (__make-renderer 22 style 0 f 0 0 0 0 label "")
+                         t-min t-max 0.0 0.0 0.0 0.0)
+      samples 0 0 0))
+
+  ;;; polar -- sample radius=f(theta).
+  (defn polar [f theta-min :float theta-max :float samples :int style :int label :cstr] :int
+    (__renderer-ints
+      (__renderer-floats (__make-renderer 23 style 0 f 0 0 0 0 label "")
+                         theta-min theta-max 0.0 0.0 0.0 0.0)
+      samples 0 0 0))
+
+  ;;; inverse -- sample x=f(y) over [y-min, y-max].
+  (defn inverse [f y-min :float y-max :float samples :int style :int label :cstr] :int
+    (__renderer-ints
+      (__renderer-floats (__make-renderer 24 style 0 f 0 0 0 0 label "")
+                         y-min y-max 0.0 0.0 0.0 0.0)
+      samples 0 0 0))
+
+  ;;; density -- kernel density estimate from a cons list of samples.
+  (defn density [vs :int bandwidth :float samples :int style :int label :cstr] :int
+    (__renderer-ints
+      (__renderer-floats (__make-renderer 25 style 0 vs 0 0 0 0 label "")
+                         bandwidth 0.0 0.0 0.0 0.0 0.0)
+      samples 0 0 0))
+
+) ;; end defmodule plot/line

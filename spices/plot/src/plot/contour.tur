@@ -1,0 +1,48 @@
+;; plot/contour.tur -- contour and color-field renderers.
+
+(defmodule plot/contour
+  (export isoline contours contour-intervals color-field)
+
+  (import plot/core :refer [__make-renderer __renderer-floats __renderer-ints __renderer-bounds])
+
+  ;;; isoline -- draw a single f(x,y)=level contour.
+  (defn isoline [f x-min :float x-max :float y-min :float y-max :float
+                 samples :int level :float style :int label :cstr] :int
+    (__renderer-bounds
+      (__renderer-ints
+        (__renderer-floats (__make-renderer 60 style 0 f 0 0 0 0 label "")
+                           x-min x-max y-min y-max level level)
+        samples 0 0 0)
+      x-min x-max y-min y-max))
+
+  ;;; contours -- draw multiple automatically spaced contour levels.
+  (defn contours [f x-min :float x-max :float y-min :float y-max :float
+                  samples :int n :int styles :int label :cstr] :int
+    (__renderer-bounds
+      (__renderer-ints
+        (__renderer-floats (__make-renderer 61 styles 0 f 0 0 0 0 label "")
+                           x-min x-max y-min y-max 0.0 0.0)
+        samples n 0 0)
+      x-min x-max y-min y-max))
+
+  ;;; contour-intervals -- fill contour bands using sampled cells.
+  (defn contour-intervals [f x-min :float x-max :float y-min :float y-max :float
+                           samples :int n :int fills :int label :cstr] :int
+    (__renderer-bounds
+      (__renderer-ints
+        (__renderer-floats (__make-renderer 62 fills 0 f 0 0 0 0 label "")
+                           x-min x-max y-min y-max 0.0 1.0)
+        samples n 0 0)
+      x-min x-max y-min y-max))
+
+  ;;; color-field -- color sampled cells by f(x,y)->color-idx.
+  (defn color-field [f x-min :float x-max :float y-min :float y-max :float
+                     samples :int alpha :float] :int
+    (__renderer-bounds
+      (__renderer-ints
+        (__renderer-floats (__make-renderer 63 0 0 f 0 0 0 0 "" "")
+                           x-min x-max y-min y-max alpha 0.0)
+        samples 0 0 0)
+      x-min x-max y-min y-max))
+
+) ;; end defmodule plot/contour

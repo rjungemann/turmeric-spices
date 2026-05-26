@@ -1,0 +1,541 @@
+;;; notebook/render-md -- render notebook documents to markdown with output blocks.
+;; notebook/render-md -- evaluate .tur.md files and emit markdown output.
+
+(defmodule notebook/render-md
+  (import notebook/cmark :refer [md-emit])
+  (import notebook/format :refer [parse-file node-tag node-prose node-cell])
+  (import notebook/cell :refer [attr-get-bool cell-id cell-lang cell-source cell-attrs cells-assign-ids])
+  (import notebook/session :refer [session-open session-close
+                                   output-status-ok output-status-error output-status-skipped
+                                   cell-output-cell-id cell-output-status cell-output-stdout
+                                   cell-output-value-repr cell-output-error-msg
+                                   cell-output-elapsed-ms])
+  (import notebook/eval :refer [eval-all])
+  (import notebook/cache :refer [cache-open cache-close])
+  (export render-opts-make
+          render-opts-output-dir render-opts-use-cache
+          render-opts-include-source render-opts-include-output
+          render-opts-fail-fast
+          default-render-opts
+          render-md-string render-md)
+
+  (defn __rmd-build-hint [] :int
+    ```c
+    /* __tur_include__: #include <sys/stat.h> */
+    return 0;
+    ```)
+
+  (defn __rmd-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __rmd-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn __rmd-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn __rmd-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
+    return cell->head;
+    ```)
+
+  (defn __rmd-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
+    return cell->tail;
+    ```)
+
+  (defn __rmd-ok [value :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = true;
+    r->ok_val = value;
+    r->err_val = 0;
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __rmd-err [value :cstr] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false;
+    r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)(value ? strdup((const char *)(intptr_t)value) : strdup(""));
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __rmd-result-ok? [result :int] #{Unsafe} :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return r && r->is_ok;
+    ```)
+
+  (defn __rmd-result-ok-val [result :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return r ? r->ok_val : 0;
+    ```)
+
+  (defn __rmd-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn __rmd-cstr-empty? [s :cstr] #{Unsafe} :bool
+    ```c
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    return src[0] == '\0';
+    ```)
+
+  (defn __rmd-cstr-as-int [s :cstr] #{Unsafe} :int
+    ```c
+    return (int64_t)(intptr_t)s;
+    ```)
+
+  (defn __rmd-int-as-cstr [value :int] #{Unsafe} :cstr
+    ```c
+    return (const char *)(intptr_t)value;
+    ```)
+
+  (defn __rmd-cstr-free [s :cstr] #{Unsafe} :void
+    ```c
+    void *p = (void *)(intptr_t)s;
+    if (p) free(p);
+    ```)
+
+  (defn __rmd-str-concat [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    size_t la = strlen(sa), lb = strlen(sb);
+    char *out = malloc(la + lb + 1);
+    memcpy(out, sa, la);
+    memcpy(out + la, sb, lb);
+    out[la + lb] = '\0';
+    return out;
+    ```)
+
+  (defn __rmd-join-blocks [a :cstr b :cstr] #{Unsafe} :cstr
+    (if (__rmd-cstr-empty? a)
+      b
+      (if (__rmd-cstr-empty? b)
+        a
+        (__rmd-str-concat a (__rmd-str-concat "\n\n" b)))))
+
+  (defn __rmd-int->cstr [value :int] #{Unsafe} :cstr
+    ```c
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    return strdup(buf);
+    ```)
+
+  (defn render-opts-make [output_dir :cstr use_cache :int include_source :int
+                          include_output :int fail_fast :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *opts = malloc(sizeof(*opts));
+    opts->output_dir = output_dir ? strdup((const char *)(intptr_t)output_dir) : strdup("");
+    opts->use_cache = use_cache;
+    opts->include_source = include_source;
+    opts->include_output = include_output;
+    opts->fail_fast = fail_fast;
+    return (int64_t)(intptr_t)opts;
+    ```)
+
+  (defn render-opts-output-dir [opts :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o && o->output_dir ? o->output_dir : "";
+    ```)
+
+  (defn render-opts-use-cache [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->use_cache : 0;
+    ```)
+
+  (defn render-opts-include-source [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->include_source : 1;
+    ```)
+
+  (defn render-opts-include-output [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->include_output : 1;
+    ```)
+
+  (defn render-opts-fail-fast [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->fail_fast : 1;
+    ```)
+
+  (defn default-render-opts [] #{Unsafe} :int
+    (render-opts-make "" 0 1 1 1))
+
+  (defn __rmd-output-path [src_path :cstr output_dir :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = src_path ? (const char *)(intptr_t)src_path : "";
+    const char *out_dir = output_dir ? (const char *)(intptr_t)output_dir : "";
+    const char *base = strrchr(src, '/');
+    base = base ? base + 1 : src;
+
+    size_t base_len = strlen(base);
+    size_t stem_len = base_len;
+    if (base_len >= 7 && strcmp(base + base_len - 7, ".tur.md") == 0) {
+      stem_len = base_len - 7;
+    } else {
+      const char *dot = strrchr(base, '.');
+      if (dot) stem_len = (size_t)(dot - base);
+    }
+
+    char *stem = malloc(stem_len + 1);
+    memcpy(stem, base, stem_len);
+    stem[stem_len] = '\0';
+
+    char *dir = NULL;
+    if (out_dir[0] != '\0') {
+      dir = strdup(out_dir);
+    } else {
+      const char *slash = strrchr(src, '/');
+      if (!slash) {
+        dir = strdup("");
+      } else {
+        size_t dir_len = (size_t)(slash - src);
+        dir = malloc(dir_len + 1);
+        memcpy(dir, src, dir_len);
+        dir[dir_len] = '\0';
+      }
+    }
+
+    size_t need = strlen(dir) + (dir[0] ? 1 : 0) + strlen(stem) + 3 + 1;
+    char *out = malloc(need);
+    if (dir[0]) snprintf(out, need, "%s/%s.md", dir, stem);
+    else snprintf(out, need, "%s.md", stem);
+
+    free(stem);
+    free(dir);
+    return out;
+    ```)
+
+  (defn __rmd-ensure-parent-dir [path :cstr] #{Unsafe} :int
+    ```c
+    #include <sys/stat.h>
+    const char *src = path ? (const char *)(intptr_t)path : "";
+    const char *slash = strrchr(src, '/');
+    if (!slash) return 0;
+    size_t len = (size_t)(slash - src);
+    char *dir = malloc(len + 1);
+    memcpy(dir, src, len);
+    dir[len] = '\0';
+    if (dir[0] == '\0') { free(dir); return 0; }
+
+    int ret = 0;
+    for (char *p = dir + 1; *p; p++) {
+      if (*p == '/') {
+        struct stat st;
+        *p = '\0';
+        if (stat(dir, &st) != 0) {
+          if (mkdir(dir, 0755) != 0) { ret = -1; break; }
+        } else if (!S_ISDIR(st.st_mode)) {
+          ret = -1;
+          break;
+        }
+        *p = '/';
+      }
+    }
+    if (ret == 0) {
+      struct stat st;
+      if (stat(dir, &st) != 0) {
+        if (mkdir(dir, 0755) != 0) ret = -1;
+      } else if (!S_ISDIR(st.st_mode)) {
+        ret = -1;
+      }
+    }
+    free(dir);
+    return ret;
+    ```)
+
+  (defn __rmd-write-file [path :cstr s :cstr] #{Unsafe} :int
+    ```c
+    const char *p = path ? (const char *)(intptr_t)path : "";
+    const char *text = s ? (const char *)(intptr_t)s : "";
+    FILE *fp = fopen(p, "wb");
+    if (!fp) return 0;
+    size_t len = strlen(text);
+    size_t wrote = fwrite(text, 1, len, fp);
+    fclose(fp);
+    return wrote == len ? 1 : 0;
+    ```)
+
+  (defn __rmd-close-cache [cache :int] #{Unsafe} :int
+    (if (not (= cache 0))
+      (do
+        (cache-close cache)
+        0)
+      0))
+
+  (defn __rmd-lang-label [lang :int] #{Unsafe} :cstr
+    (if (= lang 0) "turmeric" "sweet-exp"))
+
+  (defn __rmd-render-attr-list [attrs :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *name; char *value; } Attr;
+    Cons *lst = (Cons *)(intptr_t)attrs;
+    if (!lst) return "";
+    size_t cap = 64;
+    size_t len = 0;
+    char *out = malloc(cap);
+    out[0] = '\0';
+    int first = 1;
+    while (lst) {
+      Attr *attr = (Attr *)(intptr_t)lst->head;
+      const char *name = (attr && attr->name) ? attr->name : "";
+      const char *value = (attr && attr->value) ? attr->value : "";
+      size_t need = len + strlen(name) + strlen(value) + 4;
+      while (need > cap) { cap *= 2; out = realloc(out, cap); }
+      if (!first) out[len++] = ' ';
+      memcpy(out + len, name, strlen(name));
+      len += strlen(name);
+      out[len++] = '=';
+      memcpy(out + len, value, strlen(value));
+      len += strlen(value);
+      out[len] = '\0';
+      first = 0;
+      lst = (Cons *)(intptr_t)lst->tail;
+    }
+    return out;
+    ```)
+
+  (defn __rmd-render-attrs [attrs :int] #{Unsafe} :cstr
+    (if (__rmd-list-nil? attrs)
+      ""
+      (__rmd-str-concat " {" (__rmd-str-concat (__rmd-render-attr-list attrs) "}"))))
+
+  (defn __rmd-render-source-block [cell :int] #{Unsafe} :cstr
+    (__rmd-str-concat
+      "```"
+      (__rmd-str-concat (__rmd-lang-label (cell-lang cell))
+                        (__rmd-str-concat (__rmd-render-attrs (cell-attrs cell))
+                                          (__rmd-str-concat "\n"
+                                                            (__rmd-str-concat (cell-source cell)
+                                                                              "\n```"))))))
+
+  (defn __rmd-output-fence [output :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    if (!out || out->status == 2) return strdup("");
+
+    const char *status = out->status == 0 ? "ok" : "error";
+    const char *cell_id = out->cell_id ? out->cell_id : "";
+    const char *stdout_text = out->stdout_text ? out->stdout_text : "";
+    const char *value_repr = out->value_repr ? out->value_repr : "";
+    const char *error_msg = out->error_msg ? out->error_msg : "";
+
+    size_t cap = strlen(stdout_text) + strlen(value_repr) + strlen(error_msg) + 256;
+    char *buf = malloc(cap);
+    size_t len = 0;
+    len += (size_t)snprintf(buf + len, cap - len, "%c%c%coutput\n;; cell-id=%s status=%s elapsed=%lldms\n",
+                            '`', '`', '`', cell_id, status, (long long)out->elapsed_ms);
+
+    if (out->status == 0) {
+      if (stdout_text[0]) {
+        size_t slen = strlen(stdout_text);
+        memcpy(buf + len, stdout_text, slen);
+        len += slen;
+        if (len == 0 || buf[len - 1] != '\n') buf[len++] = '\n';
+      }
+      if (value_repr[0]) {
+        len += (size_t)snprintf(buf + len, cap - len, ";; => %s\n", value_repr);
+      }
+    } else if (error_msg[0]) {
+      size_t elen = strlen(error_msg);
+      memcpy(buf + len, error_msg, elen);
+      len += elen;
+      if (len == 0 || buf[len - 1] != '\n') buf[len++] = '\n';
+    }
+
+    len += (size_t)snprintf(buf + len, cap - len, "%c%c%c", '`', '`', '`');
+    buf[len] = '\0';
+    return buf;
+    ```)
+
+  (defn __rmd-render-cell-block [cell :int output :int opts :int] #{Unsafe} :cstr
+    (let [source-part (if (and (= (render-opts-include-source opts) 1)
+                               (= (attr-get-bool (cell-attrs cell) "echo" 1) 1))
+                        (__rmd-render-source-block cell)
+                        "")
+          output-part (if (and (not (= output 0))
+                               (= (render-opts-include-output opts) 1)
+                               (= (attr-get-bool (cell-attrs cell) "output" 1) 1))
+                        (__rmd-output-fence output)
+                        "")]
+      (__rmd-join-blocks source-part output-part)))
+
+  (defn __rmd-render-state-make [text :cstr outputs :int] #{Unsafe} :int
+    ```c
+    typedef struct { char *text; int64_t outputs; } RenderState;
+    RenderState *state = malloc(sizeof(*state));
+    state->text = text ? strdup((const char *)(intptr_t)text) : strdup("");
+    state->outputs = outputs;
+    return (int64_t)(intptr_t)state;
+    ```)
+
+  (defn __rmd-render-state-text [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { char *text; int64_t outputs; } RenderState;
+    RenderState *s = (RenderState *)(intptr_t)state;
+    return s && s->text ? s->text : "";
+    ```)
+
+  (defn __rmd-render-state-outputs [state :int] #{Unsafe} :int
+    ```c
+    typedef struct { char *text; int64_t outputs; } RenderState;
+    RenderState *s = (RenderState *)(intptr_t)state;
+    return s ? s->outputs : 0;
+    ```)
+
+  (defn __rmd-render-nodes [nodes :int outputs :int opts :int] #{Unsafe} :int
+    (if (__rmd-list-nil? nodes)
+      (__rmd-render-state-make "" outputs)
+      (let [node (__rmd-head nodes)]
+        (if (= (node-tag node) 0)
+          (let [rest (__rmd-render-nodes (__rmd-tail nodes) outputs opts)]
+            (__rmd-render-state-make
+              (__rmd-join-blocks (md-emit (node-prose node))
+                                 (__rmd-render-state-text rest))
+              (__rmd-render-state-outputs rest)))
+          (let [cell (node-cell node)
+                cur-output (if (__rmd-list-nil? outputs) 0 (__rmd-head outputs))
+                rest-outputs (if (__rmd-list-nil? outputs) (__rmd-nil-value) (__rmd-tail outputs))
+                rest (__rmd-render-nodes (__rmd-tail nodes) rest-outputs opts)]
+            (__rmd-render-state-make
+              (__rmd-join-blocks (__rmd-render-cell-block cell cur-output opts)
+                                 (__rmd-render-state-text rest))
+              (__rmd-render-state-outputs rest)))))))
+
+  (defn __rmd-cells-from-nodes-rev [nodes :int acc :int] #{Unsafe} :int
+    (if (__rmd-list-nil? nodes)
+      acc
+      (let [node (__rmd-head nodes)]
+        (__rmd-cells-from-nodes-rev
+          (__rmd-tail nodes)
+          (if (= (node-tag node) 1)
+            (__rmd-cons (node-cell node) acc)
+            acc)))))
+
+  (defn __rmd-reverse [lst :int acc :int] #{Unsafe} :int
+    (if (__rmd-list-nil? lst)
+      acc
+      (__rmd-reverse (__rmd-tail lst) (__rmd-cons (__rmd-head lst) acc))))
+
+  (defn __rmd-cells-from-nodes [nodes :int] #{Unsafe} :int
+    (__rmd-reverse (__rmd-cells-from-nodes-rev nodes (__rmd-nil-value))
+                   (__rmd-nil-value)))
+
+  (defn __rmd-list-length [lst :int] #{Unsafe} :int
+    (if (__rmd-list-nil? lst)
+      0
+      (+ 1 (__rmd-list-length (__rmd-tail lst)))))
+
+  ;;; render-md-string -- render a parsed notebook and its outputs to markdown.
+  (defn render-md-string [nodes :int outputs :int opts :int] #{Unsafe} :cstr
+    (__rmd-render-state-text (__rmd-render-nodes nodes outputs opts)))
+
+  ;;; render-md -- evaluate a notebook file and write rendered markdown beside it.
+  (defn render-md [path :cstr opts :int] #{Unsafe} :int
+    (let [parsed (parse-file path)]
+      (if (not (__rmd-result-ok? parsed))
+        (__rmd-err "failed to parse notebook file")
+        (let [nodes (__rmd-result-ok-val parsed)
+              cells (cells-assign-ids (__rmd-cells-from-nodes nodes))
+              session (session-open)
+              cache (if (= (render-opts-use-cache opts) 1)
+                      (cache-open "")
+                      0)
+              outputs (eval-all session cells cache 0)
+              halted? (and (= (render-opts-fail-fast opts) 1)
+                           (< (__rmd-list-length outputs) (__rmd-list-length cells)))]
+          (if halted?
+            (do
+              (session-close session)
+              (__rmd-close-cache cache)
+              (__rmd-err "render halted after a cell error"))
+            (let [rendered (render-md-string nodes outputs opts)
+                  out-path (__rmd-output-path path (render-opts-output-dir opts))]
+              (do
+                (session-close session)
+                (__rmd-close-cache cache)
+                (if (= (__rmd-ensure-parent-dir out-path) -1)
+                  (__rmd-err "failed to create output directory")
+                  (if (= (__rmd-write-file out-path rendered) 1)
+                    (__rmd-ok (__rmd-cstr-as-int out-path))
+                    (__rmd-err "failed to write rendered markdown"))))))))))
+
+) ;; end defmodule notebook/render-md

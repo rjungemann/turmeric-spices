@@ -1,0 +1,324 @@
+;; notebook/format -- parse notebook markdown into prose/cell nodes.
+
+(defmodule notebook/format
+  (import notebook/cmark :refer [md-parse md-tag-code-block md-node-children md-node-tag
+                                 md-node-info md-node-text md-source-span md-emit])
+  (import notebook/cell :refer [parse-attrs attr-get
+                                attr-name attr-value
+                                cell-make cell-id cell-lang cell-source cell-attrs
+                                cell-start-line cell-end-line])
+  (export parse-file parse-string
+          node-tag node-prose node-cell
+          nodes->str nodes-update-cell)
+
+  ;; Minimal cons helpers so the module stays self-contained.
+  (defn __fmt-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __fmt-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn __fmt-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn __fmt-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
+    return cell->head;
+    ```)
+
+  (defn __fmt-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
+    return cell->tail;
+    ```)
+
+  ;; Result helpers compatible with stdlib/result.tur.
+  (defn __ok [value :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = true;
+    r->ok_val = value;
+    r->err_val = 0;
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __err [value :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false;
+    r->ok_val = 0;
+    r->err_val = value;
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __fmt-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn __fmt-str-concat [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    size_t la = strlen(sa), lb = strlen(sb);
+    char *out = malloc(la + lb + 1);
+    memcpy(out, sa, la);
+    memcpy(out + la, sb, lb);
+    out[la + lb] = '\0';
+    return out;
+    ```)
+
+  (defn __fmt-cstr-as-int [value :cstr] #{Unsafe} :int
+    ```c
+    return (int64_t)(intptr_t)value;
+    ```)
+
+  (defn __fmt-int-as-cstr [value :int] #{Unsafe} :cstr
+    ```c
+    return (const char *)(intptr_t)value;
+    ```)
+
+  (defn __fmt-slurp [path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *p = path ? (const char *)(intptr_t)path : "";
+    FILE *fp = fopen(p, "rb");
+    if (!fp) return (const char *)(intptr_t)0;
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return (const char *)(intptr_t)0; }
+    long sz = ftell(fp);
+    if (sz < 0) { fclose(fp); return (const char *)(intptr_t)0; }
+    rewind(fp);
+    char *buf = malloc((size_t)sz + 1);
+    if (!buf) { fclose(fp); return (const char *)(intptr_t)0; }
+    size_t got = fread(buf, 1, (size_t)sz, fp);
+    fclose(fp);
+    buf[got] = '\0';
+    return (const char *)(intptr_t)buf;
+    ```)
+
+  (defn __fmt-cstr-free [s :cstr] #{Unsafe} :void
+    ```c
+    void *p = (void *)(intptr_t)s;
+    if (p) free(p);
+    ```)
+
+  (defn __fmt-cstr-null? [s :cstr] #{Unsafe} :bool
+    ```c
+    return ((const void *)(intptr_t)s) == NULL;
+    ```)
+
+  (defn __fmt-node-make [tag :int prose :int cell :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
+    NotebookNode *node = malloc(sizeof(*node));
+    node->tag = tag;
+    node->prose = prose;
+    node->cell = cell;
+    return (int64_t)(intptr_t)node;
+    ```)
+
+  (defn __node-prose-make [prose :int] #{Unsafe} :int
+    (__fmt-node-make 0 prose 0))
+
+  (defn __node-cell-make [cell :int] #{Unsafe} :int
+    (__fmt-node-make 1 0 cell))
+
+  ;;; node-tag -- return 0 for prose nodes and 1 for cell nodes.
+  (defn node-tag [node :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
+    NotebookNode *n = (NotebookNode *)(intptr_t)node;
+    return n ? n->tag : -1;
+    ```)
+
+  ;;; node-prose -- extract the md-node handle from a prose node.
+  (defn node-prose [node :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
+    NotebookNode *n = (NotebookNode *)(intptr_t)node;
+    return n ? n->prose : 0;
+    ```)
+
+  ;;; node-cell -- extract the cell handle from a cell node.
+  (defn node-cell [node :int] #{Unsafe} :int
+    ```c
+    typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
+    NotebookNode *n = (NotebookNode *)(intptr_t)node;
+    return n ? n->cell : 0;
+    ```)
+
+  (defn __lang-from-info [info :cstr] #{Unsafe} :int
+    ```c
+    const char *s = info ? (const char *)(intptr_t)info : "";
+    size_t n = strlen(s);
+    if (n >= 8 && strncmp(s, "turmeric", 8) == 0 &&
+        (s[8] == '\0' || s[8] == ' ' || s[8] == '\t' || s[8] == '{')) {
+      return 0;
+    }
+    if (n >= 9 && strncmp(s, "sweet-exp", 9) == 0 &&
+        (s[9] == '\0' || s[9] == ' ' || s[9] == '\t' || s[9] == '{')) {
+      return 1;
+    }
+    return -1;
+    ```)
+
+  (defn __lang-label [lang :int] #{Unsafe} :cstr
+    (if (= lang 0)
+      "turmeric"
+      "sweet-exp"))
+
+  (defn __span-start [span :int] #{Unsafe} :int
+    (__fmt-head span))
+
+  (defn __span-end [span :int] #{Unsafe} :int
+    (__fmt-head (__fmt-tail span)))
+
+  (defn __block->node [block :int] #{Unsafe} :int
+    (if (and (= (md-node-tag block) (md-tag-code-block))
+             (>= (__lang-from-info (md-node-info block)) 0))
+      (let [attrs (parse-attrs (md-node-info block))
+            lang (__lang-from-info (md-node-info block))
+            span (md-source-span block)
+            cell (cell-make (attr-get attrs "id" "")
+                            lang
+                            (md-node-text block)
+                            attrs
+                            (__span-start span)
+                            (__span-end span))]
+        (__node-cell-make cell))
+      (__node-prose-make block)))
+
+  (defn __blocks->nodes [blocks :int] #{Unsafe} :int
+    (if (__fmt-list-nil? blocks)
+      (__fmt-nil-value)
+      (__fmt-cons (__block->node (__fmt-head blocks))
+                  (__blocks->nodes (__fmt-tail blocks)))))
+
+  ;;; parse-string -- parse notebook markdown into prose and cell nodes.
+  (defn parse-string [s :cstr] #{Unsafe} :int
+    (__ok (__blocks->nodes (md-node-children (md-parse s)))))
+
+  ;;; parse-file -- read a notebook file from disk and parse it.
+  (defn parse-file [path :cstr] #{Unsafe} :int
+    (let [src (__fmt-slurp path)]
+    (if (__fmt-cstr-null? src)
+        (__err 0)
+        (let [parsed (parse-string src)]
+          (do
+          (__fmt-cstr-free src)
+            parsed)))))
+
+  (defn __render-attr-list [attrs :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *name; char *value; } Attr;
+    Cons *lst = (Cons *)(intptr_t)attrs;
+    if (!lst) return "";
+    size_t cap = 64;
+    size_t len = 0;
+    char *out = malloc(cap);
+    out[0] = '\0';
+    int first = 1;
+    while (lst) {
+      Attr *attr = (Attr *)(intptr_t)lst->head;
+      const char *name = (attr && attr->name) ? attr->name : "";
+      const char *value = (attr && attr->value) ? attr->value : "";
+      size_t need = len + strlen(name) + strlen(value) + 4;
+      while (need > cap) { cap *= 2; out = realloc(out, cap); }
+      if (!first) {
+        out[len++] = ' ';
+      }
+      memcpy(out + len, name, strlen(name));
+      len += strlen(name);
+      out[len++] = '=';
+      memcpy(out + len, value, strlen(value));
+      len += strlen(value);
+      out[len] = '\0';
+      first = 0;
+      lst = (Cons *)(intptr_t)lst->tail;
+    }
+    return out;
+    ```)
+
+  (defn __render-attrs [attrs :int] #{Unsafe} :cstr
+    (if (__fmt-list-nil? attrs)
+      ""
+      (__fmt-str-concat
+        " {"
+        (__fmt-str-concat (__render-attr-list attrs) "}"))))
+
+  (defn __render-node [node :int] #{Unsafe} :cstr
+    (if (= (node-tag node) 0)
+      (md-emit (node-prose node))
+      (let [cell (node-cell node)]
+        (__fmt-str-concat
+          "```"
+          (__fmt-str-concat (__lang-label (cell-lang cell))
+                            (__fmt-str-concat (__render-attrs (cell-attrs cell))
+                                              (__fmt-str-concat "\n"
+                                                                (__fmt-str-concat (cell-source cell) "\n```"))))))))
+
+  (defn __nodes->str-int [nodes :int] #{Unsafe} :int
+    (if (__fmt-list-nil? nodes)
+      (__fmt-cstr-as-int "")
+      (let [cur (__render-node (__fmt-head nodes))]
+        (if (__fmt-list-nil? (__fmt-tail nodes))
+          (__fmt-cstr-as-int cur)
+          (__fmt-cstr-as-int
+            (__fmt-str-concat cur
+                              (__fmt-str-concat "\n\n" (__fmt-int-as-cstr (__nodes->str-int (__fmt-tail nodes))))))))))
+
+  ;;; nodes->str -- serialize notebook nodes back to normalized markdown.
+  (defn nodes->str [nodes :int] #{Unsafe} :cstr
+    (__fmt-int-as-cstr (__nodes->str-int nodes)))
+
+  (defn __copy-cell-with-source [cell :int source :cstr] #{Unsafe} :int
+    (cell-make (cell-id cell)
+               (cell-lang cell)
+               source
+               (cell-attrs cell)
+               (cell-start-line cell)
+               (cell-end-line cell)))
+
+  (defn __replace-node-if-match [node :int cell-id-want :cstr new-source :cstr] #{Unsafe} :int
+    (if (= (node-tag node) 1)
+      (let [cell (node-cell node)]
+        (if (__fmt-cstr-eq? (cell-id cell) cell-id-want)
+          (__node-cell-make (__copy-cell-with-source cell new-source))
+          node))
+      node))
+
+  (defn __node-list-has-cell? [nodes :int cell-id-want :cstr] #{Unsafe} :bool
+    (if (__fmt-list-nil? nodes)
+      false
+      (if (and (= (node-tag (__fmt-head nodes)) 1)
+               (__fmt-cstr-eq? (cell-id (node-cell (__fmt-head nodes))) cell-id-want))
+        true
+        (__node-list-has-cell? (__fmt-tail nodes) cell-id-want))))
+
+  (defn __replace-node-list [nodes :int cell-id-want :cstr new-source :cstr] #{Unsafe} :int
+    (if (__fmt-list-nil? nodes)
+      (__fmt-nil-value)
+      (__fmt-cons (__replace-node-if-match (__fmt-head nodes) cell-id-want new-source)
+                  (__replace-node-list (__fmt-tail nodes) cell-id-want new-source))))
+
+  ;;; nodes-update-cell -- replace the source of a named cell in an immutable node list.
+  (defn nodes-update-cell [nodes :int cell-id-want :cstr new-source :cstr] #{Unsafe} :int
+    (if (__node-list-has-cell? nodes cell-id-want)
+      (__ok (__replace-node-list nodes cell-id-want new-source))
+      (__err 0)))
+
+) ;; end defmodule notebook/format

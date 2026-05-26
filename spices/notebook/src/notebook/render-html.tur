@@ -1,0 +1,1105 @@
+;;; notebook/render-html -- render notebook documents to standalone HTML.
+;; notebook/render-html -- evaluate .tur.md files and emit HTML output.
+
+(defmodule notebook/render-html
+  (import notebook/cmark :refer [md-emit-html])
+  (import notebook/format :refer [parse-file node-tag node-prose node-cell])
+  (import notebook/cell :refer [attr-get attr-get-bool cell-id cell-lang cell-source cell-attrs cells-assign-ids])
+  (import notebook/session :refer [session-open session-close
+                                   output-status-ok output-status-error output-status-skipped
+                                   cell-output-status cell-output-cell-id
+                                   cell-output-stdout cell-output-value-repr
+                                   cell-output-error-msg cell-output-elapsed-ms
+                                   cell-output-image-paths])
+  (import notebook/eval :refer [eval-all])
+  (import notebook/cache :refer [cache-open cache-close])
+  (export render-html-string render-html-string-at render-html)
+
+  (defn __rhtml-build-hint [] :int
+    ```c
+    /* __tur_include__: #include <sys/stat.h> */
+    return 0;
+    ```)
+
+  (defn __rhtml-nil-value [] #{Unsafe} :int
+    ```c
+    return 0;
+    ```)
+
+  (defn __rhtml-list-nil? [lst :int] #{Unsafe} :bool
+    ```c
+    return lst == 0;
+    ```)
+
+  (defn __rhtml-cons [value :int next :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
+    cell->head = value;
+    cell->tail = next;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  (defn __rhtml-head [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
+    return cell->head;
+    ```)
+
+  (defn __rhtml-tail [lst :int] #{Unsafe} :int
+    ```c
+    struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
+    if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
+    return cell->tail;
+    ```)
+
+  (defn __rhtml-ok [value :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = true;
+    r->ok_val = value;
+    r->err_val = 0;
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __rhtml-err [value :cstr] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+    r->is_ok = false;
+    r->ok_val = 0;
+    r->err_val = (int64_t)(intptr_t)(value ? strdup((const char *)(intptr_t)value) : strdup(""));
+    return (int64_t)(intptr_t)r;
+    ```)
+
+  (defn __rhtml-result-ok? [result :int] #{Unsafe} :bool
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return r && r->is_ok;
+    ```)
+
+  (defn __rhtml-result-ok-val [result :int] #{Unsafe} :int
+    ```c
+    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
+    return r ? r->ok_val : 0;
+    ```)
+
+  (defn __rhtml-cstr-as-int [s :cstr] #{Unsafe} :int
+    ```c
+    return (int64_t)(intptr_t)s;
+    ```)
+
+  (defn __rhtml-int-as-cstr [value :int] #{Unsafe} :cstr
+    ```c
+    return (const char *)(intptr_t)value;
+    ```)
+
+  (defn __rhtml-cstr-empty? [s :cstr] #{Unsafe} :bool
+    ```c
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    return src[0] == '\0';
+    ```)
+
+  (defn __rhtml-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  (defn __rhtml-str-concat [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    const char *sa = a ? (const char *)(intptr_t)a : "";
+    const char *sb = b ? (const char *)(intptr_t)b : "";
+    size_t la = strlen(sa), lb = strlen(sb);
+    char *out = malloc(la + lb + 1);
+    memcpy(out, sa, la);
+    memcpy(out + la, sb, lb);
+    out[la + lb] = '\0';
+    return out;
+    ```)
+
+  (defn __rhtml-join-blocks [a :cstr b :cstr] #{Unsafe} :cstr
+    (if (__rhtml-cstr-empty? a)
+      b
+      (if (__rhtml-cstr-empty? b)
+        a
+        (__rhtml-str-concat a (__rhtml-str-concat "\n" b)))))
+
+  (defn __rhtml-output-path [src_path :cstr output_dir :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = src_path ? (const char *)(intptr_t)src_path : "";
+    const char *out_dir = output_dir ? (const char *)(intptr_t)output_dir : "";
+    const char *base = strrchr(src, '/');
+    base = base ? base + 1 : src;
+
+    size_t base_len = strlen(base);
+    size_t stem_len = base_len;
+    if (base_len >= 7 && strcmp(base + base_len - 7, ".tur.md") == 0) {
+      stem_len = base_len - 7;
+    } else {
+      const char *dot = strrchr(base, '.');
+      if (dot) stem_len = (size_t)(dot - base);
+    }
+
+    char *stem = malloc(stem_len + 1);
+    memcpy(stem, base, stem_len);
+    stem[stem_len] = '\0';
+
+    char *dir = NULL;
+    if (out_dir[0] != '\0') {
+      dir = strdup(out_dir);
+    } else {
+      const char *slash = strrchr(src, '/');
+      if (!slash) {
+        dir = strdup("");
+      } else {
+        size_t dir_len = (size_t)(slash - src);
+        dir = malloc(dir_len + 1);
+        memcpy(dir, src, dir_len);
+        dir[dir_len] = '\0';
+      }
+    }
+
+    size_t need = strlen(dir) + (dir[0] ? 1 : 0) + strlen(stem) + 5 + 1;
+    char *out = malloc(need);
+    if (dir[0]) snprintf(out, need, "%s/%s.html", dir, stem);
+    else snprintf(out, need, "%s.html", stem);
+
+    free(stem);
+    free(dir);
+    return out;
+    ```)
+
+  (defn __rhtml-style-path [html_path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = html_path ? (const char *)(intptr_t)html_path : "";
+    const char *slash = strrchr(src, '/');
+    size_t dir_len = slash ? (size_t)(slash - src) : 0;
+    size_t need = dir_len + (dir_len ? 1 : 0) + strlen("style.css") + 1;
+    char *out = malloc(need);
+    if (dir_len) snprintf(out, need, "%.*s/style.css", (int)dir_len, src);
+    else snprintf(out, need, "style.css");
+    return out;
+    ```)
+
+  (defn __rhtml-ensure-parent-dir [path :cstr] #{Unsafe} :int
+    ```c
+    #include <sys/stat.h>
+    const char *src = path ? (const char *)(intptr_t)path : "";
+    const char *slash = strrchr(src, '/');
+    if (!slash) return 0;
+    size_t len = (size_t)(slash - src);
+    char *dir = malloc(len + 1);
+    memcpy(dir, src, len);
+    dir[len] = '\0';
+    if (dir[0] == '\0') { free(dir); return 0; }
+
+    int ret = 0;
+    for (char *p = dir + 1; *p; p++) {
+      if (*p == '/') {
+        struct stat st;
+        *p = '\0';
+        if (stat(dir, &st) != 0) {
+          if (mkdir(dir, 0755) != 0) { ret = -1; break; }
+        } else if (!S_ISDIR(st.st_mode)) {
+          ret = -1;
+          break;
+        }
+        *p = '/';
+      }
+    }
+    if (ret == 0) {
+      struct stat st;
+      if (stat(dir, &st) != 0) {
+        if (mkdir(dir, 0755) != 0) ret = -1;
+      } else if (!S_ISDIR(st.st_mode)) {
+        ret = -1;
+      }
+    }
+    free(dir);
+    return ret;
+    ```)
+
+  (defn __rhtml-write-file [path :cstr s :cstr] #{Unsafe} :int
+    ```c
+    const char *p = path ? (const char *)(intptr_t)path : "";
+    const char *text = s ? (const char *)(intptr_t)s : "";
+    FILE *fp = fopen(p, "wb");
+    if (!fp) return 0;
+    size_t len = strlen(text);
+    size_t wrote = fwrite(text, 1, len, fp);
+    fclose(fp);
+    return wrote == len ? 1 : 0;
+    ```)
+
+  (defn __rhtml-close-cache [cache :int] #{Unsafe} :int
+    (if (not (= cache 0))
+      (do
+        (cache-close cache)
+        0)
+      0))
+
+  (defn __rhtml-render-opts-output-dir [opts :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o && o->output_dir ? o->output_dir : "";
+    ```)
+
+  (defn __rhtml-render-opts-use-cache [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->use_cache : 0;
+    ```)
+
+  (defn __rhtml-render-opts-include-source [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->include_source : 1;
+    ```)
+
+  (defn __rhtml-render-opts-include-output [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->include_output : 1;
+    ```)
+
+  (defn __rhtml-render-opts-fail-fast [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->fail_fast : 1;
+    ```)
+
+  (defn __rhtml-lang-label [lang :int] #{Unsafe} :cstr
+    (if (= lang 0) "turmeric" "sweet-exp"))
+
+  (defn __rhtml-status-label [status :int] #{Unsafe} :cstr
+    (if (= status (output-status-ok))
+      "ok"
+      (if (= status (output-status-skipped))
+        "skipped"
+        "error")))
+
+  (defn __rhtml-cell-class [lang :int] #{Unsafe} :cstr
+    (if (= lang 0) "turmeric-cell" "sweet-exp-cell"))
+
+  (defn __rhtml-html-escape [text :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = text ? (const char *)(intptr_t)text : "";
+    size_t cap = strlen(src) * 6 + 1;
+    char *out = malloc(cap);
+    size_t len = 0;
+    while (*src) {
+      const char *rep = NULL;
+      switch (*src) {
+        case '&': rep = "&amp;"; break;
+        case '<': rep = "&lt;"; break;
+        case '>': rep = "&gt;"; break;
+        case '"': rep = "&quot;"; break;
+        case '\'': rep = "&#39;"; break;
+        default: break;
+      }
+      if (rep) {
+        size_t n = strlen(rep);
+        memcpy(out + len, rep, n);
+        len += n;
+      } else {
+        out[len++] = *src;
+      }
+      src++;
+    }
+    out[len] = '\0';
+    return out;
+    ```)
+
+  (defn __rhtml-page-title [path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = path ? (const char *)(intptr_t)path : "";
+    const char *base = strrchr(src, '/');
+    base = base ? base + 1 : src;
+    size_t n = strlen(base);
+    if (n >= 7 && strcmp(base + n - 7, ".tur.md") == 0) n -= 7;
+    else {
+      const char *dot = strrchr(base, '.');
+      if (dot) n = (size_t)(dot - base);
+    }
+    if (n == 0) return strdup("Notebook");
+    char *out = malloc(n + 1);
+    memcpy(out, base, n);
+    out[n] = '\0';
+    return out;
+    ```)
+
+  (defn __rhtml-style-css [] #{Unsafe} :cstr
+    ```c
+    return strdup(
+      ":root {\n"
+      "  --bg-base: #0c0a08;\n"
+      "  --bg-surface: #131109;\n"
+      "  --bg-panel: #181512;\n"
+      "  --bg-hover: #1f1c18;\n"
+      "  --border: #252119;\n"
+      "  --border-mid: #302b24;\n"
+      "  --gold: #d48b1c;\n"
+      "  --gold-bright: #efa030;\n"
+      "  --gold-line: rgba(239, 160, 48, 0.24);\n"
+      "  --gold-subtle: rgba(212, 139, 28, 0.1);\n"
+      "  --text-primary: #eae0d2;\n"
+      "  --text-sec: #88796c;\n"
+      "  --text-dim: #453f39;\n"
+      "  --success: #a8c98a;\n"
+      "  --error: #d9735a;\n"
+      "  --font-sans: \"DM Sans\", \"Inter\", system-ui, sans-serif;\n"
+      "  --font-mono: \"Iosevka\", \"SF Mono\", \"Fira Code\", monospace;\n"
+      "}\n"
+      "* { box-sizing: border-box; }\n"
+      "html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }\n"
+      "body.notebook-page {\n"
+      "  margin: 0;\n"
+      "  min-height: 100vh;\n"
+      "  background: var(--bg-base);\n"
+      "  color: var(--text-primary);\n"
+      "  font-family: var(--font-sans);\n"
+      "  line-height: 1.6;\n"
+      "}\n"
+      ".notebook-document {\n"
+      "  max-width: 960px;\n"
+      "  margin: 0 auto;\n"
+      "  padding: 40px 24px 72px;\n"
+      "}\n"
+      "a { color: var(--gold-bright); }\n"
+      "a:hover { color: var(--text-primary); }\n"
+      "h1, h2, h3, h4, h5, h6 { color: var(--gold-bright); line-height: 1.2; margin: 1.4em 0 0.5em; }\n"
+      "h1:first-child { margin-top: 0; }\n"
+      "p, ul, ol, blockquote, pre, table { margin: 0 0 1rem; }\n"
+      "ul, ol { padding-left: 1.4rem; }\n"
+      "blockquote {\n"
+      "  margin-left: 0;\n"
+      "  padding: 0.8rem 1rem;\n"
+      "  border-left: 3px solid var(--gold-line);\n"
+      "  background: var(--bg-surface);\n"
+      "  color: var(--text-sec);\n"
+      "}\n"
+      "code {\n"
+      "  font-family: var(--font-mono);\n"
+      "  font-size: 0.92em;\n"
+      "  background: var(--bg-panel);\n"
+      "  border-radius: 4px;\n"
+      "  padding: 0.12rem 0.32rem;\n"
+      "}\n"
+      "pre {\n"
+      "  margin: 0;\n"
+      "  padding: 14px 16px;\n"
+      "  overflow-x: auto;\n"
+      "  border-radius: 10px;\n"
+      "  background: var(--bg-surface);\n"
+      "  border: 1px solid var(--border-mid);\n"
+      "  color: var(--text-primary);\n"
+      "}\n"
+      "pre code { background: transparent; padding: 0; border-radius: 0; }\n"
+      "hr { border: 0; border-top: 1px solid var(--border-mid); margin: 1.5rem 0; }\n"
+      "table { width: 100%; border-collapse: collapse; }\n"
+      "th, td { border: 1px solid var(--border-mid); padding: 0.5rem 0.75rem; }\n"
+      "th { background: var(--bg-surface); text-align: left; }\n"
+      ".notebook-cell, .code-card {\n"
+      "  margin: 1rem 0 1.25rem;\n"
+      "  background: var(--bg-panel);\n"
+      "  border: 1px solid var(--border-mid);\n"
+      "  border-radius: 12px;\n"
+      "  overflow: hidden;\n"
+      "}\n"
+      ".code-card-bar, .notebook-cell-bar, .cell-output-meta {\n"
+      "  display: flex;\n"
+      "  align-items: center;\n"
+      "  gap: 0.75rem;\n"
+      "  padding: 10px 14px;\n"
+      "  background: rgba(0, 0, 0, 0.18);\n"
+      "  border-bottom: 1px solid var(--border);\n"
+      "  font-family: var(--font-mono);\n"
+      "  font-size: 12px;\n"
+      "}\n"
+      ".cell-kind { color: var(--gold-bright); text-transform: lowercase; }\n"
+      ".cell-meta { color: var(--text-sec); }\n"
+      ".notebook-cell pre, .code-card pre { border: 0; border-radius: 0; }\n"
+      ".cell-output-block {\n"
+      "  margin-top: 0;\n"
+      "  border-top: 1px solid var(--border);\n"
+      "}\n"
+      ".cell-output-meta { color: var(--text-sec); }\n"
+      ".cell-output-meta.status-ok { color: var(--success); }\n"
+      ".cell-output-meta.status-error { color: var(--error); }\n"
+      ".cell-output { background: #0f0d0b; }\n"
+      ".cell-images {\n"
+      "  display: grid;\n"
+      "  gap: 12px;\n"
+      "  padding: 14px;\n"
+      "  border-top: 1px solid var(--border);\n"
+      "}\n"
+      ".cell-images img {\n"
+      "  max-width: 100%;\n"
+      "  display: block;\n"
+      "  border-radius: 10px;\n"
+      "  border: 1px solid var(--border-mid);\n"
+      "  background: #fff;\n"
+      "}\n"
+      ".code-syntax-toggle {\n"
+      "  margin-left: auto;\n"
+      "  display: flex;\n"
+      "  border: 1px solid var(--border-mid);\n"
+      "  border-radius: 6px;\n"
+      "  overflow: hidden;\n"
+      "  font-family: var(--font-mono);\n"
+      "  font-size: 11px;\n"
+      "}\n"
+      ".seg-btn {\n"
+      "  padding: 4px 10px;\n"
+      "  background: transparent;\n"
+      "  color: var(--text-sec);\n"
+      "  border: 0;\n"
+      "  cursor: pointer;\n"
+      "}\n"
+      ".seg-btn:hover { background: var(--bg-hover); color: var(--text-primary); }\n"
+      ".seg-btn.active { color: var(--gold-bright); background: var(--gold-subtle); }\n"
+      ".code-version { display: block; }\n"
+      ".code-version[hidden] { display: none; }\n"
+    );
+    ```)
+
+  (defn __rhtml-toggle-script [] #{Unsafe} :cstr
+    ```c
+    return strdup(
+      "document.querySelectorAll('.code-syntax-toggle').forEach(function(toggle){\n"
+      "  toggle.addEventListener('click', function(e){\n"
+      "    if (!e.target.classList.contains('seg-btn')) return;\n"
+      "    var syntax = e.target.getAttribute('data-syntax');\n"
+      "    var card = toggle.closest('.code-card');\n"
+      "    toggle.querySelectorAll('.seg-btn').forEach(function(btn){\n"
+      "      var active = btn === e.target;\n"
+      "      btn.classList.toggle('active', active);\n"
+      "      btn.setAttribute('aria-selected', active ? 'true' : 'false');\n"
+      "    });\n"
+      "    card.querySelectorAll('.code-version').forEach(function(panel){\n"
+      "      panel.hidden = !panel.classList.contains(syntax + '-version');\n"
+      "    });\n"
+      "  });\n"
+      "});\n"
+    );
+    ```)
+
+  (defn __rhtml-render-source-pre [cell :int] #{Unsafe} :cstr
+    (let [escaped (__rhtml-html-escape (cell-source cell))]
+      (__rhtml-str-concat
+        "<div class=\"notebook-cell-bar\"><span class=\"cell-kind\">"
+        (__rhtml-str-concat
+          (__rhtml-lang-label (cell-lang cell))
+          (__rhtml-str-concat
+            "</span><span class=\"cell-meta\">"
+            (__rhtml-str-concat
+              (__rhtml-html-escape (cell-id cell))
+              (__rhtml-str-concat
+                "</span></div><pre class=\""
+                (__rhtml-str-concat
+                  (__rhtml-cell-class (cell-lang cell))
+                  (__rhtml-str-concat "\"><code>" (__rhtml-str-concat escaped "</code></pre>"))))))))))
+
+  (defn __rhtml-output-skipped? [output :int] #{Unsafe} :bool
+    (or (= output 0)
+        (= (cell-output-status output) (output-status-skipped))))
+
+  (defn __rhtml-output-meta [output :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    if (!out || out->status == 2) return strdup("");
+    const char *status = out->status == 0 ? "ok" : "error";
+    const char *cell_id = out->cell_id ? out->cell_id : "";
+    char buf[256];
+    snprintf(buf, sizeof(buf), "cell-id=%s status=%s elapsed=%lldms",
+             cell_id, status, (long long)out->elapsed_ms);
+    return strdup(buf);
+    ```)
+
+  (defn __rhtml-output-body [output :int] #{Unsafe} :cstr
+    ```c
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    if (!out || out->status == 2) return strdup("");
+
+    const char *stdout_text = out->stdout_text ? out->stdout_text : "";
+    const char *value_repr = out->value_repr ? out->value_repr : "";
+    const char *error_msg = out->error_msg ? out->error_msg : "";
+
+    size_t cap = strlen(stdout_text) + strlen(value_repr) + strlen(error_msg) + 32;
+    char *buf = malloc(cap);
+    buf[0] = '\0';
+    if (out->status == 0) {
+      if (stdout_text[0]) strncat(buf, stdout_text, cap - strlen(buf) - 1);
+      if (value_repr[0]) {
+        if (buf[0]) strncat(buf, "\n", cap - strlen(buf) - 1);
+        strncat(buf, ";; => ", cap - strlen(buf) - 1);
+        strncat(buf, value_repr, cap - strlen(buf) - 1);
+      }
+    } else {
+      strncat(buf, error_msg, cap - strlen(buf) - 1);
+    }
+    return buf;
+    ```)
+
+  (defn __rhtml-render-output-pre [output :int] #{Unsafe} :cstr
+    (if (__rhtml-output-skipped? output)
+      ""
+      (let [status (__rhtml-status-label (cell-output-status output))
+            meta (__rhtml-html-escape (__rhtml-output-meta output))
+            body (__rhtml-html-escape (__rhtml-output-body output))]
+        (__rhtml-str-concat
+          "<div class=\"cell-output-block\"><div class=\"cell-output-meta status-"
+          (__rhtml-str-concat
+            status
+            (__rhtml-str-concat
+              "\">"
+              (__rhtml-str-concat
+                meta
+                (__rhtml-str-concat "</div><pre class=\"cell-output\">"
+                                    (__rhtml-str-concat body "</pre></div>")))))))))
+
+  (defn __rhtml-int->cstr [value :int] #{Unsafe} :cstr
+    ```c
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    return strdup(buf);
+    ```)
+
+  (defn __rhtml-copy-file [src_path :cstr dst_path :cstr] #{Unsafe} :int
+    ```c
+    const char *src = src_path ? (const char *)(intptr_t)src_path : "";
+    const char *dst = dst_path ? (const char *)(intptr_t)dst_path : "";
+    FILE *in = fopen(src, "rb");
+    if (!in) return 0;
+    FILE *out = fopen(dst, "wb");
+    if (!out) { fclose(in); return 0; }
+    char buf[8192];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+      if (fwrite(buf, 1, n, out) != n) { ok = 0; break; }
+    }
+    fclose(in);
+    fclose(out);
+    return ok;
+    ```)
+
+  (defn __rhtml-png-data-url [img_path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *path = img_path ? (const char *)(intptr_t)img_path : "";
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return strdup("");
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return strdup(""); }
+    long sz = ftell(fp);
+    if (sz < 0) { fclose(fp); return strdup(""); }
+    rewind(fp);
+    unsigned char *src = malloc((size_t)sz);
+    size_t got = fread(src, 1, (size_t)sz, fp);
+    fclose(fp);
+
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_len = ((got + 2) / 3) * 4;
+    char *b64 = malloc(out_len + 1);
+    size_t i = 0, j = 0;
+    while (i < got) {
+      unsigned a = src[i++];
+      unsigned b = i < got ? src[i++] : 0;
+      unsigned c = i < got ? src[i++] : 0;
+      unsigned tri = (a << 16) | (b << 8) | c;
+      b64[j++] = tbl[(tri >> 18) & 63];
+      b64[j++] = tbl[(tri >> 12) & 63];
+      b64[j++] = (i - 1 > got) ? '=' : tbl[(tri >> 6) & 63];
+      b64[j++] = (i > got) ? '=' : tbl[tri & 63];
+    }
+    if (got % 3 == 1) { b64[out_len - 1] = '='; b64[out_len - 2] = '='; }
+    else if (got % 3 == 2) { b64[out_len - 1] = '='; }
+    b64[out_len] = '\0';
+    free(src);
+
+    size_t need = strlen("data:image/png;base64,") + out_len + 1;
+    char *out = malloc(need);
+    snprintf(out, need, "data:image/png;base64,%s", b64);
+    free(b64);
+    return out;
+    ```)
+
+  (defn __rhtml-image-rel-name [img_path :cstr html_path :cstr cell_id_value :cstr idx :int] #{Unsafe} :cstr
+    ```c
+    const char *src = img_path ? (const char *)(intptr_t)img_path : "";
+    const char *html_out = html_path ? (const char *)(intptr_t)html_path : "";
+    const char *cell_id = cell_id_value ? (const char *)(intptr_t)cell_id_value : "";
+    const char *html_base = strrchr(html_out, '/');
+    html_base = html_base ? html_base + 1 : html_out;
+    size_t stem_len = strlen(html_base);
+    const char *dot = strrchr(html_base, '.');
+    if (dot) stem_len = (size_t)(dot - html_base);
+    const char *src_base = strrchr(src, '/');
+    src_base = src_base ? src_base + 1 : src;
+    const char *ext = strrchr(src_base, '.');
+    if (!ext) ext = ".png";
+    char *stem = malloc(stem_len + 1);
+    memcpy(stem, html_base, stem_len);
+    stem[stem_len] = '\0';
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s-%s-%lld%s",
+             stem[0] ? stem : "notebook",
+             cell_id[0] ? cell_id : "cell",
+             (long long)idx,
+             ext);
+    free(stem);
+    return strdup(buf);
+    ```)
+
+  (defn __rhtml-dir-join [dir_path :cstr child :cstr] #{Unsafe} :cstr
+    ```c
+    const char *dir = dir_path ? (const char *)(intptr_t)dir_path : "";
+    const char *child_name = child ? (const char *)(intptr_t)child : "";
+    size_t need = strlen(dir) + (dir[0] ? 1 : 0) + strlen(child_name) + 1;
+    char *out = malloc(need);
+    if (dir[0]) snprintf(out, need, "%s/%s", dir, child_name);
+    else snprintf(out, need, "%s", child_name);
+    return out;
+    ```)
+
+  (defn __rhtml-output-dir [html_path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *src = html_path ? (const char *)(intptr_t)html_path : "";
+    const char *slash = strrchr(src, '/');
+    if (!slash) return strdup("");
+    size_t n = (size_t)(slash - src);
+    char *out = malloc(n + 1);
+    memcpy(out, src, n);
+    out[n] = '\0';
+    return out;
+    ```)
+
+  (defn __rhtml-render-image-block [output :int image_mode :cstr html_path :cstr cell_id_value :cstr] #{Unsafe} :cstr
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    if (!out || !out->image_paths) return strdup("");
+
+    const char *mode = image_mode ? (const char *)(intptr_t)image_mode : "inline";
+    const char *html_out = html_path ? (const char *)(intptr_t)html_path : "";
+    const char *cell_id = cell_id_value ? (const char *)(intptr_t)cell_id_value : "";
+
+    size_t cap = 256;
+    size_t len = 0;
+    char *html = malloc(cap);
+    strcpy(html, "<div class=\"cell-images\">");
+    len = strlen(html);
+
+    int idx = 1;
+    for (Cons *lst = (Cons *)(intptr_t)out->image_paths; lst; lst = (Cons *)(intptr_t)lst->tail, idx++) {
+      const char *img_path = (const char *)(intptr_t)lst->head;
+      if (!img_path || !img_path[0]) continue;
+
+      char *src_ref = NULL;
+      if (strcmp(mode, "file") == 0) {
+        const char *base = strrchr(img_path, '/');
+        base = base ? base + 1 : img_path;
+        const char *ext = strrchr(base, '.');
+        if (!ext) ext = ".png";
+
+        const char *html_base = strrchr(html_out, '/');
+        html_base = html_base ? html_base + 1 : html_out;
+        size_t stem_len = strlen(html_base);
+        const char *dot = strrchr(html_base, '.');
+        if (dot) stem_len = (size_t)(dot - html_base);
+        char stem[256];
+        if (stem_len == 0) snprintf(stem, sizeof(stem), "notebook");
+        else snprintf(stem, sizeof(stem), "%.*s", (int)stem_len, html_base);
+
+        char rel_name[512];
+        snprintf(rel_name, sizeof(rel_name), "%s-%s-%d%s",
+                 stem,
+                 cell_id[0] ? cell_id : "cell",
+                 idx,
+                 ext);
+
+        if (html_out[0]) {
+          const char *slash = strrchr(html_out, '/');
+          char dst[1024];
+          if (slash) snprintf(dst, sizeof(dst), "%.*s/%s", (int)(slash - html_out), html_out, rel_name);
+          else snprintf(dst, sizeof(dst), "%s", rel_name);
+
+          FILE *in = fopen(img_path, "rb");
+          if (in) {
+            FILE *outf = fopen(dst, "wb");
+            if (outf) {
+              char buf[8192];
+              size_t n;
+              while ((n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, outf);
+              fclose(outf);
+            }
+            fclose(in);
+          }
+          src_ref = strdup(rel_name);
+        } else {
+          src_ref = strdup(img_path);
+        }
+      } else {
+        FILE *fp = fopen(img_path, "rb");
+        if (!fp) continue;
+        if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); continue; }
+        long sz = ftell(fp);
+        if (sz < 0) { fclose(fp); continue; }
+        rewind(fp);
+        unsigned char *src = malloc((size_t)sz);
+        size_t got = fread(src, 1, (size_t)sz, fp);
+        fclose(fp);
+
+        static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        size_t b64_len = ((got + 2) / 3) * 4;
+        char *b64 = malloc(b64_len + 1);
+        size_t i = 0, j = 0;
+        while (i < got) {
+          unsigned a = src[i++];
+          unsigned b = i < got ? src[i++] : 0;
+          unsigned c = i < got ? src[i++] : 0;
+          unsigned tri = (a << 16) | (b << 8) | c;
+          b64[j++] = tbl[(tri >> 18) & 63];
+          b64[j++] = tbl[(tri >> 12) & 63];
+          b64[j++] = (i - 1 > got) ? '=' : tbl[(tri >> 6) & 63];
+          b64[j++] = (i > got) ? '=' : tbl[tri & 63];
+        }
+        if (got % 3 == 1) { b64[b64_len - 1] = '='; b64[b64_len - 2] = '='; }
+        else if (got % 3 == 2) { b64[b64_len - 1] = '='; }
+        b64[b64_len] = '\0';
+        free(src);
+
+        size_t need = strlen("data:image/png;base64,") + b64_len + 1;
+        src_ref = malloc(need);
+        snprintf(src_ref, need, "data:image/png;base64,%s", b64);
+        free(b64);
+      }
+
+      size_t esc_cap = strlen(src_ref) * 6 + 1;
+      char *src_esc = malloc(esc_cap);
+      size_t esc_len = 0;
+      for (const char *p = src_ref; *p; p++) {
+        const char *rep = NULL;
+        switch (*p) {
+          case '&': rep = "&amp;"; break;
+          case '<': rep = "&lt;"; break;
+          case '>': rep = "&gt;"; break;
+          case '"': rep = "&quot;"; break;
+          case '\'': rep = "&#39;"; break;
+          default: break;
+        }
+        if (rep) {
+          size_t n = strlen(rep);
+          memcpy(src_esc + esc_len, rep, n);
+          esc_len += n;
+        } else {
+          src_esc[esc_len++] = *p;
+        }
+      }
+      src_esc[esc_len] = '\0';
+
+      size_t need = len + strlen(src_esc) + 64;
+      while (need > cap) { cap *= 2; html = realloc(html, cap); }
+      len += (size_t)snprintf(html + len, cap - len,
+                              "<img src=\"%s\" alt=\"cell image %d\" />",
+                              src_esc, idx);
+      free(src_ref);
+      free(src_esc);
+    }
+
+    if (len == strlen("<div class=\"cell-images\">")) {
+      free(html);
+      return strdup("");
+    }
+    size_t need = len + strlen("</div>") + 1;
+    while (need > cap) { cap *= 2; html = realloc(html, cap); }
+    strcpy(html + len, "</div>");
+    return html;
+    ```)
+
+  (defn __rhtml-cell-shows-source? [cell :int opts :int] #{Unsafe} :bool
+    (and (= (__rhtml-render-opts-include-source opts) 1)
+         (= (attr-get-bool (cell-attrs cell) "echo" 1) 1)))
+
+  (defn __rhtml-cell-shows-output? [cell :int output :int opts :int] #{Unsafe} :bool
+    (and (not (= output 0))
+         (= (__rhtml-render-opts-include-output opts) 1)
+         (= (attr-get-bool (cell-attrs cell) "output" 1) 1)))
+
+  (defn __rhtml-render-cell-content [cell :int output :int opts :int html_path :cstr] #{Unsafe} :cstr
+    (let [source-part (if (__rhtml-cell-shows-source? cell opts)
+                        (__rhtml-render-source-pre cell)
+                        "")
+          output-part (if (__rhtml-cell-shows-output? cell output opts)
+                        (__rhtml-render-output-pre output)
+                        "")
+          image-part (if (__rhtml-cell-shows-output? cell output opts)
+                       (__rhtml-render-image-block output
+                                                   (attr-get (cell-attrs cell) "image" "inline")
+                                                   html_path
+                                                   (cell-id cell))
+                       "")]
+      (__rhtml-join-blocks source-part (__rhtml-join-blocks output-part image-part))))
+
+  (defn __rhtml-render-single-cell [cell :int output :int opts :int html_path :cstr] #{Unsafe} :cstr
+    (__rhtml-str-concat "<section class=\"notebook-cell\">"
+                        (__rhtml-str-concat
+                          (__rhtml-render-cell-content cell output opts html_path)
+                          "</section>")))
+
+  (defn __rhtml-should-toggle-pair? [cell_a :int cell_b :int opts :int] #{Unsafe} :bool
+    (and (not (= (cell-lang cell_a) (cell-lang cell_b)))
+         (and (__rhtml-cell-shows-source? cell_a opts)
+              (__rhtml-cell-shows-source? cell_b opts))))
+
+  (defn __rhtml-toggle-button [lang :int active? :bool] #{Unsafe} :cstr
+    (__rhtml-str-concat
+      "<button class=\"seg-btn"
+      (__rhtml-str-concat
+        (if active? " active" "")
+        (__rhtml-str-concat
+          "\" data-syntax=\""
+          (__rhtml-str-concat
+            (__rhtml-lang-label lang)
+            (__rhtml-str-concat
+              "\" role=\"tab\" aria-selected=\""
+              (__rhtml-str-concat (if active? "true" "false")
+                                  (__rhtml-str-concat "\">"
+                                                      (__rhtml-str-concat (__rhtml-lang-label lang)
+                                                                          "</button>")))))))))
+
+  (defn __rhtml-toggle-panel [cell :int output :int opts :int html_path :cstr active? :bool] #{Unsafe} :cstr
+    (__rhtml-str-concat
+      "<div class=\"code-version "
+      (__rhtml-str-concat
+        (__rhtml-lang-label (cell-lang cell))
+        (__rhtml-str-concat
+          "-version\" role=\"tabpanel\""
+          (__rhtml-str-concat
+            (if active? "" " hidden=\"hidden\"")
+            (__rhtml-str-concat ">"
+                                (__rhtml-str-concat (__rhtml-render-cell-content cell output opts html_path)
+                                                    "</div>")))))))
+
+  (defn __rhtml-render-toggle-pair [cell_a :int output_a :int cell_b :int output_b :int opts :int html_path :cstr] #{Unsafe} :cstr
+    (__rhtml-str-concat
+      "<section class=\"code-card code-toggle\"><div class=\"code-card-bar\"><span class=\"cell-meta\">paired syntax view</span><div class=\"code-syntax-toggle\" role=\"tablist\">"
+      (__rhtml-str-concat
+        (__rhtml-toggle-button (cell-lang cell_a) true)
+        (__rhtml-str-concat
+          (__rhtml-toggle-button (cell-lang cell_b) false)
+          (__rhtml-str-concat
+            "</div></div>"
+            (__rhtml-str-concat
+              (__rhtml-toggle-panel cell_a output_a opts html_path true)
+              (__rhtml-str-concat (__rhtml-toggle-panel cell_b output_b opts html_path false)
+                                  "</section>")))))))
+
+  (defn __rhtml-render-state-make [text :cstr outputs :int] #{Unsafe} :int
+    ```c
+    typedef struct { char *text; int64_t outputs; } RenderState;
+    RenderState *state = malloc(sizeof(*state));
+    state->text = text ? strdup((const char *)(intptr_t)text) : strdup("");
+    state->outputs = outputs;
+    return (int64_t)(intptr_t)state;
+    ```)
+
+  (defn __rhtml-render-state-text [state :int] #{Unsafe} :cstr
+    ```c
+    typedef struct { char *text; int64_t outputs; } RenderState;
+    RenderState *s = (RenderState *)(intptr_t)state;
+    return s && s->text ? s->text : "";
+    ```)
+
+  (defn __rhtml-render-state-outputs [state :int] #{Unsafe} :int
+    ```c
+    typedef struct { char *text; int64_t outputs; } RenderState;
+    RenderState *s = (RenderState *)(intptr_t)state;
+    return s ? s->outputs : 0;
+    ```)
+
+  (defn __rhtml-render-body [nodes :int outputs :int opts :int html_path :cstr] #{Unsafe} :int
+    (if (__rhtml-list-nil? nodes)
+      (__rhtml-render-state-make "" outputs)
+      (let [node (__rhtml-head nodes)]
+        (if (= (node-tag node) 0)
+          (let [rest (__rhtml-render-body (__rhtml-tail nodes) outputs opts html_path)]
+            (__rhtml-render-state-make
+              (__rhtml-join-blocks (md-emit-html (node-prose node))
+                                   (__rhtml-render-state-text rest))
+              (__rhtml-render-state-outputs rest)))
+          (let [cell (node-cell node)
+                cur-output (if (__rhtml-list-nil? outputs) 0 (__rhtml-head outputs))
+                rest-outputs (if (__rhtml-list-nil? outputs) (__rhtml-nil-value) (__rhtml-tail outputs))
+                more-nodes (__rhtml-tail nodes)]
+            (if (and (not (__rhtml-list-nil? more-nodes))
+                     (= (node-tag (__rhtml-head more-nodes)) 1)
+                     (__rhtml-should-toggle-pair? cell (node-cell (__rhtml-head more-nodes)) opts))
+              (let [next-cell (node-cell (__rhtml-head more-nodes))
+                    next-output (if (__rhtml-list-nil? rest-outputs) 0 (__rhtml-head rest-outputs))
+                    tail-outputs (if (__rhtml-list-nil? rest-outputs) (__rhtml-nil-value) (__rhtml-tail rest-outputs))
+                    rest (__rhtml-render-body (__rhtml-tail more-nodes) tail-outputs opts html_path)]
+                (__rhtml-render-state-make
+                  (__rhtml-join-blocks
+                    (__rhtml-render-toggle-pair cell cur-output next-cell next-output opts html_path)
+                    (__rhtml-render-state-text rest))
+                  (__rhtml-render-state-outputs rest)))
+              (let [rest (__rhtml-render-body more-nodes rest-outputs opts html_path)]
+                (__rhtml-render-state-make
+                  (__rhtml-join-blocks
+                    (__rhtml-render-single-cell cell cur-output opts html_path)
+                    (__rhtml-render-state-text rest))
+                  (__rhtml-render-state-outputs rest)))))))))
+
+  (defn __rhtml-cells-from-nodes-rev [nodes :int acc :int] #{Unsafe} :int
+    (if (__rhtml-list-nil? nodes)
+      acc
+      (let [node (__rhtml-head nodes)]
+        (__rhtml-cells-from-nodes-rev
+          (__rhtml-tail nodes)
+          (if (= (node-tag node) 1)
+            (__rhtml-cons (node-cell node) acc)
+            acc)))))
+
+  (defn __rhtml-reverse [lst :int acc :int] #{Unsafe} :int
+    (if (__rhtml-list-nil? lst)
+      acc
+      (__rhtml-reverse (__rhtml-tail lst) (__rhtml-cons (__rhtml-head lst) acc))))
+
+  (defn __rhtml-cells-from-nodes [nodes :int] #{Unsafe} :int
+    (__rhtml-reverse (__rhtml-cells-from-nodes-rev nodes (__rhtml-nil-value))
+                     (__rhtml-nil-value)))
+
+  (defn __rhtml-list-length [lst :int] #{Unsafe} :int
+    (if (__rhtml-list-nil? lst)
+      0
+      (+ 1 (__rhtml-list-length (__rhtml-tail lst)))))
+
+  (defn __rhtml-document [title :cstr body :cstr] #{Unsafe} :cstr
+    (let [title_esc (__rhtml-html-escape title)
+          script (__rhtml-toggle-script)]
+      (__rhtml-str-concat
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><meta name=\"color-scheme\" content=\"dark\" /><title>"
+        (__rhtml-str-concat
+          title_esc
+          (__rhtml-str-concat
+            "</title><link rel=\"stylesheet\" href=\"style.css\" /></head><body class=\"notebook-page\"><main class=\"notebook-document\">"
+            (__rhtml-str-concat
+              body
+              (__rhtml-str-concat
+                "</main><script>"
+                (__rhtml-str-concat script "</script></body></html>"))))))))
+
+  ;;; render-html-string-at -- render a parsed notebook to HTML as if writing html_path.
+  (defn render-html-string-at [nodes :int outputs :int opts :int html_path :cstr] #{Unsafe} :cstr
+    (let [body (__rhtml-render-state-text (__rhtml-render-body nodes outputs opts html_path))
+          title "Notebook"]
+      (__rhtml-document title body)))
+
+  ;;; render-html-string -- render a parsed notebook and its outputs to standalone HTML.
+  (defn render-html-string [nodes :int outputs :int opts :int] #{Unsafe} :cstr
+    (let [body (__rhtml-render-state-text (__rhtml-render-body nodes outputs opts ""))
+          title "Notebook"]
+      (__rhtml-document title body)))
+
+  ;;; render-html -- evaluate a notebook file and write rendered HTML beside it.
+  (defn render-html [path :cstr opts :int] #{Unsafe} :int
+    (let [parsed (parse-file path)]
+      (if (not (__rhtml-result-ok? parsed))
+        (__rhtml-err "failed to parse notebook file")
+        (let [nodes (__rhtml-result-ok-val parsed)
+              cells (cells-assign-ids (__rhtml-cells-from-nodes nodes))
+              session (session-open)
+              cache (if (= (__rhtml-render-opts-use-cache opts) 1)
+                      (cache-open "")
+                      0)
+              outputs (eval-all session cells cache 0)
+              halted? (and (= (__rhtml-render-opts-fail-fast opts) 1)
+                           (< (__rhtml-list-length outputs) (__rhtml-list-length cells)))]
+          (if halted?
+            (do
+              (session-close session)
+              (__rhtml-close-cache cache)
+              (__rhtml-err "render halted after a cell error"))
+            (let [out-path (__rhtml-output-path path (__rhtml-render-opts-output-dir opts))
+                  style-path (__rhtml-style-path out-path)
+                  title (__rhtml-page-title path)
+                  body (__rhtml-render-state-text (__rhtml-render-body nodes outputs opts out-path))
+                  html (__rhtml-document title body)
+                  css (__rhtml-style-css)]
+              (do
+                (session-close session)
+                (__rhtml-close-cache cache)
+                (if (or (= (__rhtml-ensure-parent-dir out-path) -1)
+                        (= (__rhtml-ensure-parent-dir style-path) -1))
+                  (__rhtml-err "failed to create output directory")
+                  (if (= (__rhtml-write-file style-path css) 1)
+                    (if (= (__rhtml-write-file out-path html) 1)
+                      (__rhtml-ok (__rhtml-cstr-as-int out-path))
+                      (__rhtml-err "failed to write rendered html"))
+                    (__rhtml-err "failed to write stylesheet"))))))))))
+
+) ;; end defmodule notebook/render-html

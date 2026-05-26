@@ -1,0 +1,168 @@
+;; plot/tick.tur -- linear and logarithmic tick helpers.
+
+(defmodule plot/tick
+  (export linear-ticks log-ticks format-tick linear-tick-labels log-tick-labels)
+
+  ;;; format-tick -- format a numeric tick value with a fixed precision.
+  (defn format-tick [v :float precision :int] :cstr
+    ```c
+    #include <stdlib.h>
+    #include <stdio.h>
+    #include <string.h>
+    int prec = (int)precision;
+    if (prec < 0) prec = 0;
+    if (prec > 12) prec = 12;
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%.*f", prec, v);
+    size_t len = strlen(buf);
+    while (len > 0 && buf[len - 1] == '0') { buf[--len] = '\0'; }
+    if (len > 0 && buf[len - 1] == '.') { buf[--len] = '\0'; }
+    char *out = (char *)malloc(len + 1);
+    memcpy(out, buf, len + 1);
+    return (char *)(intptr_t)out;
+    ```)
+
+  ;;; linear-ticks -- generate nice linear ticks in [lo, hi].
+  (defn linear-ticks [lo :float hi :float count :int] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    extern double floor(double);
+    extern double ceil(double);
+    extern double log10(double);
+    extern double pow(double, double);
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    if (!(hi > lo)) return 0;
+    int n = (int)count;
+    if (n < 2) n = 2;
+    double span = hi - lo;
+    double raw = span / (double)(n - 1);
+    double mag = pow(10.0, floor(log10(raw)));
+    double norm = raw / mag;
+    double step = mag;
+    if (norm < 1.5) step = 1.0 * mag;
+    else if (norm < 3.0) step = 2.0 * mag;
+    else if (norm < 7.0) step = 5.0 * mag;
+    else step = 10.0 * mag;
+    double start = ceil(lo / step) * step;
+    double end   = floor(hi / step) * step;
+    int64_t out = 0;
+    for (double v = end + step * 0.25; v >= start - step * 0.25; v -= step) {
+      union { double d; int64_t i; } u; u.d = v;
+      Cons *cell = (Cons *)malloc(sizeof(*cell));
+      cell->head = u.i;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    return out;
+    ```)
+
+  ;;; log-ticks -- generate powers-of-ten ticks in [lo, hi].
+  (defn log-ticks [lo :float hi :float] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    extern double floor(double);
+    extern double ceil(double);
+    extern double log10(double);
+    extern double pow(double, double);
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    if (!(lo > 0.0) || !(hi > lo)) return 0;
+    int s = (int)ceil(log10(lo));
+    int e = (int)floor(log10(hi));
+    int64_t out = 0;
+    for (int p = e; p >= s; p--) {
+      union { double d; int64_t i; } u; u.d = pow(10.0, (double)p);
+      Cons *cell = (Cons *)malloc(sizeof(*cell));
+      cell->head = u.i;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    return out;
+    ```)
+
+  ;;; linear-tick-labels -- generate linear ticks paired with formatted labels.
+  (defn linear-tick-labels [lo :float hi :float count :int] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdio.h>
+    #include <string.h>
+    #include <stdint.h>
+    extern double floor(double);
+    extern double ceil(double);
+    extern double log10(double);
+    extern double pow(double, double);
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    if (!(hi > lo)) return 0;
+    int n = (int)count;
+    if (n < 2) n = 2;
+    double span = hi - lo;
+    double raw = span / (double)(n - 1);
+    double mag = pow(10.0, floor(log10(raw)));
+    double norm = raw / mag;
+    double step = mag;
+    if (norm < 1.5) step = 1.0 * mag;
+    else if (norm < 3.0) step = 2.0 * mag;
+    else if (norm < 7.0) step = 5.0 * mag;
+    else step = 10.0 * mag;
+    int prec = step >= 1.0 ? 2 : (int)ceil(-log10(step)) + 1;
+    if (prec < 0) prec = 0;
+    if (prec > 8) prec = 8;
+    double start = ceil(lo / step) * step;
+    double end   = floor(hi / step) * step;
+    int64_t out = 0;
+    for (double v = end + step * 0.25; v >= start - step * 0.25; v -= step) {
+      char buf[128];
+      snprintf(buf, sizeof(buf), "%.*f", prec, v);
+      size_t len = strlen(buf);
+      while (len > 0 && buf[len - 1] == '0') { buf[--len] = '\0'; }
+      if (len > 0 && buf[len - 1] == '.') { buf[--len] = '\0'; }
+      char *label = (char *)malloc(len + 1);
+      memcpy(label, buf, len + 1);
+      union { double d; int64_t i; } u; u.d = v;
+      Cons *pair = (Cons *)malloc(sizeof(*pair));
+      pair->head = u.i;
+      pair->tail = (int64_t)(intptr_t)label;
+      Cons *cell = (Cons *)malloc(sizeof(*cell));
+      cell->head = (int64_t)(intptr_t)pair;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    return out;
+    ```)
+
+  ;;; log-tick-labels -- generate log ticks paired with labels.
+  (defn log-tick-labels [lo :float hi :float] :int
+    ```c
+    #include <stdlib.h>
+    #include <stdio.h>
+    #include <string.h>
+    #include <stdint.h>
+    extern double floor(double);
+    extern double ceil(double);
+    extern double log10(double);
+    extern double pow(double, double);
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    if (!(lo > 0.0) || !(hi > lo)) return 0;
+    int s = (int)ceil(log10(lo));
+    int e = (int)floor(log10(hi));
+    int64_t out = 0;
+    for (int p = e; p >= s; p--) {
+      double v = pow(10.0, (double)p);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "1e%d", p);
+      char *label = (char *)malloc(strlen(buf) + 1);
+      strcpy(label, buf);
+      union { double d; int64_t i; } u; u.d = v;
+      Cons *pair = (Cons *)malloc(sizeof(*pair));
+      pair->head = u.i;
+      pair->tail = (int64_t)(intptr_t)label;
+      Cons *cell = (Cons *)malloc(sizeof(*cell));
+      cell->head = (int64_t)(intptr_t)pair;
+      cell->tail = out;
+      out = (int64_t)(intptr_t)cell;
+    }
+    return out;
+    ```)
+
+) ;; end defmodule plot/tick

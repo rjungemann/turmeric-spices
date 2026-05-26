@@ -1,0 +1,24 @@
+;; plot/area.tur -- filled rectangles and histogram renderers.
+
+(defmodule plot/area
+  (export rectangles area-histogram discrete-histogram stacked-histogram)
+
+  (import plot/core :refer [__make-renderer __renderer-ints])
+
+  ;;; rectangles -- draw filled rectangles from nested cons quads.
+  (defn rectangles [rects :int fill :int label :cstr] :int
+    (__make-renderer 50 fill 0 rects 0 0 0 0 label ""))
+
+  ;;; area-histogram -- draw pre-bucketed bars with cycling fills.
+  (defn area-histogram [bars :int fill-styles :int label :cstr] :int
+    (__make-renderer 51 0 0 bars fill-styles 0 0 0 label ""))
+
+  ;;; discrete-histogram -- categorical bar chart.
+  (defn discrete-histogram [bars :int fill :int invert :int label :cstr] :int
+    (__renderer-ints (__make-renderer 52 fill 0 bars bars 0 0 0 label "") invert 0 0 0))
+
+  ;;; stacked-histogram -- stacked categorical bars.
+  (defn stacked-histogram [groups :int fills :int labels :int invert :int] :int
+    (__renderer-ints (__make-renderer 53 0 0 groups groups fills labels 0 "" "") invert 0 0 0))
+
+) ;; end defmodule plot/area

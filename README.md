@@ -25,6 +25,8 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 | [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 1 -- inline-C only | -- |
 | [`tur-signal`](spices/signal/) | Arrow-based signal processing (SF, DSP, ADSR, synth) | 1 -- pure Turmeric | -- |
 | [`tur-frame`](spices/frame/) | In-memory dataframe (Arrow-compatible columnar) | 1 -- pure Turmeric | -- |
+| [`tur-plot`](spices/plot/) | 2D data visualization (functions, points, histograms, contours) | 1 -- pure Turmeric | tur-plutovg |
+| [`tur-notebook`](spices/notebook/) | Literate `.tur.md` notebooks with TUI, HTML export, and cell execution | 3 -- cmake-dep | libturi (linked against turmeric build) |
 
 ---
 

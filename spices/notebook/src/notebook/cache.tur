@@ -1,0 +1,333 @@
+;; notebook/cache -- disk-backed cache for notebook cell outputs.
+
+(defmodule notebook/cache
+  (export cache-open cache-close cache-get cache-put cache-clear)
+
+  (defn __nbc-cache-dir-default [] :cstr
+    ".turnb-cache")
+
+  (defn __nbc-cstr-empty? [s :cstr] #{Unsafe} :bool
+    ```c
+    const char *src = s ? (const char *)(intptr_t)s : "";
+    return src[0] == '\0';
+    ```)
+
+  (defn __nbc-cache-make [dir :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { char *dir; } NotebookCache;
+    NotebookCache *cache = malloc(sizeof(*cache));
+    cache->dir = dir ? strdup((const char *)(intptr_t)dir) : strdup(".turnb-cache");
+    return (int64_t)(intptr_t)cache;
+    ```)
+
+  (defn __nbc-ensure-dir [dir :cstr] #{Unsafe} :int
+    ```c
+    #include <sys/stat.h>
+    char *p = strdup(dir ? (const char *)(intptr_t)dir : ".turnb-cache");
+    int ret = 0;
+    for (char *s = p + 1; *s; s++) {
+      if (*s == '/') {
+        struct stat st;
+        *s = '\0';
+        if (stat(p, &st) != 0) {
+          if (mkdir(p, 0755) != 0) { ret = -1; break; }
+        } else if (!S_ISDIR(st.st_mode)) {
+          ret = -1;
+          break;
+        }
+        *s = '/';
+      }
+    }
+    if (ret == 0) {
+      struct stat st;
+      if (stat(p, &st) != 0) {
+        if (mkdir(p, 0755) != 0) ret = -1;
+      } else if (!S_ISDIR(st.st_mode)) {
+        ret = -1;
+      }
+    }
+    free(p);
+    return ret;
+    ```)
+
+  (defn __nbc-path [cache :int key :cstr] #{Unsafe} :cstr
+    ```c
+    typedef struct { char *dir; } NotebookCache;
+    NotebookCache *c = (NotebookCache *)(intptr_t)cache;
+    const char *dir = (c && c->dir) ? c->dir : ".turnb-cache";
+    const char *k = key ? (const char *)(intptr_t)key : "";
+    size_t len = strlen(dir) + strlen(k) + 7;
+    char *out = malloc(len);
+    snprintf(out, len, "%s/%s.nbc", dir, k);
+    return out;
+    ```)
+
+  ;;; cache-open -- open a cache rooted at the given directory.
+  ;;;
+  ;;; Parameters:
+  ;;;   dir -- cache directory path, or "" to use .turnb-cache
+  ;;;
+  ;;; Returns:
+  ;;;   An opaque cache handle.
+  ;;;
+  ;;; Example:
+  ;;;   (cache-open ".turnb-cache")
+  ;;;
+  ;;; Since: notebook-v0.1.0
+  (defn cache-open [dir :cstr] #{Unsafe} :int
+    (let [use-dir (if (__nbc-cstr-empty? dir) (__nbc-cache-dir-default) dir)
+          _ (__nbc-ensure-dir use-dir)]
+      (__nbc-cache-make use-dir)))
+
+  ;;; cache-close -- free a cache handle.
+  ;;;
+  ;;; Parameters:
+  ;;;   cache -- cache handle returned by cache-open
+  ;;;
+  ;;; Example:
+  ;;;   (cache-close cache)
+  ;;;
+  ;;; Since: notebook-v0.1.0
+  (defn cache-close [cache :int] #{Unsafe} :void
+    ```c
+    typedef struct { char *dir; } NotebookCache;
+    NotebookCache *c = (NotebookCache *)(intptr_t)cache;
+    if (!c) return;
+    if (c->dir) free(c->dir);
+    free(c);
+    ```)
+
+  ;;; cache-get -- load a cached cell-output by key, or 0 on miss.
+  ;;;
+  ;;; Parameters:
+  ;;;   cache -- cache handle returned by cache-open
+  ;;;   key   -- SHA-256 cache key
+  ;;;
+  ;;; Returns:
+  ;;;   A cell-output-compatible handle, or 0 if the key is absent.
+  ;;;
+  ;;; Example:
+  ;;;   (cache-get cache "abc123")
+  ;;;
+  ;;; Since: notebook-v0.1.0
+  (defn cache-get [cache :int key :cstr] #{Unsafe} :int
+    ```c
+    typedef struct { char *dir; } NotebookCache;
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+
+    NotebookCache *c = (NotebookCache *)(intptr_t)cache;
+    const char *dir = (c && c->dir) ? c->dir : ".turnb-cache";
+    const char *k = key ? (const char *)(intptr_t)key : "";
+    size_t path_len = strlen(dir) + strlen(k) + 7;
+    char *path = malloc(path_len);
+    snprintf(path, path_len, "%s/%s.nbc", dir, k);
+
+    FILE *fp = fopen(path, "rb");
+    free(path);
+    if (!fp) return 0;
+
+    char magic[4];
+    if (fread(magic, 1, 4, fp) != 4 || memcmp(magic, "NBC1", 4) != 0) {
+      fclose(fp);
+      return 0;
+    }
+
+    long long meta[7];
+    if (fread(meta, sizeof(long long), 7, fp) != 7) {
+      fclose(fp);
+      return 0;
+    }
+
+    size_t id_len = (size_t)meta[0];
+    size_t out_len = (size_t)meta[1];
+    size_t val_len = (size_t)meta[2];
+    size_t err_len = (size_t)meta[3];
+    int64_t status = (int64_t)meta[4];
+    int64_t elapsed_ms = (int64_t)meta[5];
+    size_t image_count = (size_t)meta[6];
+
+    char *cell_id = malloc(id_len + 1);
+    char *stdout_text = malloc(out_len + 1);
+    char *value_repr = malloc(val_len + 1);
+    char *error_msg = malloc(err_len + 1);
+    if (fread(cell_id, 1, id_len, fp) != id_len ||
+        fread(stdout_text, 1, out_len, fp) != out_len ||
+        fread(value_repr, 1, val_len, fp) != val_len ||
+        fread(error_msg, 1, err_len, fp) != err_len) {
+      free(cell_id);
+      free(stdout_text);
+      free(value_repr);
+      free(error_msg);
+      fclose(fp);
+      return 0;
+    }
+    cell_id[id_len] = '\0';
+    stdout_text[out_len] = '\0';
+    value_repr[val_len] = '\0';
+    error_msg[err_len] = '\0';
+
+    Cons *head = NULL;
+    Cons *tail = NULL;
+    for (size_t i = 0; i < image_count; i++) {
+      long long img_len_ll = 0;
+      if (fread(&img_len_ll, sizeof(long long), 1, fp) != 1) {
+        fclose(fp);
+        return 0;
+      }
+      size_t img_len = (size_t)img_len_ll;
+      char *img = malloc(img_len + 1);
+      if (fread(img, 1, img_len, fp) != img_len) {
+        free(img);
+        fclose(fp);
+        return 0;
+      }
+      img[img_len] = '\0';
+      Cons *node = malloc(sizeof(*node));
+      node->head = (int64_t)(intptr_t)img;
+      node->tail = 0;
+      if (!head) {
+        head = node;
+        tail = node;
+      } else {
+        tail->tail = (int64_t)(intptr_t)node;
+        tail = node;
+      }
+    }
+
+    fclose(fp);
+
+    NotebookCellOutput *out = malloc(sizeof(*out));
+    out->cell_id = cell_id;
+    out->status = status;
+    out->stdout_text = stdout_text;
+    out->value_repr = value_repr;
+    out->error_msg = error_msg;
+    out->elapsed_ms = elapsed_ms;
+    out->image_paths = (int64_t)(intptr_t)head;
+    return (int64_t)(intptr_t)out;
+    ```)
+
+  ;;; cache-put -- write a cell-output to disk under the given key.
+  ;;;
+  ;;; Parameters:
+  ;;;   cache  -- cache handle returned by cache-open
+  ;;;   key    -- SHA-256 cache key
+  ;;;   output -- cell-output handle to persist
+  ;;;
+  ;;; Example:
+  ;;;   (cache-put cache key output)
+  ;;;
+  ;;; Since: notebook-v0.1.0
+  (defn cache-put [cache :int key :cstr output :int] #{Unsafe} :void
+    ```c
+    typedef struct { char *dir; } NotebookCache;
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+
+    NotebookCache *c = (NotebookCache *)(intptr_t)cache;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    if (!c || !out) return;
+
+    char *p = strdup(c->dir ? c->dir : ".turnb-cache");
+    for (char *s = p + 1; *s; s++) {
+      if (*s == '/') {
+        *s = '\0';
+        mkdir(p, 0755);
+        *s = '/';
+      }
+    }
+    mkdir(p, 0755);
+    free(p);
+
+    const char *k = key ? (const char *)(intptr_t)key : "";
+    size_t path_len = strlen(c->dir ? c->dir : ".turnb-cache") + strlen(k) + 7;
+    char *path = malloc(path_len);
+    snprintf(path, path_len, "%s/%s.nbc", c->dir ? c->dir : ".turnb-cache", k);
+
+    FILE *fp = fopen(path, "wb");
+    free(path);
+    if (!fp) return;
+
+    const char *cell_id = out->cell_id ? out->cell_id : "";
+    const char *stdout_text = out->stdout_text ? out->stdout_text : "";
+    const char *value_repr = out->value_repr ? out->value_repr : "";
+    const char *error_msg = out->error_msg ? out->error_msg : "";
+
+    long long image_count = 0;
+    for (Cons *imgs = (Cons *)(intptr_t)out->image_paths; imgs; imgs = (Cons *)(intptr_t)imgs->tail) {
+      image_count++;
+    }
+
+    long long meta[7];
+    meta[0] = (long long)strlen(cell_id);
+    meta[1] = (long long)strlen(stdout_text);
+    meta[2] = (long long)strlen(value_repr);
+    meta[3] = (long long)strlen(error_msg);
+    meta[4] = (long long)out->status;
+    meta[5] = (long long)out->elapsed_ms;
+    meta[6] = image_count;
+
+    fwrite("NBC1", 1, 4, fp);
+    fwrite(meta, sizeof(long long), 7, fp);
+    fwrite(cell_id, 1, (size_t)meta[0], fp);
+    fwrite(stdout_text, 1, (size_t)meta[1], fp);
+    fwrite(value_repr, 1, (size_t)meta[2], fp);
+    fwrite(error_msg, 1, (size_t)meta[3], fp);
+
+    for (Cons *imgs = (Cons *)(intptr_t)out->image_paths; imgs; imgs = (Cons *)(intptr_t)imgs->tail) {
+      const char *img = (const char *)(intptr_t)imgs->head;
+      long long img_len = (long long)strlen(img ? img : "");
+      fwrite(&img_len, sizeof(long long), 1, fp);
+      fwrite(img ? img : "", 1, (size_t)img_len, fp);
+    }
+
+    fclose(fp);
+    ```)
+
+  ;;; cache-clear -- remove every cached entry from the cache directory.
+  ;;;
+  ;;; Parameters:
+  ;;;   cache -- cache handle returned by cache-open
+  ;;;
+  ;;; Example:
+  ;;;   (cache-clear cache)
+  ;;;
+  ;;; Since: notebook-v0.1.0
+  (defn cache-clear [cache :int] #{Unsafe} :void
+    ```c
+    #include <dirent.h>
+    typedef struct { char *dir; } NotebookCache;
+    NotebookCache *c = (NotebookCache *)(intptr_t)cache;
+    const char *dir = (c && c->dir) ? c->dir : ".turnb-cache";
+    DIR *dp = opendir(dir);
+    if (!dp) return;
+    struct dirent *ent;
+    while ((ent = readdir(dp)) != NULL) {
+      if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+      size_t len = strlen(dir) + strlen(ent->d_name) + 2;
+      char *path = malloc(len);
+      snprintf(path, len, "%s/%s", dir, ent->d_name);
+      unlink(path);
+      free(path);
+    }
+    closedir(dp);
+    ```)
+
+) ;; end defmodule notebook/cache
