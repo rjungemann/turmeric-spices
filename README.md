@@ -443,22 +443,58 @@ tur add https://github.com/rjungemann/turmeric-spices \
 
 ---
 
+### tur-stats -- statistical analysis on dataframes
+
+Exports: `stats/mathx`, `stats/rng`, `stats/summary`, `stats/cov`,
+`stats/dist`, `stats/test`, `stats/regress`, `stats/sample`, `stats/fmt`
+
+```turmeric
+(import frame/csv    :refer [read-csv-string])
+(import stats/summary :refer [col-mean col-sd describe])
+(import stats/dist   :refer [dnorm pnorm qnorm rnorm])
+(import stats/test   :refer [t-test-2samp])
+
+;; Summary statistics
+(let [f (read-csv-string "a,b\n1,2\n3,4\n5,6\n" 0 0 1 0 "")]
+  (describe f))
+
+;; Normal distribution
+(println (dnorm 0.0 0.0 1.0))  ; PDF
+(println (pnorm 1.96 0.0 1.0)) ; CDF
+
+;; t-test
+(let [a (read-csv-string "x\n1\n2\n3\n" 0 0 1 0 "")
+      b (read-csv-string "x\n4\n5\n6\n" 0 0 1 0 "")]
+  (t-test-2samp a b))
+```
+
+Add to your project:
+
+```sh
+tur add https://github.com/rjungemann/turmeric-spices \
+  --ref stats-v0.1.0 --subdir spices/stats --name stats
+```
+
+---
+
 ## Tag convention
 
 Each spice is tagged independently:
 
 ```
-test-v0.1.0
-math-v0.1.0
 c-dsl-v0.1.0
+frame-v0.1.0
 glsl-v0.1.0
-opengl-v0.1.0
-sqlite-v0.1.0
-raylib-v0.1.0
-plutovg-v0.1.0
-json-v0.1.0
 http-v0.1.0
+json-v0.1.0
+math-v0.1.0
+opengl-v0.1.0
+plutovg-v0.1.0
+raylib-v0.1.0
 regex-v0.1.0
+sqlite-v0.1.0
+stats-v0.1.0
+test-v0.1.0
 ```
 
 Always pin to a tag in production. Omitting `:ref` resolves to HEAD and
