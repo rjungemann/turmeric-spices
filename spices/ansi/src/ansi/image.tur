@@ -1,14 +1,18 @@
-;;; ansi/image -- inline image protocols (Kitty / iTerm2) with placeholder fallback.
+;;; ansi/image -- inline image protocols (Kitty / iTerm2 / sixel) + placeholder.
 ;;
-;; All terminal escape sequences are emitted to stdout.  Image data is loaded
-;; from disk or accepted pre-encoded as base64.  Sixel is deferred to v0.2
-;; (see docs/tur-ansi-spice-plan.md "Risks and open questions" #1); calls that
-;; request sixel currently fall back to the bracketed placeholder so that
-;; callers using (term-image-protocol) need no special-case logic.
+;; Two input shapes are supported:
+;;   * PNG file (image-display, image-display-protocol) -- emits Kitty
+;;     (chunked APC) or iTerm2 (OSC 1337); falls back to placeholder when
+;;     no protocol is detected.  Sixel is NOT available via this path
+;;     because tur-ansi has no PNG decoder (the spice stays Tier 1, no
+;;     cmake deps -- pulling in libpng would violate that).
+;;   * Raw RGBA pixel buffer (image-display-rgba) -- emits a sixel sequence
+;;     directly.  The caller is responsible for decoding PNG / quantizing
+;;     into 4 bytes-per-pixel format; tur-notebook does this via tur-png.
 
 (defmodule ansi/image
   (export image-display image-display-base64
-          image-display-protocol image-placeholder)
+          image-display-protocol image-display-rgba image-placeholder)
 
   ;;; image-placeholder -- write a bracketed "[image: path]" string to stdout.
   ;;;
@@ -246,6 +250,123 @@
     }
     free(b64);
     fflush(stdout);
+    ```)
+
+  ;;; image-display-rgba -- emit a sixel sequence from a raw RGBA pixel buffer.
+  ;;;
+  ;;; Parameters:
+  ;;;   w    -- pixel width  (must be >= 1)
+  ;;;   h    -- pixel height (must be >= 1)
+  ;;;   rgba -- pointer to w*h*4 bytes in tightly-packed RGBA order
+  ;;;           (no row padding; alpha is currently ignored)
+  ;;;
+  ;;; Uses a fixed 6x6x6 color cube (216 colors) for quantization: each
+  ;;; channel is mapped to 0-5 via byte/51.  The encoder emits palette
+  ;;; declarations only for the colors that actually appear in the image,
+  ;;; then writes one 6-row sixel band at a time with run-length encoding
+  ;;; for repeated columns.
+  ;;;
+  ;;; No protocol detection is performed; the caller is expected to have
+  ;;; verified (term-image-protocol) == 3 first.  Out-of-range w or h are
+  ;;; treated as no-ops.  A null rgba pointer is also a no-op.
+  ;;;
+  ;;; Since: tur-ansi v0.1.2
+  (defn image-display-rgba [w :int h :int rgba :cstr] #{Unsafe} :void
+    ```c
+    int64_t W = w, H = h;
+    const unsigned char *src = (const unsigned char *)rgba;
+    if (W < 1 || H < 1 || !src) return;
+
+    /* Quantize every pixel into a 0..215 palette index (6x6x6 cube). */
+    size_t npix = (size_t)W * (size_t)H;
+    unsigned char *idx = (unsigned char *)malloc(npix);
+    if (!idx) return;
+    unsigned char used[216];
+    memset(used, 0, sizeof(used));
+    for (size_t i = 0; i < npix; i++) {
+      unsigned r = src[i * 4 + 0];
+      unsigned g = src[i * 4 + 1];
+      unsigned b = src[i * 4 + 2];
+      unsigned ri = r / 51, gi = g / 51, bi = b / 51;
+      if (ri > 5) ri = 5;
+      if (gi > 5) gi = 5;
+      if (bi > 5) bi = 5;
+      unsigned k = ri * 36 + gi * 6 + bi;
+      idx[i] = (unsigned char)k;
+      used[k] = 1;
+    }
+
+    /* Preamble + raster attributes:  ESC P q " 1 ; 1 ; W ; H */
+    printf("\033Pq\"1;1;%lld;%lld", (long long)W, (long long)H);
+
+    /* Palette declarations for colors that appear in the image only.
+       Sixel RGB is on a 0..100 scale; map each 0..5 nibble to {0,20,40,60,80,100}. */
+    static const int sixel_scale[6] = {0, 20, 40, 60, 80, 100};
+    for (int c = 0; c < 216; c++) {
+      if (!used[c]) continue;
+      int ri = c / 36, gi = (c / 6) % 6, bi = c % 6;
+      printf("#%d;2;%d;%d;%d", c, sixel_scale[ri], sixel_scale[gi], sixel_scale[bi]);
+    }
+
+    /* One sixel band == 6 image rows.  For each band, for each color
+       present in that band, walk the columns left-to-right writing the
+       6-bit pattern (one bit per row in the band) as character '?' + mask.
+       RLE-compress runs of identical characters as !<count><char>. */
+    int64_t bands = (H + 5) / 6;
+    unsigned char *row_chars = (unsigned char *)malloc((size_t)W);
+    unsigned char band_used[216];
+    if (!row_chars) { free(idx); fputs("\033\\", stdout); fflush(stdout); return; }
+
+    for (int64_t band = 0; band < bands; band++) {
+      int64_t y0 = band * 6;
+      int64_t rows = H - y0;
+      if (rows > 6) rows = 6;
+
+      /* Discover which palette entries appear in this band. */
+      memset(band_used, 0, sizeof(band_used));
+      for (int64_t y = 0; y < rows; y++) {
+        const unsigned char *row = idx + (size_t)((y0 + y) * W);
+        for (int64_t x = 0; x < W; x++) band_used[row[x]] = 1;
+      }
+
+      int first_color = 1;
+      for (int c = 0; c < 216; c++) {
+        if (!band_used[c]) continue;
+
+        /* Compute the per-column 6-bit mask for color c in this band. */
+        for (int64_t x = 0; x < W; x++) {
+          unsigned mask = 0;
+          for (int64_t y = 0; y < rows; y++) {
+            if (idx[(size_t)((y0 + y) * W + x)] == c) mask |= (1u << y);
+          }
+          row_chars[x] = (unsigned char)('?' + mask);
+        }
+
+        if (!first_color) fputc('$', stdout); /* CR back to band start */
+        first_color = 0;
+        printf("#%d", c);
+
+        /* RLE-emit row_chars. */
+        int64_t i = 0;
+        while (i < W) {
+          int64_t j = i + 1;
+          while (j < W && row_chars[j] == row_chars[i]) j++;
+          int64_t run = j - i;
+          if (run >= 4) {
+            printf("!%lld%c", (long long)run, row_chars[i]);
+          } else {
+            for (int64_t k = 0; k < run; k++) fputc(row_chars[i], stdout);
+          }
+          i = j;
+        }
+      }
+      if (band + 1 < bands) fputc('-', stdout); /* advance to next band */
+    }
+
+    fputs("\033\\", stdout);
+    fflush(stdout);
+    free(row_chars);
+    free(idx);
     ```)
 
 ) ;; end defmodule ansi/image

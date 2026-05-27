@@ -2,7 +2,8 @@
 
 (defmodule ansi/tests/image
   (import ansi/image :refer [image-display image-display-base64
-                              image-display-protocol image-placeholder])
+                              image-display-protocol image-display-rgba
+                              image-placeholder])
 
   (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
     ```c
@@ -205,6 +206,104 @@
   (defn run-b64-chunking [big :cstr] #{Unsafe} :bool
     (do (__capture-begin) (image-display-base64 big) (__capture-end) (__check-base64-chunking)))
 
+  ;; Allocate a small RGBA buffer with hand-picked pixel values so the sixel
+  ;; quantization is deterministic and the expected output is hand-computable.
+  (defn __rgba-red-1x1 [] #{Unsafe} :cstr
+    ```c
+    unsigned char *b = (unsigned char *)malloc(4);
+    b[0] = 255; b[1] = 0; b[2] = 0; b[3] = 255;
+    return (char *)b;
+    ```)
+
+  (defn __rgba-red-green-2x1 [] #{Unsafe} :cstr
+    ```c
+    unsigned char *b = (unsigned char *)malloc(8);
+    b[0] = 255; b[1] = 0; b[2] = 0; b[3] = 255;
+    b[4] = 0;   b[5] = 255; b[6] = 0; b[7] = 255;
+    return (char *)b;
+    ```)
+
+  (defn __rgba-red-5x1 [] #{Unsafe} :cstr
+    ```c
+    unsigned char *b = (unsigned char *)malloc(20);
+    for (int i = 0; i < 5; i++) {
+      b[i*4 + 0] = 255; b[i*4 + 1] = 0; b[i*4 + 2] = 0; b[i*4 + 3] = 255;
+    }
+    return (char *)b;
+    ```)
+
+  ;; 7x1 image with the first 5 pixels red, last 2 green: triggers RLE for the
+  ;; red run (>=4) but per-character emission for the green run (<4) AND tests
+  ;; the multi-color band path.
+  (defn __rgba-rrrrrgg-7x1 [] #{Unsafe} :cstr
+    ```c
+    unsigned char *b = (unsigned char *)malloc(28);
+    for (int i = 0; i < 7; i++) {
+      int is_red = i < 5;
+      b[i*4 + 0] = is_red ? 255 : 0;
+      b[i*4 + 1] = is_red ? 0   : 255;
+      b[i*4 + 2] = 0;
+      b[i*4 + 3] = 255;
+    }
+    return (char *)b;
+    ```)
+
+  ;; Hand-computed expected sixel byte sequences for each rgba test.
+  ;;
+  ;; Palette indexing: idx = (r/51)*36 + (g/51)*6 + (b/51), each on a 0..5 scale.
+  ;; Sixel RGB declarations scale 0..5 -> {0,20,40,60,80,100}.
+  ;;
+  ;;   pure red   (255,0,0)   -> idx 180  -> #180;2;100;0;0
+  ;;   pure green (0,255,0)   -> idx 30   -> #30;2;0;100;0
+  (defn __check-rgba [test-id :int] #{Unsafe} :bool
+    ```c
+    const char *exp = "";
+    size_t elen = 0;
+    switch ((int)test_id) {
+      case 1: /* 1x1 red */
+        exp = "\033Pq\"1;1;1;1#180;2;100;0;0#180@\033\\";
+        elen = strlen(exp);
+        break;
+      case 2: /* 2x1 red then green */
+        exp = "\033Pq\"1;1;2;1#30;2;0;100;0#180;2;100;0;0#30?@$#180@?\033\\";
+        elen = strlen(exp);
+        break;
+      case 3: /* 5x1 all red -> RLE !5@ */
+        exp = "\033Pq\"1;1;5;1#180;2;100;0;0#180!5@\033\\";
+        elen = strlen(exp);
+        break;
+      case 4: /* 7x1: 5 red then 2 green */
+        /* Color 30 row chars: ?????@@ -> 5 '?' RLE'd (!5?) then 2 '@'
+           Color 180 row chars: @@@@@?? -> 5 '@' RLE'd (!5@) then 2 '?'   */
+        exp = "\033Pq\"1;1;7;1#30;2;0;100;0#180;2;100;0;0"
+              "#30!5?@@$#180!5@??\033\\";
+        elen = strlen(exp);
+        break;
+      case 5: /* zero-size: no output */
+        exp = "";
+        elen = 0;
+        break;
+      default: return 0;
+    }
+    if (g_image_buf_len != elen) return 0;
+    return memcmp(g_image_buf, exp, elen) == 0 ? 1 : 0;
+    ```)
+
+  (defn run-rgba-1x1 [buf :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-rgba 1 1 buf) (__capture-end) (__check-rgba 1)))
+
+  (defn run-rgba-2x1 [buf :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-rgba 2 1 buf) (__capture-end) (__check-rgba 2)))
+
+  (defn run-rgba-5x1-rle [buf :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-rgba 5 1 buf) (__capture-end) (__check-rgba 3)))
+
+  (defn run-rgba-mixed-rle [buf :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-rgba 7 1 buf) (__capture-end) (__check-rgba 4)))
+
+  (defn run-rgba-zero [buf :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-rgba 0 0 buf) (__capture-end) (__check-rgba 5)))
+
   (defn main [] #{Unsafe} :int
     (do
       (tap-record 1 "image-placeholder writes [image: path]"        (run-placeholder))
@@ -221,6 +320,16 @@
           (__unlink tmp)))
       (let [big (__big-b64)]
         (tap-record 10 "image-display-base64 splits >4096 chars into chunks" (run-b64-chunking big)))
-      (tap-finish 10)))
+      (let [r1 (__rgba-red-1x1)]
+        (tap-record 11 "image-display-rgba 1x1 red emits minimal sixel" (run-rgba-1x1 r1)))
+      (let [r2 (__rgba-red-green-2x1)]
+        (tap-record 12 "image-display-rgba 2x1 red+green emits two color passes" (run-rgba-2x1 r2)))
+      (let [r3 (__rgba-red-5x1)]
+        (tap-record 13 "image-display-rgba run>=4 uses RLE !<count><char>" (run-rgba-5x1-rle r3)))
+      (let [r4 (__rgba-rrrrrgg-7x1)]
+        (tap-record 14 "image-display-rgba RLE coexists with short runs"  (run-rgba-mixed-rle r4)))
+      (let [r5 (__rgba-red-1x1)]
+        (tap-record 15 "image-display-rgba with w=0 h=0 writes nothing"   (run-rgba-zero r5)))
+      (tap-finish 15)))
 
 ) ;; end defmodule
