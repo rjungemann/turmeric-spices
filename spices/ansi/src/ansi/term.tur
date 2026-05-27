@@ -1,0 +1,310 @@
+;;; ansi/term -- terminal setup, capability detection, key reading, resize.
+;;
+;; Owns the inline-C bridge to termios, TIOCGWINSZ, SIGWINCH via self-pipe,
+;; and select()-based key reading.  All other ansi/* modules emit ANSI escape
+;; sequences to stdout; this module manages process-wide terminal state.
+
+(defmodule ansi/term
+  (export term-size term-enable-raw term-disable-raw
+          term-read-key term-read-key-timeout
+          term-color-support term-no-color?
+          term-image-protocol term-on-resize)
+
+  ;;; term-size -- return terminal dimensions as a (cons rows cols) pair.
+  ;;;
+  ;;; Returns:
+  ;;;   A two-element cons cell { head=rows, tail=cols }.  Falls back to
+  ;;;   (24 . 80) when TIOCGWINSZ is unavailable.
+  ;;;
+  ;;; Example:
+  ;;;   (let [sz (term-size)] ...)  ; head/tail extract rows/cols
+  ;;;
+  ;;; Since: tur-ansi AN0
+  (defn term-size [] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <sys/ioctl.h> */
+    /* __tur_include__: #include <unistd.h> */
+    struct winsize ws;
+    int64_t rows = 24, cols = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+      if (ws.ws_row > 0) rows = ws.ws_row;
+      if (ws.ws_col > 0) cols = ws.ws_col;
+    }
+    struct { int64_t head; int64_t tail; } *pair = malloc(sizeof(*pair));
+    pair->head = rows;
+    pair->tail = cols;
+    return (int64_t)(intptr_t)pair;
+    ```)
+
+  ;;; term-no-color? -- 1 when $NO_COLOR is set and non-empty, 0 otherwise.
+  ;;;
+  ;;; See https://no-color.org/ for the convention.
+  (defn term-no-color? [] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <stdlib.h> */
+    const char *nc = getenv("NO_COLOR");
+    return (nc && nc[0]) ? 1 : 0;
+    ```)
+
+  ;;; term-color-support -- detect color depth from environment.
+  ;;;
+  ;;; Returns:
+  ;;;   0 = no color (NO_COLOR set, or TERM=dumb)
+  ;;;   1 = 4-bit (16 colors)
+  ;;;   2 = 8-bit (256-color palette)
+  ;;;   3 = 24-bit true-color
+  (defn term-color-support [] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <string.h> */
+    const char *nc = getenv("NO_COLOR");
+    if (nc && nc[0]) return 0;
+    const char *colorterm = getenv("COLORTERM");
+    if (colorterm && (strstr(colorterm, "truecolor") || strstr(colorterm, "24bit"))) return 3;
+    const char *term = getenv("TERM");
+    if (!term || !term[0]) return 0;
+    if (strcmp(term, "dumb") == 0) return 0;
+    if (strstr(term, "direct") || strstr(term, "truecolor")) return 3;
+    if (strstr(term, "256")) return 2;
+    if (strstr(term, "color")) return 1;
+    /* Modern terminals not advertising via $TERM still typically support 4-bit. */
+    return 1;
+    ```)
+
+  ;;; term-image-protocol -- detect inline-image protocol support.
+  ;;;
+  ;;; Returns:
+  ;;;   0 = none, 1 = kitty, 2 = iterm2, 3 = sixel
+  ;;;
+  ;;; Detection is conservative; callers may still fall back to a text
+  ;;; placeholder when a non-zero result fails at runtime.
+  (defn term-image-protocol [] #{Unsafe} :int
+    ```c
+    const char *term = getenv("TERM");
+    const char *prog = getenv("TERM_PROGRAM");
+    if (term && strstr(term, "kitty")) return 1;
+    if (prog && strcmp(prog, "iTerm.app") == 0) return 2;
+    if (prog && strcmp(prog, "WezTerm") == 0) return 1;
+    if (term && strstr(term, "sixel")) return 3;
+    return 0;
+    ```)
+
+  ;;
+  ;; Raw mode + SIGWINCH self-pipe.
+  ;;
+  ;; The static state below is declared at file scope via __tur_include__
+  ;; directives so the SIGWINCH handler (also file-scope) and all four
+  ;; functions that read or update terminal state can share it.
+  ;;
+
+  ;;; term-enable-raw -- enable raw terminal mode and install SIGWINCH self-pipe.
+  ;;;
+  ;;; Idempotent: a second call while already in raw mode is a no-op.  If
+  ;;; stdin is not a tty (e.g. under a test harness with $TUR_ANSI_TEST_KEYS)
+  ;;; the call is also a no-op so scripted tests don't try to ioctl a pipe.
+  (defn term-enable-raw [] #{Unsafe} :void
+    ```c
+    /* __tur_include__: #include <termios.h> */
+    /* __tur_include__: #include <signal.h> */
+    /* __tur_include__: #include <errno.h> */
+    /* __tur_include__: #include <fcntl.h> */
+    /* __tur_include__: static struct termios g_ansi_saved_termios; */
+    /* __tur_include__: static int g_ansi_raw_enabled = 0; */
+    /* __tur_include__: static int g_ansi_winch_rfd = -1; */
+    /* __tur_include__: static int g_ansi_winch_wfd = -1; */
+    /* __tur_include__: static void (*g_ansi_resize_cb)(void) = 0; */
+    /* __tur_include__: static struct sigaction g_ansi_saved_winch_sa; */
+    /* __tur_include__: static int g_ansi_winch_installed = 0; */
+    /* __tur_include__: static void g_ansi_winch_handler(int sig) { (void)sig; int saved = errno; int wfd = g_ansi_winch_wfd; if (wfd >= 0) { char b = 'R'; ssize_t r; do { r = write(wfd, &b, 1); } while (r < 0 && errno == EINTR); (void)r; } errno = saved; } */
+    const char *scripted = getenv("TUR_ANSI_TEST_KEYS");
+    if (scripted && scripted[0]) return;
+    if (!isatty(STDIN_FILENO)) return;
+    if (g_ansi_raw_enabled) return;
+    if (tcgetattr(STDIN_FILENO, &g_ansi_saved_termios) != 0) return;
+    struct termios raw = g_ansi_saved_termios;
+    raw.c_iflag &= (tcflag_t)~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw.c_oflag &= (tcflag_t)~(OPOST);
+    raw.c_cflag |= (tcflag_t)(CS8);
+    raw.c_lflag &= (tcflag_t)~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) return;
+    g_ansi_raw_enabled = 1;
+
+    /* Self-pipe for SIGWINCH delivery into the select() loop. */
+    int fds[2];
+    if (pipe(fds) == 0) {
+      int rf = fcntl(fds[0], F_GETFL, 0);
+      int wf = fcntl(fds[1], F_GETFL, 0);
+      if (rf >= 0) fcntl(fds[0], F_SETFL, rf | O_NONBLOCK);
+      if (wf >= 0) fcntl(fds[1], F_SETFL, wf | O_NONBLOCK);
+      g_ansi_winch_rfd = fds[0];
+      g_ansi_winch_wfd = fds[1];
+
+      struct sigaction sa;
+      memset(&sa, 0, sizeof(sa));
+      sa.sa_handler = g_ansi_winch_handler;
+      sigemptyset(&sa.sa_mask);
+      sa.sa_flags = SA_RESTART;
+      if (sigaction(SIGWINCH, &sa, &g_ansi_saved_winch_sa) == 0) {
+        g_ansi_winch_installed = 1;
+      }
+    }
+    ```)
+
+  ;;; term-disable-raw -- restore cooked mode and tear down the SIGWINCH self-pipe.
+  ;;;
+  ;;; Idempotent: safe to call without a matching term-enable-raw.
+  (defn term-disable-raw [] #{Unsafe} :void
+    ```c
+    const char *scripted = getenv("TUR_ANSI_TEST_KEYS");
+    if (scripted && scripted[0]) return;
+    if (!g_ansi_raw_enabled) return;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_ansi_saved_termios);
+    g_ansi_raw_enabled = 0;
+    if (g_ansi_winch_installed) {
+      sigaction(SIGWINCH, &g_ansi_saved_winch_sa, NULL);
+      g_ansi_winch_installed = 0;
+    }
+    if (g_ansi_winch_rfd >= 0) { close(g_ansi_winch_rfd); g_ansi_winch_rfd = -1; }
+    if (g_ansi_winch_wfd >= 0) { close(g_ansi_winch_wfd); g_ansi_winch_wfd = -1; }
+    g_ansi_resize_cb = 0;
+    ```)
+
+  ;;; term-on-resize -- register a callback invoked on SIGWINCH.
+  ;;;
+  ;;; Parameters:
+  ;;;   callback -- a function pointer of signature void(*)(void), or 0 to
+  ;;;               remove the current callback.
+  ;;;
+  ;;; The callback fires from inside term-read-key (after the resize byte
+  ;;; has been drained from the self-pipe and before "<Resize>" is returned),
+  ;;; so it runs in normal process context, not from the signal handler.
+  (defn term-on-resize [callback :ptr<void>] #{Unsafe} :void
+    ```c
+    g_ansi_resize_cb = (void (*)(void))callback;
+    ```)
+
+  ;;
+  ;; Key reading.  Returns a freshly malloc'd cstr per call.  The state
+  ;; machine here is intentionally small for AN0; AN2 expands it to cover
+  ;; the full key-name table (F1-F12, Ctrl modifiers, Shift-Tab, etc.).
+  ;;
+
+  (defn __ansi-read-key-impl [timeout_ms :int] #{Unsafe} :cstr
+    ```c
+    /* __tur_include__: #include <sys/select.h> */
+    /* Scripted-input mode for tests: TUR_ANSI_TEST_KEYS holds a newline-
+     * separated list of key names; each call consumes one line. */
+    static char *script_cache = NULL;
+    static char *script_env = NULL;
+    static size_t script_off = 0;
+    const char *env = getenv("TUR_ANSI_TEST_KEYS");
+    if (env && env[0]) {
+      if (!script_env || strcmp(script_env, env) != 0) {
+        if (script_cache) free(script_cache);
+        if (script_env) free(script_env);
+        script_cache = strdup(env);
+        script_env = strdup(env);
+        script_off = 0;
+      }
+      if (!script_cache[script_off]) return strdup("<EOF>");
+      char *start = script_cache + script_off;
+      char *nl = strchr(start, '\n');
+      if (nl) {
+        *nl = '\0';
+        script_off = (size_t)((nl - script_cache) + 1);
+      } else {
+        script_off = strlen(script_cache);
+      }
+      return strdup(start);
+    } else {
+      if (script_cache) { free(script_cache); script_cache = NULL; }
+      if (script_env) { free(script_env); script_env = NULL; }
+      script_off = 0;
+    }
+
+    /* select() on stdin + the SIGWINCH self-pipe (if installed). */
+    for (;;) {
+      fd_set rfds;
+      FD_ZERO(&rfds);
+      FD_SET(STDIN_FILENO, &rfds);
+      int maxfd = STDIN_FILENO;
+      if (g_ansi_winch_rfd >= 0) {
+        FD_SET(g_ansi_winch_rfd, &rfds);
+        if (g_ansi_winch_rfd > maxfd) maxfd = g_ansi_winch_rfd;
+      }
+      struct timeval tv;
+      struct timeval *ptv = NULL;
+      if (timeout_ms >= 0) {
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        ptv = &tv;
+      }
+      int n = select(maxfd + 1, &rfds, NULL, NULL, ptv);
+      if (n < 0) {
+        if (errno == EINTR) continue;
+        return strdup("<EOF>");
+      }
+      if (n == 0) return strdup("");
+      if (g_ansi_winch_rfd >= 0 && FD_ISSET(g_ansi_winch_rfd, &rfds)) {
+        /* Drain all pending resize bytes. */
+        char buf[32];
+        while (read(g_ansi_winch_rfd, buf, sizeof(buf)) > 0) { /* spin */ }
+        if (g_ansi_resize_cb) g_ansi_resize_cb();
+        return strdup("<Resize>");
+      }
+      if (FD_ISSET(STDIN_FILENO, &rfds)) break;
+    }
+
+    unsigned char ch = 0;
+    ssize_t r = read(STDIN_FILENO, &ch, 1);
+    if (r <= 0) return strdup("<EOF>");
+    if (ch == '\r' || ch == '\n') return strdup("<Enter>");
+    if (ch == 127 || ch == 8) return strdup("<Backspace>");
+    if (ch == 9) return strdup("<Tab>");
+    if (ch != 27) {
+      char out[2];
+      out[0] = (char)ch;
+      out[1] = '\0';
+      return strdup(out);
+    }
+
+    /* ESC: peek for a CSI/SS3 escape sequence. */
+    fd_set rfds2;
+    FD_ZERO(&rfds2);
+    FD_SET(STDIN_FILENO, &rfds2);
+    struct timeval tv2;
+    tv2.tv_sec = 0;
+    tv2.tv_usec = 15000;
+    if (select(STDIN_FILENO + 1, &rfds2, NULL, NULL, &tv2) <= 0) return strdup("<Escape>");
+
+    char seq[32];
+    ssize_t n2 = read(STDIN_FILENO, seq, sizeof(seq) - 1);
+    if (n2 <= 0) return strdup("<Escape>");
+    seq[n2] = '\0';
+
+    if (strncmp(seq, "[A", 2) == 0) return strdup("<Up>");
+    if (strncmp(seq, "[B", 2) == 0) return strdup("<Down>");
+    if (strncmp(seq, "[C", 2) == 0) return strdup("<Right>");
+    if (strncmp(seq, "[D", 2) == 0) return strdup("<Left>");
+    if (strncmp(seq, "[H", 2) == 0) return strdup("<Home>");
+    if (strncmp(seq, "[F", 2) == 0) return strdup("<End>");
+    if (strncmp(seq, "[Z", 2) == 0) return strdup("<S-Tab>");
+    return strdup("<Escape>");
+    ```)
+
+  ;;; term-read-key -- block until one keypress; return a normalized key string.
+  ;;;
+  ;;; Returns one of: a single-character cstr ("a", "A", " "), a bracketed
+  ;;; key name ("<Enter>", "<Up>", "<Resize>"), or "<EOF>" when stdin closes.
+  ;;;
+  ;;; AN0 covers basic keys + arrows + <Resize>.  AN2 expands the key table
+  ;;; to F-keys, Ctrl/Shift modifiers, and the kitty keyboard protocol.
+  (defn term-read-key [] #{Unsafe} :cstr
+    (__ansi-read-key-impl -1))
+
+  ;;; term-read-key-timeout -- like term-read-key but returns "" after ms millis.
+  (defn term-read-key-timeout [ms :int] #{Unsafe} :cstr
+    (__ansi-read-key-impl ms))
+
+) ;; end defmodule ansi/term

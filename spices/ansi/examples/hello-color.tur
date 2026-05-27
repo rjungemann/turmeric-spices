@@ -1,0 +1,62 @@
+;; examples/hello-color.tur -- AN0 smoke test.
+;;
+;; Exercises ansi/term capability detection and ansi/cursor movement.  AN0
+;; doesn't yet ship the ansi/color SGR helpers, so the colored block in the
+;; middle of the demo uses raw inline-C printf to emit a 256-color gradient;
+;; AN1 will rewrite this in terms of (fg8 idx).
+
+(defmodule ansi/examples/hello-color
+  (import ansi/term :refer [term-size term-color-support term-no-color?
+                            term-image-protocol])
+  (import ansi/cursor :refer [cursor-move-to cursor-save cursor-restore
+                              cursor-hide cursor-show])
+
+  (defn print-gradient [] #{Unsafe} :void
+    ```c
+    for (int i = 16; i < 232; i++) {
+      printf("\033[48;5;%dm \033[0m", i);
+      if (((i - 15) % 36) == 0) printf("\n");
+    }
+    printf("\n");
+    ```)
+
+  (defn print-size [sz :int] #{Unsafe} :void
+    ```c
+    struct { int64_t head; int64_t tail; } *p = (void *)(intptr_t)sz;
+    printf("term-size:           %lld x %lld\n",
+           (long long)p->head, (long long)p->tail);
+    ```)
+
+  (defn print-color-support [c :int] #{Unsafe} :void
+    ```c
+    printf("term-color-support:  %lld  (0=none 1=4bit 2=256 3=truecolor)\n",
+           (long long)c);
+    ```)
+
+  (defn print-no-color [nc :int] #{Unsafe} :void
+    ```c
+    printf("term-no-color?:      %lld\n", (long long)nc);
+    ```)
+
+  (defn print-image-protocol [ip :int] #{Unsafe} :void
+    ```c
+    printf("term-image-protocol: %lld  (0=none 1=kitty 2=iterm2 3=sixel)\n",
+           (long long)ip);
+    ```)
+
+  (defn show-capabilities [] #{Unsafe} :void
+    (do
+      (print-size (term-size))
+      (print-color-support (term-color-support))
+      (print-no-color (term-no-color?))
+      (print-image-protocol (term-image-protocol))))
+
+  (defn main [] #{Unsafe} :int
+    (do
+      (show-capabilities)
+      (cursor-save)
+      (print-gradient)
+      (cursor-restore)
+      0))
+
+) ;; end defmodule
