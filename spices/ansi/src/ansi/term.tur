@@ -5,6 +5,7 @@
 ;; sequences to stdout; this module manages process-wide terminal state.
 
 (defmodule ansi/term
+  (import ansi/keys :refer [parse-key-bytes])
   (export term-size term-enable-raw term-disable-raw
           term-read-key term-read-key-timeout
           term-color-support term-no-color?
@@ -256,41 +257,29 @@
       if (FD_ISSET(STDIN_FILENO, &rfds)) break;
     }
 
-    unsigned char ch = 0;
-    ssize_t r = read(STDIN_FILENO, &ch, 1);
+    /* Collect bytes into a small buffer, then hand them to ansi/keys'
+     * parse-key-bytes for the full state-machine pass.  After the first
+     * byte we drain additional bytes (escape sequences, UTF-8 trailers)
+     * with a 15ms read timeout. */
+    unsigned char buf[32];
+    ssize_t r = read(STDIN_FILENO, &buf[0], 1);
     if (r <= 0) return strdup("<EOF>");
-    if (ch == '\r' || ch == '\n') return strdup("<Enter>");
-    if (ch == 127 || ch == 8) return strdup("<Backspace>");
-    if (ch == 9) return strdup("<Tab>");
-    if (ch != 27) {
-      char out[2];
-      out[0] = (char)ch;
-      out[1] = '\0';
-      return strdup(out);
+    int total = 1;
+    if (buf[0] == 0x1B || buf[0] >= 0x80) {
+      while (total < (int)sizeof(buf)) {
+        fd_set rfds3;
+        FD_ZERO(&rfds3);
+        FD_SET(STDIN_FILENO, &rfds3);
+        struct timeval tv3;
+        tv3.tv_sec = 0;
+        tv3.tv_usec = 15000;
+        if (select(STDIN_FILENO + 1, &rfds3, NULL, NULL, &tv3) <= 0) break;
+        ssize_t rr = read(STDIN_FILENO, &buf[total], 1);
+        if (rr <= 0) break;
+        total += (int)rr;
+      }
     }
-
-    /* ESC: peek for a CSI/SS3 escape sequence. */
-    fd_set rfds2;
-    FD_ZERO(&rfds2);
-    FD_SET(STDIN_FILENO, &rfds2);
-    struct timeval tv2;
-    tv2.tv_sec = 0;
-    tv2.tv_usec = 15000;
-    if (select(STDIN_FILENO + 1, &rfds2, NULL, NULL, &tv2) <= 0) return strdup("<Escape>");
-
-    char seq[32];
-    ssize_t n2 = read(STDIN_FILENO, seq, sizeof(seq) - 1);
-    if (n2 <= 0) return strdup("<Escape>");
-    seq[n2] = '\0';
-
-    if (strncmp(seq, "[A", 2) == 0) return strdup("<Up>");
-    if (strncmp(seq, "[B", 2) == 0) return strdup("<Down>");
-    if (strncmp(seq, "[C", 2) == 0) return strdup("<Right>");
-    if (strncmp(seq, "[D", 2) == 0) return strdup("<Left>");
-    if (strncmp(seq, "[H", 2) == 0) return strdup("<Home>");
-    if (strncmp(seq, "[F", 2) == 0) return strdup("<End>");
-    if (strncmp(seq, "[Z", 2) == 0) return strdup("<S-Tab>");
-    return strdup("<Escape>");
+    return (char *)ansi__keys__parse_key_bytes((const char *)buf, (int64_t)total);
     ```)
 
   ;;; term-read-key -- block until one keypress; return a normalized key string.

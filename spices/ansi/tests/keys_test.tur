@@ -1,0 +1,214 @@
+;; tests/keys_test.tur -- AN2 tests for ansi/keys.
+;;
+;; Tests both directions of the key-name <-> bytes mapping, plus the
+;; modifier-prefix helpers.
+
+(defmodule ansi/tests/keys
+  (import ansi/keys :refer [parse-key-bytes key-name->bytes
+                            key=? key-ctrl? key-shift? key-alt?])
+
+  ;; Static fail counter avoids threading 69 result vars through a deep
+  ;; (+ ...) tree.  tap-record prints one TAP line and bumps the counter
+  ;; on failure; tap-finish prints the plan + summary and returns 0/1.
+
+  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_keys_fails = 0; */
+    if (!ok) g_keys_fails++;
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-finish [count :int] #{Unsafe} :int
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (g_keys_fails == 0) {
+      fprintf(stderr, "# All %lld ansi/keys tests passed.\n", (long long)count);
+      return 0;
+    }
+    fprintf(stderr, "# %d/%lld ansi/keys tests failed.\n",
+            g_keys_fails, (long long)count);
+    return 1;
+    ```)
+
+  ;; Decode a literal byte sequence (selected by test-id) and compare the
+  ;; resulting key name against an expected name.
+  (defn decode-test [test-id :int expected :cstr] #{Unsafe} :bool
+    ```c
+    const char *bytes = NULL;
+    int n = 0;
+    switch ((int)test_id) {
+      case 1:  bytes = "\x1b[A";       n = 3;  break;
+      case 2:  bytes = "\x1b[B";       n = 3;  break;
+      case 3:  bytes = "\x1b[C";       n = 3;  break;
+      case 4:  bytes = "\x1b[D";       n = 3;  break;
+      case 5:  bytes = "\x1b[H";       n = 3;  break;
+      case 6:  bytes = "\x1b[F";       n = 3;  break;
+      case 7:  bytes = "\x1b[Z";       n = 3;  break;
+      case 8:  bytes = "\x1bOP";       n = 3;  break;
+      case 9:  bytes = "\x1bOQ";       n = 3;  break;
+      case 10: bytes = "\x1bOR";       n = 3;  break;
+      case 11: bytes = "\x1bOS";       n = 3;  break;
+      case 12: bytes = "\x1b[15~";     n = 5;  break;
+      case 13: bytes = "\x1b[17~";     n = 5;  break;
+      case 14: bytes = "\x1b[18~";     n = 5;  break;
+      case 15: bytes = "\x1b[19~";     n = 5;  break;
+      case 16: bytes = "\x1b[20~";     n = 5;  break;
+      case 17: bytes = "\x1b[21~";     n = 5;  break;
+      case 18: bytes = "\x1b[23~";     n = 5;  break;
+      case 19: bytes = "\x1b[24~";     n = 5;  break;
+      case 20: bytes = "\x1b[2~";      n = 4;  break;
+      case 21: bytes = "\x1b[3~";      n = 4;  break;
+      case 22: bytes = "\x1b[5~";      n = 4;  break;
+      case 23: bytes = "\x1b[6~";      n = 4;  break;
+      case 24: bytes = "\x01";         n = 1;  break;
+      case 25: bytes = "\x1a";         n = 1;  break;
+      case 26: bytes = "\r";           n = 1;  break;
+      case 27: bytes = "\n";           n = 1;  break;
+      case 28: bytes = "\t";           n = 1;  break;
+      case 29: bytes = "\x7f";         n = 1;  break;
+      case 30: bytes = "\x1b";         n = 1;  break;
+      case 31: bytes = "a";            n = 1;  break;
+      case 32: bytes = " ";            n = 1;  break;
+      case 33: bytes = "\x1b" "a";     n = 2;  break;
+      case 34: bytes = "\x1b[1;5A";    n = 6;  break;
+      case 35: bytes = "\x1b[1;2A";    n = 6;  break;
+      case 36: bytes = "\x1b[1;3A";    n = 6;  break;
+      case 37: bytes = "\x1b[1;7A";    n = 6;  break;
+      case 38: bytes = "\x1b[1;8A";    n = 6;  break;
+      case 39: bytes = "\x1b[3;5~";    n = 6;  break;
+      case 40: bytes = "\x1b[1;2P";    n = 6;  break;
+      default: return 0;
+    }
+    char *got = (char *)ansi__keys__parse_key_bytes(bytes, (int64_t)n);
+    int ok = strcmp(got, (const char *)expected) == 0;
+    free(got);
+    return ok ? 1 : 0;
+    ```)
+
+  (defn encode-test [test-id :int name :cstr] #{Unsafe} :bool
+    ```c
+    const char *expected = NULL;
+    int expected_len = 0;
+    switch ((int)test_id) {
+      case 1:  expected = "\x1b[A";    expected_len = 3; break;
+      case 2:  expected = "\x1b[B";    expected_len = 3; break;
+      case 3:  expected = "\x1b[C";    expected_len = 3; break;
+      case 4:  expected = "\x1b[D";    expected_len = 3; break;
+      case 5:  expected = "\x1b[Z";    expected_len = 3; break;
+      case 6:  expected = "\x1bOP";    expected_len = 3; break;
+      case 7:  expected = "\x1bOS";    expected_len = 3; break;
+      case 8:  expected = "\x1b[15~";  expected_len = 5; break;
+      case 9:  expected = "\x1b[24~";  expected_len = 5; break;
+      case 10: expected = "\x1b[3~";   expected_len = 4; break;
+      case 11: expected = "\x1b[5~";   expected_len = 4; break;
+      case 12: expected = "\x01";      expected_len = 1; break;
+      case 13: expected = "\x1a";      expected_len = 1; break;
+      case 14: expected = "\r";        expected_len = 1; break;
+      case 15: expected = "\t";        expected_len = 1; break;
+      case 16: expected = "\x7f";      expected_len = 1; break;
+      case 17: expected = "\x1b";      expected_len = 1; break;
+      case 18: expected = "a";         expected_len = 1; break;
+      case 19: expected = "\x1b" "a";  expected_len = 2; break;
+      case 20: expected = "\x1b[1;5A"; expected_len = 6; break;
+      case 21: expected = "\x1b[3;5~"; expected_len = 6; break;
+      default: return 0;
+    }
+    char *got = (char *)ansi__keys__key_name__bytes((const char *)name);
+    int n = (int)strlen(got);
+    int ok = (n == expected_len) && (memcmp(got, expected, expected_len) == 0);
+    free(got);
+    return ok ? 1 : 0;
+    ```)
+
+  (defn mod-check [name :cstr ctrl :int shift :int alt :int] #{Unsafe} :bool
+    (and (= (key-ctrl? name) ctrl)
+         (and (= (key-shift? name) shift)
+              (= (key-alt? name) alt))))
+
+  (defn run-decode [idx :int label :cstr tid :int expected :cstr] #{Unsafe} :void
+    (tap-record idx label (decode-test tid expected)))
+
+  (defn run-encode [idx :int label :cstr tid :int name :cstr] #{Unsafe} :void
+    (tap-record idx label (encode-test tid name)))
+
+  (defn run-mod [idx :int label :cstr name :cstr c :int s :int a :int] #{Unsafe} :void
+    (tap-record idx label (mod-check name c s a)))
+
+  (defn main [] #{Unsafe} :int
+    (do
+      ;; Decode tests
+      (run-decode  1 "decode CSI A -> <Up>"           1 "<Up>")
+      (run-decode  2 "decode CSI B -> <Down>"         2 "<Down>")
+      (run-decode  3 "decode CSI C -> <Right>"        3 "<Right>")
+      (run-decode  4 "decode CSI D -> <Left>"         4 "<Left>")
+      (run-decode  5 "decode CSI H -> <Home>"         5 "<Home>")
+      (run-decode  6 "decode CSI F -> <End>"          6 "<End>")
+      (run-decode  7 "decode CSI Z -> <S-Tab>"        7 "<S-Tab>")
+      (run-decode  8 "decode SS3 P -> <F1>"           8 "<F1>")
+      (run-decode  9 "decode SS3 Q -> <F2>"           9 "<F2>")
+      (run-decode 10 "decode SS3 R -> <F3>"          10 "<F3>")
+      (run-decode 11 "decode SS3 S -> <F4>"          11 "<F4>")
+      (run-decode 12 "decode CSI 15~ -> <F5>"        12 "<F5>")
+      (run-decode 13 "decode CSI 17~ -> <F6>"        13 "<F6>")
+      (run-decode 14 "decode CSI 18~ -> <F7>"        14 "<F7>")
+      (run-decode 15 "decode CSI 19~ -> <F8>"        15 "<F8>")
+      (run-decode 16 "decode CSI 20~ -> <F9>"        16 "<F9>")
+      (run-decode 17 "decode CSI 21~ -> <F10>"       17 "<F10>")
+      (run-decode 18 "decode CSI 23~ -> <F11>"       18 "<F11>")
+      (run-decode 19 "decode CSI 24~ -> <F12>"       19 "<F12>")
+      (run-decode 20 "decode CSI 2~ -> <Insert>"     20 "<Insert>")
+      (run-decode 21 "decode CSI 3~ -> <Delete>"     21 "<Delete>")
+      (run-decode 22 "decode CSI 5~ -> <PageUp>"     22 "<PageUp>")
+      (run-decode 23 "decode CSI 6~ -> <PageDown>"   23 "<PageDown>")
+      (run-decode 24 "decode 0x01 -> <C-a>"          24 "<C-a>")
+      (run-decode 25 "decode 0x1a -> <C-z>"          25 "<C-z>")
+      (run-decode 26 "decode CR -> <Enter>"          26 "<Enter>")
+      (run-decode 27 "decode LF -> <Enter>"          27 "<Enter>")
+      (run-decode 28 "decode TAB -> <Tab>"           28 "<Tab>")
+      (run-decode 29 "decode 0x7f -> <Backspace>"    29 "<Backspace>")
+      (run-decode 30 "decode ESC alone -> <Escape>"  30 "<Escape>")
+      (run-decode 31 "decode 'a' -> a"               31 "a")
+      (run-decode 32 "decode space -> ' '"           32 " ")
+      (run-decode 33 "decode ESC a -> <M-a>"         33 "<M-a>")
+      (run-decode 34 "decode CSI 1;5A -> <C-Up>"     34 "<C-Up>")
+      (run-decode 35 "decode CSI 1;2A -> <S-Up>"     35 "<S-Up>")
+      (run-decode 36 "decode CSI 1;3A -> <M-Up>"     36 "<M-Up>")
+      (run-decode 37 "decode CSI 1;7A -> <C-M-Up>"   37 "<C-M-Up>")
+      (run-decode 38 "decode CSI 1;8A -> <C-M-S-Up>" 38 "<C-M-S-Up>")
+      (run-decode 39 "decode CSI 3;5~ -> <C-Delete>" 39 "<C-Delete>")
+      (run-decode 40 "decode CSI 1;2P -> <S-F1>"     40 "<S-F1>")
+      ;; Encode tests
+      (run-encode 41 "encode <Up>"          1  "<Up>")
+      (run-encode 42 "encode <Down>"        2  "<Down>")
+      (run-encode 43 "encode <Right>"       3  "<Right>")
+      (run-encode 44 "encode <Left>"        4  "<Left>")
+      (run-encode 45 "encode <S-Tab>"       5  "<S-Tab>")
+      (run-encode 46 "encode <F1>"          6  "<F1>")
+      (run-encode 47 "encode <F4>"          7  "<F4>")
+      (run-encode 48 "encode <F5>"          8  "<F5>")
+      (run-encode 49 "encode <F12>"         9  "<F12>")
+      (run-encode 50 "encode <Delete>"      10 "<Delete>")
+      (run-encode 51 "encode <PageUp>"      11 "<PageUp>")
+      (run-encode 52 "encode <C-a>"         12 "<C-a>")
+      (run-encode 53 "encode <C-z>"         13 "<C-z>")
+      (run-encode 54 "encode <Enter>"       14 "<Enter>")
+      (run-encode 55 "encode <Tab>"         15 "<Tab>")
+      (run-encode 56 "encode <Backspace>"   16 "<Backspace>")
+      (run-encode 57 "encode <Escape>"      17 "<Escape>")
+      (run-encode 58 "encode plain 'a'"     18 "a")
+      (run-encode 59 "encode <M-a>"         19 "<M-a>")
+      (run-encode 60 "encode <C-Up>"        20 "<C-Up>")
+      (run-encode 61 "encode <C-Delete>"    21 "<C-Delete>")
+      ;; key=? + modifier helpers
+      (tap-record 62 "key=? matches identical strings"        (= (key=? "<C-S-Up>" "<C-S-Up>") 1))
+      (tap-record 63 "key=? rejects different strings"        (= (key=? "<Up>" "<Down>") 0))
+      (run-mod    64 "key-ctrl? finds C- in <C-a>"            "<C-a>"     1 0 0)
+      (run-mod    65 "key-shift? finds S- in <S-Tab>"         "<S-Tab>"   0 1 0)
+      (run-mod    66 "key-alt? finds M- in <M-x>"             "<M-x>"     0 0 1)
+      (run-mod    67 "C- and S- both fire for <C-S-Up>"       "<C-S-Up>"  1 1 0)
+      (run-mod    68 "no modifiers on plain <Enter>"          "<Enter>"   0 0 0)
+      (run-mod    69 "all three modifiers on <C-M-S-Up>"      "<C-M-S-Up>" 1 1 1)
+      (tap-finish 69)))
+
+) ;; end defmodule
