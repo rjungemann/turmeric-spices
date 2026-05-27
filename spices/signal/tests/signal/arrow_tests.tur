@@ -2,10 +2,10 @@
 ;;
 ;; Test suite for Arrow typeclass implementations and signal processing.
 ;;
-;; Note: Function values returned from other functions are stored as int64 and
-;; must be invoked via __arrow_call1 / __arrow_call2.  Float literals are also
-;; represented as IEEE-754 bit patterns in int64; all float arithmetic is done
-;; in C blocks.
+;; Signal values at the boundary of __arrow_call1 remain int64 bit-patterns
+;; so that the function-pointer calling convention is preserved.  DSP
+;; parameters (freq, alpha, etc.) are now native :float; the helpers below
+;; still encode time/sample values as int64 for the signal ABI.
 
 (defmodule tests/arrow
   (import arrow)
@@ -14,10 +14,10 @@
   (import signal/envelope)
 
 ;; =============================================================================
-;; Float helpers -- all floats are int64 IEEE-754 bit patterns
+;; Float helpers -- int64 IEEE-754 bit-patterns for signal ABI values
 ;; =============================================================================
 
-;;; __f -- encode a C double literal as int64.
+;;; __f -- encode a C double literal as int64 for use with __arrow_call1.
 (defn __f_0_0   [] :int ```c union {double d;int64_t i;} u; u.d=0.0;    return u.i; ```)
 (defn __f_0_001 [] :int ```c union {double d;int64_t i;} u; u.d=0.001;  return u.i; ```)
 (defn __f_0_05  [] :int ```c union {double d;int64_t i;} u; u.d=0.05;   return u.i; ```)
@@ -34,7 +34,7 @@
 (defn __f_int [n] :int
   ```c union {double d;int64_t i;} u; u.d=(double)n; return u.i; ```)
 
-;; Float comparison / arithmetic helpers
+;; Float comparison / arithmetic helpers (still work on int64 bit-pattern floats)
 
 ;;; __f_near -- true if |a - b| < thresh (all float64 as int64).
 (defn __f_near [a b thresh] :bool
@@ -182,6 +182,9 @@
 
 ;; =============================================================================
 ;; DSP Primitive Tests
+;;
+;; DSP parameters (freq, phase, alpha) are native :float.
+;; Time values passed to __arrow_call1 remain int64 bit-patterns.
 ;; =============================================================================
 
 ;;; test-sine-at-zero -- verify sine wave is 0 at t=0.
@@ -189,7 +192,7 @@
 ;;; Returns:
 ;;;   true if sin(2*pi*440*0 + 0) ~= 0.
 (defn test-sine-at-zero [] :bool
-  (let [sine-sf  (sine (__f_440_0) (__f_0_0))
+  (let [sine-sf  (sine (:: (__f_440_0) :float) (:: (__f_0_0) :float))
         sig      (constant 0)
         out-sig  (__arrow_call1 sine-sf sig)
         val      (__arrow_call1 out-sig (__f_0_0))]
@@ -200,7 +203,7 @@
 ;;; Returns:
 ;;;   true if sin(2*pi*440*(1/440)) ~= 0.
 (defn test-sine-one-period [] :bool
-  (let [sine-sf  (sine (__f_440_0) (__f_0_0))
+  (let [sine-sf  (sine (:: (__f_440_0) :float) (:: (__f_0_0) :float))
         sig      (constant 0)
         out-sig  (__arrow_call1 sine-sf sig)
         val      (__arrow_call1 out-sig (__f_inv440))]
@@ -211,7 +214,7 @@
 ;;; Returns:
 ;;;   true if sawtooth(440, t=0) is in [0, 1).
 (defn test-sawtooth-range [] :bool
-  (let [saw-sf   (sawtooth (__f_440_0))
+  (let [saw-sf   (sawtooth (:: (__f_440_0) :float))
         sig      (constant 0)
         out-sig  (__arrow_call1 saw-sf sig)
         val      (__arrow_call1 out-sig (__f_0_0))]
@@ -224,7 +227,7 @@
 ;;;   true if gain(2.0) applied to 0.5 gives 1.0.
 (defn test-gain [] :bool
   (let [sig     (constant (__f_0_5))
-        gain-sf (gain (__f_int 2))
+        gain-sf (gain (:: (__f_int 2) :float))
         out-sig (__arrow_call1 gain-sf sig)
         result  (__arrow_call1 out-sig 0)]
     (__f_near result (__f_1_0) (__f_0_001))))
@@ -251,8 +254,10 @@
 ;;; Returns:
 ;;;   true if ADSR(attack=0.1, ...) is 0 at t=0.
 (defn test-adsr-at-zero [] :bool
-  (let [params  (make-struct ADSRParams (__f_0_1) (__f_0_1) (__f_0_5) (__f_0_1))
-        env     (adsr-fixed params (__f_1_0))
+  (let [params  (make-struct ADSRParams
+                             (:: (__f_0_1) :float) (:: (__f_0_1) :float)
+                             (:: (__f_0_5) :float) (:: (__f_0_1) :float))
+        env     (adsr-fixed params (:: (__f_1_0) :float))
         sig     (constant 0)
         out-sig (__arrow_call1 env sig)
         result  (__arrow_call1 out-sig (__f_0_0))]
@@ -263,8 +268,10 @@
 ;;; Returns:
 ;;;   true if ADSR is between 0.4 and 0.7 at t=0.05.
 (defn test-adsr-mid-attack [] :bool
-  (let [params  (make-struct ADSRParams (__f_0_1) (__f_0_1) (__f_0_5) (__f_0_1))
-        env     (adsr-fixed params (__f_1_0))
+  (let [params  (make-struct ADSRParams
+                             (:: (__f_0_1) :float) (:: (__f_0_1) :float)
+                             (:: (__f_0_5) :float) (:: (__f_0_1) :float))
+        env     (adsr-fixed params (:: (__f_1_0) :float))
         sig     (constant 0)
         out-sig (__arrow_call1 env sig)
         result  (__arrow_call1 out-sig (__f_0_05))]
@@ -276,8 +283,10 @@
 ;;; Returns:
 ;;;   true if ADSR is near sustain=0.5 at t=0.2.
 (defn test-adsr-sustain [] :bool
-  (let [params  (make-struct ADSRParams (__f_0_1) (__f_0_1) (__f_0_5) (__f_0_1))
-        env     (adsr-fixed params (__f_1_0))
+  (let [params  (make-struct ADSRParams
+                             (:: (__f_0_1) :float) (:: (__f_0_1) :float)
+                             (:: (__f_0_5) :float) (:: (__f_0_1) :float))
+        env     (adsr-fixed params (:: (__f_1_0) :float))
         sig     (constant 0)
         out-sig (__arrow_call1 env sig)
         result  (__arrow_call1 out-sig (__f_0_2))]
@@ -288,8 +297,10 @@
 ;;; Returns:
 ;;;   true if ADSR is near 0 at t=1.1 (past gate+release).
 (defn test-adsr-after-release [] :bool
-  (let [params  (make-struct ADSRParams (__f_0_1) (__f_0_1) (__f_0_5) (__f_0_1))
-        env     (adsr-fixed params (__f_1_0))
+  (let [params  (make-struct ADSRParams
+                             (:: (__f_0_1) :float) (:: (__f_0_1) :float)
+                             (:: (__f_0_5) :float) (:: (__f_0_1) :float))
+        env     (adsr-fixed params (:: (__f_1_0) :float))
         sig     (constant 0)
         out-sig (__arrow_call1 env sig)
         result  (__arrow_call1 out-sig (__f_1_1))]
@@ -329,7 +340,7 @@
     (+ (if t7  0 1) (+ (if t8  0 1) (+ (if t9  0 1)
     (+ (if t10 0 1) (+ (if t11 0 1) (+ (if t12 0 1)
     (+ (if t13 0 1) (+ (if t14 0 1) (+ (if t15 0 1)
-    (if t16 0 1))))))))))))))))
+    (if t16 0 1))))))))))))))))))
 
 ;;; main -- entry point; prints pass/fail summary.
 ;;;
