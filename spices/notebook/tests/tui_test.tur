@@ -113,11 +113,15 @@
 
   (defn set-test-keys [keys :cstr] #{Unsafe} :void
     ```c
-    setenv("TURNB_TEST_KEYS", (const char *)(intptr_t)keys, 1);
+    /* tur-ansi reads $TUR_ANSI_TEST_KEYS; keep $TURNB_TEST_KEYS in sync for
+       any notebook-internal code still reaching for the old name. */
+    setenv("TUR_ANSI_TEST_KEYS", (const char *)(intptr_t)keys, 1);
+    setenv("TURNB_TEST_KEYS",   (const char *)(intptr_t)keys, 1);
     ```)
 
   (defn clear-test-keys [] #{Unsafe} :void
     ```c
+    unsetenv("TUR_ANSI_TEST_KEYS");
     unsetenv("TURNB_TEST_KEYS");
     ```)
 

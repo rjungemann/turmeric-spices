@@ -9,7 +9,8 @@
                                    cell-output-status cell-output-elapsed-ms cell-output-stdout
                                    cell-output-value-repr cell-output-error-msg])
   (import notebook/eval :refer [eval-cell eval-all])
-  (import notebook/ansi :refer [ansi-reset term-enable-raw term-disable-raw term-read-key])
+  (import ansi/term  :refer [term-enable-raw term-disable-raw term-read-key])
+  (import ansi/style :refer [style-reset])
   (import notebook/keys :refer [default-keybindings load-keybindings action-dispatch])
   (export tui-opts-make default-tui-opts tui-run tui-run-nodes)
 
@@ -1931,7 +1932,7 @@
             (let [result (__tui-loop state "")]
               (do
                 (term-disable-raw)
-                (ansi-reset)
+                (style-reset)
                 (session-close session)
                 result)))))))
 

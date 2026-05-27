@@ -14,6 +14,7 @@
 ;;; for the TUI.
 
 (defmodule notebook/image
+  (import ansi/image :refer [image-display])
   (export image-marker
           image-hook-record-path
           image-hook-install
@@ -136,9 +137,10 @@
 
   ;;; image-display-tui -- render an image path in the terminal.
   ;;;
-  ;;; Detects terminal capabilities and uses the best available protocol:
-  ;;; Kitty graphics protocol, iTerm2 inline images, or a text placeholder.
-  ;;; Sixel support is not implemented in v0.1.0.
+  ;;; Delegates to ansi/image, which detects terminal capabilities and uses
+  ;;; the best available protocol (Kitty / iTerm2 / placeholder; sixel is
+  ;;; deferred to tur-ansi v0.2).  A trailing newline is appended so the
+  ;;; cursor advances past the image, matching the v0.1.0 behavior.
   ;;;
   ;;; Parameters:
   ;;;   path -- filesystem path to a PNG file
@@ -149,106 +151,11 @@
   ;;; Example:
   ;;;   (image-display-tui "/tmp/cell-3-plot.png")
   ;;;
-  ;;; Since: Phase NB11
+  ;;; Since: Phase NB11 (AN5: delegated to ansi/image)
   (defn image-display-tui [path :cstr] #{Unsafe} :int
-    ```c
-    #include <stdint.h>
-    const char *fpath = path ? (const char *)(intptr_t)path : "";
-
-    /* Detect terminal protocol support via environment variables. */
-    const char *term = getenv("TERM") ? getenv("TERM") : "";
-    const char *term_prog = getenv("TERM_PROGRAM") ? getenv("TERM_PROGRAM") : "";
-    const char *kit_proto = getenv("KITTY_WINDOW_ID") ? getenv("KITTY_WINDOW_ID") : "";
-
-    int use_kitty = kit_proto[0] != '\0';
-    int use_iterm2 = !use_kitty &&
-      (strstr(term_prog, "iTerm") || strstr(term_prog, "WezTerm") ||
-       strstr(term_prog, "Hyper") || strstr(term, "iterm2"));
-
-    if (!use_kitty && !use_iterm2) {
-      /* Fallback: print a text placeholder. */
-      fprintf(stdout, "[image: %s]\n", fpath);
-      fflush(stdout);
-      return 0;
-    }
-
-    /* Load PNG into memory. */
-    FILE *f = fopen(fpath, "rb");
-    if (!f) {
-      fprintf(stdout, "[image: %s (not found)]\n", fpath);
-      fflush(stdout);
-      return 0;
-    }
-    fseek(f, 0, SEEK_END);
-    long fsz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (fsz <= 0) { fclose(f); fprintf(stdout, "[image: %s (empty)]\n", fpath); fflush(stdout); return 0; }
-    uint8_t *raw = malloc((size_t)fsz);
-    if (!raw) { fclose(f); fprintf(stdout, "[image: %s (oom)]\n", fpath); fflush(stdout); return 0; }
-    if ((long)fread(raw, 1, (size_t)fsz, f) != fsz) {
-      free(raw); fclose(f); fprintf(stdout, "[image: %s (read error)]\n", fpath); fflush(stdout); return 0;
-    }
-    fclose(f);
-
-    /* Base64-encode. */
-    static const char b64[] =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    size_t enc_len = ((size_t)fsz + 2) / 3 * 4 + 1;
-    char *enc = malloc(enc_len);
-    char *dst = enc;
-    const uint8_t *src = raw;
-    size_t rem = (size_t)fsz;
-    while (rem >= 3) {
-      dst[0] = b64[src[0] >> 2];
-      dst[1] = b64[((src[0] & 0x03) << 4) | (src[1] >> 4)];
-      dst[2] = b64[((src[1] & 0x0f) << 2) | (src[2] >> 6)];
-      dst[3] = b64[src[2] & 0x3f];
-      src += 3; dst += 4; rem -= 3;
-    }
-    if (rem == 1) {
-      dst[0] = b64[src[0] >> 2];
-      dst[1] = b64[(src[0] & 0x03) << 4];
-      dst[2] = '='; dst[3] = '='; dst += 4;
-    } else if (rem == 2) {
-      dst[0] = b64[src[0] >> 2];
-      dst[1] = b64[((src[0] & 0x03) << 4) | (src[1] >> 4)];
-      dst[2] = b64[(src[1] & 0x0f) << 2];
-      dst[3] = '='; dst += 4;
-    }
-    *dst = '\0';
-    free(raw);
-
-    if (use_kitty) {
-      /* Kitty graphics protocol: APC sequence, chunks of 4096 bytes. */
-      size_t total = (size_t)(dst - enc);
-      size_t pos = 0;
-      int first = 1;
-      while (pos < total) {
-        size_t chunk = total - pos;
-        if (chunk > 4096) chunk = 4096;
-        int more = (pos + chunk < total) ? 1 : 0;
-        if (first) {
-          /* a=T (transmit+display), f=100 (PNG), m=more */
-          fprintf(stdout, "\033_Ga=T,f=100,m=%d;", more);
-          first = 0;
-        } else {
-          fprintf(stdout, "\033_Gm=%d;", more);
-        }
-        fwrite(enc + pos, 1, chunk, stdout);
-        fputs("\033\\", stdout);
-        pos += chunk;
-      }
-      fputc('\n', stdout);
-    } else {
-      /* iTerm2 / WezTerm inline image protocol. */
-      size_t total = (size_t)(dst - enc);
-      fprintf(stdout, "\033]1337;File=inline=1;size=%zu:", (size_t)fsz);
-      fwrite(enc, 1, total, stdout);
-      fputs("\a\n", stdout);
-    }
-    free(enc);
-    fflush(stdout);
-    return 0;
-    ```)
+    (do
+      (image-display path)
+      ```c fputc('\n', stdout); fflush(stdout); ```
+      0))
 
 ) ;; end defmodule notebook/image
