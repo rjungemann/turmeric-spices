@@ -1,0 +1,251 @@
+;;; ansi/image -- inline image protocols (Kitty / iTerm2) with placeholder fallback.
+;;
+;; All terminal escape sequences are emitted to stdout.  Image data is loaded
+;; from disk or accepted pre-encoded as base64.  Sixel is deferred to v0.2
+;; (see docs/tur-ansi-spice-plan.md "Risks and open questions" #1); calls that
+;; request sixel currently fall back to the bracketed placeholder so that
+;; callers using (term-image-protocol) need no special-case logic.
+
+(defmodule ansi/image
+  (export image-display image-display-base64
+          image-display-protocol image-placeholder)
+
+  ;;; image-placeholder -- write a bracketed "[image: path]" string to stdout.
+  ;;;
+  ;;; Used as the fallback when no inline-image protocol is available, or as
+  ;;; an explicit caller-driven sentinel.  Emits no trailing newline.
+  ;;;
+  ;;; Parameters:
+  ;;;   path -- the path string to embed in the placeholder.  May be empty.
+  ;;;
+  ;;; Since: tur-ansi AN4
+  (defn image-placeholder [path :cstr] #{Unsafe} :void
+    ```c
+    const char *p = (const char *)path;
+    if (!p) p = "";
+    printf("[image: %s]", p);
+    fflush(stdout);
+    ```)
+
+  ;;; image-display-base64 -- emit a Kitty inline-image sequence from base64 PNG data.
+  ;;;
+  ;;; Parameters:
+  ;;;   b64 -- ASCII base64-encoded PNG bytes (no whitespace, no '=' stripping)
+  ;;;
+  ;;; Chunks the payload into 4096-character APC blocks per the Kitty protocol,
+  ;;; with m=1 on every chunk except the last (m=0).  Outputs nothing if b64
+  ;;; is empty or null.
+  ;;;
+  ;;; Since: tur-ansi AN4
+  (defn image-display-base64 [b64 :cstr] #{Unsafe} :void
+    ```c
+    const char *s = (const char *)b64;
+    if (!s || !s[0]) return;
+    size_t n = strlen(s);
+    const size_t CHUNK = 4096;
+    size_t off = 0;
+    while (off < n) {
+      size_t left = n - off;
+      size_t take = left > CHUNK ? CHUNK : left;
+      int more = (off + take < n) ? 1 : 0;
+      if (off == 0) {
+        printf("\033_Gf=100,a=T,m=%d;", more);
+      } else {
+        printf("\033_Gm=%d;", more);
+      }
+      fwrite(s + off, 1, take, stdout);
+      fputs("\033\\", stdout);
+      off += take;
+    }
+    fflush(stdout);
+    ```)
+
+  ;;
+  ;; File-loading + base64 helpers used by the path-based variants below.
+  ;;
+  ;; __image-read-file returns a malloc'd buffer (via *out and *out_len) on
+  ;; success, NULL on failure.  __image-base64 returns a malloc'd ASCII string
+  ;; of the encoded bytes, or NULL on allocation failure.  Both are defined as
+  ;; static helpers in this file via __tur_include__.
+  ;;
+  (defn __image-init [] #{Unsafe} :void
+    ```c
+    /* __tur_include__: #include <stdio.h> */
+    /* __tur_include__: #include <stdlib.h> */
+    /* __tur_include__: #include <string.h> */
+    /* __tur_include__: static char *__image_read_file(const char *path, size_t *out_len) {
+         FILE *f = fopen(path, "rb");
+         if (!f) return NULL;
+         if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+         long sz = ftell(f);
+         if (sz < 0) { fclose(f); return NULL; }
+         rewind(f);
+         char *buf = (char *)malloc((size_t)sz);
+         if (!buf) { fclose(f); return NULL; }
+         size_t r = fread(buf, 1, (size_t)sz, f);
+         fclose(f);
+         if (r != (size_t)sz) { free(buf); return NULL; }
+         *out_len = (size_t)sz;
+         return buf;
+       } */
+    /* __tur_include__: static const char __image_b64_alphabet[] =
+         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"; */
+    /* __tur_include__: static char *__image_base64(const unsigned char *in, size_t n) {
+         size_t out_len = 4 * ((n + 2) / 3);
+         char *out = (char *)malloc(out_len + 1);
+         if (!out) return NULL;
+         size_t i = 0, j = 0;
+         while (i + 2 < n) {
+           unsigned v = ((unsigned)in[i] << 16) | ((unsigned)in[i+1] << 8) | (unsigned)in[i+2];
+           out[j++] = __image_b64_alphabet[(v >> 18) & 0x3F];
+           out[j++] = __image_b64_alphabet[(v >> 12) & 0x3F];
+           out[j++] = __image_b64_alphabet[(v >>  6) & 0x3F];
+           out[j++] = __image_b64_alphabet[ v        & 0x3F];
+           i += 3;
+         }
+         if (i < n) {
+           unsigned v = (unsigned)in[i] << 16;
+           if (i + 1 < n) v |= (unsigned)in[i+1] << 8;
+           out[j++] = __image_b64_alphabet[(v >> 18) & 0x3F];
+           out[j++] = __image_b64_alphabet[(v >> 12) & 0x3F];
+           if (i + 1 < n) {
+             out[j++] = __image_b64_alphabet[(v >> 6) & 0x3F];
+             out[j++] = '=';
+           } else {
+             out[j++] = '=';
+             out[j++] = '=';
+           }
+         }
+         out[j] = '\0';
+         return out;
+       } */
+    ```)
+
+  ;;; image-display-protocol -- display a PNG file using a specific protocol.
+  ;;;
+  ;;; Parameters:
+  ;;;   proto -- 0 = placeholder, 1 = kitty, 2 = iterm2, 3 = sixel
+  ;;;            (matches the encoding used by (term-image-protocol))
+  ;;;   path  -- filesystem path to a PNG (or other supported image format)
+  ;;;
+  ;;; Sixel (proto=3) is deferred to v0.2; the call falls back to the
+  ;;; bracketed placeholder so callers wired to (term-image-protocol) keep
+  ;;; working without a special-case branch.  Any unknown proto also falls
+  ;;; back to the placeholder.  A missing file always falls back too.
+  ;;;
+  ;;; Since: tur-ansi AN4
+  (defn image-display-protocol [proto :int path :cstr] #{Unsafe} :void
+    ```c
+    const char *p = (const char *)path;
+    int pr = (int)proto;
+    if (!p || !p[0] || pr == 0 || pr == 3) {
+      printf("[image: %s]", p ? p : "");
+      fflush(stdout);
+      return;
+    }
+    size_t n = 0;
+    char *raw = __image_read_file(p, &n);
+    if (!raw) {
+      printf("[image: %s]", p);
+      fflush(stdout);
+      return;
+    }
+    char *b64 = __image_base64((const unsigned char *)raw, n);
+    free(raw);
+    if (!b64) {
+      printf("[image: %s]", p);
+      fflush(stdout);
+      return;
+    }
+    if (pr == 1) {
+      /* Kitty: APC G f=100 a=T m=<more> ; <chunk> ST ; repeat. */
+      size_t total = strlen(b64);
+      const size_t CHUNK = 4096;
+      size_t off = 0;
+      while (off < total) {
+        size_t left = total - off;
+        size_t take = left > CHUNK ? CHUNK : left;
+        int more = (off + take < total) ? 1 : 0;
+        if (off == 0) {
+          printf("\033_Gf=100,a=T,m=%d;", more);
+        } else {
+          printf("\033_Gm=%d;", more);
+        }
+        fwrite(b64 + off, 1, take, stdout);
+        fputs("\033\\", stdout);
+        off += take;
+      }
+    } else if (pr == 2) {
+      /* iTerm2: OSC 1337 ; File = [args] : <b64> BEL */
+      printf("\033]1337;File=inline=1;size=%zu;preserveAspectRatio=1:%s\a", n, b64);
+    } else {
+      printf("[image: %s]", p);
+    }
+    free(b64);
+    fflush(stdout);
+    ```)
+
+  ;;; image-display -- display a PNG file inline using the best available protocol.
+  ;;;
+  ;;; Parameters:
+  ;;;   path -- filesystem path to a PNG file
+  ;;;
+  ;;; Calls (term-image-protocol) internally to pick the protocol; when none
+  ;;; is detected (or sixel, which is deferred), falls back to the bracketed
+  ;;; placeholder.
+  ;;;
+  ;;; Example:
+  ;;;   (image-display "logo.png")  ; => emits Kitty/iTerm2 APC/OSC or [image: logo.png]
+  ;;;
+  ;;; Since: tur-ansi AN4
+  (defn image-display [path :cstr] #{Unsafe} :void
+    ```c
+    /* Inline the term-image-protocol detection so this module does not have
+       to import ansi/term (which would create a needless dep cycle when
+       ansi/term grows test hooks). */
+    const char *term = getenv("TERM");
+    const char *prog = getenv("TERM_PROGRAM");
+    int proto = 0;
+    if (term && strstr(term, "kitty")) proto = 1;
+    else if (prog && strcmp(prog, "iTerm.app") == 0) proto = 2;
+    else if (prog && strcmp(prog, "WezTerm") == 0) proto = 1;
+    else if (term && strstr(term, "sixel")) proto = 3;
+
+    const char *p = (const char *)path;
+    if (!p || !p[0]) { printf("[image: ]"); fflush(stdout); return; }
+
+    if (proto == 0 || proto == 3) {
+      printf("[image: %s]", p);
+      fflush(stdout);
+      return;
+    }
+
+    size_t n = 0;
+    char *raw = __image_read_file(p, &n);
+    if (!raw) { printf("[image: %s]", p); fflush(stdout); return; }
+    char *b64 = __image_base64((const unsigned char *)raw, n);
+    free(raw);
+    if (!b64) { printf("[image: %s]", p); fflush(stdout); return; }
+
+    if (proto == 1) {
+      size_t total = strlen(b64);
+      const size_t CHUNK = 4096;
+      size_t off = 0;
+      while (off < total) {
+        size_t left = total - off;
+        size_t take = left > CHUNK ? CHUNK : left;
+        int more = (off + take < total) ? 1 : 0;
+        if (off == 0) printf("\033_Gf=100,a=T,m=%d;", more);
+        else          printf("\033_Gm=%d;", more);
+        fwrite(b64 + off, 1, take, stdout);
+        fputs("\033\\", stdout);
+        off += take;
+      }
+    } else { /* proto == 2 */
+      printf("\033]1337;File=inline=1;size=%zu;preserveAspectRatio=1:%s\a", n, b64);
+    }
+    free(b64);
+    fflush(stdout);
+    ```)
+
+) ;; end defmodule ansi/image

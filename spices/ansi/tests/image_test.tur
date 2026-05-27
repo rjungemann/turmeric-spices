@@ -1,0 +1,226 @@
+;; tests/image_test.tur -- AN4 tests for ansi/image (Kitty + iTerm2 + placeholder).
+
+(defmodule ansi/tests/image
+  (import ansi/image :refer [image-display image-display-base64
+                              image-display-protocol image-placeholder])
+
+  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_image_fails = 0; */
+    if (!ok) g_image_fails++;
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-finish [count :int] #{Unsafe} :int
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (g_image_fails == 0) {
+      fprintf(stderr, "# All %lld ansi/image tests passed.\n", (long long)count);
+      return 0;
+    }
+    fprintf(stderr, "# %d/%lld ansi/image tests failed.\n",
+            g_image_fails, (long long)count);
+    return 1;
+    ```)
+
+  ;; Stdout capture machinery (same shape as box/color/style tests but uses a
+  ;; larger buffer because Kitty sequences for real files can run to tens of
+  ;; kilobytes once chunking lands).
+  (defn __capture-begin [] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_image_saved_fd = -1; */
+    /* __tur_include__: static int g_image_pipe_r = -1; */
+    /* __tur_include__: static int g_image_pipe_w = -1; */
+    /* __tur_include__: static char g_image_buf[16384]; */
+    /* __tur_include__: static size_t g_image_buf_len = 0; */
+    fflush(stdout);
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    int sf = fcntl(fds[0], F_GETFL, 0);
+    if (sf >= 0) fcntl(fds[0], F_SETFL, sf | O_NONBLOCK);
+    g_image_pipe_r = fds[0];
+    g_image_pipe_w = fds[1];
+    g_image_saved_fd = dup(STDOUT_FILENO);
+    dup2(g_image_pipe_w, STDOUT_FILENO);
+    g_image_buf_len = 0;
+    ```)
+
+  (defn __capture-end [] #{Unsafe} :void
+    ```c
+    fflush(stdout);
+    if (g_image_saved_fd < 0) return;
+    dup2(g_image_saved_fd, STDOUT_FILENO);
+    close(g_image_saved_fd);
+    close(g_image_pipe_w);
+    g_image_saved_fd = -1;
+    g_image_pipe_w = -1;
+    g_image_buf_len = 0;
+    for (;;) {
+      if (g_image_buf_len >= sizeof(g_image_buf) - 1) break;
+      ssize_t n = read(g_image_pipe_r, g_image_buf + g_image_buf_len,
+                       sizeof(g_image_buf) - 1 - g_image_buf_len);
+      if (n <= 0) break;
+      g_image_buf_len += (size_t)n;
+    }
+    g_image_buf[g_image_buf_len] = '\0';
+    close(g_image_pipe_r);
+    g_image_pipe_r = -1;
+    ```)
+
+  ;; Compare the captured buffer against a literal expected string.
+  (defn __capture-eq? [expected :cstr exp-len :int] #{Unsafe} :bool
+    ```c
+    if (g_image_buf_len != (size_t)exp_len) return 0;
+    return memcmp(g_image_buf, expected, (size_t)exp_len) == 0 ? 1 : 0;
+    ```)
+
+  (defn __capture-len [] #{Unsafe} :int
+    ```c return (int64_t)g_image_buf_len; ```)
+
+  ;; Boolean helpers that drive the captured-buffer checks via test-id.
+  (defn __check [test-id :int] #{Unsafe} :bool
+    ```c
+    const char *exp = "";
+    size_t elen = 0;
+    switch ((int)test_id) {
+      case 1:  exp = "[image: foo.png]"; elen = strlen(exp); break;
+      case 2:  exp = "[image: ]";        elen = strlen(exp); break;
+      case 3:  /* image-display-base64 with "TWFu" -> single Kitty chunk */
+               exp = "\033_Gf=100,a=T,m=0;TWFu\033\\"; elen = strlen(exp); break;
+      case 4:  /* image-display-base64 with NULL/empty -> no output */
+               exp = ""; elen = 0; break;
+      case 5:  /* image-display-protocol proto=0 -> placeholder */
+               exp = "[image: missing.png]"; elen = strlen(exp); break;
+      case 6:  /* image-display-protocol proto=3 (sixel) -> placeholder */
+               exp = "[image: missing.png]"; elen = strlen(exp); break;
+      case 7:  /* image-display-protocol with missing file -> placeholder */
+               exp = "[image: /this/path/does/not/exist.png]"; elen = strlen(exp); break;
+      default: return 0;
+    }
+    if (g_image_buf_len != elen) return 0;
+    return memcmp(g_image_buf, exp, elen) == 0 ? 1 : 0;
+    ```)
+
+  ;; Write a tiny temp file with known contents so we can predict the encoded
+  ;; output exactly.  "Man" (3 bytes) -> base64 "TWFu".
+  (defn __make-tmp-file [] #{Unsafe} :cstr
+    ```c
+    static char path[] = "/tmp/ansi-image-test-XXXXXX";
+    static char path_buf[64];
+    /* mkstemp clobbers the X's, so re-init each call. */
+    memcpy(path_buf, path, sizeof(path));
+    int fd = mkstemp(path_buf);
+    if (fd < 0) return strdup("");
+    const char *data = "Man";
+    write(fd, data, 3);
+    close(fd);
+    return strdup(path_buf);
+    ```)
+
+  (defn __unlink [p :cstr] #{Unsafe} :void
+    ```c unlink((const char *)p); ```)
+
+  ;; Verify the Kitty path-based output equals the expected APC sequence
+  ;; wrapping b64("Man") = "TWFu".
+  (defn __check-kitty-file [] #{Unsafe} :bool
+    ```c
+    const char *exp = "\033_Gf=100,a=T,m=0;TWFu\033\\";
+    size_t elen = strlen(exp);
+    if (g_image_buf_len != elen) return 0;
+    return memcmp(g_image_buf, exp, elen) == 0 ? 1 : 0;
+    ```)
+
+  ;; Verify the iTerm2 path-based output for "Man" (3 bytes).
+  (defn __check-iterm-file [] #{Unsafe} :bool
+    ```c
+    const char *exp =
+      "\033]1337;File=inline=1;size=3;preserveAspectRatio=1:TWFu\a";
+    size_t elen = strlen(exp);
+    if (g_image_buf_len != elen) return 0;
+    return memcmp(g_image_buf, exp, elen) == 0 ? 1 : 0;
+    ```)
+
+  ;; Build a base64-style string of length 5000 (>4096) so chunking splits it
+  ;; into exactly two chunks, then verify the framing.
+  (defn __check-base64-chunking [] #{Unsafe} :bool
+    ```c
+    /* Expected framing:
+         "\033_Gf=100,a=T,m=1;" (17) + (4096 'A') + "\033\\" (2)
+       + "\033_Gm=0;"           (7) + (904 'A')  + "\033\\" (2)
+       Total bytes = 17 + 4096 + 2 + 7 + 904 + 2 = 5028.  */
+    if (g_image_buf_len != 5028) return 0;
+    const char *p = g_image_buf;
+    if (memcmp(p, "\033_Gf=100,a=T,m=1;", 17) != 0) return 0;
+    p += 17;
+    for (int i = 0; i < 4096; i++) if (p[i] != 'A') return 0;
+    p += 4096;
+    if (memcmp(p, "\033\\", 2) != 0) return 0;
+    p += 2;
+    if (memcmp(p, "\033_Gm=0;", 7) != 0) return 0;
+    p += 7;
+    for (int i = 0; i < 904; i++) if (p[i] != 'A') return 0;
+    p += 904;
+    if (memcmp(p, "\033\\", 2) != 0) return 0;
+    return 1;
+    ```)
+
+  (defn __big-b64 [] #{Unsafe} :cstr
+    ```c
+    char *buf = (char *)malloc(5001);
+    memset(buf, 'A', 5000);
+    buf[5000] = '\0';
+    return buf;
+    ```)
+
+  (defn run-placeholder [] #{Unsafe} :bool
+    (do (__capture-begin) (image-placeholder "foo.png") (__capture-end) (__check 1)))
+
+  (defn run-placeholder-empty [] #{Unsafe} :bool
+    (do (__capture-begin) (image-placeholder "") (__capture-end) (__check 2)))
+
+  (defn run-b64-short [] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-base64 "TWFu") (__capture-end) (__check 3)))
+
+  (defn run-b64-empty [] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-base64 "") (__capture-end) (__check 4)))
+
+  (defn run-proto-zero [] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-protocol 0 "missing.png") (__capture-end) (__check 5)))
+
+  (defn run-proto-sixel [] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-protocol 3 "missing.png") (__capture-end) (__check 6)))
+
+  (defn run-proto-missing [] #{Unsafe} :bool
+    (do (__capture-begin)
+        (image-display-protocol 1 "/this/path/does/not/exist.png")
+        (__capture-end) (__check 7)))
+
+  (defn run-kitty-file [path :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-protocol 1 path) (__capture-end) (__check-kitty-file)))
+
+  (defn run-iterm-file [path :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-protocol 2 path) (__capture-end) (__check-iterm-file)))
+
+  (defn run-b64-chunking [big :cstr] #{Unsafe} :bool
+    (do (__capture-begin) (image-display-base64 big) (__capture-end) (__check-base64-chunking)))
+
+  (defn main [] #{Unsafe} :int
+    (do
+      (tap-record 1 "image-placeholder writes [image: path]"        (run-placeholder))
+      (tap-record 2 "image-placeholder handles empty path"          (run-placeholder-empty))
+      (tap-record 3 "image-display-base64 emits single Kitty chunk" (run-b64-short))
+      (tap-record 4 "image-display-base64 with empty input writes nothing" (run-b64-empty))
+      (tap-record 5 "image-display-protocol 0 falls back to placeholder"   (run-proto-zero))
+      (tap-record 6 "image-display-protocol 3 (sixel deferred) -> placeholder" (run-proto-sixel))
+      (tap-record 7 "image-display-protocol with missing file -> placeholder" (run-proto-missing))
+      (let [tmp (__make-tmp-file)]
+        (do
+          (tap-record 8  "image-display-protocol 1 wraps file bytes in Kitty APC"   (run-kitty-file tmp))
+          (tap-record 9  "image-display-protocol 2 wraps file bytes in iTerm2 OSC"  (run-iterm-file tmp))
+          (__unlink tmp)))
+      (let [big (__big-b64)]
+        (tap-record 10 "image-display-base64 splits >4096 chars into chunks" (run-b64-chunking big)))
+      (tap-finish 10)))
+
+) ;; end defmodule
