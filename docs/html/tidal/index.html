@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tur-tidal | Turmeric Spices</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/style.css">
+  <style>
+    .guide-content h1 { font-size:1.75rem; color:var(--gold-bright); margin-bottom:1.5rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border); }
+    .guide-content h2 { font-size:1.2rem; color:var(--text-primary); margin:2rem 0 0.75rem; }
+    .guide-content h3 { font-size:1rem; color:var(--gold-bright); margin:1.5rem 0 0.5rem; }
+    .guide-content p  { margin-bottom:1rem; }
+    .guide-content ul, .guide-content ol { margin:0 0 1rem 1.5rem; }
+    .guide-content li { margin:0.25rem 0; }
+    .guide-content code { font-family:"Iosevka","Fira Code",monospace; font-size:0.85em; background:var(--bg-panel); border:1px solid var(--border); border-radius:3px; padding:0.1em 0.35em; }
+    .guide-content pre { background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+    .guide-content pre code { background:none; border:none; padding:0; font-size:0.85rem; }
+    .guide-content blockquote { border-left:3px solid var(--gold); padding-left:1rem; color:var(--text-sec); margin:1rem 0; }
+    .guide-content table { border-collapse:collapse; width:100%; margin-bottom:1rem; font-size:0.9rem; }
+    .guide-content th { background:var(--bg-surface); border:1px solid var(--border); padding:0.5rem 0.75rem; text-align:left; color:var(--gold-bright); }
+    .guide-content td { border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .guide-content a { color:var(--gold-bright); }
+    .guide-content strong { color:var(--text-primary); }
+    .hl-comment { color:#48433D; font-style:italic; }
+    .hl-string  { color:#D9735A; }
+    .hl-number  { color:#A8C98A; }
+    .hl-keyword { color:#EFA030; font-weight:bold; }
+    .hl-type    { color:#7AC4B8; }
+    .code-toggle { border:1px solid var(--border); border-radius:4px; margin-bottom:1rem; overflow:hidden; }
+    .code-card-bar { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:0.35rem 0.75rem; display:flex; align-items:center; }
+    .code-syntax-toggle { margin-left:auto; display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden; font-family:"Iosevka","Fira Code",monospace; font-size:11px; }
+    .seg-btn { padding:3px 10px; background:transparent; color:var(--text-sec); border:none; cursor:pointer; transition:all 0.14s; }
+    .seg-btn:hover { color:var(--text-primary); }
+    .seg-btn.active { color:var(--gold-bright); background:var(--bg-hover); }
+    .code-card-body { }
+    .code-version { }
+    .guide-content .code-toggle pre { border:none; border-radius:0; margin-bottom:0; }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <button class="hamburger" aria-label="Toggle navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <a class="nav-logo" href="https://turmeric-lang.com">
+      <img src="/logo-icon.svg" width="28" height="28" alt="">
+      <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+    </a>
+    <nav>
+      <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+      <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+      <a href="https://turmeric-lang.com/try">Try It</a>
+    </nav>
+  </header>
+  <div class="sidebar-overlay"></div>
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.querySelector('.hamburger');
+      var sidebar = document.querySelector('.sidebar');
+      var overlay = document.querySelector('.sidebar-overlay');
+      if (!btn || !sidebar) return;
+      function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+      function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+      btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+      overlay && overlay.addEventListener('click', close);
+    });
+  </script>
+  <div class="page-layout">
+    <div class="sidebar">
+      <div style="margin-bottom:0.5rem"><a href="https://turmeric-lang.com" style="font-size:0.8rem;color:var(--text-sec)">&larr; turmeric-lang.com</a></div>
+      <div style="margin-bottom:1.25rem"><a href="../index.html" style="font-size:0.8rem;color:var(--text-sec)">&larr; All Spices</a></div>
+      <div style="margin-bottom:1.25rem"><a href="api/" style="font-size:0.85rem;color:var(--gold-bright)">API reference &rarr;</a></div>
+      <h3>On this page</h3>
+      <ul><li style=""><a href="#tur-tidal" style="">tur-tidal</a></li>
+<li style=""><a href="#mini-notation-reference" style="">Mini-notation reference</a></li>
+<li style=""><a href="#quick-example" style="">Quick example</a></li>
+<li style=""><a href="#modules" style="">Modules</a></li>
+<li style="padding-left:0.75rem;"><a href="#tidalevent" style="color:var(--text-sec);">tidal/event</a></li>
+<li style="padding-left:0.75rem;"><a href="#tidalnotation" style="color:var(--text-sec);">tidal/notation</a></li>
+<li style="padding-left:0.75rem;"><a href="#tidalpattern" style="color:var(--text-sec);">tidal/pattern</a></li>
+<li style="padding-left:0.75rem;"><a href="#tidalrender" style="color:var(--text-sec);">tidal/render</a></li>
+<li style=""><a href="#dependencies" style="">Dependencies</a></li>
+<li style=""><a href="#building" style="">Building</a></li>
+<li style=""><a href="#license" style="">License</a></li></ul>
+    </div>
+    <div class="content guide-content">
+      <h1 id="tur-tidal">tur-tidal</h1>
+<p>A Tidal Cycles-inspired mini-notation parser and pattern library for Turmeric.
+<code>tur-tidal</code> parses the compact mini-notation used by Tidal Cycles into an
+in-memory pattern tree, evaluates that tree at any cycle number to produce
+a flat list of timed events, and renders the result as a plain-text event
+table, a raw sclang <code>Pbind.new(...)</code> expression, or a scscm <code>pbind</code> form
+for use with the <code>tur-scscm</code> spice.</p>
+<h2 id="mini-notation-reference">Mini-notation reference</h2>
+<table>
+<thead>
+<tr>
+<th>Syntax</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bd sd cp</code></td>
+<td>Sequence: three equal-duration steps per cycle</td>
+</tr>
+<tr>
+<td><code>[bd sd] cp</code></td>
+<td>Subsequence: bd and sd share the first half-cycle slot</td>
+</tr>
+<tr>
+<td><code>&lt;60 62 64&gt;</code></td>
+<td>Alternating: one value per cycle, advancing each cycle</td>
+</tr>
+<tr>
+<td><code>bd*2</code></td>
+<td>Repeat: bd twice within its slot</td>
+</tr>
+<tr>
+<td><code>bd/2</code></td>
+<td>Slow: bd spans 2 cycles</td>
+</tr>
+<tr>
+<td><code>bd(3,8)</code></td>
+<td>Euclidean rhythm: 3 pulses distributed across 8 steps</td>
+</tr>
+<tr>
+<td><code>bd@2</code></td>
+<td>Weight: bd takes twice as much time in a sequence</td>
+</tr>
+<tr>
+<td><code>~</code></td>
+<td>Rest: empty slot (no event produced)</td>
+</tr>
+</tbody>
+</table>
+<p>Note names (<code>c4</code>, <code>d#3</code>, <code>bb5</code>) are resolved to MIDI numbers by <code>note-&gt;midi</code>.
+Raw integers (<code>60</code>, <code>72</code>) pass through as MIDI directly.
+Drum names (<code>bd</code>, <code>sd</code>, <code>cp</code>) pass through as string values in events and
+are not converted to MIDI (their <code>note-&gt;midi</code> result is -1, so they are
+filtered out of <code>render-sclang</code> / <code>render-pbind</code> MIDI arrays).</p>
+<h2 id="quick-example">Quick example</h2>
+<div class="code-card code-toggle"><div class="code-card-bar"><div class="code-syntax-toggle" role="tablist"><button class="seg-btn active" data-syntax="turmeric" role="tab" aria-selected="true">turmeric</button><button class="seg-btn" data-syntax="sweet-exp" role="tab" aria-selected="false">sweet-exp</button></div></div><div class="code-card-body"><div class="code-version turmeric-version" role="tabpanel"><pre><code class="language-turmeric">(let [r (parse-notation &quot;c4 [d4 e4] f4&quot;)]
+  (let [p (ok-val r)]
+    (println (render-sclang p &quot;piano&quot;))
+    (notation-free p)))
+</code></pre></div><div class="code-version sweet-exp-version" role="tabpanel" style="display:none"><pre><code class="language-sweet-exp">#lang sweet-exp
+let [r parse-notation(&quot;c4 [d4 e4] f4&quot;)]
+  let [p ok-val(r)]
+    println $ render-sclang p &quot;piano&quot;
+    notation-free(p)
+</code></pre></div></div></div>
+<p>Output:</p>
+<pre><code>(Pbind.new([\instrument, &quot;piano&quot;, \midinote, Pseq.new([60,62,64,65],inf), \dur, Pseq.new([0.250,0.125,0.125,0.250],inf)])).play;
+</code></pre>
+<h2 id="modules">Modules</h2>
+<h3 id="tidalevent">tidal/event</h3>
+<p>Low-level event struct (onset, dur, value) and the <code>note-&gt;midi</code> parser.</p>
+<ul>
+<li><code>event-new onset dur value</code> -- allocate an event</li>
+<li><code>event-onset e</code> -- onset fraction (0.0 to 1.0)</li>
+<li><code>event-dur e</code>   -- duration fraction (0.0 to 1.0)</li>
+<li><code>event-value e</code> -- raw string value</li>
+<li><code>event-free e</code>  -- free the event</li>
+<li><code>note-&gt;midi value</code> -- parse note name or integer to MIDI number (-1 for rest)</li>
+</ul>
+<h3 id="tidalnotation">tidal/notation</h3>
+<p>Mini-notation parser and evaluator.</p>
+<ul>
+<li><code>parse-notation text</code> -- parse text into a pattern handle; returns <code>ok(p)</code> or <code>err(msg)</code></li>
+<li><code>notation-free p</code>     -- free a pattern handle</li>
+<li><code>pattern-events p cycle</code> -- evaluate pattern at cycle, returns cons list of events</li>
+</ul>
+<h3 id="tidalpattern">tidal/pattern</h3>
+<p>Higher-level combinators that wrap an existing pattern handle.</p>
+<ul>
+<li><code>pattern-fast p n</code>         -- speed up by factor n</li>
+<li><code>pattern-slow p n</code>         -- slow down by factor n</li>
+<li><code>pattern-stack p1 p2</code>      -- overlay: events from both patterns per cycle</li>
+<li><code>pattern-cat p1 p2</code>        -- concatenate: alternate p1/p2 each cycle</li>
+<li><code>pattern-rev p</code>            -- reverse event order within a cycle</li>
+<li><code>pattern-every n f p</code>      -- apply transformed pattern f every nth cycle</li>
+<li><code>pattern-degrade p prob</code>   -- randomly drop events with probability prob</li>
+<li><code>pattern-free p</code>           -- free a combinator pattern</li>
+</ul>
+<h3 id="tidalrender">tidal/render</h3>
+<p>Render a pattern to text.</p>
+<ul>
+<li><code>render-events p cycle</code>      -- plain-text table: one <code>onset  dur  value</code> line per event</li>
+<li><code>render-sclang p instrument</code> -- sclang <code>Pbind.new(...).play;</code> string</li>
+<li><code>render-pbind p instrument</code>  -- scscm <code>(. (pbind ...) play)</code> string</li>
+</ul>
+<h2 id="dependencies">Dependencies</h2>
+<ul>
+<li><strong>tur-scscm</strong> (optional) -- provides the scscm compiler used by <code>render-pbind</code> output.
+  <code>tur-tidal</code> produces the scscm text but does not require <code>tur-scscm</code> to be loaded
+  in order to render it. The <code>tur-scscm</code> dependency is marked <code>:optional true</code> in
+  <code>build.tur</code>.</li>
+</ul>
+<h2 id="building">Building</h2>
+<pre><code class="language-sh">just build
+just test
+</code></pre>
+<h2 id="license">License</h2>
+<p>MIT</p>
+    </div>
+  </div>
+  <footer class="site-footer">
+    Auto-generated by <code>tools/genspices.py (turmeric-spices)</code> &mdash; source: <code>spices/tidal/README.md</code>
+  </footer>
+  <script>
+  (function(){
+    var KW = new Set([
+      'defn','defmacro','defstruct','definstance','defdata','defgadt','defclass','def','let','let*','letrec',
+      'if','cond','when','unless','do','begin','and','or','not',
+      'fn','lambda','async','await','match','case',
+      'quote','quasiquote','unquote','for','while','loop','do-m',
+      'set!','try','catch','finally','with','use',
+      'import','export','module','require','provide',
+      'cons','car','cdr','nil-value','some','none','ok','err',
+      'map','filter','reduce','apply','return','yield','raise','throw',
+      'coerce','cast','type-of','any',
+    ]);
+    function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function hl(code){
+      var out='', i=0, n=code.length;
+      while(i<n){
+        var c=code[i];
+        // Line comment
+        if(c===';'){
+          var e=code.indexOf('\n',i); if(e===-1)e=n;
+          out+='<span class="hl-comment">'+esc(code.slice(i,e))+'</span>'; i=e; continue;
+        }
+        // String
+        if(c==='"'){
+          var j=i+1;
+          while(j<n){if(code[j]==='\\'){j+=2;continue;}if(code[j]==='"'){j++;break;}j++;}
+          out+='<span class="hl-string">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Type annotation :keyword
+        if(c===':'&&i+1<n&&/[a-zA-Z_]/.test(code[i+1])){
+          var j=i+1;
+          while(j<n&&/[a-zA-Z0-9_\-?!]/.test(code[j]))j++;
+          out+='<span class="hl-type">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Number (integer or float, possibly negative)
+        if(/[0-9]/.test(c)||(c==='-'&&i+1<n&&/[0-9]/.test(code[i+1]))){
+          var j=i; if(code[j]==='-')j++;
+          while(j<n&&/[0-9a-fA-FxX_\.]/.test(code[j]))j++;
+          out+='<span class="hl-number">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Symbol / identifier
+        if(/[a-zA-Z_\-!?*+<>=\/&%^~#@]/.test(c)){
+          var j=i;
+          while(j<n&&/[a-zA-Z0-9_\-!?*+<>=\/&%^~#@\.]/.test(code[j]))j++;
+          var sym=code.slice(i,j);
+          if(sym==='true'||sym==='false'||sym==='nil'){
+            out+='<span class="hl-number">'+esc(sym)+'</span>';
+          } else if(KW.has(sym)){
+            out+='<span class="hl-keyword">'+esc(sym)+'</span>';
+          } else {
+            out+=esc(sym);
+          }
+          i=j; continue;
+        }
+        out+=esc(c); i++;
+      }
+      return out;
+    }
+    document.querySelectorAll('pre code.language-turmeric, pre code.language-sweet-exp').forEach(function(el){
+      el.innerHTML=hl(el.textContent);
+    });
+  })();
+  </script>
+  <script>
+  (function(){
+    function applyToggle(toggle, syntax) {
+      var card = toggle.closest('.code-card');
+      if (!card) return;
+      toggle.querySelectorAll('.seg-btn').forEach(function(btn){
+        var active = btn.dataset.syntax === syntax;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      card.querySelectorAll('.code-version').forEach(function(v){
+        v.style.display = v.classList.contains(syntax + '-version') ? '' : 'none';
+      });
+    }
+
+    // ST1.5: restore stored preference across all cards on load
+    var stored = localStorage.getItem('guide-syntax');
+    if (stored) {
+      document.querySelectorAll('.code-syntax-toggle').forEach(function(t){ applyToggle(t, stored); });
+    }
+
+    document.querySelectorAll('.code-syntax-toggle').forEach(function(toggle){
+      // Click handler
+      toggle.addEventListener('click', function(e){
+        if (!e.target.classList.contains('seg-btn')) return;
+        var syntax = e.target.dataset.syntax;
+        document.querySelectorAll('.code-syntax-toggle').forEach(function(t){ applyToggle(t, syntax); });
+        localStorage.setItem('guide-syntax', syntax);
+      });
+      // ST5.2: arrow-key navigation within the tablist
+      toggle.addEventListener('keydown', function(e){
+        var btns = Array.from(toggle.querySelectorAll('.seg-btn'));
+        var idx = btns.indexOf(document.activeElement);
+        if (idx === -1) return;
+        if (e.key === 'ArrowRight'){ btns[(idx+1)%btns.length].focus(); e.preventDefault(); }
+        if (e.key === 'ArrowLeft') { btns[(idx-1+btns.length)%btns.length].focus(); e.preventDefault(); }
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

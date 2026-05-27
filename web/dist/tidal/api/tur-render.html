@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/tur/render | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#nil-value">nil-value</a></li>
+    <li><a href="#list-nil_">list-nil?</a></li>
+    <li><a href="#cons">cons</a></li>
+    <li><a href="#head">head</a></li>
+    <li><a href="#tail">tail</a></li>
+    <li><a href="#tidal-ok">tidal-ok</a></li>
+    <li><a href="#tidal-err">tidal-err</a></li>
+    <li><a href="#tidal-ok_">tidal-ok?</a></li>
+    <li><a href="#tidal-err_">tidal-err?</a></li>
+    <li><a href="#tidal-ok-val">tidal-ok-val</a></li>
+    <li><a href="#tidal-err-val">tidal-err-val</a></li>
+    <li><a href="#tidal-void">tidal-void</a></li>
+    <li><a href="#tidal-eval-to-cons">tidal-eval-to-cons</a></li>
+    <li><a href="#note-_midi">note-&gt;midi</a></li>
+    <li><a href="#tidal-concat">tidal-concat</a></li>
+    <li><a href="#tidal-float-str">tidal-float-str</a></li>
+    <li><a href="#tidal-int-str">tidal-int-str</a></li>
+    <li><a href="#tidal-ev-onset">tidal-ev-onset</a></li>
+    <li><a href="#tidal-ev-dur">tidal-ev-dur</a></li>
+    <li><a href="#tidal-ev-value">tidal-ev-value</a></li>
+    <li><a href="#tidal-ev-free">tidal-ev-free</a></li>
+    <li><a href="#render-events-loop">render-events-loop</a></li>
+    <li><a href="#render-events">render-events</a></li>
+    <li><a href="#render-midi-csv">render-midi-csv</a></li>
+    <li><a href="#render-dur-csv">render-dur-csv</a></li>
+    <li><a href="#render-midi-sp">render-midi-sp</a></li>
+    <li><a href="#render-dur-sp">render-dur-sp</a></li>
+    <li><a href="#render-sclang">render-sclang</a></li>
+    <li><a href="#render-pbind">render-pbind</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>tur/render</h1>
+    <div class="module-path">src/tidal/render.tur</div>
+  </div>
+<div class="def-card" id="nil-value">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>nil-value</h2>
+  </div>
+  <pre class="def-signature">(nil-value)</pre>
+</div>
+<div class="def-card" id="list-nil_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>list-nil?</h2>
+  </div>
+  <pre class="def-signature">(list-nil? [lst :int])</pre>
+</div>
+<div class="def-card" id="cons">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>cons</h2>
+  </div>
+  <pre class="def-signature">(cons [value :int next :int])</pre>
+</div>
+<div class="def-card" id="head">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>head</h2>
+  </div>
+  <pre class="def-signature">(head [lst :int])</pre>
+</div>
+<div class="def-card" id="tail">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tail</h2>
+  </div>
+  <pre class="def-signature">(tail [lst :int])</pre>
+</div>
+<div class="def-card" id="tidal-ok">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-ok</h2>
+  </div>
+  <pre class="def-signature">(tidal-ok [x :int])</pre>
+</div>
+<div class="def-card" id="tidal-err">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-err</h2>
+  </div>
+  <pre class="def-signature">(tidal-err [e :int])</pre>
+</div>
+<div class="def-card" id="tidal-ok_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-ok?</h2>
+  </div>
+  <pre class="def-signature">(tidal-ok? [r :ptr&lt;void&gt;])</pre>
+</div>
+<div class="def-card" id="tidal-err_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-err?</h2>
+  </div>
+  <pre class="def-signature">(tidal-err? [r :ptr&lt;void&gt;])</pre>
+</div>
+<div class="def-card" id="tidal-ok-val">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-ok-val</h2>
+  </div>
+  <pre class="def-signature">(tidal-ok-val [r :ptr&lt;void&gt;])</pre>
+</div>
+<div class="def-card" id="tidal-err-val">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-err-val</h2>
+  </div>
+  <pre class="def-signature">(tidal-err-val [r :ptr&lt;void&gt;])</pre>
+</div>
+<div class="def-card" id="tidal-void">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-void</h2>
+  </div>
+  <pre class="def-signature">(tidal-void)</pre>
+</div>
+<div class="def-card" id="tidal-eval-to-cons">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-eval-to-cons</h2>
+  </div>
+  <pre class="def-signature">(tidal-eval-to-cons [pat :int cycle :int])</pre>
+</div>
+<div class="def-card" id="note-_midi">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>note-&gt;midi</h2>
+  </div>
+  <pre class="def-signature">(note-&gt;midi [value :cstr])</pre>
+</div>
+<div class="def-card" id="tidal-concat">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-concat</h2>
+  </div>
+  <pre class="def-signature">(tidal-concat [a :cstr b :cstr])</pre>
+</div>
+<div class="def-card" id="tidal-float-str">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-float-str</h2>
+  </div>
+  <pre class="def-signature">(tidal-float-str [f :float])</pre>
+</div>
+<div class="def-card" id="tidal-int-str">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-int-str</h2>
+  </div>
+  <pre class="def-signature">(tidal-int-str [n :int])</pre>
+</div>
+<div class="def-card" id="tidal-ev-onset">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-ev-onset</h2>
+  </div>
+  <pre class="def-signature">(tidal-ev-onset [e :int])</pre>
+</div>
+<div class="def-card" id="tidal-ev-dur">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-ev-dur</h2>
+  </div>
+  <pre class="def-signature">(tidal-ev-dur [e :int])</pre>
+</div>
+<div class="def-card" id="tidal-ev-value">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-ev-value</h2>
+  </div>
+  <pre class="def-signature">(tidal-ev-value [e :int])</pre>
+</div>
+<div class="def-card" id="tidal-ev-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tidal-ev-free</h2>
+  </div>
+  <pre class="def-signature">(tidal-ev-free [e :int])</pre>
+</div>
+<div class="def-card" id="render-events-loop">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-events-loop</h2>
+  </div>
+  <pre class="def-signature">(render-events-loop [evts :int acc :cstr])</pre>
+</div>
+<div class="def-card" id="render-events">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-events</h2>
+  </div>
+  <pre class="def-signature">(render-events [p :int cycle :int])</pre>
+  <p class="def-summary">render a pattern&#x27;s events as a plain-text table.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>p</td><td></td><td>pattern handle</td></tr>
+    <tr><td>cycle</td><td></td><td>cycle number to evaluate</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Multi-line string: one &quot;onset  dur  value&quot; line per event.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(render-events p 0)
+  ; =&gt; &quot;0.000  0.333  bd\n0.333  0.333  sd\n0.667  0.333  cp\n&quot;</pre>
+  </div>
+  <p class="def-since">Since: TD5</p>
+</div>
+<div class="def-card" id="render-midi-csv">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-midi-csv</h2>
+  </div>
+  <pre class="def-signature">(render-midi-csv [evts :int first? :bool])</pre>
+</div>
+<div class="def-card" id="render-dur-csv">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-dur-csv</h2>
+  </div>
+  <pre class="def-signature">(render-dur-csv [evts :int first? :bool])</pre>
+</div>
+<div class="def-card" id="render-midi-sp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-midi-sp</h2>
+  </div>
+  <pre class="def-signature">(render-midi-sp [evts :int first? :bool])</pre>
+</div>
+<div class="def-card" id="render-dur-sp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-dur-sp</h2>
+  </div>
+  <pre class="def-signature">(render-dur-sp [evts :int first? :bool])</pre>
+</div>
+<div class="def-card" id="render-sclang">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-sclang</h2>
+  </div>
+  <pre class="def-signature">(render-sclang [p :int instrument :cstr])</pre>
+  <p class="def-summary">render a pattern as raw sclang Pbind text.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>p</td><td></td><td>pattern handle</td></tr>
+    <tr><td>instrument</td><td></td><td>instrument name string (e.g. &quot;bass&quot;)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">sclang text:
+  (Pbind.new([\instrument, &quot;piano&quot;, \midinote, Pseq.new([60,62],inf),
+              \dur, Pseq.new([0.333,0.333],inf)])).play;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(render-sclang p &quot;piano&quot;)</pre>
+  </div>
+  <p class="def-since">Since: TD5</p>
+</div>
+<div class="def-card" id="render-pbind">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-pbind</h2>
+  </div>
+  <pre class="def-signature">(render-pbind [p :int instrument :cstr])</pre>
+  <p class="def-summary">render a pattern as scscm Pbind expression.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>p</td><td></td><td>pattern handle</td></tr>
+    <tr><td>instrument</td><td></td><td>instrument name string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">scscm text:
+  (. (pbind :instrument &quot;piano&quot; :midinote (pseq [60 62] inf)
+            :dur (pseq [0.333 0.333] inf)) play)</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(render-pbind p &quot;piano&quot;)</pre>
+  </div>
+  <p class="def-since">Since: TD5</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

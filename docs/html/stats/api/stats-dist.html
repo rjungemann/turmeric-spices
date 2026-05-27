@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/stats/dist | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#dist-normal">dist-normal</a></li>
+    <li><a href="#dist-t">dist-t</a></li>
+    <li><a href="#dist-chi2">dist-chi2</a></li>
+    <li><a href="#dist-f">dist-f</a></li>
+    <li><a href="#dist-uniform">dist-uniform</a></li>
+    <li><a href="#dist-binomial">dist-binomial</a></li>
+    <li><a href="#dist-poisson">dist-poisson</a></li>
+    <li><a href="#dist-exponential">dist-exponential</a></li>
+    <li><a href="#dist-beta">dist-beta</a></li>
+    <li><a href="#dist-gamma">dist-gamma</a></li>
+    <li><a href="#dist-free">dist-free</a></li>
+    <li><a href="#pdf">pdf</a></li>
+    <li><a href="#cdf">cdf</a></li>
+    <li><a href="#quantile">quantile</a></li>
+    <li><a href="#random">random</a></li>
+    <li><a href="#random-n">random-n</a></li>
+    <li><a href="#dnorm">dnorm</a></li>
+    <li><a href="#pnorm">pnorm</a></li>
+    <li><a href="#qnorm">qnorm</a></li>
+    <li><a href="#rnorm">rnorm</a></li>
+    <li><a href="#dt">dt</a></li>
+    <li><a href="#pt">pt</a></li>
+    <li><a href="#qt">qt</a></li>
+    <li><a href="#rt">rt</a></li>
+    <li><a href="#dchi2">dchi2</a></li>
+    <li><a href="#pchi2">pchi2</a></li>
+    <li><a href="#qchi2">qchi2</a></li>
+    <li><a href="#rchi2">rchi2</a></li>
+    <li><a href="#df-dist">df-dist</a></li>
+    <li><a href="#pf-dist">pf-dist</a></li>
+    <li><a href="#qf-dist">qf-dist</a></li>
+    <li><a href="#rf-dist">rf-dist</a></li>
+    <li><a href="#dunif">dunif</a></li>
+    <li><a href="#punif">punif</a></li>
+    <li><a href="#qunif">qunif</a></li>
+    <li><a href="#runif">runif</a></li>
+    <li><a href="#dbinom">dbinom</a></li>
+    <li><a href="#pbinom">pbinom</a></li>
+    <li><a href="#qbinom">qbinom</a></li>
+    <li><a href="#rbinom">rbinom</a></li>
+    <li><a href="#dpois">dpois</a></li>
+    <li><a href="#ppois">ppois</a></li>
+    <li><a href="#qpois">qpois</a></li>
+    <li><a href="#rpois">rpois</a></li>
+    <li><a href="#dexp">dexp</a></li>
+    <li><a href="#pexp">pexp</a></li>
+    <li><a href="#qexp">qexp</a></li>
+    <li><a href="#rexp">rexp</a></li>
+    <li><a href="#dbeta">dbeta</a></li>
+    <li><a href="#pbeta">pbeta</a></li>
+    <li><a href="#qbeta">qbeta</a></li>
+    <li><a href="#rbeta">rbeta</a></li>
+    <li><a href="#dgamma">dgamma</a></li>
+    <li><a href="#pgamma">pgamma</a></li>
+    <li><a href="#qgamma">qgamma</a></li>
+    <li><a href="#rgamma">rgamma</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>stats/dist</h1>
+    <div class="module-path">src/stats/dist.tur</div>
+  </div>
+<div class="def-card" id="dist-normal">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-normal</h2>
+  </div>
+  <pre class="def-signature">(dist-normal [mu :float sigma :float] :int)</pre>
+  <p class="def-summary">construct a Normal(mu, sigma) distribution object.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>mu</td><td></td><td>:float mean</td></tr>
+    <tr><td>sigma</td><td></td><td>:float standard deviation (&gt; 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.  Free with dist-free.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [d (dist-normal 0.0 1.0)] (pdf d 0.0))  ; =&gt; ~0.3989</pre>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="dist-t">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-t</h2>
+  </div>
+  <pre class="def-signature">(dist-t [df :float] :int)</pre>
+  <p class="def-summary">construct a Student t(df) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>df</td><td></td><td>:float degrees of freedom (&gt; 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="dist-chi2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-chi2</h2>
+  </div>
+  <pre class="def-signature">(dist-chi2 [df :float] :int)</pre>
+  <p class="def-summary">construct a chi-squared(df) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>df</td><td></td><td>:float degrees of freedom (&gt; 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="dist-f">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-f</h2>
+  </div>
+  <pre class="def-signature">(dist-f [df1 :float df2 :float] :int)</pre>
+  <p class="def-summary">construct an F(df1, df2) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>df1</td><td></td><td>:float numerator df</td></tr>
+    <tr><td>df2</td><td></td><td>:float denominator df</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="dist-uniform">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-uniform</h2>
+  </div>
+  <pre class="def-signature">(dist-uniform [a :float b :float] :int)</pre>
+  <p class="def-summary">construct a Uniform(a, b) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>a</td><td></td><td>:float lower bound</td></tr>
+    <tr><td>b</td><td></td><td>:float upper bound (b &gt; a)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dist-binomial">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-binomial</h2>
+  </div>
+  <pre class="def-signature">(dist-binomial [n :int p :float] :int)</pre>
+  <p class="def-summary">construct a Binomial(n, p) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>:int   number of trials</td></tr>
+    <tr><td>p</td><td></td><td>:float success probability in [0,1]</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dist-poisson">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-poisson</h2>
+  </div>
+  <pre class="def-signature">(dist-poisson [lambda :float] :int)</pre>
+  <p class="def-summary">construct a Poisson(lambda) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>lambda</td><td></td><td>:float rate parameter (&gt; 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dist-exponential">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-exponential</h2>
+  </div>
+  <pre class="def-signature">(dist-exponential [rate :float] :int)</pre>
+  <p class="def-summary">construct an Exponential(rate) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>rate</td><td></td><td>:float rate = 1/mean (&gt; 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dist-beta">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-beta</h2>
+  </div>
+  <pre class="def-signature">(dist-beta [alpha :float beta :float] :int)</pre>
+  <p class="def-summary">construct a Beta(alpha, beta) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>alpha</td><td></td><td>:float shape1 (&gt; 0)</td></tr>
+    <tr><td>beta</td><td></td><td>:float shape2 (&gt; 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dist-gamma">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-gamma</h2>
+  </div>
+  <pre class="def-signature">(dist-gamma [shape :float rate :float] :int)</pre>
+  <p class="def-summary">construct a Gamma(shape, rate) distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>shape</td><td></td><td>:float shape parameter (&gt; 0)</td></tr>
+    <tr><td>rate</td><td></td><td>:float rate = 1/scale (&gt; 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  dist handle.</p>
+  </div>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dist-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dist-free</h2>
+  </div>
+  <pre class="def-signature">(dist-free [d :int] :void)</pre>
+  <p class="def-summary">free a distribution object.</p>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="pdf">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pdf</h2>
+  </div>
+  <pre class="def-signature">(pdf [d :int x :float] :float)</pre>
+  <p class="def-summary">probability density (or mass) at x.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>d</td><td></td><td>:int  dist handle</td></tr>
+    <tr><td>x</td><td></td><td>:float argument</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float density / PMF value.</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="cdf">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>cdf</h2>
+  </div>
+  <pre class="def-signature">(cdf [d :int x :float] :float)</pre>
+  <p class="def-summary">cumulative distribution function P(X &lt;= x).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>d</td><td></td><td>:int  dist handle</td></tr>
+    <tr><td>x</td><td></td><td>:float argument</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  P(X &lt;= x) in [0, 1].</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="quantile">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>quantile</h2>
+  </div>
+  <pre class="def-signature">(quantile [d :int p :float] :float)</pre>
+  <p class="def-summary">inverse CDF (quantile function).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>d</td><td></td><td>:int  dist handle</td></tr>
+    <tr><td>p</td><td></td><td>:float probability in [0, 1]</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  x such that CDF(x) ~= p.</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="random">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>random</h2>
+  </div>
+  <pre class="def-signature">(random [d :int rng :int] :float)</pre>
+  <p class="def-summary">draw one sample from a distribution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>d</td><td></td><td>:int  dist handle</td></tr>
+    <tr><td>rng</td><td></td><td>:int  rng handle (from rng-make)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  one sample.</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="random-n">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>random-n</h2>
+  </div>
+  <pre class="def-signature">(random-n [d :int rng :int n :int] :int)</pre>
+  <p class="def-summary">draw n samples from a distribution into a float64 column.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>d</td><td></td><td>:int  dist handle</td></tr>
+    <tr><td>rng</td><td></td><td>:int  rng handle</td></tr>
+    <tr><td>n</td><td></td><td>:int  number of samples</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  new float64 column of length n.  Caller frees.</p>
+  </div>
+  <p class="def-since">Since: ST3</p>
+</div>
+<div class="def-card" id="dnorm">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dnorm</h2>
+  </div>
+  <pre class="def-signature">(dnorm [x :float mu :float sigma :float] :float)</pre>
+  <p class="def-summary">normal density at x.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pnorm">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pnorm</h2>
+  </div>
+  <pre class="def-signature">(pnorm [x :float mu :float sigma :float] :float)</pre>
+  <p class="def-summary">normal CDF at x.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qnorm">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qnorm</h2>
+  </div>
+  <pre class="def-signature">(qnorm [p :float mu :float sigma :float] :float)</pre>
+  <p class="def-summary">normal quantile at p.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rnorm">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rnorm</h2>
+  </div>
+  <pre class="def-signature">(rnorm [rng :int n :int mu :float sigma :float] :int)</pre>
+  <p class="def-summary">n normal samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dt">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dt</h2>
+  </div>
+  <pre class="def-signature">(dt [x :float df :float] :float)</pre>
+  <p class="def-summary">t density.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pt">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pt</h2>
+  </div>
+  <pre class="def-signature">(pt [x :float df :float] :float)</pre>
+  <p class="def-summary">t CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qt">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qt</h2>
+  </div>
+  <pre class="def-signature">(qt [p :float df :float] :float)</pre>
+  <p class="def-summary">t quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rt">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rt</h2>
+  </div>
+  <pre class="def-signature">(rt [rng :int n :int df :float] :int)</pre>
+  <p class="def-summary">n t samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dchi2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dchi2</h2>
+  </div>
+  <pre class="def-signature">(dchi2 [x :float df :float] :float)</pre>
+  <p class="def-summary">chi-squared density.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pchi2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pchi2</h2>
+  </div>
+  <pre class="def-signature">(pchi2 [x :float df :float] :float)</pre>
+  <p class="def-summary">chi-squared CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qchi2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qchi2</h2>
+  </div>
+  <pre class="def-signature">(qchi2 [p :float df :float] :float)</pre>
+  <p class="def-summary">chi-squared quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rchi2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rchi2</h2>
+  </div>
+  <pre class="def-signature">(rchi2 [rng :int n :int df :float] :int)</pre>
+  <p class="def-summary">n chi-squared samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="df-dist">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>df-dist</h2>
+  </div>
+  <pre class="def-signature">(df-dist [x :float df1 :float df2 :float] :float)</pre>
+  <p class="def-summary">F density.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pf-dist">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pf-dist</h2>
+  </div>
+  <pre class="def-signature">(pf-dist [x :float df1 :float df2 :float] :float)</pre>
+  <p class="def-summary">F CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qf-dist">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qf-dist</h2>
+  </div>
+  <pre class="def-signature">(qf-dist [p :float df1 :float df2 :float] :float)</pre>
+  <p class="def-summary">F quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rf-dist">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rf-dist</h2>
+  </div>
+  <pre class="def-signature">(rf-dist [rng :int n :int df1 :float df2 :float] :int)</pre>
+  <p class="def-summary">n F samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dunif">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dunif</h2>
+  </div>
+  <pre class="def-signature">(dunif [x :float a :float b :float] :float)</pre>
+  <p class="def-summary">uniform density.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="punif">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>punif</h2>
+  </div>
+  <pre class="def-signature">(punif [x :float a :float b :float] :float)</pre>
+  <p class="def-summary">uniform CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qunif">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qunif</h2>
+  </div>
+  <pre class="def-signature">(qunif [p :float a :float b :float] :float)</pre>
+  <p class="def-summary">uniform quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="runif">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>runif</h2>
+  </div>
+  <pre class="def-signature">(runif [rng :int n :int a :float b :float] :int)</pre>
+  <p class="def-summary">n uniform samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dbinom">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dbinom</h2>
+  </div>
+  <pre class="def-signature">(dbinom [x :float n :int p :float] :float)</pre>
+  <p class="def-summary">binomial PMF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pbinom">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pbinom</h2>
+  </div>
+  <pre class="def-signature">(pbinom [x :float n :int p :float] :float)</pre>
+  <p class="def-summary">binomial CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qbinom">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qbinom</h2>
+  </div>
+  <pre class="def-signature">(qbinom [p :float n :int pp :float] :float)</pre>
+  <p class="def-summary">binomial quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rbinom">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rbinom</h2>
+  </div>
+  <pre class="def-signature">(rbinom [rng :int n-samp :int n-trials :int p :float] :int)</pre>
+  <p class="def-summary">n binomial samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dpois">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dpois</h2>
+  </div>
+  <pre class="def-signature">(dpois [x :float lambda :float] :float)</pre>
+  <p class="def-summary">Poisson PMF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="ppois">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ppois</h2>
+  </div>
+  <pre class="def-signature">(ppois [x :float lambda :float] :float)</pre>
+  <p class="def-summary">Poisson CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qpois">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qpois</h2>
+  </div>
+  <pre class="def-signature">(qpois [p :float lambda :float] :float)</pre>
+  <p class="def-summary">Poisson quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rpois">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rpois</h2>
+  </div>
+  <pre class="def-signature">(rpois [rng :int n :int lambda :float] :int)</pre>
+  <p class="def-summary">n Poisson samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dexp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dexp</h2>
+  </div>
+  <pre class="def-signature">(dexp [x :float rate :float] :float)</pre>
+  <p class="def-summary">exponential density.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pexp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pexp</h2>
+  </div>
+  <pre class="def-signature">(pexp [x :float rate :float] :float)</pre>
+  <p class="def-summary">exponential CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qexp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qexp</h2>
+  </div>
+  <pre class="def-signature">(qexp [p :float rate :float] :float)</pre>
+  <p class="def-summary">exponential quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rexp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rexp</h2>
+  </div>
+  <pre class="def-signature">(rexp [rng :int n :int rate :float] :int)</pre>
+  <p class="def-summary">n exponential samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dbeta">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dbeta</h2>
+  </div>
+  <pre class="def-signature">(dbeta [x :float alpha :float beta :float] :float)</pre>
+  <p class="def-summary">beta density.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pbeta">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pbeta</h2>
+  </div>
+  <pre class="def-signature">(pbeta [x :float alpha :float beta :float] :float)</pre>
+  <p class="def-summary">beta CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qbeta">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qbeta</h2>
+  </div>
+  <pre class="def-signature">(qbeta [p :float alpha :float beta :float] :float)</pre>
+  <p class="def-summary">beta quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rbeta">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rbeta</h2>
+  </div>
+  <pre class="def-signature">(rbeta [rng :int n :int alpha :float beta :float] :int)</pre>
+  <p class="def-summary">n beta samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="dgamma">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dgamma</h2>
+  </div>
+  <pre class="def-signature">(dgamma [x :float shape :float rate :float] :float)</pre>
+  <p class="def-summary">gamma density.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="pgamma">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>pgamma</h2>
+  </div>
+  <pre class="def-signature">(pgamma [x :float shape :float rate :float] :float)</pre>
+  <p class="def-summary">gamma CDF.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="qgamma">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>qgamma</h2>
+  </div>
+  <pre class="def-signature">(qgamma [p :float shape :float rate :float] :float)</pre>
+  <p class="def-summary">gamma quantile.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+<div class="def-card" id="rgamma">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rgamma</h2>
+  </div>
+  <pre class="def-signature">(rgamma [rng :int n :int shape :float rate :float] :int)</pre>
+  <p class="def-summary">n gamma samples.</p>
+  <p class="def-since">Since: ST4</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

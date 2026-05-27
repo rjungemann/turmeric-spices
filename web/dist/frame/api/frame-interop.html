@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/interop | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#arrow-export-column">arrow-export-column</a></li>
+    <li><a href="#arrow-export">arrow-export</a></li>
+    <li><a href="#arrow-import-column">arrow-import-column</a></li>
+    <li><a href="#arrow-import">arrow-import</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__ip-nil" style="color:var(--faint)">__ip-nil</a></li>
+    <li><a href="#__ip-cons" style="color:var(--faint)">__ip-cons</a></li>
+    <li><a href="#__ip-release-array" style="color:var(--faint)">__ip-release-array</a></li>
+    <li><a href="#__ip-release-schema" style="color:var(--faint)">__ip-release-schema</a></li>
+    <li><a href="#__ip-export-column-into" style="color:var(--faint)">__ip-export-column-into</a></li>
+    <li><a href="#__ip-alloc-schema" style="color:var(--faint)">__ip-alloc-schema</a></li>
+    <li><a href="#__ip-alloc-array" style="color:var(--faint)">__ip-alloc-array</a></li>
+    <li><a href="#__ip-export-frame-into" style="color:var(--faint)">__ip-export-frame-into</a></li>
+    <li><a href="#__ip-fmt-to-tag" style="color:var(--faint)">__ip-fmt-to-tag</a></li>
+    <li><a href="#__ip-array-n-children" style="color:var(--faint)">__ip-array-n-children</a></li>
+    <li><a href="#__ip-schema-child" style="color:var(--faint)">__ip-schema-child</a></li>
+    <li><a href="#__ip-array-child" style="color:var(--faint)">__ip-array-child</a></li>
+    <li><a href="#__ip-schema-name" style="color:var(--faint)">__ip-schema-name</a></li>
+    <li><a href="#__ip-schema-format" style="color:var(--faint)">__ip-schema-format</a></li>
+    <li><a href="#__ip-import-child-column" style="color:var(--faint)">__ip-import-child-column</a></li>
+    <li><a href="#__ip-build-cols" style="color:var(--faint)">__ip-build-cols</a></li>
+    <li><a href="#__ip-build-fields" style="color:var(--faint)">__ip-build-fields</a></li>
+    <li><a href="#__ip-release-toplevel" style="color:var(--faint)">__ip-release-toplevel</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/interop</h1>
+    <div class="module-path">src/frame/interop.tur</div>
+  </div>
+<div class="def-card" id="arrow-export-column">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>arrow-export-column</h2>
+  </div>
+  <pre class="def-signature">(arrow-export-column [col :int name :cstr] :int)</pre>
+  <p class="def-summary">export a single column as (ArrowSchema*, ArrowArray*)</p>
+  <p class="def-since">Since: FR8</p>
+</div>
+<div class="def-card" id="arrow-export">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>arrow-export</h2>
+  </div>
+  <pre class="def-signature">(arrow-export [f :int] :int)</pre>
+  <p class="def-summary">export a frame as a &quot;+s&quot; struct-typed</p>
+</div>
+<div class="def-card" id="arrow-import-column">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>arrow-import-column</h2>
+  </div>
+  <pre class="def-signature">(arrow-import-column [sch :int arr :int] :int)</pre>
+  <p class="def-summary">build a tur-frame column from an external</p>
+</div>
+<div class="def-card" id="arrow-import">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>arrow-import</h2>
+  </div>
+  <pre class="def-signature">(arrow-import [sch :int arr :int] :int)</pre>
+  <p class="def-summary">build a tur-frame from a &quot;+s&quot; struct-typed</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__ip-nil"><code>__ip-nil</code></div>
+  <div class="internal-item" id="__ip-cons"><code>__ip-cons</code></div>
+  <div class="internal-item" id="__ip-release-array"><code>__ip-release-array</code><span class="internal-item-summary">-- ArrowArray release callback.  Frees buffers, the</span></div>
+  <div class="internal-item" id="__ip-release-schema"><code>__ip-release-schema</code><span class="internal-item-summary">-- ArrowSchema release callback.  Frees format/name</span></div>
+  <div class="internal-item" id="__ip-export-column-into"><code>__ip-export-column-into</code><span class="internal-item-summary">-- fill an externally-allocated (schema, array)</span></div>
+  <div class="internal-item" id="__ip-alloc-schema"><code>__ip-alloc-schema</code></div>
+  <div class="internal-item" id="__ip-alloc-array"><code>__ip-alloc-array</code></div>
+  <div class="internal-item" id="__ip-export-frame-into"><code>__ip-export-frame-into</code></div>
+  <div class="internal-item" id="__ip-fmt-to-tag"><code>__ip-fmt-to-tag</code></div>
+  <div class="internal-item" id="__ip-array-n-children"><code>__ip-array-n-children</code></div>
+  <div class="internal-item" id="__ip-schema-child"><code>__ip-schema-child</code></div>
+  <div class="internal-item" id="__ip-array-child"><code>__ip-array-child</code></div>
+  <div class="internal-item" id="__ip-schema-name"><code>__ip-schema-name</code></div>
+  <div class="internal-item" id="__ip-schema-format"><code>__ip-schema-format</code></div>
+  <div class="internal-item" id="__ip-import-child-column"><code>__ip-import-child-column</code></div>
+  <div class="internal-item" id="__ip-build-cols"><code>__ip-build-cols</code></div>
+  <div class="internal-item" id="__ip-build-fields"><code>__ip-build-fields</code></div>
+  <div class="internal-item" id="__ip-release-toplevel"><code>__ip-release-toplevel</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

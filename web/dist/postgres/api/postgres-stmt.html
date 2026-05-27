@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/postgres/stmt | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#stmt-prepare">stmt-prepare</a></li>
+    <li><a href="#stmt-exec-prepared">stmt-exec-prepared</a></li>
+    <li><a href="#stmt-deallocate">stmt-deallocate</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__ok" style="color:var(--faint)">__ok</a></li>
+    <li><a href="#__err" style="color:var(--faint)">__err</a></li>
+    <li><a href="#__params-count" style="color:var(--faint)">__params-count</a></li>
+    <li><a href="#__params-values" style="color:var(--faint)">__params-values</a></li>
+    <li><a href="#__dealloc-sql" style="color:var(--faint)">__dealloc-sql</a></li>
+    <li><a href="#__pq-prepare-raw" style="color:var(--faint)">__pq-prepare-raw</a></li>
+    <li><a href="#__pq-exec-prepared-raw" style="color:var(--faint)">__pq-exec-prepared-raw</a></li>
+    <li><a href="#__pq-exec-raw" style="color:var(--faint)">__pq-exec-raw</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>postgres/stmt</h1>
+    <div class="module-path">src/postgres/stmt.tur</div>
+  </div>
+<div class="def-card" id="stmt-prepare">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>stmt-prepare</h2>
+  </div>
+  <pre class="def-signature">(stmt-prepare [conn :int name :cstr sql :cstr nparams :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">compile a named prepared statement on the server.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>conn</td><td></td><td>connection handle</td></tr>
+    <tr><td>name</td><td></td><td>unique name for this prepared statement</td></tr>
+    <tr><td>sql</td><td></td><td>SQL string with $1,$2,... placeholders</td></tr>
+    <tr><td>nparams</td><td></td><td>number of parameters in sql</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok 0) on success; (err 0) on failure.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(stmt-prepare conn &quot;insert-user&quot; &quot;INSERT INTO users (name) VALUES ($1)&quot; 1)</pre>
+  </div>
+  <p class="def-since">Since: PG2</p>
+</div>
+<div class="def-card" id="stmt-exec-prepared">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>stmt-exec-prepared</h2>
+  </div>
+  <pre class="def-signature">(stmt-exec-prepared [conn :int name :cstr params :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">execute a previously prepared statement with parameters.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>conn</td><td></td><td>connection handle</td></tr>
+    <tr><td>name</td><td></td><td>name used in stmt-prepare</td></tr>
+    <tr><td>params</td><td></td><td>cons list of :cstr parameter values (positional, 1-indexed)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok rows-handle) on success; (err 0) on failure.
+  Free the rows-handle with rows-free from postgres/row when done.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (stmt-exec-prepared conn &quot;insert-user&quot; (cons &quot;Alice&quot; 0))]
+    (if (ok? r) (rows-free (ok-val r)) (println &quot;exec failed&quot;)))</pre>
+  </div>
+  <p class="def-since">Since: PG2</p>
+</div>
+<div class="def-card" id="stmt-deallocate">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>stmt-deallocate</h2>
+  </div>
+  <pre class="def-signature">(stmt-deallocate [conn :int name :cstr] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">drop a named prepared statement from the server.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>conn</td><td></td><td>connection handle</td></tr>
+    <tr><td>name</td><td></td><td>name used in stmt-prepare</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok 0) on success; (err 0) on failure.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(stmt-deallocate conn &quot;insert-user&quot;)</pre>
+  </div>
+  <p class="def-since">Since: PG2</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__ok"><code>__ok</code><span class="internal-item-summary">-- create an ok result wrapping integer value v.</span></div>
+  <div class="internal-item" id="__err"><code>__err</code><span class="internal-item-summary">-- create an err result wrapping integer error value e.</span></div>
+  <div class="internal-item" id="__params-count"><code>__params-count</code><span class="internal-item-summary">-- count the number of cells in a cons list.</span></div>
+  <div class="internal-item" id="__params-values"><code>__params-values</code><span class="internal-item-summary">-- build a heap-allocated char** from a cons list of :cstr.</span></div>
+  <div class="internal-item" id="__dealloc-sql"><code>__dealloc-sql</code><span class="internal-item-summary">-- build &quot;DEALLOCATE name&quot; as a heap-allocated cstr.</span></div>
+  <div class="internal-item" id="__pq-prepare-raw"><code>__pq-prepare-raw</code><span class="internal-item-summary">-- PQprepare; returns 1 on success, 0 on failure.</span></div>
+  <div class="internal-item" id="__pq-exec-prepared-raw"><code>__pq-exec-prepared-raw</code><span class="internal-item-summary">-- PQexecPrepared; returns PGresult* as :int (0 on failure).</span></div>
+  <div class="internal-item" id="__pq-exec-raw"><code>__pq-exec-raw</code><span class="internal-item-summary">-- execute SQL with no params; returns 1 on success, 0 on failure.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

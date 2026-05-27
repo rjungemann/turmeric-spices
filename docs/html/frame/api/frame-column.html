@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/column | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#column-int32">column-int32</a></li>
+    <li><a href="#column-int64">column-int64</a></li>
+    <li><a href="#column-float32">column-float32</a></li>
+    <li><a href="#column-float64">column-float64</a></li>
+    <li><a href="#column-bool">column-bool</a></li>
+    <li><a href="#column-date32">column-date32</a></li>
+    <li><a href="#column-timestamp">column-timestamp</a></li>
+    <li><a href="#column-date32-at">column-date32-at</a></li>
+    <li><a href="#column-timestamp-at">column-timestamp-at</a></li>
+    <li><a href="#column-type">column-type</a></li>
+    <li><a href="#column-length">column-length</a></li>
+    <li><a href="#column-null-count">column-null-count</a></li>
+    <li><a href="#column-valid_">column-valid?</a></li>
+    <li><a href="#column-int32-at">column-int32-at</a></li>
+    <li><a href="#column-int64-at">column-int64-at</a></li>
+    <li><a href="#column-float32-at">column-float32-at</a></li>
+    <li><a href="#column-float64-at">column-float64-at</a></li>
+    <li><a href="#column-bool-at">column-bool-at</a></li>
+    <li><a href="#column-slice">column-slice</a></li>
+    <li><a href="#column-free">column-free</a></li>
+    <li><a href="#column-retain">column-retain</a></li>
+    <li><a href="#column-utf8">column-utf8</a></li>
+    <li><a href="#column-utf8-at">column-utf8-at</a></li>
+    <li><a href="#column-builder">column-builder</a></li>
+    <li><a href="#builder-append-int32">builder-append-int32</a></li>
+    <li><a href="#builder-append-int64">builder-append-int64</a></li>
+    <li><a href="#builder-append-float64">builder-append-float64</a></li>
+    <li><a href="#builder-append-bool">builder-append-bool</a></li>
+    <li><a href="#builder-append-utf8">builder-append-utf8</a></li>
+    <li><a href="#builder-append-null">builder-append-null</a></li>
+    <li><a href="#builder-finish">builder-finish</a></li>
+    <li><a href="#column-cast">column-cast</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__set-type-tag" style="color:var(--faint)">__set-type-tag</a></li>
+    <li><a href="#__builder-grow" style="color:var(--faint)">__builder-grow</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/column</h1>
+    <div class="module-path">src/frame/column.tur</div>
+  </div>
+<div class="def-card" id="column-int32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-int32</h2>
+  </div>
+  <pre class="def-signature">(column-int32 [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a column of int32 values from a cons list.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>vs</td><td></td><td>cons list of :int values (will be narrowed to int32)</td></tr>
+    <tr><td>nullable</td><td></td><td>:int, 0 = no, 1 = yes</td></tr>
+    <tr><td>validity</td><td></td><td>0 (all-valid) or a parallel cons list of 0/1 :int values</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  opaque column handle.  Free with column-free.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [c (column-int32 (cons 1 (cons 2 (cons 3 0))) 0 0)]
+    (column-int32-at c 0))   ; =&gt; 1</pre>
+  </div>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="column-int64">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-int64</h2>
+  </div>
+  <pre class="def-signature">(column-int64 [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a column of int64 values. Since: FR0</p>
+</div>
+<div class="def-card" id="column-float32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-float32</h2>
+  </div>
+  <pre class="def-signature">(column-float32 [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a column of float32 values from a cons list</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="column-float64">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-float64</h2>
+  </div>
+  <pre class="def-signature">(column-float64 [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a column of float64 values from a cons list of</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="column-bool">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-bool</h2>
+  </div>
+  <pre class="def-signature">(column-bool [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a 1-bit-packed bool column from a cons list of 0/1 ints.</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="column-date32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-date32</h2>
+  </div>
+  <pre class="def-signature">(column-date32 [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a date32 column from a cons list of int days-since-epoch.</p>
+  <p class="def-since">Since: FR9</p>
+</div>
+<div class="def-card" id="column-timestamp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-timestamp</h2>
+  </div>
+  <pre class="def-signature">(column-timestamp [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a timestamp column from a cons list of int64</p>
+</div>
+<div class="def-card" id="column-date32-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-date32-at</h2>
+  </div>
+  <pre class="def-signature">(column-date32-at [col :int i :int] :int)</pre>
+  <p class="def-summary">read a date32 cell as :int (days since epoch). Since: FR9</p>
+</div>
+<div class="def-card" id="column-timestamp-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-timestamp-at</h2>
+  </div>
+  <pre class="def-signature">(column-timestamp-at [col :int i :int] :int)</pre>
+  <p class="def-summary">read a timestamp cell as :int (us since epoch). Since: FR9</p>
+</div>
+<div class="def-card" id="column-type">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-type</h2>
+  </div>
+  <pre class="def-signature">(column-type [col :int] :int)</pre>
+  <p class="def-summary">type tag of a column. Since: FR0</p>
+</div>
+<div class="def-card" id="column-length">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-length</h2>
+  </div>
+  <pre class="def-signature">(column-length [col :int] :int)</pre>
+  <p class="def-summary">number of elements in a column. Since: FR0</p>
+</div>
+<div class="def-card" id="column-null-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-null-count</h2>
+  </div>
+  <pre class="def-signature">(column-null-count [col :int] :int)</pre>
+  <p class="def-summary">number of null entries. Since: FR0</p>
+</div>
+<div class="def-card" id="column-valid_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-valid?</h2>
+  </div>
+  <pre class="def-signature">(column-valid? [col :int i :int] :bool)</pre>
+  <p class="def-summary">true if row i of col is non-null. Since: FR0</p>
+</div>
+<div class="def-card" id="column-int32-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-int32-at</h2>
+  </div>
+  <pre class="def-signature">(column-int32-at [col :int i :int] :int)</pre>
+  <p class="def-summary">read int32 element at row i. Since: FR0</p>
+</div>
+<div class="def-card" id="column-int64-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-int64-at</h2>
+  </div>
+  <pre class="def-signature">(column-int64-at [col :int i :int] :int)</pre>
+  <p class="def-summary">read int64 element at row i. Since: FR0</p>
+</div>
+<div class="def-card" id="column-float32-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-float32-at</h2>
+  </div>
+  <pre class="def-signature">(column-float32-at [col :int i :int] :float)</pre>
+  <p class="def-summary">read float32 element at row i as :float (double). Since: FR0</p>
+</div>
+<div class="def-card" id="column-float64-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-float64-at</h2>
+  </div>
+  <pre class="def-signature">(column-float64-at [col :int i :int] :float)</pre>
+  <p class="def-summary">read float64 element at row i. Since: FR0</p>
+</div>
+<div class="def-card" id="column-bool-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-bool-at</h2>
+  </div>
+  <pre class="def-signature">(column-bool-at [col :int i :int] :int)</pre>
+  <p class="def-summary">read 1-bit-packed bool element at row i; returns 0 or 1. Since: FR0</p>
+</div>
+<div class="def-card" id="column-slice">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-slice</h2>
+  </div>
+  <pre class="def-signature">(column-slice [col :int offset :int length :int] :int)</pre>
+  <p class="def-summary">new column containing rows [offset, offset+length).</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="column-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-free</h2>
+  </div>
+  <pre class="def-signature">(column-free [col :int] :void)</pre>
+  <p class="def-summary">release a reference to a column.</p>
+</div>
+<div class="def-card" id="column-retain">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-retain</h2>
+  </div>
+  <pre class="def-signature">(column-retain [col :int] :int)</pre>
+  <p class="def-summary">bump the refcount on a shared column handle. Since: FR2</p>
+</div>
+<div class="def-card" id="column-utf8">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-utf8</h2>
+  </div>
+  <pre class="def-signature">(column-utf8 [vs :int nullable :int validity :int] :int)</pre>
+  <p class="def-summary">build a utf8 column from a cons list of :cstr values.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>vs</td><td></td><td>cons list whose `value` slots are :cstr pointers (NUL-terminated)</td></tr>
+    <tr><td>nullable</td><td></td><td>:int, 0 = no, 1 = yes</td></tr>
+    <tr><td>validity</td><td></td><td>0 (all-valid) or a parallel cons list of 0/1 :int values</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  opaque column handle.  Free with column-free.
+
+Layout: Arrow utf8 -- (validity_bitmap?, int32 offsets[n+1], data_bytes).</p>
+  </div>
+  <p class="def-since">Since: FR1</p>
+</div>
+<div class="def-card" id="column-utf8-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-utf8-at</h2>
+  </div>
+  <pre class="def-signature">(column-utf8-at [col :int i :int] :cstr)</pre>
+  <p class="def-summary">read the utf8 element at row i as a :cstr.</p>
+  <p class="def-since">Since: FR1</p>
+</div>
+<div class="def-card" id="column-builder">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-builder</h2>
+  </div>
+  <pre class="def-signature">(column-builder [type-tag :int capacity :int] :int)</pre>
+  <p class="def-summary">create a new builder for the given type with an initial</p>
+</div>
+<div class="def-card" id="builder-append-int32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>builder-append-int32</h2>
+  </div>
+  <pre class="def-signature">(builder-append-int32 [b :int v :int] :void)</pre>
+  <p class="def-summary">append a value to an int32 builder. Since: FR1</p>
+</div>
+<div class="def-card" id="builder-append-int64">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>builder-append-int64</h2>
+  </div>
+  <pre class="def-signature">(builder-append-int64 [b :int v :int] :void)</pre>
+  <p class="def-summary">append a value to an int64 builder. Since: FR1</p>
+</div>
+<div class="def-card" id="builder-append-float64">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>builder-append-float64</h2>
+  </div>
+  <pre class="def-signature">(builder-append-float64 [b :int v :float] :void)</pre>
+  <p class="def-summary">append a double value to a float64 builder. Since: FR1</p>
+</div>
+<div class="def-card" id="builder-append-bool">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>builder-append-bool</h2>
+  </div>
+  <pre class="def-signature">(builder-append-bool [b :int v :int] :void)</pre>
+  <p class="def-summary">append 0/1 to a bool builder. Since: FR1</p>
+</div>
+<div class="def-card" id="builder-append-utf8">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>builder-append-utf8</h2>
+  </div>
+  <pre class="def-signature">(builder-append-utf8 [b :int s :cstr] :void)</pre>
+  <p class="def-summary">append a string to a utf8 builder. Since: FR1</p>
+</div>
+<div class="def-card" id="builder-append-null">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>builder-append-null</h2>
+  </div>
+  <pre class="def-signature">(builder-append-null [b :int] :void)</pre>
+  <p class="def-summary">mark the next row as null and bump length.</p>
+</div>
+<div class="def-card" id="builder-finish">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>builder-finish</h2>
+  </div>
+  <pre class="def-signature">(builder-finish [b :int] :int)</pre>
+  <p class="def-summary">materialize the accumulated rows into a column and free</p>
+</div>
+<div class="def-card" id="column-cast">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>column-cast</h2>
+  </div>
+  <pre class="def-signature">(column-cast [col :int target :int] :int)</pre>
+  <p class="def-summary">numeric-&gt;numeric conversion producing a new column. Since: FR9</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__set-type-tag"><code>__set-type-tag</code><span class="internal-item-summary">-- internal helper to retag a column.  Since: FR9</span></div>
+  <div class="internal-item" id="__builder-grow"><code>__builder-grow</code><span class="internal-item-summary">-- ensure capacity for one more row (internal). Since: FR1</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

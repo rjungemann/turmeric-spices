@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/rtmidi/msg | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#msg-note-on">msg-note-on</a></li>
+    <li><a href="#msg-note-off">msg-note-off</a></li>
+    <li><a href="#msg-control-change">msg-control-change</a></li>
+    <li><a href="#msg-program-change">msg-program-change</a></li>
+    <li><a href="#msg-pitch-bend">msg-pitch-bend</a></li>
+    <li><a href="#msg-aftertouch">msg-aftertouch</a></li>
+    <li><a href="#msg-poly-aftertouch">msg-poly-aftertouch</a></li>
+    <li><a href="#msg-sysex">msg-sysex</a></li>
+    <li><a href="#msg-status">msg-status</a></li>
+    <li><a href="#msg-channel">msg-channel</a></li>
+    <li><a href="#msg-data1">msg-data1</a></li>
+    <li><a href="#msg-data2">msg-data2</a></li>
+    <li><a href="#msg-bytes">msg-bytes</a></li>
+    <li><a href="#msg-len">msg-len</a></li>
+    <li><a href="#msg-free">msg-free</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>rtmidi/msg</h1>
+    <div class="module-path">src/rtmidi/msg.tur</div>
+  </div>
+<div class="def-card" id="msg-note-on">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-note-on</h2>
+  </div>
+  <pre class="def-signature">(msg-note-on [channel :int note :int velocity :int] :int)</pre>
+  <p class="def-summary">construct a Note On MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>channel</td><td></td><td>MIDI channel (0-15)</td></tr>
+    <tr><td>note</td><td></td><td>MIDI note number (0-127)</td></tr>
+    <tr><td>velocity</td><td></td><td>note velocity (0-127)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  len is 3.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-note-on 0 60 127)]
+    (midi-out-send mo (msg-bytes m) (msg-len m))
+    (msg-free m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-note-off">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-note-off</h2>
+  </div>
+  <pre class="def-signature">(msg-note-off [channel :int note :int velocity :int] :int)</pre>
+  <p class="def-summary">construct a Note Off MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>channel</td><td></td><td>MIDI channel (0-15)</td></tr>
+    <tr><td>note</td><td></td><td>MIDI note number (0-127)</td></tr>
+    <tr><td>velocity</td><td></td><td>release velocity (0-127)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  len is 3.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-note-off 0 60 0)]
+    (midi-out-send mo (msg-bytes m) (msg-len m))
+    (msg-free m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-control-change">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-control-change</h2>
+  </div>
+  <pre class="def-signature">(msg-control-change [channel :int cc :int value :int] :int)</pre>
+  <p class="def-summary">construct a Control Change MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>channel</td><td></td><td>MIDI channel (0-15)</td></tr>
+    <tr><td>cc</td><td></td><td>controller number (0-127)</td></tr>
+    <tr><td>value</td><td></td><td>controller value (0-127)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  len is 3.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-control-change 0 7 100)]
+    (midi-out-send mo (msg-bytes m) (msg-len m))
+    (msg-free m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-program-change">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-program-change</h2>
+  </div>
+  <pre class="def-signature">(msg-program-change [channel :int program :int] :int)</pre>
+  <p class="def-summary">construct a Program Change MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>channel</td><td></td><td>MIDI channel (0-15)</td></tr>
+    <tr><td>program</td><td></td><td>program number (0-127)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  len is 2.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-program-change 0 0)]
+    (midi-out-send mo (msg-bytes m) (msg-len m))
+    (msg-free m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-pitch-bend">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-pitch-bend</h2>
+  </div>
+  <pre class="def-signature">(msg-pitch-bend [channel :int lsb :int msb :int] :int)</pre>
+  <p class="def-summary">construct a Pitch Bend MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>channel</td><td></td><td>MIDI channel (0-15)</td></tr>
+    <tr><td>lsb</td><td></td><td>least significant 7 bits of bend value (0-127)</td></tr>
+    <tr><td>msb</td><td></td><td>most significant 7 bits of bend value (0-127)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  len is 3.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-pitch-bend 0 0 64)]
+    (midi-out-send mo (msg-bytes m) (msg-len m))
+    (msg-free m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-aftertouch">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-aftertouch</h2>
+  </div>
+  <pre class="def-signature">(msg-aftertouch [channel :int pressure :int] :int)</pre>
+  <p class="def-summary">construct a Channel Pressure (Aftertouch) MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>channel</td><td></td><td>MIDI channel (0-15)</td></tr>
+    <tr><td>pressure</td><td></td><td>pressure value (0-127)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  len is 2.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-aftertouch 0 64)]
+    (midi-out-send mo (msg-bytes m) (msg-len m))
+    (msg-free m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-poly-aftertouch">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-poly-aftertouch</h2>
+  </div>
+  <pre class="def-signature">(msg-poly-aftertouch [channel :int note :int pressure :int] :int)</pre>
+  <p class="def-summary">construct a Polyphonic Aftertouch MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>channel</td><td></td><td>MIDI channel (0-15)</td></tr>
+    <tr><td>note</td><td></td><td>MIDI note number (0-127)</td></tr>
+    <tr><td>pressure</td><td></td><td>pressure value (0-127)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  len is 3.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-poly-aftertouch 0 60 80)]
+    (midi-out-send mo (msg-bytes m) (msg-len m))
+    (msg-free m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-sysex">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-sysex</h2>
+  </div>
+  <pre class="def-signature">(msg-sysex [bytes :cstr len :int] :int)</pre>
+  <p class="def-summary">construct a SysEx MIDI message with 0xF0/0xF7 framing.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>bytes</td><td></td><td>pointer to the inner SysEx data bytes (without 0xF0/0xF7)</td></tr>
+    <tr><td>len</td><td></td><td>number of inner data bytes</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A __midi_msg* as :int.  Total len is len + 2 (including 0xF0 and 0xF7).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [data &quot;\x41\x10\x42&quot;]
+    (let [m (msg-sysex data 3)]
+      (midi-out-send mo (msg-bytes m) (msg-len m))
+      (msg-free m)))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-status">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-status</h2>
+  </div>
+  <pre class="def-signature">(msg-status [m :int] :int)</pre>
+  <p class="def-summary">return the status nibble (high 4 bits) of a MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>__midi_msg* as :int (from any msg-* constructor)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Status nibble as :int, e.g. 0x90 for Note On.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(assert-eq (msg-status (msg-note-on 0 60 127)) 0x90)</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-channel">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-channel</h2>
+  </div>
+  <pre class="def-signature">(msg-channel [m :int] :int)</pre>
+  <p class="def-summary">return the channel nibble (low 4 bits) of a MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>__midi_msg* as :int (from any msg-* constructor)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Channel nibble as :int (0-15).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(assert-eq (msg-channel (msg-note-on 3 60 127)) 3)</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-data1">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-data1</h2>
+  </div>
+  <pre class="def-signature">(msg-data1 [m :int] :int)</pre>
+  <p class="def-summary">return the first data byte of a MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>__midi_msg* as :int (from any msg-* constructor with len &gt;= 2)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">First data byte as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(assert-eq (msg-data1 (msg-note-on 0 60 127)) 60)</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-data2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-data2</h2>
+  </div>
+  <pre class="def-signature">(msg-data2 [m :int] :int)</pre>
+  <p class="def-summary">return the second data byte of a MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>__midi_msg* as :int (from any msg-* constructor with len &gt;= 3)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Second data byte as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(assert-eq (msg-data2 (msg-note-on 0 60 127)) 127)</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-bytes">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-bytes</h2>
+  </div>
+  <pre class="def-signature">(msg-bytes [m :int] :cstr)</pre>
+  <p class="def-summary">return a pointer to the raw byte buffer of a MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>__midi_msg* as :int (from any msg-* constructor)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Raw byte buffer as :cstr; use with msg-len for midi-out-send.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(midi-out-send mo (msg-bytes m) (msg-len m))</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-len">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-len</h2>
+  </div>
+  <pre class="def-signature">(msg-len [m :int] :int)</pre>
+  <p class="def-summary">return the byte count of a MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>__midi_msg* as :int (from any msg-* constructor)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Number of bytes in the message as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(assert-eq (msg-len (msg-note-on 0 60 127)) 3)</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+<div class="def-card" id="msg-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-free</h2>
+  </div>
+  <pre class="def-signature">(msg-free [m :int] :void)</pre>
+  <p class="def-summary">free all memory associated with a MIDI message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>__midi_msg* as :int (from any msg-* constructor)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-free m)</pre>
+  </div>
+  <p class="def-since">Since: RM0</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tur-scscm | Turmeric Spices</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/style.css">
+  <style>
+    .guide-content h1 { font-size:1.75rem; color:var(--gold-bright); margin-bottom:1.5rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border); }
+    .guide-content h2 { font-size:1.2rem; color:var(--text-primary); margin:2rem 0 0.75rem; }
+    .guide-content h3 { font-size:1rem; color:var(--gold-bright); margin:1.5rem 0 0.5rem; }
+    .guide-content p  { margin-bottom:1rem; }
+    .guide-content ul, .guide-content ol { margin:0 0 1rem 1.5rem; }
+    .guide-content li { margin:0.25rem 0; }
+    .guide-content code { font-family:"Iosevka","Fira Code",monospace; font-size:0.85em; background:var(--bg-panel); border:1px solid var(--border); border-radius:3px; padding:0.1em 0.35em; }
+    .guide-content pre { background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+    .guide-content pre code { background:none; border:none; padding:0; font-size:0.85rem; }
+    .guide-content blockquote { border-left:3px solid var(--gold); padding-left:1rem; color:var(--text-sec); margin:1rem 0; }
+    .guide-content table { border-collapse:collapse; width:100%; margin-bottom:1rem; font-size:0.9rem; }
+    .guide-content th { background:var(--bg-surface); border:1px solid var(--border); padding:0.5rem 0.75rem; text-align:left; color:var(--gold-bright); }
+    .guide-content td { border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .guide-content a { color:var(--gold-bright); }
+    .guide-content strong { color:var(--text-primary); }
+    .hl-comment { color:#48433D; font-style:italic; }
+    .hl-string  { color:#D9735A; }
+    .hl-number  { color:#A8C98A; }
+    .hl-keyword { color:#EFA030; font-weight:bold; }
+    .hl-type    { color:#7AC4B8; }
+    .code-toggle { border:1px solid var(--border); border-radius:4px; margin-bottom:1rem; overflow:hidden; }
+    .code-card-bar { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:0.35rem 0.75rem; display:flex; align-items:center; }
+    .code-syntax-toggle { margin-left:auto; display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden; font-family:"Iosevka","Fira Code",monospace; font-size:11px; }
+    .seg-btn { padding:3px 10px; background:transparent; color:var(--text-sec); border:none; cursor:pointer; transition:all 0.14s; }
+    .seg-btn:hover { color:var(--text-primary); }
+    .seg-btn.active { color:var(--gold-bright); background:var(--bg-hover); }
+    .code-card-body { }
+    .code-version { }
+    .guide-content .code-toggle pre { border:none; border-radius:0; margin-bottom:0; }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <button class="hamburger" aria-label="Toggle navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <a class="nav-logo" href="https://turmeric-lang.com">
+      <img src="/logo-icon.svg" width="28" height="28" alt="">
+      <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+    </a>
+    <nav>
+      <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+      <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+      <a href="https://turmeric-lang.com/try">Try It</a>
+    </nav>
+  </header>
+  <div class="sidebar-overlay"></div>
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.querySelector('.hamburger');
+      var sidebar = document.querySelector('.sidebar');
+      var overlay = document.querySelector('.sidebar-overlay');
+      if (!btn || !sidebar) return;
+      function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+      function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+      btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+      overlay && overlay.addEventListener('click', close);
+    });
+  </script>
+  <div class="page-layout">
+    <div class="sidebar">
+      <div style="margin-bottom:0.5rem"><a href="https://turmeric-lang.com" style="font-size:0.8rem;color:var(--text-sec)">&larr; turmeric-lang.com</a></div>
+      <div style="margin-bottom:1.25rem"><a href="../index.html" style="font-size:0.8rem;color:var(--text-sec)">&larr; All Spices</a></div>
+      <div style="margin-bottom:1.25rem"><a href="api/" style="font-size:0.85rem;color:var(--gold-bright)">API reference &rarr;</a></div>
+      <h3>On this page</h3>
+      <ul><li style=""><a href="#tur-scscm" style="">tur-scscm</a></li>
+<li style=""><a href="#overview" style="">Overview</a></li>
+<li style=""><a href="#quick-start" style="">Quick start</a></li>
+<li style=""><a href="#scscm-language-reference" style="">scscm language reference</a></li>
+<li style="padding-left:0.75rem;"><a href="#data-literals" style="color:var(--text-sec);">Data literals</a></li>
+<li style="padding-left:0.75rem;"><a href="#special-forms" style="color:var(--text-sec);">Special forms</a></li>
+<li style="padding-left:0.75rem;"><a href="#macro-stdlib" style="color:var(--text-sec);">Macro stdlib</a></li>
+<li style="padding-left:0.75rem;"><a href="#user-defined-macros" style="color:var(--text-sec);">User-defined macros</a></li>
+<li style=""><a href="#api" style="">API</a></li>
+<li style="padding-left:0.75rem;"><a href="#scscmlexer" style="color:var(--text-sec);">scscm/lexer</a></li>
+<li style="padding-left:0.75rem;"><a href="#scscmexpander" style="color:var(--text-sec);">scscm/expander</a></li>
+<li style="padding-left:0.75rem;"><a href="#scscmcompile" style="color:var(--text-sec);">scscm/compile</a></li>
+<li style=""><a href="#implementation-notes" style="">Implementation notes</a></li>
+<li style=""><a href="#roadmap" style="">Roadmap</a></li></ul>
+    </div>
+    <div class="content guide-content">
+      <h1 id="tur-scscm">tur-scscm</h1>
+<p>An scscm (Scheme-like s-expression syntax) to sclang (SuperCollider language)
+compiler written in Turmeric. Also includes an OSC client for sending note and
+performance control messages to a running scsynth or hcsynth server (SC6, coming
+soon).</p>
+<h2 id="overview">Overview</h2>
+<p><code>tur-scscm</code> is a Tier 1 spice (pure Turmeric + inline-C, no cmake deps). The
+compilation pipeline is:</p>
+<pre><code>scscm text
+  -&gt; [lexer]    token list       (scscm/lexer)
+  -&gt; [parser]   AST              (scscm/parser)
+  -&gt; [expander] expanded AST     (scscm/expander)
+  -&gt; [codegen]  sclang text      (scscm/codegen)
+</code></pre>
+<p>Use <code>scscm/compile</code> for the public one-shot API.</p>
+<h2 id="quick-start">Quick start</h2>
+<div class="code-card code-toggle"><div class="code-card-bar"><div class="code-syntax-toggle" role="tablist"><button class="seg-btn active" data-syntax="turmeric" role="tab" aria-selected="true">turmeric</button><button class="seg-btn" data-syntax="sweet-exp" role="tab" aria-selected="false">sweet-exp</button></div></div><div class="code-card-body"><div class="code-version turmeric-version" role="tabpanel"><pre><code class="language-turmeric">(load &quot;stdlib/list.tur&quot;)
+(load &quot;stdlib/result.tur&quot;)
+(load &quot;spices/tur-scscm/src/scscm/lexer.tur&quot;)
+(load &quot;spices/tur-scscm/src/scscm/parser.tur&quot;)
+(load &quot;spices/tur-scscm/src/scscm/codegen.tur&quot;)
+(load &quot;spices/tur-scscm/src/scscm/expander.tur&quot;)
+(load &quot;spices/tur-scscm/src/scscm/compile.tur&quot;)
+
+(let [res (compile-text &quot;(+ 1 2)&quot;)]
+  (if (ok? res)
+    (println (scscm-int-as-cstr (ok-val res)))
+    (println &quot;error&quot;)))
+;; =&gt; &quot;1 + 2&quot;
+</code></pre></div><div class="code-version sweet-exp-version" role="tabpanel" style="display:none"><pre><code class="language-sweet-exp">#lang sweet-exp
+load(&quot;stdlib/list.tur&quot;)
+load(&quot;stdlib/result.tur&quot;)
+load(&quot;spices/tur-scscm/src/scscm/lexer.tur&quot;)
+load(&quot;spices/tur-scscm/src/scscm/parser.tur&quot;)
+load(&quot;spices/tur-scscm/src/scscm/codegen.tur&quot;)
+load(&quot;spices/tur-scscm/src/scscm/expander.tur&quot;)
+load(&quot;spices/tur-scscm/src/scscm/compile.tur&quot;)
+
+let [res compile-text(&quot;(+ 1 2)&quot;)]
+  if ok?(res)
+    println $ scscm-int-as-cstr ok-val(res)
+    println(&quot;error&quot;)
+;; =&gt; &quot;1 + 2&quot;
+</code></pre></div></div></div>
+<h2 id="scscm-language-reference">scscm language reference</h2>
+<h3 id="data-literals">Data literals</h3>
+<table>
+<thead>
+<tr>
+<th>scscm</th>
+<th>sclang</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nil</code> <code>true</code> <code>false</code></td>
+<td><code>nil</code> <code>true</code> <code>false</code></td>
+</tr>
+<tr>
+<td><code>440</code> <code>0.5</code> <code>-1</code></td>
+<td><code>440</code> <code>0.5</code> <code>-1</code></td>
+</tr>
+<tr>
+<td><code>"hello"</code></td>
+<td><code>"hello"</code></td>
+</tr>
+<tr>
+<td><code>:freq</code></td>
+<td><code>\freq</code></td>
+</tr>
+<tr>
+<td><code>foo-bar</code></td>
+<td><code>foo_bar</code></td>
+</tr>
+<tr>
+<td><code>done?</code></td>
+<td><code>done_p</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="special-forms">Special forms</h3>
+<table>
+<thead>
+<tr>
+<th>scscm</th>
+<th>sclang</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>(fn [a b] body)</code></td>
+<td><code>{ \|a, b\| body }</code></td>
+</tr>
+<tr>
+<td><code>(defn name [a] body)</code></td>
+<td><code>name = { \|a\| body }</code></td>
+</tr>
+<tr>
+<td><code>(var x val)</code></td>
+<td><code>var x = val</code></td>
+</tr>
+<tr>
+<td><code>(set! x val)</code></td>
+<td><code>x = val</code></td>
+</tr>
+<tr>
+<td><code>(let [x v y w] body)</code></td>
+<td><code>var x = v;\nvar y = w;\nbody</code></td>
+</tr>
+<tr>
+<td><code>(if c t e)</code></td>
+<td><code>if(c, { t }, { e })</code></td>
+</tr>
+<tr>
+<td><code>(do e1 e2)</code></td>
+<td><code>e1;\ne2</code></td>
+</tr>
+<tr>
+<td><code>(. obj msg args...)</code></td>
+<td><code>obj.msg(args...)</code></td>
+</tr>
+<tr>
+<td><code>(.dot Cls msg args...)</code></td>
+<td><code>Cls.msg(args...)</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="macro-stdlib">Macro stdlib</h3>
+<table>
+<thead>
+<tr>
+<th>scscm</th>
+<th>expands to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>(-&gt; x f g)</code></td>
+<td>thread-first: <code>g(f(x))</code></td>
+</tr>
+<tr>
+<td><code>(-&gt;&gt; x f g)</code></td>
+<td>thread-last: <code>g(f(x))</code></td>
+</tr>
+<tr>
+<td><code>(when c body)</code></td>
+<td><code>if(c, { body }, { nil })</code></td>
+</tr>
+<tr>
+<td><code>(unless c body)</code></td>
+<td><code>if(not(c), { body }, { nil })</code></td>
+</tr>
+<tr>
+<td><code>(doseq [x seq] body)</code></td>
+<td><code>seq.do { \|x\| body }</code></td>
+</tr>
+<tr>
+<td><code>(dotimes [i n] body)</code></td>
+<td><code>n.do { \|i\| body }</code></td>
+</tr>
+<tr>
+<td><code>(collect [x seq] body)</code></td>
+<td><code>seq.collect { \|x\| body }</code></td>
+</tr>
+<tr>
+<td><code>(pbind :k v ...)</code></td>
+<td><code>Pbind(\k, v, ...)</code></td>
+</tr>
+<tr>
+<td><code>(pseq items n)</code></td>
+<td><code>Pseq(items, n)</code></td>
+</tr>
+<tr>
+<td><code>(prand items n)</code></td>
+<td><code>Prand(items, n)</code></td>
+</tr>
+<tr>
+<td><code>(pwhite lo hi n)</code></td>
+<td><code>Pwhite(lo, hi, n)</code></td>
+</tr>
+<tr>
+<td><code>(pgeom start step n)</code></td>
+<td><code>Pgeom(start, step, n)</code></td>
+</tr>
+<tr>
+<td><code>(defsynth name [p] body)</code></td>
+<td><code>SynthDef.new(\name, { \|p\| body }).add</code></td>
+</tr>
+<tr>
+<td><code>(adsr a d s r)</code></td>
+<td><code>Env.adsr(a, d, s, r)</code></td>
+</tr>
+<tr>
+<td><code>(perc atk rel)</code></td>
+<td><code>Env.perc(atk, rel)</code></td>
+</tr>
+<tr>
+<td><code>(env-line lvls times)</code></td>
+<td><code>Env.new(lvls, times)</code></td>
+</tr>
+<tr>
+<td><code>(midi-&gt;hz n)</code></td>
+<td><code>n.midicps</code></td>
+</tr>
+<tr>
+<td><code>(hz-&gt;midi n)</code></td>
+<td><code>n.cpsmidi</code></td>
+</tr>
+<tr>
+<td><code>(db-&gt;amp db)</code></td>
+<td><code>db.dbamp</code></td>
+</tr>
+<tr>
+<td><code>(amp-&gt;db amp)</code></td>
+<td><code>amp.ampdb</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="user-defined-macros">User-defined macros</h3>
+<pre><code class="language-scscm">(defmacro my-inc [x]
+  `(+ ~x 1))
+
+(my-inc 5)   ;; =&gt; 6
+</code></pre>
+<p>Macros are hygienic substitution templates: <code>~x</code> is <code>unquote</code> (splice the
+argument), <code>`(...)</code> is <code>quasiquote</code>.</p>
+<h2 id="api">API</h2>
+<h3 id="scscmlexer">scscm/lexer</h3>
+<p>```turmeric no-check
+(tokenize source :cstr)              ;; =&gt; result<tokens :int>
+(token-type tok :int) :cstr          ;; =&gt; ":symbol" ":keyword" etc.
+(token-value tok :int) :cstr
+(token-line tok :int) :int
+(token-col tok :int) :int
+(tokens-free ts :int) :void</p>
+<pre><code>
+### scscm/parser
+
+```turmeric no-check
+(parse tokens :int)                  ;; =&gt; result&lt;ast-list :int&gt;
+(ast-kind node :int) :cstr           ;; =&gt; &quot;:list&quot; &quot;:symbol&quot; etc.
+(ast-symbol-name node :int) :cstr
+(ast-number-value node :int) :cstr
+(ast-string-value node :int) :cstr
+(ast-list-len node :int) :int
+(ast-list-get node :int i :int) :int
+(ast-free node :int) :void
+(ast-free-all nodes :int) :void
+</code></pre>
+<h3 id="scscmexpander">scscm/expander</h3>
+<p>```turmeric no-check
+(expand ast :int) :int               ;; expand one node
+(expand-all asts :int) :int          ;; expand a cons list</p>
+<pre><code>
+### scscm/codegen
+
+```turmeric no-check
+(generate ast :int) :cstr            ;; sclang text for one node
+(generate-all asts :int) :cstr       ;; joined with &quot;;\n&quot;
+</code></pre>
+<h3 id="scscmcompile">scscm/compile</h3>
+<p><code>turmeric no-check
+(compile-text source :cstr)          ;; =&gt; result&lt;sclang :cstr&gt;
+(compile-file path :cstr)            ;; =&gt; result&lt;sclang :cstr&gt;</code></p>
+<h2 id="implementation-notes">Implementation notes</h2>
+<ul>
+<li>The lexer (<code>scscm/lexer</code>) uses a single inline-C block for character-level
+  scanning. All higher-level logic is pure Turmeric.</li>
+<li>AST nodes are heap-allocated C structs passed as <code>:int</code> opaque handles,
+  mirroring the pattern in <code>stdlib/list.tur</code>.</li>
+<li>The expander maintains a C-static global macro environment. Macros defined
+  via <code>defmacro</code> persist for the lifetime of the process.</li>
+<li>The codegen uses <code>str-concat</code>-style string building; for large programs
+  consider a string-builder approach.</li>
+</ul>
+<h2 id="roadmap">Roadmap</h2>
+<ul>
+<li>[x] SC0 -- lexer</li>
+<li>[x] SC1 -- parser</li>
+<li>[x] SC2 -- codegen</li>
+<li>[x] SC3 -- expander (special forms + quasiquote + user defmacro)</li>
+<li>[x] SC4 -- stdlib macros + compile API</li>
+<li>[x] SC5 -- tests + README</li>
+<li>[ ] SC6 -- <code>scscm/server</code>: OSC client for scsynth/hcsynth (requires <code>tur-osc</code>)</li>
+</ul>
+    </div>
+  </div>
+  <footer class="site-footer">
+    Auto-generated by <code>tools/genspices.py (turmeric-spices)</code> &mdash; source: <code>spices/scscm/README.md</code>
+  </footer>
+  <script>
+  (function(){
+    var KW = new Set([
+      'defn','defmacro','defstruct','definstance','defdata','defgadt','defclass','def','let','let*','letrec',
+      'if','cond','when','unless','do','begin','and','or','not',
+      'fn','lambda','async','await','match','case',
+      'quote','quasiquote','unquote','for','while','loop','do-m',
+      'set!','try','catch','finally','with','use',
+      'import','export','module','require','provide',
+      'cons','car','cdr','nil-value','some','none','ok','err',
+      'map','filter','reduce','apply','return','yield','raise','throw',
+      'coerce','cast','type-of','any',
+    ]);
+    function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function hl(code){
+      var out='', i=0, n=code.length;
+      while(i<n){
+        var c=code[i];
+        // Line comment
+        if(c===';'){
+          var e=code.indexOf('\n',i); if(e===-1)e=n;
+          out+='<span class="hl-comment">'+esc(code.slice(i,e))+'</span>'; i=e; continue;
+        }
+        // String
+        if(c==='"'){
+          var j=i+1;
+          while(j<n){if(code[j]==='\\'){j+=2;continue;}if(code[j]==='"'){j++;break;}j++;}
+          out+='<span class="hl-string">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Type annotation :keyword
+        if(c===':'&&i+1<n&&/[a-zA-Z_]/.test(code[i+1])){
+          var j=i+1;
+          while(j<n&&/[a-zA-Z0-9_\-?!]/.test(code[j]))j++;
+          out+='<span class="hl-type">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Number (integer or float, possibly negative)
+        if(/[0-9]/.test(c)||(c==='-'&&i+1<n&&/[0-9]/.test(code[i+1]))){
+          var j=i; if(code[j]==='-')j++;
+          while(j<n&&/[0-9a-fA-FxX_\.]/.test(code[j]))j++;
+          out+='<span class="hl-number">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Symbol / identifier
+        if(/[a-zA-Z_\-!?*+<>=\/&%^~#@]/.test(c)){
+          var j=i;
+          while(j<n&&/[a-zA-Z0-9_\-!?*+<>=\/&%^~#@\.]/.test(code[j]))j++;
+          var sym=code.slice(i,j);
+          if(sym==='true'||sym==='false'||sym==='nil'){
+            out+='<span class="hl-number">'+esc(sym)+'</span>';
+          } else if(KW.has(sym)){
+            out+='<span class="hl-keyword">'+esc(sym)+'</span>';
+          } else {
+            out+=esc(sym);
+          }
+          i=j; continue;
+        }
+        out+=esc(c); i++;
+      }
+      return out;
+    }
+    document.querySelectorAll('pre code.language-turmeric, pre code.language-sweet-exp').forEach(function(el){
+      el.innerHTML=hl(el.textContent);
+    });
+  })();
+  </script>
+  <script>
+  (function(){
+    function applyToggle(toggle, syntax) {
+      var card = toggle.closest('.code-card');
+      if (!card) return;
+      toggle.querySelectorAll('.seg-btn').forEach(function(btn){
+        var active = btn.dataset.syntax === syntax;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      card.querySelectorAll('.code-version').forEach(function(v){
+        v.style.display = v.classList.contains(syntax + '-version') ? '' : 'none';
+      });
+    }
+
+    // ST1.5: restore stored preference across all cards on load
+    var stored = localStorage.getItem('guide-syntax');
+    if (stored) {
+      document.querySelectorAll('.code-syntax-toggle').forEach(function(t){ applyToggle(t, stored); });
+    }
+
+    document.querySelectorAll('.code-syntax-toggle').forEach(function(toggle){
+      // Click handler
+      toggle.addEventListener('click', function(e){
+        if (!e.target.classList.contains('seg-btn')) return;
+        var syntax = e.target.dataset.syntax;
+        document.querySelectorAll('.code-syntax-toggle').forEach(function(t){ applyToggle(t, syntax); });
+        localStorage.setItem('guide-syntax', syntax);
+      });
+      // ST5.2: arrow-key navigation within the tablist
+      toggle.addEventListener('keydown', function(e){
+        var btns = Array.from(toggle.querySelectorAll('.seg-btn'));
+        var idx = btns.indexOf(document.activeElement);
+        if (idx === -1) return;
+        if (e.key === 'ArrowRight'){ btns[(idx+1)%btns.length].focus(); e.preventDefault(); }
+        if (e.key === 'ArrowLeft') { btns[(idx-1+btns.length)%btns.length].focus(); e.preventDefault(); }
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

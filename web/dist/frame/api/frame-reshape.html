@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/reshape | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#melt">melt</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__rh-nil" style="color:var(--faint)">__rh-nil</a></li>
+    <li><a href="#__rh-cons" style="color:var(--faint)">__rh-cons</a></li>
+    <li><a href="#__rh-list-has-cstr?" style="color:var(--faint)">__rh-list-has-cstr?</a></li>
+    <li><a href="#__rh-list-length" style="color:var(--faint)">__rh-list-length</a></li>
+    <li><a href="#__rh-list-nth-int" style="color:var(--faint)">__rh-list-nth-int</a></li>
+    <li><a href="#__rh-clone-field-at" style="color:var(--faint)">__rh-clone-field-at</a></li>
+    <li><a href="#__rh-non-id-ixs" style="color:var(--faint)">__rh-non-id-ixs</a></li>
+    <li><a href="#__rh-id-ixs" style="color:var(--faint)">__rh-id-ixs</a></li>
+    <li><a href="#__rh-append-cell" style="color:var(--faint)">__rh-append-cell</a></li>
+    <li><a href="#__rh-build-id-col" style="color:var(--faint)">__rh-build-id-col</a></li>
+    <li><a href="#__rh-mod" style="color:var(--faint)">__rh-mod</a></li>
+    <li><a href="#__rh-mul" style="color:var(--faint)">__rh-mul</a></li>
+    <li><a href="#__rh-div" style="color:var(--faint)">__rh-div</a></li>
+    <li><a href="#__rh-build-var-col" style="color:var(--faint)">__rh-build-var-col</a></li>
+    <li><a href="#__rh-build-val-col" style="color:var(--faint)">__rh-build-val-col</a></li>
+    <li><a href="#__rh-common-type" style="color:var(--faint)">__rh-common-type</a></li>
+    <li><a href="#__rh-build-id-fields" style="color:var(--faint)">__rh-build-id-fields</a></li>
+    <li><a href="#__rh-build-id-cols" style="color:var(--faint)">__rh-build-id-cols</a></li>
+    <li><a href="#__rh-list-concat" style="color:var(--faint)">__rh-list-concat</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/reshape</h1>
+    <div class="module-path">src/frame/reshape.tur</div>
+  </div>
+<div class="def-card" id="melt">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>melt</h2>
+  </div>
+  <pre class="def-signature">(melt [f :int id-names :int var-name :cstr value-name :cstr] :int)</pre>
+  <p class="def-summary">pivot a wide frame to long format.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>f</td><td></td><td>:int source frame</td></tr>
+    <tr><td>id-names</td><td></td><td>cons list of :cstr id-column names (stay as-is, replicated)</td></tr>
+    <tr><td>var-name</td><td></td><td>:cstr name of the output column holding original column names</td></tr>
+    <tr><td>value-name</td><td></td><td>:cstr name of the output column holding cell values</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int frame with (n_orig_rows * n_non_id_cols) rows and
+  (n_id + 2) columns: id columns, then var-name (utf8), then value-name.
+
+Non-id columns must share a single type tag; returns 0 otherwise.</p>
+  </div>
+  <p class="def-since">Since: FR7</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__rh-nil"><code>__rh-nil</code></div>
+  <div class="internal-item" id="__rh-cons"><code>__rh-cons</code></div>
+  <div class="internal-item" id="__rh-list-has-cstr_"><code>__rh-list-has-cstr?</code></div>
+  <div class="internal-item" id="__rh-list-length"><code>__rh-list-length</code></div>
+  <div class="internal-item" id="__rh-list-nth-int"><code>__rh-list-nth-int</code></div>
+  <div class="internal-item" id="__rh-clone-field-at"><code>__rh-clone-field-at</code></div>
+  <div class="internal-item" id="__rh-non-id-ixs"><code>__rh-non-id-ixs</code></div>
+  <div class="internal-item" id="__rh-id-ixs"><code>__rh-id-ixs</code></div>
+  <div class="internal-item" id="__rh-append-cell"><code>__rh-append-cell</code></div>
+  <div class="internal-item" id="__rh-build-id-col"><code>__rh-build-id-col</code></div>
+  <div class="internal-item" id="__rh-mod"><code>__rh-mod</code></div>
+  <div class="internal-item" id="__rh-mul"><code>__rh-mul</code></div>
+  <div class="internal-item" id="__rh-div"><code>__rh-div</code></div>
+  <div class="internal-item" id="__rh-build-var-col"><code>__rh-build-var-col</code></div>
+  <div class="internal-item" id="__rh-build-val-col"><code>__rh-build-val-col</code></div>
+  <div class="internal-item" id="__rh-common-type"><code>__rh-common-type</code></div>
+  <div class="internal-item" id="__rh-build-id-fields"><code>__rh-build-id-fields</code></div>
+  <div class="internal-item" id="__rh-build-id-cols"><code>__rh-build-id-cols</code></div>
+  <div class="internal-item" id="__rh-list-concat"><code>__rh-list-concat</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

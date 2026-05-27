@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/notebook/tui | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#tui-opts-make">tui-opts-make</a></li>
+    <li><a href="#default-tui-opts">default-tui-opts</a></li>
+    <li><a href="#tui-run">tui-run</a></li>
+    <li><a href="#tui-run-nodes">tui-run-nodes</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__tui-nil-value" style="color:var(--faint)">__tui-nil-value</a></li>
+    <li><a href="#__tui-cons" style="color:var(--faint)">__tui-cons</a></li>
+    <li><a href="#__tui-list-nil?" style="color:var(--faint)">__tui-list-nil?</a></li>
+    <li><a href="#__tui-head" style="color:var(--faint)">__tui-head</a></li>
+    <li><a href="#__tui-tail" style="color:var(--faint)">__tui-tail</a></li>
+    <li><a href="#__tui-ok" style="color:var(--faint)">__tui-ok</a></li>
+    <li><a href="#__tui-err" style="color:var(--faint)">__tui-err</a></li>
+    <li><a href="#__tui-result-ok?" style="color:var(--faint)">__tui-result-ok?</a></li>
+    <li><a href="#__tui-result-ok-val" style="color:var(--faint)">__tui-result-ok-val</a></li>
+    <li><a href="#__tui-result-err-val" style="color:var(--faint)">__tui-result-err-val</a></li>
+    <li><a href="#__tui-cstr-empty?" style="color:var(--faint)">__tui-cstr-empty?</a></li>
+    <li><a href="#__tui-cstr-eq?" style="color:var(--faint)">__tui-cstr-eq?</a></li>
+    <li><a href="#__tui-str-concat" style="color:var(--faint)">__tui-str-concat</a></li>
+    <li><a href="#__tui-cstr-drop-last" style="color:var(--faint)">__tui-cstr-drop-last</a></li>
+    <li><a href="#__tui-cstr-contains-ci?" style="color:var(--faint)">__tui-cstr-contains-ci?</a></li>
+    <li><a href="#__tui-int-&gt;cstr" style="color:var(--faint)">__tui-int-&gt;cstr</a></li>
+    <li><a href="#__tui-opts-color" style="color:var(--faint)">__tui-opts-color</a></li>
+    <li><a href="#__tui-opts-cell-width" style="color:var(--faint)">__tui-opts-cell-width</a></li>
+    <li><a href="#__tui-opts-scrollback" style="color:var(--faint)">__tui-opts-scrollback</a></li>
+    <li><a href="#__tui-opts-keybindings-file" style="color:var(--faint)">__tui-opts-keybindings-file</a></li>
+    <li><a href="#__tui-node-cell-make" style="color:var(--faint)">__tui-node-cell-make</a></li>
+    <li><a href="#__tui-copy-cell" style="color:var(--faint)">__tui-copy-cell</a></li>
+    <li><a href="#__tui-current-cell" style="color:var(--faint)">__tui-current-cell</a></li>
+    <li><a href="#__tui-cells-have-id?" style="color:var(--faint)">__tui-cells-have-id?</a></li>
+    <li><a href="#__tui-fresh-cell-id" style="color:var(--faint)">__tui-fresh-cell-id</a></li>
+    <li><a href="#__tui-append-node" style="color:var(--faint)">__tui-append-node</a></li>
+    <li><a href="#__tui-insert-node-before" style="color:var(--faint)">__tui-insert-node-before</a></li>
+    <li><a href="#__tui-insert-node-after" style="color:var(--faint)">__tui-insert-node-after</a></li>
+    <li><a href="#__tui-delete-node-pair" style="color:var(--faint)">__tui-delete-node-pair</a></li>
+    <li><a href="#__tui-blank-cell" style="color:var(--faint)">__tui-blank-cell</a></li>
+    <li><a href="#__tui-cells-from-nodes-rev" style="color:var(--faint)">__tui-cells-from-nodes-rev</a></li>
+    <li><a href="#__tui-reverse" style="color:var(--faint)">__tui-reverse</a></li>
+    <li><a href="#__tui-list-length" style="color:var(--faint)">__tui-list-length</a></li>
+    <li><a href="#__tui-zero-list" style="color:var(--faint)">__tui-zero-list</a></li>
+    <li><a href="#__tui-list-nth" style="color:var(--faint)">__tui-list-nth</a></li>
+    <li><a href="#__tui-list-set" style="color:var(--faint)">__tui-list-set</a></li>
+    <li><a href="#__tui-concat-lists" style="color:var(--faint)">__tui-concat-lists</a></li>
+    <li><a href="#__tui-write-file" style="color:var(--faint)">__tui-write-file</a></li>
+    <li><a href="#__tui-state-make" style="color:var(--faint)">__tui-state-make</a></li>
+    <li><a href="#__tui-state-cells" style="color:var(--faint)">__tui-state-cells</a></li>
+    <li><a href="#__tui-state-outputs" style="color:var(--faint)">__tui-state-outputs</a></li>
+    <li><a href="#__tui-state-set-outputs" style="color:var(--faint)">__tui-state-set-outputs</a></li>
+    <li><a href="#__tui-state-set-cells" style="color:var(--faint)">__tui-state-set-cells</a></li>
+    <li><a href="#__tui-state-set-nodes" style="color:var(--faint)">__tui-state-set-nodes</a></li>
+    <li><a href="#__tui-state-set-cell-count" style="color:var(--faint)">__tui-state-set-cell-count</a></li>
+    <li><a href="#__tui-state-set-focus" style="color:var(--faint)">__tui-state-set-focus</a></li>
+    <li><a href="#__tui-state-focus" style="color:var(--faint)">__tui-state-focus</a></li>
+    <li><a href="#__tui-state-cell-count" style="color:var(--faint)">__tui-state-cell-count</a></li>
+    <li><a href="#__tui-state-session" style="color:var(--faint)">__tui-state-session</a></li>
+    <li><a href="#__tui-state-bindings" style="color:var(--faint)">__tui-state-bindings</a></li>
+    <li><a href="#__tui-state-path" style="color:var(--faint)">__tui-state-path</a></li>
+    <li><a href="#__tui-state-nodes" style="color:var(--faint)">__tui-state-nodes</a></li>
+    <li><a href="#__tui-state-status" style="color:var(--faint)">__tui-state-status</a></li>
+    <li><a href="#__tui-state-set-status" style="color:var(--faint)">__tui-state-set-status</a></li>
+    <li><a href="#__tui-state-pending-effect" style="color:var(--faint)">__tui-state-pending-effect</a></li>
+    <li><a href="#__tui-state-set-pending-effect" style="color:var(--faint)">__tui-state-set-pending-effect</a></li>
+    <li><a href="#__tui-state-exit-code" style="color:var(--faint)">__tui-state-exit-code</a></li>
+    <li><a href="#__tui-state-set-quit" style="color:var(--faint)">__tui-state-set-quit</a></li>
+    <li><a href="#__tui-state-dirty" style="color:var(--faint)">__tui-state-dirty</a></li>
+    <li><a href="#__tui-state-set-dirty" style="color:var(--faint)">__tui-state-set-dirty</a></li>
+    <li><a href="#__tui-state-output-hidden" style="color:var(--faint)">__tui-state-output-hidden</a></li>
+    <li><a href="#__tui-state-set-output-hidden" style="color:var(--faint)">__tui-state-set-output-hidden</a></li>
+    <li><a href="#__tui-state-search-query" style="color:var(--faint)">__tui-state-search-query</a></li>
+    <li><a href="#__tui-state-set-search-query" style="color:var(--faint)">__tui-state-set-search-query</a></li>
+    <li><a href="#__tui-state-help-visible" style="color:var(--faint)">__tui-state-help-visible</a></li>
+    <li><a href="#__tui-state-set-help-visible" style="color:var(--faint)">__tui-state-set-help-visible</a></li>
+    <li><a href="#__tui-state-clipboard" style="color:var(--faint)">__tui-state-clipboard</a></li>
+    <li><a href="#__tui-state-set-clipboard" style="color:var(--faint)">__tui-state-set-clipboard</a></li>
+    <li><a href="#__tui-state-quit-confirm" style="color:var(--faint)">__tui-state-quit-confirm</a></li>
+    <li><a href="#__tui-state-set-quit-confirm" style="color:var(--faint)">__tui-state-set-quit-confirm</a></li>
+    <li><a href="#__tui-state-quit?" style="color:var(--faint)">__tui-state-quit?</a></li>
+    <li><a href="#__tui-binding-action" style="color:var(--faint)">__tui-binding-action</a></li>
+    <li><a href="#__tui-binding-has-prefix" style="color:var(--faint)">__tui-binding-has-prefix</a></li>
+    <li><a href="#__tui-output-message" style="color:var(--faint)">__tui-output-message</a></li>
+    <li><a href="#__tui-cell-matches-query?" style="color:var(--faint)">__tui-cell-matches-query?</a></li>
+    <li><a href="#__tui-wrap-index" style="color:var(--faint)">__tui-wrap-index</a></li>
+    <li><a href="#__tui-find-match" style="color:var(--faint)">__tui-find-match</a></li>
+    <li><a href="#__tui-read-search-query" style="color:var(--faint)">__tui-read-search-query</a></li>
+    <li><a href="#__tui-search" style="color:var(--faint)">__tui-search</a></li>
+    <li><a href="#__tui-rebuild-state" style="color:var(--faint)">__tui-rebuild-state</a></li>
+    <li><a href="#__tui-edit-source" style="color:var(--faint)">__tui-edit-source</a></li>
+    <li><a href="#__tui-run-current" style="color:var(--faint)">__tui-run-current</a></li>
+    <li><a href="#__tui-run-all" style="color:var(--faint)">__tui-run-all</a></li>
+    <li><a href="#__tui-save" style="color:var(--faint)">__tui-save</a></li>
+    <li><a href="#__tui-edit-current" style="color:var(--faint)">__tui-edit-current</a></li>
+    <li><a href="#__tui-add-cell" style="color:var(--faint)">__tui-add-cell</a></li>
+    <li><a href="#__tui-delete-current" style="color:var(--faint)">__tui-delete-current</a></li>
+    <li><a href="#__tui-paste-cell" style="color:var(--faint)">__tui-paste-cell</a></li>
+    <li><a href="#__tui-request-quit" style="color:var(--faint)">__tui-request-quit</a></li>
+    <li><a href="#__tui-search-prompt" style="color:var(--faint)">__tui-search-prompt</a></li>
+    <li><a href="#__tui-search-next" style="color:var(--faint)">__tui-search-next</a></li>
+    <li><a href="#__tui-search-prev" style="color:var(--faint)">__tui-search-prev</a></li>
+    <li><a href="#__tui-toggle-help" style="color:var(--faint)">__tui-toggle-help</a></li>
+    <li><a href="#__tui-toggle-output" style="color:var(--faint)">__tui-toggle-output</a></li>
+    <li><a href="#__tui-apply-effect" style="color:var(--faint)">__tui-apply-effect</a></li>
+    <li><a href="#__tui-render" style="color:var(--faint)">__tui-render</a></li>
+    <li><a href="#__tui-handle-key" style="color:var(--faint)">__tui-handle-key</a></li>
+    <li><a href="#__tui-loop" style="color:var(--faint)">__tui-loop</a></li>
+    <li><a href="#__tui-load-bindings" style="color:var(--faint)">__tui-load-bindings</a></li>
+    <li><a href="#__tui-run-with-path" style="color:var(--faint)">__tui-run-with-path</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>notebook/tui</h1>
+    <div class="module-path">src/notebook/tui.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">command-mode terminal UI for .tur.md notebooks.</p>
+  </div>
+<div class="def-card" id="tui-opts-make">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tui-opts-make</h2>
+  </div>
+  <pre class="def-signature">(tui-opts-make [color :int cell_width :int scrollback :int keybindings_file :cstr])</pre>
+  <p class="def-summary">build notebook/tui options.</p>
+</div>
+<div class="def-card" id="default-tui-opts">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>default-tui-opts</h2>
+  </div>
+  <pre class="def-signature">(default-tui-opts)</pre>
+  <p class="def-summary">default options for the command-mode notebook TUI.</p>
+</div>
+<div class="def-card" id="tui-run">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tui-run</h2>
+  </div>
+  <pre class="def-signature">(tui-run [path :cstr opts :int])</pre>
+  <p class="def-summary">parse a notebook file and launch the command-mode TUI.</p>
+</div>
+<div class="def-card" id="tui-run-nodes">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tui-run-nodes</h2>
+  </div>
+  <pre class="def-signature">(tui-run-nodes [nodes :int opts :int])</pre>
+  <p class="def-summary">launch the command-mode TUI with an already-parsed node list.</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__tui-nil-value"><code>__tui-nil-value</code></div>
+  <div class="internal-item" id="__tui-cons"><code>__tui-cons</code></div>
+  <div class="internal-item" id="__tui-list-nil_"><code>__tui-list-nil?</code></div>
+  <div class="internal-item" id="__tui-head"><code>__tui-head</code></div>
+  <div class="internal-item" id="__tui-tail"><code>__tui-tail</code></div>
+  <div class="internal-item" id="__tui-ok"><code>__tui-ok</code></div>
+  <div class="internal-item" id="__tui-err"><code>__tui-err</code></div>
+  <div class="internal-item" id="__tui-result-ok_"><code>__tui-result-ok?</code></div>
+  <div class="internal-item" id="__tui-result-ok-val"><code>__tui-result-ok-val</code></div>
+  <div class="internal-item" id="__tui-result-err-val"><code>__tui-result-err-val</code></div>
+  <div class="internal-item" id="__tui-cstr-empty_"><code>__tui-cstr-empty?</code></div>
+  <div class="internal-item" id="__tui-cstr-eq_"><code>__tui-cstr-eq?</code></div>
+  <div class="internal-item" id="__tui-str-concat"><code>__tui-str-concat</code></div>
+  <div class="internal-item" id="__tui-cstr-drop-last"><code>__tui-cstr-drop-last</code></div>
+  <div class="internal-item" id="__tui-cstr-contains-ci_"><code>__tui-cstr-contains-ci?</code></div>
+  <div class="internal-item" id="__tui-int-_cstr"><code>__tui-int-&gt;cstr</code></div>
+  <div class="internal-item" id="__tui-opts-color"><code>__tui-opts-color</code></div>
+  <div class="internal-item" id="__tui-opts-cell-width"><code>__tui-opts-cell-width</code></div>
+  <div class="internal-item" id="__tui-opts-scrollback"><code>__tui-opts-scrollback</code></div>
+  <div class="internal-item" id="__tui-opts-keybindings-file"><code>__tui-opts-keybindings-file</code></div>
+  <div class="internal-item" id="__tui-node-cell-make"><code>__tui-node-cell-make</code></div>
+  <div class="internal-item" id="__tui-copy-cell"><code>__tui-copy-cell</code></div>
+  <div class="internal-item" id="__tui-current-cell"><code>__tui-current-cell</code></div>
+  <div class="internal-item" id="__tui-cells-have-id_"><code>__tui-cells-have-id?</code></div>
+  <div class="internal-item" id="__tui-fresh-cell-id"><code>__tui-fresh-cell-id</code></div>
+  <div class="internal-item" id="__tui-append-node"><code>__tui-append-node</code></div>
+  <div class="internal-item" id="__tui-insert-node-before"><code>__tui-insert-node-before</code></div>
+  <div class="internal-item" id="__tui-insert-node-after"><code>__tui-insert-node-after</code></div>
+  <div class="internal-item" id="__tui-delete-node-pair"><code>__tui-delete-node-pair</code></div>
+  <div class="internal-item" id="__tui-blank-cell"><code>__tui-blank-cell</code></div>
+  <div class="internal-item" id="__tui-cells-from-nodes-rev"><code>__tui-cells-from-nodes-rev</code></div>
+  <div class="internal-item" id="__tui-reverse"><code>__tui-reverse</code></div>
+  <div class="internal-item" id="__tui-list-length"><code>__tui-list-length</code></div>
+  <div class="internal-item" id="__tui-zero-list"><code>__tui-zero-list</code></div>
+  <div class="internal-item" id="__tui-list-nth"><code>__tui-list-nth</code></div>
+  <div class="internal-item" id="__tui-list-set"><code>__tui-list-set</code></div>
+  <div class="internal-item" id="__tui-concat-lists"><code>__tui-concat-lists</code></div>
+  <div class="internal-item" id="__tui-write-file"><code>__tui-write-file</code></div>
+  <div class="internal-item" id="__tui-state-make"><code>__tui-state-make</code></div>
+  <div class="internal-item" id="__tui-state-cells"><code>__tui-state-cells</code></div>
+  <div class="internal-item" id="__tui-state-outputs"><code>__tui-state-outputs</code></div>
+  <div class="internal-item" id="__tui-state-set-outputs"><code>__tui-state-set-outputs</code></div>
+  <div class="internal-item" id="__tui-state-set-cells"><code>__tui-state-set-cells</code></div>
+  <div class="internal-item" id="__tui-state-set-nodes"><code>__tui-state-set-nodes</code></div>
+  <div class="internal-item" id="__tui-state-set-cell-count"><code>__tui-state-set-cell-count</code></div>
+  <div class="internal-item" id="__tui-state-set-focus"><code>__tui-state-set-focus</code></div>
+  <div class="internal-item" id="__tui-state-focus"><code>__tui-state-focus</code></div>
+  <div class="internal-item" id="__tui-state-cell-count"><code>__tui-state-cell-count</code></div>
+  <div class="internal-item" id="__tui-state-session"><code>__tui-state-session</code></div>
+  <div class="internal-item" id="__tui-state-bindings"><code>__tui-state-bindings</code></div>
+  <div class="internal-item" id="__tui-state-path"><code>__tui-state-path</code></div>
+  <div class="internal-item" id="__tui-state-nodes"><code>__tui-state-nodes</code></div>
+  <div class="internal-item" id="__tui-state-status"><code>__tui-state-status</code></div>
+  <div class="internal-item" id="__tui-state-set-status"><code>__tui-state-set-status</code></div>
+  <div class="internal-item" id="__tui-state-pending-effect"><code>__tui-state-pending-effect</code></div>
+  <div class="internal-item" id="__tui-state-set-pending-effect"><code>__tui-state-set-pending-effect</code></div>
+  <div class="internal-item" id="__tui-state-exit-code"><code>__tui-state-exit-code</code></div>
+  <div class="internal-item" id="__tui-state-set-quit"><code>__tui-state-set-quit</code></div>
+  <div class="internal-item" id="__tui-state-dirty"><code>__tui-state-dirty</code></div>
+  <div class="internal-item" id="__tui-state-set-dirty"><code>__tui-state-set-dirty</code></div>
+  <div class="internal-item" id="__tui-state-output-hidden"><code>__tui-state-output-hidden</code></div>
+  <div class="internal-item" id="__tui-state-set-output-hidden"><code>__tui-state-set-output-hidden</code></div>
+  <div class="internal-item" id="__tui-state-search-query"><code>__tui-state-search-query</code></div>
+  <div class="internal-item" id="__tui-state-set-search-query"><code>__tui-state-set-search-query</code></div>
+  <div class="internal-item" id="__tui-state-help-visible"><code>__tui-state-help-visible</code></div>
+  <div class="internal-item" id="__tui-state-set-help-visible"><code>__tui-state-set-help-visible</code></div>
+  <div class="internal-item" id="__tui-state-clipboard"><code>__tui-state-clipboard</code></div>
+  <div class="internal-item" id="__tui-state-set-clipboard"><code>__tui-state-set-clipboard</code></div>
+  <div class="internal-item" id="__tui-state-quit-confirm"><code>__tui-state-quit-confirm</code></div>
+  <div class="internal-item" id="__tui-state-set-quit-confirm"><code>__tui-state-set-quit-confirm</code></div>
+  <div class="internal-item" id="__tui-state-quit_"><code>__tui-state-quit?</code></div>
+  <div class="internal-item" id="__tui-binding-action"><code>__tui-binding-action</code></div>
+  <div class="internal-item" id="__tui-binding-has-prefix"><code>__tui-binding-has-prefix</code></div>
+  <div class="internal-item" id="__tui-output-message"><code>__tui-output-message</code></div>
+  <div class="internal-item" id="__tui-cell-matches-query_"><code>__tui-cell-matches-query?</code></div>
+  <div class="internal-item" id="__tui-wrap-index"><code>__tui-wrap-index</code></div>
+  <div class="internal-item" id="__tui-find-match"><code>__tui-find-match</code></div>
+  <div class="internal-item" id="__tui-read-search-query"><code>__tui-read-search-query</code></div>
+  <div class="internal-item" id="__tui-search"><code>__tui-search</code></div>
+  <div class="internal-item" id="__tui-rebuild-state"><code>__tui-rebuild-state</code></div>
+  <div class="internal-item" id="__tui-edit-source"><code>__tui-edit-source</code></div>
+  <div class="internal-item" id="__tui-run-current"><code>__tui-run-current</code></div>
+  <div class="internal-item" id="__tui-run-all"><code>__tui-run-all</code></div>
+  <div class="internal-item" id="__tui-save"><code>__tui-save</code></div>
+  <div class="internal-item" id="__tui-edit-current"><code>__tui-edit-current</code></div>
+  <div class="internal-item" id="__tui-add-cell"><code>__tui-add-cell</code></div>
+  <div class="internal-item" id="__tui-delete-current"><code>__tui-delete-current</code></div>
+  <div class="internal-item" id="__tui-paste-cell"><code>__tui-paste-cell</code></div>
+  <div class="internal-item" id="__tui-request-quit"><code>__tui-request-quit</code></div>
+  <div class="internal-item" id="__tui-search-prompt"><code>__tui-search-prompt</code></div>
+  <div class="internal-item" id="__tui-search-next"><code>__tui-search-next</code></div>
+  <div class="internal-item" id="__tui-search-prev"><code>__tui-search-prev</code></div>
+  <div class="internal-item" id="__tui-toggle-help"><code>__tui-toggle-help</code></div>
+  <div class="internal-item" id="__tui-toggle-output"><code>__tui-toggle-output</code></div>
+  <div class="internal-item" id="__tui-apply-effect"><code>__tui-apply-effect</code></div>
+  <div class="internal-item" id="__tui-render"><code>__tui-render</code></div>
+  <div class="internal-item" id="__tui-handle-key"><code>__tui-handle-key</code></div>
+  <div class="internal-item" id="__tui-loop"><code>__tui-loop</code></div>
+  <div class="internal-item" id="__tui-load-bindings"><code>__tui-load-bindings</code></div>
+  <div class="internal-item" id="__tui-run-with-path"><code>__tui-run-with-path</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

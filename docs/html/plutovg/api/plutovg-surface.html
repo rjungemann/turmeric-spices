@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/plutovg/surface | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#surface-create">surface-create</a></li>
+    <li><a href="#surface-create-from-data">surface-create-from-data</a></li>
+    <li><a href="#surface-destroy">surface-destroy</a></li>
+    <li><a href="#surface-width">surface-width</a></li>
+    <li><a href="#surface-height">surface-height</a></li>
+    <li><a href="#surface-stride">surface-stride</a></li>
+    <li><a href="#surface-data">surface-data</a></li>
+    <li><a href="#surface-write-png">surface-write-png</a></li>
+    <li><a href="#surface-write-jpeg">surface-write-jpeg</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__ok" style="color:var(--faint)">__ok</a></li>
+    <li><a href="#__err" style="color:var(--faint)">__err</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>plutovg/surface</h1>
+    <div class="module-path">src/plutovg/surface.tur</div>
+  </div>
+<div class="def-card" id="surface-create">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-create</h2>
+  </div>
+  <pre class="def-signature">(surface-create [width :int height :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">allocate a new premultiplied-ARGB pixel buffer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>width</td><td></td><td>surface width in pixels</td></tr>
+    <tr><td>height</td><td></td><td>surface height in pixels</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok handle) on success; (err 0) if plutovg refuses the dimensions.
+  Free with surface-destroy when done.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (surface-create 256 256)]
+    (if (ok? r) (let [s (ok-val r)] ...) (println &quot;create failed&quot;)))</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="surface-create-from-data">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-create-from-data</h2>
+  </div>
+  <pre class="def-signature">(surface-create-from-data [data :cstr width :int height :int stride :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">wrap an existing pixel buffer as a surface.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>data</td><td></td><td>pointer to existing premultiplied-ARGB bytes (:cstr)</td></tr>
+    <tr><td>width</td><td></td><td>surface width in pixels</td></tr>
+    <tr><td>height</td><td></td><td>surface height in pixels</td></tr>
+    <tr><td>stride</td><td></td><td>bytes per row (typically width * 4)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok handle) on success; (err 0) on failure.  The buffer is NOT owned
+  by the returned surface; the caller must keep it alive until the
+  surface is destroyed.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(surface-create-from-data buf 64 64 (* 64 4))</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="surface-destroy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-destroy</h2>
+  </div>
+  <pre class="def-signature">(surface-destroy [s :int] :void)</pre>
+  <p class="def-summary">release a surface allocated by surface-create.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle (ok-val from surface-create)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(surface-destroy s)</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="surface-width">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-width</h2>
+  </div>
+  <pre class="def-signature">(surface-width [s :int] :int)</pre>
+  <p class="def-summary">return the width of a surface in pixels.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Width as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(println (surface-width s))</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="surface-height">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-height</h2>
+  </div>
+  <pre class="def-signature">(surface-height [s :int] :int)</pre>
+  <p class="def-summary">return the height of a surface in pixels.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Height as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(println (surface-height s))</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="surface-stride">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-stride</h2>
+  </div>
+  <pre class="def-signature">(surface-stride [s :int] :int)</pre>
+  <p class="def-summary">return the row stride of a surface in bytes.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Bytes per row as :int.  For surfaces allocated by surface-create this
+  is always width * 4.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(println (surface-stride s))</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="surface-data">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-data</h2>
+  </div>
+  <pre class="def-signature">(surface-data [s :int] :cstr)</pre>
+  <p class="def-summary">return a raw pointer to the surface pixel buffer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Pointer to the pixel buffer as :cstr.  Pixels are stored as 32-bit
+  premultiplied ARGB (0xAARRGGBB); on a little-endian host the byte
+  order in memory is B, G, R, A.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [buf (surface-data s)] ...)</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="surface-write-png">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-write-png</h2>
+  </div>
+  <pre class="def-signature">(surface-write-png [s :int path :cstr] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">write the surface to a PNG file.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle</td></tr>
+    <tr><td>path</td><td></td><td>destination filesystem path</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok 0) on success; (err 0) if plutovg could not write the file.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (surface-write-png s &quot;out.png&quot;)]
+    (if (ok? r) (println &quot;written&quot;) (println &quot;failed&quot;)))</pre>
+  </div>
+  <p class="def-since">Since: PV6</p>
+</div>
+<div class="def-card" id="surface-write-jpeg">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>surface-write-jpeg</h2>
+  </div>
+  <pre class="def-signature">(surface-write-jpeg [s :int path :cstr quality :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">write the surface to a JPEG file.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle</td></tr>
+    <tr><td>path</td><td></td><td>destination filesystem path</td></tr>
+    <tr><td>quality</td><td></td><td>JPEG quality in [0, 100]; 90 is a good default</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok 0) on success; (err 0) on failure.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(surface-write-jpeg s &quot;out.jpg&quot; 90)</pre>
+  </div>
+  <p class="def-since">Since: PV6</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__ok"><code>__ok</code><span class="internal-item-summary">-- create an ok result wrapping integer value v.</span></div>
+  <div class="internal-item" id="__err"><code>__err</code><span class="internal-item-summary">-- create an err result wrapping integer error value e.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

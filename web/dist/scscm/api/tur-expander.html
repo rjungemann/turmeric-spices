@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/tur/expander | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#scscm-cstr-eq_">scscm-cstr-eq?</a></li>
+    <li><a href="#ast-kind">ast-kind</a></li>
+    <li><a href="#ast-symbol-name">ast-symbol-name</a></li>
+    <li><a href="#ast-list-len">ast-list-len</a></li>
+    <li><a href="#ast-list-get">ast-list-get</a></li>
+    <li><a href="#scscm-ast-leaf">scscm-ast-leaf</a></li>
+    <li><a href="#scscm-ast-list-node">scscm-ast-list-node</a></li>
+    <li><a href="#scscm-ast-add-child">scscm-ast-add-child</a></li>
+    <li><a href="#scscm-macro-env-get">scscm-macro-env-get</a></li>
+    <li><a href="#scscm-macro-env-set">scscm-macro-env-set</a></li>
+    <li><a href="#scscm-macro-env-update">scscm-macro-env-update</a></li>
+    <li><a href="#scscm-macro-env-op">scscm-macro-env-op</a></li>
+    <li><a href="#scscm-macro-get">scscm-macro-get</a></li>
+    <li><a href="#scscm-macro-set">scscm-macro-set</a></li>
+    <li><a href="#scscm-macro-define">scscm-macro-define</a></li>
+    <li><a href="#scscm-cstr-eq-node_">scscm-cstr-eq-node?</a></li>
+    <li><a href="#scscm-macro-lookup-loop">scscm-macro-lookup-loop</a></li>
+    <li><a href="#scscm-macro-lookup">scscm-macro-lookup</a></li>
+    <li><a href="#scscm-make-sym">scscm-make-sym</a></li>
+    <li><a href="#scscm-make-list-from-cons">scscm-make-list-from-cons</a></li>
+    <li><a href="#scscm-fill-list-from-cons">scscm-fill-list-from-cons</a></li>
+    <li><a href="#scscm-make-wrap">scscm-make-wrap</a></li>
+    <li><a href="#scscm-make-call2">scscm-make-call2</a></li>
+    <li><a href="#scscm-copy-children">scscm-copy-children</a></li>
+    <li><a href="#scscm-children-cons">scscm-children-cons</a></li>
+    <li><a href="#scscm-children-cons-loop">scscm-children-cons-loop</a></li>
+    <li><a href="#scscm-void">scscm-void</a></li>
+    <li><a href="#scscm-expand-qq">scscm-expand-qq</a></li>
+    <li><a href="#scscm-qq-fill-list">scscm-qq-fill-list</a></li>
+    <li><a href="#scscm-splice-children">scscm-splice-children</a></li>
+    <li><a href="#scscm-thread-first-step">scscm-thread-first-step</a></li>
+    <li><a href="#scscm-thread-last-step">scscm-thread-last-step</a></li>
+    <li><a href="#scscm-expand-thread-first">scscm-expand-thread-first</a></li>
+    <li><a href="#scscm-expand-thread-last">scscm-expand-thread-last</a></li>
+    <li><a href="#scscm-macro-apply">scscm-macro-apply</a></li>
+    <li><a href="#scscm-kind-int">scscm-kind-int</a></li>
+    <li><a href="#scscm-subst">scscm-subst</a></li>
+    <li><a href="#scscm-subst-fill">scscm-subst-fill</a></li>
+    <li><a href="#scscm-find-param">scscm-find-param</a></li>
+    <li><a href="#scscm-find-param-loop">scscm-find-param-loop</a></li>
+    <li><a href="#scscm-cons-nth">scscm-cons-nth</a></li>
+    <li><a href="#scscm-expand-when">scscm-expand-when</a></li>
+    <li><a href="#scscm-expand-unless">scscm-expand-unless</a></li>
+    <li><a href="#scscm-copy-expanded-children">scscm-copy-expanded-children</a></li>
+    <li><a href="#scscm-expand-children">scscm-expand-children</a></li>
+    <li><a href="#scscm-expand-pbind">scscm-expand-pbind</a></li>
+    <li><a href="#scscm-expand-pattern-fn">scscm-expand-pattern-fn</a></li>
+    <li><a href="#scscm-expand-defsynth">scscm-expand-defsynth</a></li>
+    <li><a href="#scscm-expand-definst">scscm-expand-definst</a></li>
+    <li><a href="#scscm-expand-comp">scscm-expand-comp</a></li>
+    <li><a href="#scscm-expand-partial">scscm-expand-partial</a></li>
+    <li><a href="#scscm-expand-adsr">scscm-expand-adsr</a></li>
+    <li><a href="#scscm-expand-perc">scscm-expand-perc</a></li>
+    <li><a href="#scscm-expand-env-line">scscm-expand-env-line</a></li>
+    <li><a href="#scscm-expand-midi-hz">scscm-expand-midi-hz</a></li>
+    <li><a href="#scscm-expand-hz-midi">scscm-expand-hz-midi</a></li>
+    <li><a href="#scscm-expand-db-amp">scscm-expand-db-amp</a></li>
+    <li><a href="#scscm-expand-amp-db">scscm-expand-amp-db</a></li>
+    <li><a href="#scscm-expand-ctl">scscm-expand-ctl</a></li>
+    <li><a href="#scscm-expand-kill">scscm-expand-kill</a></li>
+    <li><a href="#scscm-expand-doseq">scscm-expand-doseq</a></li>
+    <li><a href="#scscm-expand-dotimes">scscm-expand-dotimes</a></li>
+    <li><a href="#scscm-expand-collect">scscm-expand-collect</a></li>
+    <li><a href="#scscm-handle-defmacro">scscm-handle-defmacro</a></li>
+    <li><a href="#expand">expand</a></li>
+    <li><a href="#scscm-expand-list">scscm-expand-list</a></li>
+    <li><a href="#scscm-expand-let">scscm-expand-let</a></li>
+    <li><a href="#scscm-expand-let-bindings">scscm-expand-let-bindings</a></li>
+    <li><a href="#scscm-expand-cond">scscm-expand-cond</a></li>
+    <li><a href="#scscm-expand-cond-pairs">scscm-expand-cond-pairs</a></li>
+    <li><a href="#expand-all">expand-all</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>tur/expander</h1>
+    <div class="module-path">src/scscm/expander.tur</div>
+  </div>
+<div class="def-card" id="scscm-cstr-eq_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-cstr-eq?</h2>
+  </div>
+  <pre class="def-signature">(scscm-cstr-eq? [a :cstr b :cstr])</pre>
+</div>
+<div class="def-card" id="ast-kind">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-kind</h2>
+  </div>
+  <pre class="def-signature">(ast-kind [node :int])</pre>
+</div>
+<div class="def-card" id="ast-symbol-name">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-symbol-name</h2>
+  </div>
+  <pre class="def-signature">(ast-symbol-name [node :int])</pre>
+</div>
+<div class="def-card" id="ast-list-len">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-list-len</h2>
+  </div>
+  <pre class="def-signature">(ast-list-len [node :int])</pre>
+</div>
+<div class="def-card" id="ast-list-get">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-list-get</h2>
+  </div>
+  <pre class="def-signature">(ast-list-get [node :int i :int])</pre>
+</div>
+<div class="def-card" id="scscm-ast-leaf">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-ast-leaf</h2>
+  </div>
+  <pre class="def-signature">(scscm-ast-leaf [kind :int value :cstr])</pre>
+</div>
+<div class="def-card" id="scscm-ast-list-node">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-ast-list-node</h2>
+  </div>
+  <pre class="def-signature">(scscm-ast-list-node [kind :int])</pre>
+</div>
+<div class="def-card" id="scscm-ast-add-child">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-ast-add-child</h2>
+  </div>
+  <pre class="def-signature">(scscm-ast-add-child [node :int child :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-env-get">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-env-get</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-env-get)</pre>
+</div>
+<div class="def-card" id="scscm-macro-env-set">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-env-set</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-env-set [env :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-env-update">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-env-update</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-env-update [env :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-env-op">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-env-op</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-env-op [op :int val :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-get">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-get</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-get)</pre>
+</div>
+<div class="def-card" id="scscm-macro-set">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-set</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-set [env :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-define">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-define</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-define [name :int params :int body :int])</pre>
+</div>
+<div class="def-card" id="scscm-cstr-eq-node_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-cstr-eq-node?</h2>
+  </div>
+  <pre class="def-signature">(scscm-cstr-eq-node? [name :cstr node :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-lookup-loop">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-lookup-loop</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-lookup-loop [name :cstr env :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-lookup">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-lookup</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-lookup [name :cstr])</pre>
+</div>
+<div class="def-card" id="scscm-make-sym">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-make-sym</h2>
+  </div>
+  <pre class="def-signature">(scscm-make-sym [name :cstr])</pre>
+</div>
+<div class="def-card" id="scscm-make-list-from-cons">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-make-list-from-cons</h2>
+  </div>
+  <pre class="def-signature">(scscm-make-list-from-cons [children :int])</pre>
+</div>
+<div class="def-card" id="scscm-fill-list-from-cons">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-fill-list-from-cons</h2>
+  </div>
+  <pre class="def-signature">(scscm-fill-list-from-cons [node :int children :int])</pre>
+</div>
+<div class="def-card" id="scscm-make-wrap">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-make-wrap</h2>
+  </div>
+  <pre class="def-signature">(scscm-make-wrap [sym-name :cstr inner :int])</pre>
+</div>
+<div class="def-card" id="scscm-make-call2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-make-call2</h2>
+  </div>
+  <pre class="def-signature">(scscm-make-call2 [sym-name :cstr a :int b :int])</pre>
+</div>
+<div class="def-card" id="scscm-copy-children">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-copy-children</h2>
+  </div>
+  <pre class="def-signature">(scscm-copy-children [dst :int src :int start :int])</pre>
+</div>
+<div class="def-card" id="scscm-children-cons">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-children-cons</h2>
+  </div>
+  <pre class="def-signature">(scscm-children-cons [src :int start :int])</pre>
+</div>
+<div class="def-card" id="scscm-children-cons-loop">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-children-cons-loop</h2>
+  </div>
+  <pre class="def-signature">(scscm-children-cons-loop [src :int i :int acc :int])</pre>
+</div>
+<div class="def-card" id="scscm-void">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-void</h2>
+  </div>
+  <pre class="def-signature">(scscm-void)</pre>
+</div>
+<div class="def-card" id="scscm-expand-qq">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-qq</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-qq [node :int depth :int])</pre>
+</div>
+<div class="def-card" id="scscm-qq-fill-list">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-qq-fill-list</h2>
+  </div>
+  <pre class="def-signature">(scscm-qq-fill-list [dst :int src :int i :int depth :int])</pre>
+</div>
+<div class="def-card" id="scscm-splice-children">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-splice-children</h2>
+  </div>
+  <pre class="def-signature">(scscm-splice-children [dst :int src-node :int])</pre>
+</div>
+<div class="def-card" id="scscm-thread-first-step">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-thread-first-step</h2>
+  </div>
+  <pre class="def-signature">(scscm-thread-first-step [acc :int form :int])</pre>
+</div>
+<div class="def-card" id="scscm-thread-last-step">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-thread-last-step</h2>
+  </div>
+  <pre class="def-signature">(scscm-thread-last-step [acc :int form :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-thread-first">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-thread-first</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-thread-first [node :int i :int acc :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-thread-last">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-thread-last</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-thread-last [node :int i :int acc :int])</pre>
+</div>
+<div class="def-card" id="scscm-macro-apply">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-macro-apply</h2>
+  </div>
+  <pre class="def-signature">(scscm-macro-apply [params-node :int body :int args :int])</pre>
+</div>
+<div class="def-card" id="scscm-kind-int">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-kind-int</h2>
+  </div>
+  <pre class="def-signature">(scscm-kind-int [knd :cstr])</pre>
+</div>
+<div class="def-card" id="scscm-subst">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-subst</h2>
+  </div>
+  <pre class="def-signature">(scscm-subst [node :int params :int args :int])</pre>
+</div>
+<div class="def-card" id="scscm-subst-fill">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-subst-fill</h2>
+  </div>
+  <pre class="def-signature">(scscm-subst-fill [dst :int src :int params :int args :int i :int])</pre>
+</div>
+<div class="def-card" id="scscm-find-param">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-find-param</h2>
+  </div>
+  <pre class="def-signature">(scscm-find-param [sym-node :int params :int args :int])</pre>
+</div>
+<div class="def-card" id="scscm-find-param-loop">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-find-param-loop</h2>
+  </div>
+  <pre class="def-signature">(scscm-find-param-loop [sym-node :int params :int args :int i :int])</pre>
+</div>
+<div class="def-card" id="scscm-cons-nth">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-cons-nth</h2>
+  </div>
+  <pre class="def-signature">(scscm-cons-nth [lst :int n :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-when">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-when</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-when [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-unless">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-unless</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-unless [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-copy-expanded-children">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-copy-expanded-children</h2>
+  </div>
+  <pre class="def-signature">(scscm-copy-expanded-children [dst :int src :int start :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-children">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-children</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-children [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-pbind">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-pbind</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-pbind [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-pattern-fn">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-pattern-fn</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-pattern-fn [sclang-name :cstr node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-defsynth">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-defsynth</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-defsynth [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-definst">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-definst</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-definst [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-comp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-comp</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-comp [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-partial">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-partial</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-partial [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-adsr">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-adsr</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-adsr [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-perc">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-perc</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-perc [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-env-line">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-env-line</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-env-line [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-midi-hz">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-midi-hz</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-midi-hz [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-hz-midi">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-hz-midi</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-hz-midi [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-db-amp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-db-amp</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-db-amp [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-amp-db">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-amp-db</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-amp-db [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-ctl">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-ctl</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-ctl [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-kill">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-kill</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-kill [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-doseq">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-doseq</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-doseq [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-dotimes">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-dotimes</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-dotimes [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-collect">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-collect</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-collect [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-handle-defmacro">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-handle-defmacro</h2>
+  </div>
+  <pre class="def-signature">(scscm-handle-defmacro [node :int])</pre>
+</div>
+<div class="def-card" id="expand">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>expand</h2>
+  </div>
+  <pre class="def-signature">(expand [ast :int])</pre>
+  <p class="def-summary">expand macros in a single AST node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>ast</td><td></td><td>AST node handle (from parser)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Expanded AST node handle (may be a new allocation).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(expand (parse-one-form my-tokens))</pre>
+  </div>
+  <p class="def-since">Since: SC3</p>
+</div>
+<div class="def-card" id="scscm-expand-list">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-list</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-list [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-let">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-let</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-let [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-let-bindings">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-let-bindings</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-let-bindings [dst :int bvec :int i :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-cond">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-cond</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-cond [node :int])</pre>
+</div>
+<div class="def-card" id="scscm-expand-cond-pairs">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-expand-cond-pairs</h2>
+  </div>
+  <pre class="def-signature">(scscm-expand-cond-pairs [node :int i :int])</pre>
+</div>
+<div class="def-card" id="expand-all">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>expand-all</h2>
+  </div>
+  <pre class="def-signature">(expand-all [asts :int])</pre>
+  <p class="def-summary">expand macros in a cons list of top-level AST nodes.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>asts</td><td></td><td>cons list of AST node handles</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Cons list of expanded AST node handles.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(expand-all top-level-nodes)</pre>
+  </div>
+  <p class="def-since">Since: SC3</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

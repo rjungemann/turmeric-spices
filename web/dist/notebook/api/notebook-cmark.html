@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/notebook/cmark | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#md-tag-document">md-tag-document</a></li>
+    <li><a href="#md-tag-heading">md-tag-heading</a></li>
+    <li><a href="#md-tag-paragraph">md-tag-paragraph</a></li>
+    <li><a href="#md-tag-blockquote">md-tag-blockquote</a></li>
+    <li><a href="#md-tag-list">md-tag-list</a></li>
+    <li><a href="#md-tag-list-item">md-tag-list-item</a></li>
+    <li><a href="#md-tag-code-block">md-tag-code-block</a></li>
+    <li><a href="#md-tag-thematic-break">md-tag-thematic-break</a></li>
+    <li><a href="#md-tag-table">md-tag-table</a></li>
+    <li><a href="#md-tag-table-row">md-tag-table-row</a></li>
+    <li><a href="#md-tag-table-cell">md-tag-table-cell</a></li>
+    <li><a href="#md-tag-text">md-tag-text</a></li>
+    <li><a href="#md-tag-emph">md-tag-emph</a></li>
+    <li><a href="#md-tag-strong">md-tag-strong</a></li>
+    <li><a href="#md-tag-code-span">md-tag-code-span</a></li>
+    <li><a href="#md-tag-link">md-tag-link</a></li>
+    <li><a href="#md-tag-image">md-tag-image</a></li>
+    <li><a href="#md-tag-strikethrough">md-tag-strikethrough</a></li>
+    <li><a href="#md-tag-autolink">md-tag-autolink</a></li>
+    <li><a href="#md-tag-hard-break">md-tag-hard-break</a></li>
+    <li><a href="#md-tag-soft-break">md-tag-soft-break</a></li>
+    <li><a href="#md-node-tag">md-node-tag</a></li>
+    <li><a href="#md-node-children">md-node-children</a></li>
+    <li><a href="#md-node-text">md-node-text</a></li>
+    <li><a href="#md-node-info">md-node-info</a></li>
+    <li><a href="#md-node-meta">md-node-meta</a></li>
+    <li><a href="#md-source-span">md-source-span</a></li>
+    <li><a href="#md-parse">md-parse</a></li>
+    <li><a href="#md-emit">md-emit</a></li>
+    <li><a href="#md-emit-html">md-emit-html</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#nil-value" style="color:var(--faint)">nil-value</a></li>
+    <li><a href="#list-nil?" style="color:var(--faint)">list-nil?</a></li>
+    <li><a href="#cons" style="color:var(--faint)">cons</a></li>
+    <li><a href="#head" style="color:var(--faint)">head</a></li>
+    <li><a href="#tail" style="color:var(--faint)">tail</a></li>
+    <li><a href="#__str-concat" style="color:var(--faint)">__str-concat</a></li>
+    <li><a href="#__repeat-char" style="color:var(--faint)">__repeat-char</a></li>
+    <li><a href="#__int-&gt;cstr" style="color:var(--faint)">__int-&gt;cstr</a></li>
+    <li><a href="#__int-as-cstr" style="color:var(--faint)">__int-as-cstr</a></li>
+    <li><a href="#__cstr-as-int" style="color:var(--faint)">__cstr-as-int</a></li>
+    <li><a href="#__cstr-eq?" style="color:var(--faint)">__cstr-eq?</a></li>
+    <li><a href="#__prefix-lines" style="color:var(--faint)">__prefix-lines</a></li>
+    <li><a href="#__format-list-item" style="color:var(--faint)">__format-list-item</a></li>
+    <li><a href="#__md-void" style="color:var(--faint)">__md-void</a></li>
+    <li><a href="#__md-inline-fill" style="color:var(--faint)">__md-inline-fill</a></li>
+    <li><a href="#__md-upgrade-gfm-node" style="color:var(--faint)">__md-upgrade-gfm-node</a></li>
+    <li><a href="#__md-upgrade-gfm-list" style="color:var(--faint)">__md-upgrade-gfm-list</a></li>
+    <li><a href="#__md-upgrade-gfm" style="color:var(--faint)">__md-upgrade-gfm</a></li>
+    <li><a href="#__md-annotate-inline-list" style="color:var(--faint)">__md-annotate-inline-list</a></li>
+    <li><a href="#__md-annotate-inlines" style="color:var(--faint)">__md-annotate-inlines</a></li>
+    <li><a href="#__md-parse-blocks" style="color:var(--faint)">__md-parse-blocks</a></li>
+    <li><a href="#__emit-nodes-with-sep" style="color:var(--faint)">__emit-nodes-with-sep</a></li>
+    <li><a href="#__emit-list-items" style="color:var(--faint)">__emit-list-items</a></li>
+    <li><a href="#__table-align-mark" style="color:var(--faint)">__table-align-mark</a></li>
+    <li><a href="#__emit-table-row-cells" style="color:var(--faint)">__emit-table-row-cells</a></li>
+    <li><a href="#__emit-table-align-cells" style="color:var(--faint)">__emit-table-align-cells</a></li>
+    <li><a href="#__emit-table-row" style="color:var(--faint)">__emit-table-row</a></li>
+    <li><a href="#__emit-table-body-rows" style="color:var(--faint)">__emit-table-body-rows</a></li>
+    <li><a href="#__emit-table-node" style="color:var(--faint)">__emit-table-node</a></li>
+    <li><a href="#__emit-node-int" style="color:var(--faint)">__emit-node-int</a></li>
+    <li><a href="#__html-escape" style="color:var(--faint)">__html-escape</a></li>
+    <li><a href="#__emit-inline-plain-list" style="color:var(--faint)">__emit-inline-plain-list</a></li>
+    <li><a href="#__emit-inline-html-list" style="color:var(--faint)">__emit-inline-html-list</a></li>
+    <li><a href="#__emit-block-html-list" style="color:var(--faint)">__emit-block-html-list</a></li>
+    <li><a href="#__emit-inline-plain-node-int" style="color:var(--faint)">__emit-inline-plain-node-int</a></li>
+    <li><a href="#__emit-link-html-int" style="color:var(--faint)">__emit-link-html-int</a></li>
+    <li><a href="#__emit-image-html-int" style="color:var(--faint)">__emit-image-html-int</a></li>
+    <li><a href="#__emit-inline-html-node-int" style="color:var(--faint)">__emit-inline-html-node-int</a></li>
+    <li><a href="#__table-align-attr" style="color:var(--faint)">__table-align-attr</a></li>
+    <li><a href="#__emit-table-cells-html" style="color:var(--faint)">__emit-table-cells-html</a></li>
+    <li><a href="#__emit-table-row-html" style="color:var(--faint)">__emit-table-row-html</a></li>
+    <li><a href="#__emit-table-body-html" style="color:var(--faint)">__emit-table-body-html</a></li>
+    <li><a href="#__emit-table-html-int" style="color:var(--faint)">__emit-table-html-int</a></li>
+    <li><a href="#__emit-heading-html-int" style="color:var(--faint)">__emit-heading-html-int</a></li>
+    <li><a href="#__emit-block-html-node-int" style="color:var(--faint)">__emit-block-html-node-int</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>notebook/cmark</h1>
+    <div class="module-path">src/notebook/cmark.tur</div>
+  </div>
+<div class="def-card" id="md-tag-document">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-document</h2>
+  </div>
+  <pre class="def-signature">(md-tag-document :int)</pre>
+</div>
+<div class="def-card" id="md-tag-heading">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-heading</h2>
+  </div>
+  <pre class="def-signature">(md-tag-heading :int)</pre>
+</div>
+<div class="def-card" id="md-tag-paragraph">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-paragraph</h2>
+  </div>
+  <pre class="def-signature">(md-tag-paragraph :int)</pre>
+</div>
+<div class="def-card" id="md-tag-blockquote">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-blockquote</h2>
+  </div>
+  <pre class="def-signature">(md-tag-blockquote :int)</pre>
+</div>
+<div class="def-card" id="md-tag-list">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-list</h2>
+  </div>
+  <pre class="def-signature">(md-tag-list :int)</pre>
+</div>
+<div class="def-card" id="md-tag-list-item">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-list-item</h2>
+  </div>
+  <pre class="def-signature">(md-tag-list-item :int)</pre>
+</div>
+<div class="def-card" id="md-tag-code-block">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-code-block</h2>
+  </div>
+  <pre class="def-signature">(md-tag-code-block :int)</pre>
+</div>
+<div class="def-card" id="md-tag-thematic-break">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-thematic-break</h2>
+  </div>
+  <pre class="def-signature">(md-tag-thematic-break :int)</pre>
+</div>
+<div class="def-card" id="md-tag-table">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-table</h2>
+  </div>
+  <pre class="def-signature">(md-tag-table :int)</pre>
+</div>
+<div class="def-card" id="md-tag-table-row">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-table-row</h2>
+  </div>
+  <pre class="def-signature">(md-tag-table-row :int)</pre>
+</div>
+<div class="def-card" id="md-tag-table-cell">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-table-cell</h2>
+  </div>
+  <pre class="def-signature">(md-tag-table-cell :int)</pre>
+</div>
+<div class="def-card" id="md-tag-text">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-text</h2>
+  </div>
+  <pre class="def-signature">(md-tag-text :int)</pre>
+</div>
+<div class="def-card" id="md-tag-emph">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-emph</h2>
+  </div>
+  <pre class="def-signature">(md-tag-emph :int)</pre>
+</div>
+<div class="def-card" id="md-tag-strong">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-strong</h2>
+  </div>
+  <pre class="def-signature">(md-tag-strong :int)</pre>
+</div>
+<div class="def-card" id="md-tag-code-span">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-code-span</h2>
+  </div>
+  <pre class="def-signature">(md-tag-code-span :int)</pre>
+</div>
+<div class="def-card" id="md-tag-link">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-link</h2>
+  </div>
+  <pre class="def-signature">(md-tag-link :int)</pre>
+</div>
+<div class="def-card" id="md-tag-image">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-image</h2>
+  </div>
+  <pre class="def-signature">(md-tag-image :int)</pre>
+</div>
+<div class="def-card" id="md-tag-strikethrough">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-strikethrough</h2>
+  </div>
+  <pre class="def-signature">(md-tag-strikethrough :int)</pre>
+</div>
+<div class="def-card" id="md-tag-autolink">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-autolink</h2>
+  </div>
+  <pre class="def-signature">(md-tag-autolink :int)</pre>
+</div>
+<div class="def-card" id="md-tag-hard-break">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-hard-break</h2>
+  </div>
+  <pre class="def-signature">(md-tag-hard-break :int)</pre>
+</div>
+<div class="def-card" id="md-tag-soft-break">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-tag-soft-break</h2>
+  </div>
+  <pre class="def-signature">(md-tag-soft-break :int)</pre>
+</div>
+<div class="def-card" id="md-node-tag">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-node-tag</h2>
+  </div>
+  <pre class="def-signature">(md-node-tag [n :int])</pre>
+  <p class="def-summary">return the block tag of a parsed markdown node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>node handle returned by md-parse or md-node-children</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">One of the md-tag-* integer constants implemented in NB0.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(md-node-tag (md-parse &quot;# Hi&quot;))</pre>
+  </div>
+  <p class="def-since">Since: NB0</p>
+</div>
+<div class="def-card" id="md-node-children">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-node-children</h2>
+  </div>
+  <pre class="def-signature">(md-node-children [n :int])</pre>
+  <p class="def-summary">return the children of a node as a cons list.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>node handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A cons list of child node handles in document order.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(md-node-children doc)</pre>
+  </div>
+  <p class="def-since">Since: NB0</p>
+</div>
+<div class="def-card" id="md-node-text">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-node-text</h2>
+  </div>
+  <pre class="def-signature">(md-node-text [n :int])</pre>
+  <p class="def-summary">return the node text payload for block-level nodes.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>node handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Paragraph text, heading text, or code-block body depending on node kind.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(md-node-text heading)</pre>
+  </div>
+  <p class="def-since">Since: NB0</p>
+</div>
+<div class="def-card" id="md-node-info">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-node-info</h2>
+  </div>
+  <pre class="def-signature">(md-node-info [n :int])</pre>
+  <p class="def-summary">return the node info payload.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>node handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Fence info string for code blocks, or list marker info for list nodes.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(md-node-info code-block)</pre>
+  </div>
+  <p class="def-since">Since: NB0</p>
+</div>
+<div class="def-card" id="md-node-meta">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-node-meta</h2>
+  </div>
+  <pre class="def-signature">(md-node-meta [n :int])</pre>
+  <p class="def-summary">return the node integer metadata field.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>node handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Heading level for headings or list start number for ordered lists.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(md-node-meta heading)</pre>
+  </div>
+  <p class="def-since">Since: NB0</p>
+</div>
+<div class="def-card" id="md-source-span">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-source-span</h2>
+  </div>
+  <pre class="def-signature">(md-source-span [n :int])</pre>
+  <p class="def-summary">return the start/end line pair for a node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>node handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A cons pair (start-line . end-line), both 1-based.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(md-source-span node)</pre>
+  </div>
+  <p class="def-since">Since: NB0</p>
+</div>
+<div class="def-card" id="md-parse">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-parse</h2>
+  </div>
+  <pre class="def-signature">(md-parse [source :cstr])</pre>
+</div>
+<div class="def-card" id="md-emit">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-emit</h2>
+  </div>
+  <pre class="def-signature">(md-emit [n :int])</pre>
+  <p class="def-summary">serialize a parsed NB0 AST back to normalized markdown.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>node handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Markdown source string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(md-emit (md-parse &quot;# Title&quot;))</pre>
+  </div>
+  <p class="def-since">Since: NB0</p>
+</div>
+<div class="def-card" id="md-emit-html">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>md-emit-html</h2>
+  </div>
+  <pre class="def-signature">(md-emit-html [n :int])</pre>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="nil-value"><code>nil-value</code></div>
+  <div class="internal-item" id="list-nil_"><code>list-nil?</code></div>
+  <div class="internal-item" id="cons"><code>cons</code></div>
+  <div class="internal-item" id="head"><code>head</code></div>
+  <div class="internal-item" id="tail"><code>tail</code></div>
+  <div class="internal-item" id="__str-concat"><code>__str-concat</code></div>
+  <div class="internal-item" id="__repeat-char"><code>__repeat-char</code></div>
+  <div class="internal-item" id="__int-_cstr"><code>__int-&gt;cstr</code></div>
+  <div class="internal-item" id="__int-as-cstr"><code>__int-as-cstr</code></div>
+  <div class="internal-item" id="__cstr-as-int"><code>__cstr-as-int</code></div>
+  <div class="internal-item" id="__cstr-eq_"><code>__cstr-eq?</code></div>
+  <div class="internal-item" id="__prefix-lines"><code>__prefix-lines</code></div>
+  <div class="internal-item" id="__format-list-item"><code>__format-list-item</code></div>
+  <div class="internal-item" id="__md-void"><code>__md-void</code></div>
+  <div class="internal-item" id="__md-inline-fill"><code>__md-inline-fill</code></div>
+  <div class="internal-item" id="__md-upgrade-gfm-node"><code>__md-upgrade-gfm-node</code></div>
+  <div class="internal-item" id="__md-upgrade-gfm-list"><code>__md-upgrade-gfm-list</code></div>
+  <div class="internal-item" id="__md-upgrade-gfm"><code>__md-upgrade-gfm</code></div>
+  <div class="internal-item" id="__md-annotate-inline-list"><code>__md-annotate-inline-list</code></div>
+  <div class="internal-item" id="__md-annotate-inlines"><code>__md-annotate-inlines</code></div>
+  <div class="internal-item" id="__md-parse-blocks"><code>__md-parse-blocks</code><span class="internal-item-summary">-- parse a markdown string into a block-level AST.</span></div>
+  <div class="internal-item" id="__emit-nodes-with-sep"><code>__emit-nodes-with-sep</code></div>
+  <div class="internal-item" id="__emit-list-items"><code>__emit-list-items</code></div>
+  <div class="internal-item" id="__table-align-mark"><code>__table-align-mark</code></div>
+  <div class="internal-item" id="__emit-table-row-cells"><code>__emit-table-row-cells</code></div>
+  <div class="internal-item" id="__emit-table-align-cells"><code>__emit-table-align-cells</code></div>
+  <div class="internal-item" id="__emit-table-row"><code>__emit-table-row</code></div>
+  <div class="internal-item" id="__emit-table-body-rows"><code>__emit-table-body-rows</code></div>
+  <div class="internal-item" id="__emit-table-node"><code>__emit-table-node</code></div>
+  <div class="internal-item" id="__emit-node-int"><code>__emit-node-int</code></div>
+  <div class="internal-item" id="__html-escape"><code>__html-escape</code></div>
+  <div class="internal-item" id="__emit-inline-plain-list"><code>__emit-inline-plain-list</code></div>
+  <div class="internal-item" id="__emit-inline-html-list"><code>__emit-inline-html-list</code></div>
+  <div class="internal-item" id="__emit-block-html-list"><code>__emit-block-html-list</code></div>
+  <div class="internal-item" id="__emit-inline-plain-node-int"><code>__emit-inline-plain-node-int</code></div>
+  <div class="internal-item" id="__emit-link-html-int"><code>__emit-link-html-int</code></div>
+  <div class="internal-item" id="__emit-image-html-int"><code>__emit-image-html-int</code></div>
+  <div class="internal-item" id="__emit-inline-html-node-int"><code>__emit-inline-html-node-int</code></div>
+  <div class="internal-item" id="__table-align-attr"><code>__table-align-attr</code></div>
+  <div class="internal-item" id="__emit-table-cells-html"><code>__emit-table-cells-html</code></div>
+  <div class="internal-item" id="__emit-table-row-html"><code>__emit-table-row-html</code></div>
+  <div class="internal-item" id="__emit-table-body-html"><code>__emit-table-body-html</code></div>
+  <div class="internal-item" id="__emit-table-html-int"><code>__emit-table-html-int</code></div>
+  <div class="internal-item" id="__emit-heading-html-int"><code>__emit-heading-html-int</code></div>
+  <div class="internal-item" id="__emit-block-html-node-int"><code>__emit-block-html-node-int</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

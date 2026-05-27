@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/linalg/small | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#vec2">vec2</a></li>
+    <li><a href="#vec3">vec3</a></li>
+    <li><a href="#vec4">vec4</a></li>
+    <li><a href="#mat2">mat2</a></li>
+    <li><a href="#mat3">mat3</a></li>
+    <li><a href="#mat4">mat4</a></li>
+    <li><a href="#vec2">vec2</a></li>
+    <li><a href="#vec3">vec3</a></li>
+    <li><a href="#vec4">vec4</a></li>
+    <li><a href="#mat4-identity">mat4-identity</a></li>
+    <li><a href="#vec2-dot">vec2-dot</a></li>
+    <li><a href="#vec3-dot">vec3-dot</a></li>
+    <li><a href="#vec3-cross">vec3-cross</a></li>
+    <li><a href="#vec3-length">vec3-length</a></li>
+    <li><a href="#vec3-normalize">vec3-normalize</a></li>
+    <li><a href="#mat4-mul">mat4-mul</a></li>
+    <li><a href="#mat4-mul-vec4">mat4-mul-vec4</a></li>
+    <li><a href="#mat4-transpose">mat4-transpose</a></li>
+    <li><a href="#mat4-inv">mat4-inv</a></li>
+    <li><a href="#mat4-translate">mat4-translate</a></li>
+    <li><a href="#mat4-scale">mat4-scale</a></li>
+    <li><a href="#mat4-rotate-x">mat4-rotate-x</a></li>
+    <li><a href="#mat4-rotate-y">mat4-rotate-y</a></li>
+    <li><a href="#mat4-rotate-z">mat4-rotate-z</a></li>
+    <li><a href="#mat4-rotate">mat4-rotate</a></li>
+    <li><a href="#mat4-perspective">mat4-perspective</a></li>
+    <li><a href="#mat4-ortho">mat4-ortho</a></li>
+    <li><a href="#mat4-look-at">mat4-look-at</a></li>
+    <li><a href="#mat4-ptr">mat4-ptr</a></li>
+    <li><a href="#vec3-ptr">vec3-ptr</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#mat2-identity" style="color:var(--faint)">mat2-identity</a></li>
+    <li><a href="#mat3-identity" style="color:var(--faint)">mat3-identity</a></li>
+    <li><a href="#vec3-&gt;vec4" style="color:var(--faint)">vec3-&gt;vec4</a></li>
+    <li><a href="#vec3-sub" style="color:var(--faint)">vec3-sub</a></li>
+    <li><a href="#vec4-dot" style="color:var(--faint)">vec4-dot</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>linalg/small</h1>
+    <div class="module-path">src/linalg/small.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">fixed-size concrete helpers: vec2/vec3/vec4, mat4</p>
+  </div>
+<div class="def-card" id="vec2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defstruct">defstruct</span>
+    <h2>vec2</h2>
+  </div>
+  <pre class="def-signature">(defstruct vec2 [])</pre>
+  <p class="def-summary">2D vector (float32)</p>
+</div>
+<div class="def-card" id="vec3">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defstruct">defstruct</span>
+    <h2>vec3</h2>
+  </div>
+  <pre class="def-signature">(defstruct vec3 [])</pre>
+  <p class="def-summary">3D vector (float32)</p>
+</div>
+<div class="def-card" id="vec4">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defstruct">defstruct</span>
+    <h2>vec4</h2>
+  </div>
+  <pre class="def-signature">(defstruct vec4 [])</pre>
+  <p class="def-summary">4D vector (float32)</p>
+</div>
+<div class="def-card" id="mat2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defstruct">defstruct</span>
+    <h2>mat2</h2>
+  </div>
+  <pre class="def-signature">(defstruct mat2 [])</pre>
+  <p class="def-summary">2x2 matrix (float32, column-major)</p>
+</div>
+<div class="def-card" id="mat3">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defstruct">defstruct</span>
+    <h2>mat3</h2>
+  </div>
+  <pre class="def-signature">(defstruct mat3 [])</pre>
+  <p class="def-summary">3x3 matrix (float32, column-major)</p>
+</div>
+<div class="def-card" id="mat4">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defstruct">defstruct</span>
+    <h2>mat4</h2>
+  </div>
+  <pre class="def-signature">(defstruct mat4 [])</pre>
+  <p class="def-summary">4x4 matrix (float32, column-major to match OpenGL)</p>
+</div>
+<div class="def-card" id="vec2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec2</h2>
+  </div>
+  <pre class="def-signature">(vec2 [x y] :vec2)</pre>
+  <p class="def-summary">vec2 constructor</p>
+</div>
+<div class="def-card" id="vec3">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec3</h2>
+  </div>
+  <pre class="def-signature">(vec3 [x y z] :vec3)</pre>
+  <p class="def-summary">vec3 constructor</p>
+</div>
+<div class="def-card" id="vec4">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec4</h2>
+  </div>
+  <pre class="def-signature">(vec4 [x y z w] :vec4)</pre>
+  <p class="def-summary">vec4 constructor</p>
+</div>
+<div class="def-card" id="mat4-identity">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-identity</h2>
+  </div>
+  <pre class="def-signature">(mat4-identity :mat4)</pre>
+  <p class="def-summary">create 4x4 identity matrix</p>
+</div>
+<div class="def-card" id="vec2-dot">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec2-dot</h2>
+  </div>
+  <pre class="def-signature">(vec2-dot [a b] :float)</pre>
+  <p class="def-summary">dot product of two vec2</p>
+</div>
+<div class="def-card" id="vec3-dot">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec3-dot</h2>
+  </div>
+  <pre class="def-signature">(vec3-dot [a b] :float)</pre>
+  <p class="def-summary">dot product of two vec3</p>
+</div>
+<div class="def-card" id="vec3-cross">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec3-cross</h2>
+  </div>
+  <pre class="def-signature">(vec3-cross [a b] :vec3)</pre>
+  <p class="def-summary">cross product of two vec3</p>
+</div>
+<div class="def-card" id="vec3-length">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec3-length</h2>
+  </div>
+  <pre class="def-signature">(vec3-length [v] :float)</pre>
+  <p class="def-summary">length (norm) of a vec3</p>
+</div>
+<div class="def-card" id="vec3-normalize">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec3-normalize</h2>
+  </div>
+  <pre class="def-signature">(vec3-normalize [v] :vec3)</pre>
+  <p class="def-summary">normalize a vec3 to unit length</p>
+</div>
+<div class="def-card" id="mat4-mul">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-mul</h2>
+  </div>
+  <pre class="def-signature">(mat4-mul [a b] :mat4)</pre>
+  <p class="def-summary">multiply two mat4 matrices (column-major)</p>
+</div>
+<div class="def-card" id="mat4-mul-vec4">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-mul-vec4</h2>
+  </div>
+  <pre class="def-signature">(mat4-mul-vec4 [m v] :vec4)</pre>
+  <p class="def-summary">multiply mat4 by vec4</p>
+</div>
+<div class="def-card" id="mat4-transpose">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-transpose</h2>
+  </div>
+  <pre class="def-signature">(mat4-transpose [m] :mat4)</pre>
+  <p class="def-summary">transpose a mat4</p>
+</div>
+<div class="def-card" id="mat4-inv">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-inv</h2>
+  </div>
+  <pre class="def-signature">(mat4-inv [m] :mat4)</pre>
+  <p class="def-summary">compute inverse of a mat4</p>
+</div>
+<div class="def-card" id="mat4-translate">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-translate</h2>
+  </div>
+  <pre class="def-signature">(mat4-translate [v] :mat4)</pre>
+  <p class="def-summary">create translation matrix</p>
+</div>
+<div class="def-card" id="mat4-scale">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-scale</h2>
+  </div>
+  <pre class="def-signature">(mat4-scale [v] :mat4)</pre>
+  <p class="def-summary">create scaling matrix</p>
+</div>
+<div class="def-card" id="mat4-rotate-x">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-rotate-x</h2>
+  </div>
+  <pre class="def-signature">(mat4-rotate-x [angle] :mat4)</pre>
+  <p class="def-summary">create rotation matrix around x-axis</p>
+</div>
+<div class="def-card" id="mat4-rotate-y">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-rotate-y</h2>
+  </div>
+  <pre class="def-signature">(mat4-rotate-y [angle] :mat4)</pre>
+  <p class="def-summary">create rotation matrix around y-axis</p>
+</div>
+<div class="def-card" id="mat4-rotate-z">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-rotate-z</h2>
+  </div>
+  <pre class="def-signature">(mat4-rotate-z [angle] :mat4)</pre>
+  <p class="def-summary">create rotation matrix around z-axis</p>
+</div>
+<div class="def-card" id="mat4-rotate">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-rotate</h2>
+  </div>
+  <pre class="def-signature">(mat4-rotate [axis angle] :mat4)</pre>
+  <p class="def-summary">create rotation matrix around arbitrary axis</p>
+</div>
+<div class="def-card" id="mat4-perspective">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-perspective</h2>
+  </div>
+  <pre class="def-signature">(mat4-perspective [fovy aspect near far] :mat4)</pre>
+  <p class="def-summary">create perspective projection matrix</p>
+</div>
+<div class="def-card" id="mat4-ortho">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-ortho</h2>
+  </div>
+  <pre class="def-signature">(mat4-ortho [l r b t near far] :mat4)</pre>
+  <p class="def-summary">create orthographic projection matrix</p>
+</div>
+<div class="def-card" id="mat4-look-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-look-at</h2>
+  </div>
+  <pre class="def-signature">(mat4-look-at [eye center up] :mat4)</pre>
+  <p class="def-summary">create view matrix (camera transformation)</p>
+</div>
+<div class="def-card" id="mat4-ptr">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-ptr</h2>
+  </div>
+  <pre class="def-signature">(mat4-ptr [m] :int)</pre>
+  <p class="def-summary">get pointer to mat4 data (for OpenGL uniform uploads)</p>
+</div>
+<div class="def-card" id="vec3-ptr">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec3-ptr</h2>
+  </div>
+  <pre class="def-signature">(vec3-ptr [v] :int)</pre>
+  <p class="def-summary">get pointer to vec3 data</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="mat2-identity"><code>mat2-identity</code><span class="internal-item-summary">-- create 2x2 identity matrix</span></div>
+  <div class="internal-item" id="mat3-identity"><code>mat3-identity</code><span class="internal-item-summary">-- create 3x3 identity matrix</span></div>
+  <div class="internal-item" id="vec3-_vec4"><code>vec3-&gt;vec4</code><span class="internal-item-summary">-- Helper: create vec4 from vec3 with w=1.0</span></div>
+  <div class="internal-item" id="vec3-sub"><code>vec3-sub</code><span class="internal-item-summary">-- Helper functions for vec3 arithmetic (needed for look-at)</span></div>
+  <div class="internal-item" id="vec4-dot"><code>vec4-dot</code><span class="internal-item-summary">-- vec3-dot (already defined above)</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

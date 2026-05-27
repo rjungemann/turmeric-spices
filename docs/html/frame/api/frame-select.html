@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/select | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#select-cols">select-cols</a></li>
+    <li><a href="#drop-cols">drop-cols</a></li>
+    <li><a href="#rename">rename</a></li>
+    <li><a href="#with-col">with-col</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__s-nil" style="color:var(--faint)">__s-nil</a></li>
+    <li><a href="#__s-cons" style="color:var(--faint)">__s-cons</a></li>
+    <li><a href="#__cstr-list-has?" style="color:var(--faint)">__cstr-list-has?</a></li>
+    <li><a href="#__cstr-list-nth" style="color:var(--faint)">__cstr-list-nth</a></li>
+    <li><a href="#__cstr-list-nth-int" style="color:var(--faint)">__cstr-list-nth-int</a></li>
+    <li><a href="#__cstr-list-length" style="color:var(--faint)">__cstr-list-length</a></li>
+    <li><a href="#__pair-first" style="color:var(--faint)">__pair-first</a></li>
+    <li><a href="#__pair-second" style="color:var(--faint)">__pair-second</a></li>
+    <li><a href="#__append-end" style="color:var(--faint)">__append-end</a></li>
+    <li><a href="#__clone-field-at" style="color:var(--faint)">__clone-field-at</a></li>
+    <li><a href="#__build-from-indices" style="color:var(--faint)">__build-from-indices</a></li>
+    <li><a href="#__indices-from-names" style="color:var(--faint)">__indices-from-names</a></li>
+    <li><a href="#__all-indices-except" style="color:var(--faint)">__all-indices-except</a></li>
+    <li><a href="#__assemble" style="color:var(--faint)">__assemble</a></li>
+    <li><a href="#__rename-build" style="color:var(--faint)">__rename-build</a></li>
+    <li><a href="#__with-col-append" style="color:var(--faint)">__with-col-append</a></li>
+    <li><a href="#__with-col-replace" style="color:var(--faint)">__with-col-replace</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/select</h1>
+    <div class="module-path">src/frame/select.tur</div>
+  </div>
+<div class="def-card" id="select-cols">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>select-cols</h2>
+  </div>
+  <pre class="def-signature">(select-cols [f :int names :int] :int)</pre>
+  <p class="def-summary">keep only the named columns, in the given order.</p>
+</div>
+<div class="def-card" id="drop-cols">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>drop-cols</h2>
+  </div>
+  <pre class="def-signature">(drop-cols [f :int names :int] :int)</pre>
+  <p class="def-summary">keep every column except those named in `names`. Since: FR2</p>
+</div>
+<div class="def-card" id="rename">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rename</h2>
+  </div>
+  <pre class="def-signature">(rename [f :int old :cstr new :cstr] :int)</pre>
+  <p class="def-summary">return a new frame with column `old` renamed to `new`.</p>
+</div>
+<div class="def-card" id="with-col">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>with-col</h2>
+  </div>
+  <pre class="def-signature">(with-col [f :int name :cstr type :int col :int] :int)</pre>
+  <p class="def-summary">return a new frame with the named column added (or replaced).</p>
+  <p class="def-since">Since: FR2</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__s-nil"><code>__s-nil</code></div>
+  <div class="internal-item" id="__s-cons"><code>__s-cons</code></div>
+  <div class="internal-item" id="__cstr-list-has_"><code>__cstr-list-has?</code></div>
+  <div class="internal-item" id="__cstr-list-nth"><code>__cstr-list-nth</code></div>
+  <div class="internal-item" id="__cstr-list-nth-int"><code>__cstr-list-nth-int</code></div>
+  <div class="internal-item" id="__cstr-list-length"><code>__cstr-list-length</code></div>
+  <div class="internal-item" id="__pair-first"><code>__pair-first</code></div>
+  <div class="internal-item" id="__pair-second"><code>__pair-second</code></div>
+  <div class="internal-item" id="__append-end"><code>__append-end</code></div>
+  <div class="internal-item" id="__clone-field-at"><code>__clone-field-at</code></div>
+  <div class="internal-item" id="__build-from-indices"><code>__build-from-indices</code></div>
+  <div class="internal-item" id="__indices-from-names"><code>__indices-from-names</code></div>
+  <div class="internal-item" id="__all-indices-except"><code>__all-indices-except</code></div>
+  <div class="internal-item" id="__assemble"><code>__assemble</code></div>
+  <div class="internal-item" id="__rename-build"><code>__rename-build</code></div>
+  <div class="internal-item" id="__with-col-append"><code>__with-col-append</code></div>
+  <div class="internal-item" id="__with-col-replace"><code>__with-col-replace</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

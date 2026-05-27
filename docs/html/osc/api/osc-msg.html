@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/osc/msg | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#msg-new">msg-new</a></li>
+    <li><a href="#msg-add-float">msg-add-float</a></li>
+    <li><a href="#msg-add-int">msg-add-int</a></li>
+    <li><a href="#msg-add-string">msg-add-string</a></li>
+    <li><a href="#msg-free">msg-free</a></li>
+    <li><a href="#msg-path">msg-path</a></li>
+    <li><a href="#msg-arg-count">msg-arg-count</a></li>
+    <li><a href="#msg-arg-type">msg-arg-type</a></li>
+    <li><a href="#msg-arg-float">msg-arg-float</a></li>
+    <li><a href="#msg-arg-int">msg-arg-int</a></li>
+    <li><a href="#msg-arg-string">msg-arg-string</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>osc/msg</h1>
+    <div class="module-path">src/osc/msg.tur</div>
+  </div>
+<div class="def-card" id="msg-new">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-new</h2>
+  </div>
+  <pre class="def-signature">(msg-new [path :cstr] :int)</pre>
+  <p class="def-summary">create a new OSC message for the given address path.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>path</td><td></td><td>OSC address path string (e.g. &quot;/synth/freq&quot;)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Wrapper :int handle; pass to msg-add-*, msg-free, and client-send.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [m (msg-new &quot;/synth/freq&quot;)]
+    (msg-add-float m 440.0)
+    ...)</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-add-float">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-add-float</h2>
+  </div>
+  <pre class="def-signature">(msg-add-float [m :int f :float] :void)</pre>
+  <p class="def-summary">append a float argument to a message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    <tr><td>f</td><td></td><td>float value to append</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-add-float m 440.0)</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-add-int">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-add-int</h2>
+  </div>
+  <pre class="def-signature">(msg-add-int [m :int i :int] :void)</pre>
+  <p class="def-summary">append a 32-bit integer argument to a message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    <tr><td>i</td><td></td><td>integer value to append</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-add-int m 1)</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-add-string">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-add-string</h2>
+  </div>
+  <pre class="def-signature">(msg-add-string [m :int s :cstr] :void)</pre>
+  <p class="def-summary">append a string argument to a message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    <tr><td>s</td><td></td><td>string value to append</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-add-string m &quot;hello&quot;)</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-free</h2>
+  </div>
+  <pre class="def-signature">(msg-free [m :int] :void)</pre>
+  <p class="def-summary">free a message wrapper and the underlying lo_message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-free m)</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-path</h2>
+  </div>
+  <pre class="def-signature">(msg-path [m :int] :cstr)</pre>
+  <p class="def-summary">return the OSC address path of a message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Path string as :cstr; valid until msg-free is called.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-path m)  ; =&gt; &quot;/synth/freq&quot;</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-arg-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-arg-count</h2>
+  </div>
+  <pre class="def-signature">(msg-arg-count [m :int] :int)</pre>
+  <p class="def-summary">return the number of arguments in a message.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Argument count as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-arg-count m)  ; =&gt; 2</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-arg-type">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-arg-type</h2>
+  </div>
+  <pre class="def-signature">(msg-arg-type [m :int i :int] :cstr)</pre>
+  <p class="def-summary">return the OSC type tag character for argument i.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    <tr><td>i</td><td></td><td>0-based argument index</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Single-character type tag as :cstr (e.g. &quot;f&quot;, &quot;i&quot;, &quot;s&quot;).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-arg-type m 0)  ; =&gt; &quot;f&quot;</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-arg-float">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-arg-float</h2>
+  </div>
+  <pre class="def-signature">(msg-arg-float [m :int i :int] :float)</pre>
+  <p class="def-summary">return argument i of a message as a float.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    <tr><td>i</td><td></td><td>0-based argument index</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Argument value as :float.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-arg-float m 0)  ; =&gt; 440.0</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-arg-int">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-arg-int</h2>
+  </div>
+  <pre class="def-signature">(msg-arg-int [m :int i :int] :int)</pre>
+  <p class="def-summary">return argument i of a message as an integer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    <tr><td>i</td><td></td><td>0-based argument index</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Argument value as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-arg-int m 0)  ; =&gt; 1</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+<div class="def-card" id="msg-arg-string">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>msg-arg-string</h2>
+  </div>
+  <pre class="def-signature">(msg-arg-string [m :int i :int] :cstr)</pre>
+  <p class="def-summary">return argument i of a message as a string.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>m</td><td></td><td>wrapper :int (return value of msg-new)</td></tr>
+    <tr><td>i</td><td></td><td>0-based argument index</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Argument value as :cstr; valid for the lifetime of the lo_message.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(msg-arg-string m 0)  ; =&gt; &quot;hello&quot;</pre>
+  </div>
+  <p class="def-since">Since: OSC0</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/notebook/render-md | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#render-opts-make">render-opts-make</a></li>
+    <li><a href="#render-opts-output-dir">render-opts-output-dir</a></li>
+    <li><a href="#render-opts-use-cache">render-opts-use-cache</a></li>
+    <li><a href="#render-opts-include-source">render-opts-include-source</a></li>
+    <li><a href="#render-opts-include-output">render-opts-include-output</a></li>
+    <li><a href="#render-opts-fail-fast">render-opts-fail-fast</a></li>
+    <li><a href="#default-render-opts">default-render-opts</a></li>
+    <li><a href="#render-md-string">render-md-string</a></li>
+    <li><a href="#render-md">render-md</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__rmd-build-hint" style="color:var(--faint)">__rmd-build-hint</a></li>
+    <li><a href="#__rmd-nil-value" style="color:var(--faint)">__rmd-nil-value</a></li>
+    <li><a href="#__rmd-list-nil?" style="color:var(--faint)">__rmd-list-nil?</a></li>
+    <li><a href="#__rmd-cons" style="color:var(--faint)">__rmd-cons</a></li>
+    <li><a href="#__rmd-head" style="color:var(--faint)">__rmd-head</a></li>
+    <li><a href="#__rmd-tail" style="color:var(--faint)">__rmd-tail</a></li>
+    <li><a href="#__rmd-ok" style="color:var(--faint)">__rmd-ok</a></li>
+    <li><a href="#__rmd-err" style="color:var(--faint)">__rmd-err</a></li>
+    <li><a href="#__rmd-result-ok?" style="color:var(--faint)">__rmd-result-ok?</a></li>
+    <li><a href="#__rmd-result-ok-val" style="color:var(--faint)">__rmd-result-ok-val</a></li>
+    <li><a href="#__rmd-cstr-eq?" style="color:var(--faint)">__rmd-cstr-eq?</a></li>
+    <li><a href="#__rmd-cstr-empty?" style="color:var(--faint)">__rmd-cstr-empty?</a></li>
+    <li><a href="#__rmd-cstr-as-int" style="color:var(--faint)">__rmd-cstr-as-int</a></li>
+    <li><a href="#__rmd-int-as-cstr" style="color:var(--faint)">__rmd-int-as-cstr</a></li>
+    <li><a href="#__rmd-cstr-free" style="color:var(--faint)">__rmd-cstr-free</a></li>
+    <li><a href="#__rmd-str-concat" style="color:var(--faint)">__rmd-str-concat</a></li>
+    <li><a href="#__rmd-join-blocks" style="color:var(--faint)">__rmd-join-blocks</a></li>
+    <li><a href="#__rmd-int-&gt;cstr" style="color:var(--faint)">__rmd-int-&gt;cstr</a></li>
+    <li><a href="#__rmd-output-path" style="color:var(--faint)">__rmd-output-path</a></li>
+    <li><a href="#__rmd-ensure-parent-dir" style="color:var(--faint)">__rmd-ensure-parent-dir</a></li>
+    <li><a href="#__rmd-write-file" style="color:var(--faint)">__rmd-write-file</a></li>
+    <li><a href="#__rmd-close-cache" style="color:var(--faint)">__rmd-close-cache</a></li>
+    <li><a href="#__rmd-lang-label" style="color:var(--faint)">__rmd-lang-label</a></li>
+    <li><a href="#__rmd-render-attr-list" style="color:var(--faint)">__rmd-render-attr-list</a></li>
+    <li><a href="#__rmd-render-attrs" style="color:var(--faint)">__rmd-render-attrs</a></li>
+    <li><a href="#__rmd-render-source-block" style="color:var(--faint)">__rmd-render-source-block</a></li>
+    <li><a href="#__rmd-output-fence" style="color:var(--faint)">__rmd-output-fence</a></li>
+    <li><a href="#__rmd-render-cell-block" style="color:var(--faint)">__rmd-render-cell-block</a></li>
+    <li><a href="#__rmd-render-state-make" style="color:var(--faint)">__rmd-render-state-make</a></li>
+    <li><a href="#__rmd-render-state-text" style="color:var(--faint)">__rmd-render-state-text</a></li>
+    <li><a href="#__rmd-render-state-outputs" style="color:var(--faint)">__rmd-render-state-outputs</a></li>
+    <li><a href="#__rmd-render-nodes" style="color:var(--faint)">__rmd-render-nodes</a></li>
+    <li><a href="#__rmd-cells-from-nodes-rev" style="color:var(--faint)">__rmd-cells-from-nodes-rev</a></li>
+    <li><a href="#__rmd-reverse" style="color:var(--faint)">__rmd-reverse</a></li>
+    <li><a href="#__rmd-cells-from-nodes" style="color:var(--faint)">__rmd-cells-from-nodes</a></li>
+    <li><a href="#__rmd-list-length" style="color:var(--faint)">__rmd-list-length</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>notebook/render-md</h1>
+    <div class="module-path">src/notebook/render-md.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">render notebook documents to markdown with output blocks.</p>
+  </div>
+<div class="def-card" id="render-opts-make">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-opts-make</h2>
+  </div>
+  <pre class="def-signature">(render-opts-make [output_dir :cstr use_cache :int include_source :int include_output :int fail_fast :int])</pre>
+</div>
+<div class="def-card" id="render-opts-output-dir">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-opts-output-dir</h2>
+  </div>
+  <pre class="def-signature">(render-opts-output-dir [opts :int])</pre>
+</div>
+<div class="def-card" id="render-opts-use-cache">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-opts-use-cache</h2>
+  </div>
+  <pre class="def-signature">(render-opts-use-cache [opts :int])</pre>
+</div>
+<div class="def-card" id="render-opts-include-source">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-opts-include-source</h2>
+  </div>
+  <pre class="def-signature">(render-opts-include-source [opts :int])</pre>
+</div>
+<div class="def-card" id="render-opts-include-output">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-opts-include-output</h2>
+  </div>
+  <pre class="def-signature">(render-opts-include-output [opts :int])</pre>
+</div>
+<div class="def-card" id="render-opts-fail-fast">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-opts-fail-fast</h2>
+  </div>
+  <pre class="def-signature">(render-opts-fail-fast [opts :int])</pre>
+</div>
+<div class="def-card" id="default-render-opts">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>default-render-opts</h2>
+  </div>
+  <pre class="def-signature">(default-render-opts)</pre>
+</div>
+<div class="def-card" id="render-md-string">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-md-string</h2>
+  </div>
+  <pre class="def-signature">(render-md-string [nodes :int outputs :int opts :int])</pre>
+  <p class="def-summary">render a parsed notebook and its outputs to markdown.</p>
+</div>
+<div class="def-card" id="render-md">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-md</h2>
+  </div>
+  <pre class="def-signature">(render-md [path :cstr opts :int])</pre>
+  <p class="def-summary">evaluate a notebook file and write rendered markdown beside it.</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__rmd-build-hint"><code>__rmd-build-hint</code></div>
+  <div class="internal-item" id="__rmd-nil-value"><code>__rmd-nil-value</code></div>
+  <div class="internal-item" id="__rmd-list-nil_"><code>__rmd-list-nil?</code></div>
+  <div class="internal-item" id="__rmd-cons"><code>__rmd-cons</code></div>
+  <div class="internal-item" id="__rmd-head"><code>__rmd-head</code></div>
+  <div class="internal-item" id="__rmd-tail"><code>__rmd-tail</code></div>
+  <div class="internal-item" id="__rmd-ok"><code>__rmd-ok</code></div>
+  <div class="internal-item" id="__rmd-err"><code>__rmd-err</code></div>
+  <div class="internal-item" id="__rmd-result-ok_"><code>__rmd-result-ok?</code></div>
+  <div class="internal-item" id="__rmd-result-ok-val"><code>__rmd-result-ok-val</code></div>
+  <div class="internal-item" id="__rmd-cstr-eq_"><code>__rmd-cstr-eq?</code></div>
+  <div class="internal-item" id="__rmd-cstr-empty_"><code>__rmd-cstr-empty?</code></div>
+  <div class="internal-item" id="__rmd-cstr-as-int"><code>__rmd-cstr-as-int</code></div>
+  <div class="internal-item" id="__rmd-int-as-cstr"><code>__rmd-int-as-cstr</code></div>
+  <div class="internal-item" id="__rmd-cstr-free"><code>__rmd-cstr-free</code></div>
+  <div class="internal-item" id="__rmd-str-concat"><code>__rmd-str-concat</code></div>
+  <div class="internal-item" id="__rmd-join-blocks"><code>__rmd-join-blocks</code></div>
+  <div class="internal-item" id="__rmd-int-_cstr"><code>__rmd-int-&gt;cstr</code></div>
+  <div class="internal-item" id="__rmd-output-path"><code>__rmd-output-path</code></div>
+  <div class="internal-item" id="__rmd-ensure-parent-dir"><code>__rmd-ensure-parent-dir</code></div>
+  <div class="internal-item" id="__rmd-write-file"><code>__rmd-write-file</code></div>
+  <div class="internal-item" id="__rmd-close-cache"><code>__rmd-close-cache</code></div>
+  <div class="internal-item" id="__rmd-lang-label"><code>__rmd-lang-label</code></div>
+  <div class="internal-item" id="__rmd-render-attr-list"><code>__rmd-render-attr-list</code></div>
+  <div class="internal-item" id="__rmd-render-attrs"><code>__rmd-render-attrs</code></div>
+  <div class="internal-item" id="__rmd-render-source-block"><code>__rmd-render-source-block</code></div>
+  <div class="internal-item" id="__rmd-output-fence"><code>__rmd-output-fence</code></div>
+  <div class="internal-item" id="__rmd-render-cell-block"><code>__rmd-render-cell-block</code></div>
+  <div class="internal-item" id="__rmd-render-state-make"><code>__rmd-render-state-make</code></div>
+  <div class="internal-item" id="__rmd-render-state-text"><code>__rmd-render-state-text</code></div>
+  <div class="internal-item" id="__rmd-render-state-outputs"><code>__rmd-render-state-outputs</code></div>
+  <div class="internal-item" id="__rmd-render-nodes"><code>__rmd-render-nodes</code></div>
+  <div class="internal-item" id="__rmd-cells-from-nodes-rev"><code>__rmd-cells-from-nodes-rev</code></div>
+  <div class="internal-item" id="__rmd-reverse"><code>__rmd-reverse</code></div>
+  <div class="internal-item" id="__rmd-cells-from-nodes"><code>__rmd-cells-from-nodes</code></div>
+  <div class="internal-item" id="__rmd-list-length"><code>__rmd-list-length</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

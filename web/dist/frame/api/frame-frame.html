@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/frame | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#frame">frame</a></li>
+    <li><a href="#frame-nrows">frame-nrows</a></li>
+    <li><a href="#frame-ncols">frame-ncols</a></li>
+    <li><a href="#frame-schema">frame-schema</a></li>
+    <li><a href="#frame-column-at">frame-column-at</a></li>
+    <li><a href="#frame-column">frame-column</a></li>
+    <li><a href="#frame-slice">frame-slice</a></li>
+    <li><a href="#frame-head">frame-head</a></li>
+    <li><a href="#frame-free">frame-free</a></li>
+    <li><a href="#frame">frame</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__nil" style="color:var(--faint)">__nil</a></li>
+    <li><a href="#__cons" style="color:var(--faint)">__cons</a></li>
+    <li><a href="#__cons-length" style="color:var(--faint)">__cons-length</a></li>
+    <li><a href="#__cons-nth" style="color:var(--faint)">__cons-nth</a></li>
+    <li><a href="#__shape-ok?" style="color:var(--faint)">__shape-ok?</a></li>
+    <li><a href="#__frame-alloc" style="color:var(--faint)">__frame-alloc</a></li>
+    <li><a href="#__schema-clone" style="color:var(--faint)">__schema-clone</a></li>
+    <li><a href="#__slice-cols" style="color:var(--faint)">__slice-cols</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/frame</h1>
+    <div class="module-path">src/frame/frame.tur</div>
+  </div>
+<div class="def-card" id="frame">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame</h2>
+  </div>
+  <pre class="def-signature">(frame [sch :int columns :int] :int)</pre>
+  <p class="def-summary">build a frame from a schema and a cons list of column handles.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>schema</td><td></td><td>:int schema handle</td></tr>
+    <tr><td>columns</td><td></td><td>cons list of :int column handles</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  frame handle, or 0 on shape/arity mismatch.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [s (schema (cons (field &quot;x&quot; (type-int32) 0) 0))
+        c (column-int32 (cons 1 (cons 2 0)) 0 0)
+        f (frame s (cons c 0))]
+    (frame-nrows f))   ; =&gt; 2</pre>
+  </div>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="frame-nrows">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-nrows</h2>
+  </div>
+  <pre class="def-signature">(frame-nrows [f :int] :int)</pre>
+  <p class="def-summary">number of rows. Since: FR0</p>
+</div>
+<div class="def-card" id="frame-ncols">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-ncols</h2>
+  </div>
+  <pre class="def-signature">(frame-ncols [f :int] :int)</pre>
+  <p class="def-summary">number of columns. Since: FR0</p>
+</div>
+<div class="def-card" id="frame-schema">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-schema</h2>
+  </div>
+  <pre class="def-signature">(frame-schema [f :int] :int)</pre>
+  <p class="def-summary">schema handle (still owned by the frame). Since: FR0</p>
+</div>
+<div class="def-card" id="frame-column-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-column-at</h2>
+  </div>
+  <pre class="def-signature">(frame-column-at [f :int i :int] :int)</pre>
+  <p class="def-summary">column handle at index i (0-based).  Returns 0 if out of range.</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="frame-column">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-column</h2>
+  </div>
+  <pre class="def-signature">(frame-column [f :int name :cstr] :int)</pre>
+  <p class="def-summary">column handle for a named column.  Returns 0 if not found.</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="frame-slice">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-slice</h2>
+  </div>
+  <pre class="def-signature">(frame-slice [f :int offset :int length :int] :int)</pre>
+  <p class="def-summary">a new frame containing rows [offset, offset+length).</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="frame-head">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-head</h2>
+  </div>
+  <pre class="def-signature">(frame-head [f :int n :int] :int)</pre>
+  <p class="def-summary">a new frame containing the first n rows.</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="frame-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-free</h2>
+  </div>
+  <pre class="def-signature">(frame-free [f :int] :void)</pre>
+  <p class="def-summary">release a frame&#x27;s schema, columns, and descriptor.</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="frame">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame</h2>
+  </div>
+  <pre class="def-signature">(frame [a :int b :int] :bool)</pre>
+  <p class="def-summary">structural equality across schema (names + types) and every cell.</p>
+  <p class="def-since">Since: FR2</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__nil"><code>__nil</code></div>
+  <div class="internal-item" id="__cons"><code>__cons</code></div>
+  <div class="internal-item" id="__cons-length"><code>__cons-length</code></div>
+  <div class="internal-item" id="__cons-nth"><code>__cons-nth</code></div>
+  <div class="internal-item" id="__shape-ok_"><code>__shape-ok?</code></div>
+  <div class="internal-item" id="__frame-alloc"><code>__frame-alloc</code></div>
+  <div class="internal-item" id="__schema-clone"><code>__schema-clone</code></div>
+  <div class="internal-item" id="__slice-cols"><code>__slice-cols</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

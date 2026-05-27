@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/glsl/codegen | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#glsl-cat2">glsl-cat2</a></li>
+    <li><a href="#glsl-cat3">glsl-cat3</a></li>
+    <li><a href="#glsl-cat4">glsl-cat4</a></li>
+    <li><a href="#glsl-sprintf1">glsl-sprintf1</a></li>
+    <li><a href="#glsl-sprintf2">glsl-sprintf2</a></li>
+    <li><a href="#glsl-sprintf3">glsl-sprintf3</a></li>
+    <li><a href="#glsl-sprintf4">glsl-sprintf4</a></li>
+    <li><a href="#glsl-int-_str">glsl-int-&gt;str</a></li>
+    <li><a href="#glsl-join-vec">glsl-join-vec</a></li>
+    <li><a href="#glsl-join">glsl-join</a></li>
+    <li><a href="#glsl-indent">glsl-indent</a></li>
+    <li><a href="#glsl-raw">glsl-raw</a></li>
+    <li><a href="#glsl-stmts">glsl-stmts</a></li>
+    <li><a href="#compile-glsl">compile-glsl</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>glsl/codegen</h1>
+    <div class="module-path">src/glsl/codegen.tur</div>
+  </div>
+<div class="def-card" id="glsl-cat2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-cat2</h2>
+  </div>
+  <pre class="def-signature">(glsl-cat2 [a :cstr b :cstr] :cstr)</pre>
+  <p class="def-summary">concatenate two strings.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>a</td><td></td><td>first string</td></tr>
+    <tr><td>b</td><td></td><td>second string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Concatenated string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-cat2 &quot;vec3 &quot; &quot;pos&quot;)  ; =&gt; &quot;vec3 pos&quot;</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-cat3">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-cat3</h2>
+  </div>
+  <pre class="def-signature">(glsl-cat3 [a :cstr b :cstr c :cstr] :cstr)</pre>
+  <p class="def-summary">concatenate three strings.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>a</td><td></td><td>first string</td></tr>
+    <tr><td>b</td><td></td><td>second string</td></tr>
+    <tr><td>c</td><td></td><td>third string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Concatenated string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-cat3 &quot;if (&quot; cond &quot;) {&quot;)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-cat4">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-cat4</h2>
+  </div>
+  <pre class="def-signature">(glsl-cat4 [a :cstr b :cstr c :cstr d :cstr] :cstr)</pre>
+  <p class="def-summary">concatenate four strings.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>a b c d -- strings to concatenate</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Concatenated string.</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-sprintf1">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-sprintf1</h2>
+  </div>
+  <pre class="def-signature">(glsl-sprintf1 [fmt :cstr a :cstr] :cstr)</pre>
+  <p class="def-summary">format a string with one substitution.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fmt</td><td></td><td>format string with one %s</td></tr>
+    <tr><td>a</td><td></td><td>substitution value</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Formatted string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-sprintf1 &quot;return %s;&quot; &quot;x&quot;)  ; =&gt; &quot;return x;&quot;</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-sprintf2">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-sprintf2</h2>
+  </div>
+  <pre class="def-signature">(glsl-sprintf2 [fmt :cstr a :cstr b :cstr] :cstr)</pre>
+  <p class="def-summary">format a string with two substitutions.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fmt</td><td></td><td>format string with two %s placeholders</td></tr>
+    <tr><td></td><td></td><td>a b -- substitution values</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Formatted string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-sprintf2 &quot;%s = %s;&quot; name value)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-sprintf3">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-sprintf3</h2>
+  </div>
+  <pre class="def-signature">(glsl-sprintf3 [fmt :cstr a :cstr b :cstr c :cstr] :cstr)</pre>
+  <p class="def-summary">format a string with three substitutions.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fmt</td><td></td><td>format string with three %s placeholders</td></tr>
+    <tr><td></td><td></td><td>a b c -- substitution values</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Formatted string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-sprintf3 &quot;%s %s = %s;&quot; type name init)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-sprintf4">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-sprintf4</h2>
+  </div>
+  <pre class="def-signature">(glsl-sprintf4 [fmt :cstr a :cstr b :cstr c :cstr d :cstr] :cstr)</pre>
+  <p class="def-summary">format a string with four substitutions.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fmt</td><td></td><td>format string with four %s placeholders</td></tr>
+    <tr><td></td><td></td><td>a b c d -- substitution values</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Formatted string.</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-int-_str">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-int-&gt;str</h2>
+  </div>
+  <pre class="def-signature">(glsl-int-&gt;str [n :int] :cstr)</pre>
+  <p class="def-summary">convert an integer to a decimal string.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>n</td><td></td><td>integer value</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Decimal string representation.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-int-&gt;str 42)  ; =&gt; &quot;42&quot;</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-join-vec">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-join-vec</h2>
+  </div>
+  <pre class="def-signature">(glsl-join-vec [sep :cstr items :int] :cstr)</pre>
+  <p class="def-summary">join a cons list of strings with a separator.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>sep</td><td></td><td>separator string</td></tr>
+    <tr><td>items</td><td></td><td>cons list of :cstr values (opaque :int handle)</td></tr>
+    <tr><td>sep</td><td></td><td>separator inserted between elements</td></tr>
+    <tr><td>items</td><td></td><td>Vec[cstr] of strings to concatenate</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">The joined string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-join-vec &quot;, &quot; (vec-of &quot;float x&quot; &quot;vec3 n&quot;))
+  ; =&gt; &quot;float x, vec3 n&quot;</pre>
+  </div>
+  <p class="def-since">Since: v0.2.0</p>
+</div>
+<div class="def-card" id="glsl-join">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-join</h2>
+  </div>
+  <pre class="def-signature">(glsl-join [sep :cstr items :int] :cstr)</pre>
+</div>
+<div class="def-card" id="glsl-indent">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-indent</h2>
+  </div>
+  <pre class="def-signature">(glsl-indent [src :cstr] :cstr)</pre>
+  <p class="def-summary">indent every line of src by 4 spaces.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>src</td><td></td><td>GLSL source fragment (may be multi-line)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Source with 4 spaces prepended to every line.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-indent &quot;return x;&quot;)  ; =&gt; &quot;    return x;&quot;</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-raw">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-raw</h2>
+  </div>
+  <pre class="def-signature">(glsl-raw [src :cstr] :cstr)</pre>
+  <p class="def-summary">return src unchanged.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>src</td><td></td><td>any string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">src unchanged. Useful as a pass-through in higher-order contexts.</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="glsl-stmts">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>glsl-stmts</h2>
+  </div>
+  <pre class="def-signature">(glsl-stmts [stmts :int] :cstr)</pre>
+  <p class="def-summary">join a cons list of statement strings with newlines.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>stmts</td><td></td><td>cons list of statement strings</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Statements joined with &quot;\n&quot;.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(glsl-stmts (cons &quot;float x = 1.0;&quot; (cons &quot;float y = 2.0;&quot; 0)))
+  ; =&gt; &quot;float x = 1.0;\nfloat y = 2.0;&quot;</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="compile-glsl">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>compile-glsl</h2>
+  </div>
+  <pre class="def-signature">(compile-glsl [src :cstr] :cstr)</pre>
+  <p class="def-summary">return the assembled GLSL source string.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>src</td><td></td><td>complete GLSL source string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">src unchanged.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(compile-glsl (glsl-vertex-shader &quot;330 core&quot; decls body))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

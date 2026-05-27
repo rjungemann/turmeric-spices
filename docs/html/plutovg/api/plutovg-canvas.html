@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/plutovg/canvas | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#canvas-create">canvas-create</a></li>
+    <li><a href="#canvas-destroy">canvas-destroy</a></li>
+    <li><a href="#canvas-set-source-color">canvas-set-source-color</a></li>
+    <li><a href="#canvas-fill-rect">canvas-fill-rect</a></li>
+    <li><a href="#canvas-move-to">canvas-move-to</a></li>
+    <li><a href="#canvas-line-to">canvas-line-to</a></li>
+    <li><a href="#canvas-quad-to">canvas-quad-to</a></li>
+    <li><a href="#canvas-cubic-to">canvas-cubic-to</a></li>
+    <li><a href="#canvas-close-path">canvas-close-path</a></li>
+    <li><a href="#canvas-rect">canvas-rect</a></li>
+    <li><a href="#canvas-ellipse">canvas-ellipse</a></li>
+    <li><a href="#canvas-circle">canvas-circle</a></li>
+    <li><a href="#canvas-fill">canvas-fill</a></li>
+    <li><a href="#canvas-stroke">canvas-stroke</a></li>
+    <li><a href="#canvas-clip">canvas-clip</a></li>
+    <li><a href="#canvas-add-path">canvas-add-path</a></li>
+    <li><a href="#canvas-fill-path">canvas-fill-path</a></li>
+    <li><a href="#canvas-stroke-path">canvas-stroke-path</a></li>
+    <li><a href="#canvas-save">canvas-save</a></li>
+    <li><a href="#canvas-restore">canvas-restore</a></li>
+    <li><a href="#canvas-translate">canvas-translate</a></li>
+    <li><a href="#canvas-scale">canvas-scale</a></li>
+    <li><a href="#canvas-rotate">canvas-rotate</a></li>
+    <li><a href="#canvas-transform">canvas-transform</a></li>
+    <li><a href="#canvas-reset-transform">canvas-reset-transform</a></li>
+    <li><a href="#canvas-set-line-width">canvas-set-line-width</a></li>
+    <li><a href="#canvas-set-line-cap">canvas-set-line-cap</a></li>
+    <li><a href="#canvas-set-line-join">canvas-set-line-join</a></li>
+    <li><a href="#canvas-set-miter-limit">canvas-set-miter-limit</a></li>
+    <li><a href="#dash-array-create">dash-array-create</a></li>
+    <li><a href="#dash-array-add">dash-array-add</a></li>
+    <li><a href="#dash-array-count">dash-array-count</a></li>
+    <li><a href="#dash-array-destroy">dash-array-destroy</a></li>
+    <li><a href="#canvas-set-dash-offset">canvas-set-dash-offset</a></li>
+    <li><a href="#canvas-set-dash-array">canvas-set-dash-array</a></li>
+    <li><a href="#canvas-set-fill-rule">canvas-set-fill-rule</a></li>
+    <li><a href="#canvas-set-operator">canvas-set-operator</a></li>
+    <li><a href="#canvas-set-opacity">canvas-set-opacity</a></li>
+    <li><a href="#canvas-arc">canvas-arc</a></li>
+    <li><a href="#canvas-arc-to">canvas-arc-to</a></li>
+    <li><a href="#canvas-round-rect">canvas-round-rect</a></li>
+    <li><a href="#canvas-draw-image">canvas-draw-image</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__ok" style="color:var(--faint)">__ok</a></li>
+    <li><a href="#__err" style="color:var(--faint)">__err</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>plutovg/canvas</h1>
+    <div class="module-path">src/plutovg/canvas.tur</div>
+  </div>
+<div class="def-card" id="canvas-create">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-create</h2>
+  </div>
+  <pre class="def-signature">(canvas-create [s :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">allocate a drawing context that writes into surface s.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>s</td><td></td><td>surface handle (ok-val from surface-create)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok handle) on success; (err 0) on failure.
+  Free with canvas-destroy when done.  The surface must outlive the
+  canvas.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (canvas-create s)]
+    (if (ok? r) (let [c (ok-val r)] ...) (println &quot;create failed&quot;)))</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="canvas-destroy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-destroy</h2>
+  </div>
+  <pre class="def-signature">(canvas-destroy [c :int] :void)</pre>
+  <p class="def-summary">release a canvas allocated by canvas-create.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle (ok-val from canvas-create)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-destroy c)</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="canvas-set-source-color">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-source-color</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-source-color [c :int r :float g :float b :float a :float] :void)</pre>
+  <p class="def-summary">set the current paint to a solid RGBA color.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>r</td><td></td><td>red   in [0.0, 1.0]</td></tr>
+    <tr><td>g</td><td></td><td>green in [0.0, 1.0]</td></tr>
+    <tr><td>b</td><td></td><td>blue  in [0.0, 1.0]</td></tr>
+    <tr><td>a</td><td></td><td>alpha in [0.0, 1.0]</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-set-source-color c 1.0 0.0 0.0 1.0)  ; opaque red</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="canvas-fill-rect">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-fill-rect</h2>
+  </div>
+  <pre class="def-signature">(canvas-fill-rect [c :int x :float y :float w :float h :float] :void)</pre>
+  <p class="def-summary">fill an axis-aligned rectangle with the current paint.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>x</td><td></td><td>top-left x in surface space</td></tr>
+    <tr><td>y</td><td></td><td>top-left y in surface space</td></tr>
+    <tr><td>w</td><td></td><td>width in pixels</td></tr>
+    <tr><td>h</td><td></td><td>height in pixels</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-fill-rect c 10.0 10.0 100.0 50.0)</pre>
+  </div>
+  <p class="def-since">Since: PV0</p>
+</div>
+<div class="def-card" id="canvas-move-to">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-move-to</h2>
+  </div>
+  <pre class="def-signature">(canvas-move-to [c :int x :float y :float] :void)</pre>
+  <p class="def-summary">start a new subpath at (x, y).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>x</td><td></td><td>destination x in surface space</td></tr>
+    <tr><td>y</td><td></td><td>destination y in surface space</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-move-to c 10.0 10.0)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-line-to">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-line-to</h2>
+  </div>
+  <pre class="def-signature">(canvas-line-to [c :int x :float y :float] :void)</pre>
+  <p class="def-summary">append a straight line from the current point to (x, y).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>x</td><td></td><td>destination x</td></tr>
+    <tr><td>y</td><td></td><td>destination y</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-line-to c 100.0 10.0)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-quad-to">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-quad-to</h2>
+  </div>
+  <pre class="def-signature">(canvas-quad-to [c :int x1 :float y1 :float x :float y :float] :void)</pre>
+  <p class="def-summary">append a quadratic Bezier from the current point to (x, y) via control (x1, y1).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>x1</td><td></td><td>control point x</td></tr>
+    <tr><td>y1</td><td></td><td>control point y</td></tr>
+    <tr><td>x</td><td></td><td>destination x</td></tr>
+    <tr><td>y</td><td></td><td>destination y</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-quad-to c 50.0 0.0 100.0 50.0)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-cubic-to">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-cubic-to</h2>
+  </div>
+  <pre class="def-signature">(canvas-cubic-to [c :int x1 :float y1 :float x2 :float y2 :float x :float y :float] :void)</pre>
+  <p class="def-summary">append a cubic Bezier from the current point.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>x1</td><td></td><td>first control point x</td></tr>
+    <tr><td>y1</td><td></td><td>first control point y</td></tr>
+    <tr><td>x2</td><td></td><td>second control point x</td></tr>
+    <tr><td>y2</td><td></td><td>second control point y</td></tr>
+    <tr><td>x</td><td></td><td>destination x</td></tr>
+    <tr><td>y</td><td></td><td>destination y</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-cubic-to c 25.0 0.0 75.0 0.0 100.0 50.0)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-close-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-close-path</h2>
+  </div>
+  <pre class="def-signature">(canvas-close-path [c :int] :void)</pre>
+  <p class="def-summary">close the current subpath with a straight line to its origin.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-close-path c)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-rect">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-rect</h2>
+  </div>
+  <pre class="def-signature">(canvas-rect [c :int x :float y :float w :float h :float] :void)</pre>
+  <p class="def-summary">append an axis-aligned rectangle subpath to the current path.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>x</td><td></td><td>top-left x</td></tr>
+    <tr><td>y</td><td></td><td>top-left y</td></tr>
+    <tr><td>w</td><td></td><td>width in pixels</td></tr>
+    <tr><td>h</td><td></td><td>height in pixels</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-rect c 0.0 0.0 100.0 50.0)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-ellipse">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-ellipse</h2>
+  </div>
+  <pre class="def-signature">(canvas-ellipse [c :int cx :float cy :float rx :float ry :float] :void)</pre>
+  <p class="def-summary">append an axis-aligned ellipse subpath.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>cx</td><td></td><td>center x</td></tr>
+    <tr><td>cy</td><td></td><td>center y</td></tr>
+    <tr><td>rx</td><td></td><td>horizontal radius</td></tr>
+    <tr><td>ry</td><td></td><td>vertical radius</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-ellipse c 50.0 50.0 30.0 20.0)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-circle">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-circle</h2>
+  </div>
+  <pre class="def-signature">(canvas-circle [c :int cx :float cy :float r :float] :void)</pre>
+  <p class="def-summary">append a circle subpath (convenience for canvas-ellipse with rx == ry).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>cx</td><td></td><td>center x</td></tr>
+    <tr><td>cy</td><td></td><td>center y</td></tr>
+    <tr><td>r</td><td></td><td>radius</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-circle c 50.0 50.0 25.0)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-fill">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-fill</h2>
+  </div>
+  <pre class="def-signature">(canvas-fill [c :int] :void)</pre>
+  <p class="def-summary">fill the current path with the current paint, then clear the path.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-rect c 0.0 0.0 100.0 50.0)
+  (canvas-fill c)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-stroke">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-stroke</h2>
+  </div>
+  <pre class="def-signature">(canvas-stroke [c :int] :void)</pre>
+  <p class="def-summary">stroke the current path with the current paint, then clear the path.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-rect c 0.0 0.0 100.0 50.0)
+  (canvas-stroke c)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-clip">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-clip</h2>
+  </div>
+  <pre class="def-signature">(canvas-clip [c :int] :void)</pre>
+  <p class="def-summary">intersect the clip region with the current path, then clear the path.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-circle c 50.0 50.0 25.0)
+  (canvas-clip c)</pre>
+  </div>
+  <p class="def-since">Since: PV1</p>
+</div>
+<div class="def-card" id="canvas-add-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-add-path</h2>
+  </div>
+  <pre class="def-signature">(canvas-add-path [c :int path :int] :void)</pre>
+  <p class="def-summary">append a pre-built path to the canvas&#x27;s current path.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>path</td><td></td><td>path handle (from plutovg/path)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-add-path c my-path)</pre>
+  </div>
+  <p class="def-since">Since: PV2</p>
+</div>
+<div class="def-card" id="canvas-fill-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-fill-path</h2>
+  </div>
+  <pre class="def-signature">(canvas-fill-path [c :int path :int] :void)</pre>
+  <p class="def-summary">fill a pre-built path without disturbing the</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>path</td><td></td><td>path handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <p class="def-since">Since: PV2</p>
+</div>
+<div class="def-card" id="canvas-stroke-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-stroke-path</h2>
+  </div>
+  <pre class="def-signature">(canvas-stroke-path [c :int path :int] :void)</pre>
+  <p class="def-summary">stroke a pre-built path without disturbing the</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>path</td><td></td><td>path handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <p class="def-since">Since: PV2</p>
+</div>
+<div class="def-card" id="canvas-save">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-save</h2>
+  </div>
+  <pre class="def-signature">(canvas-save [c :int] :void)</pre>
+  <p class="def-summary">push the current drawing state (transform, paint, stroke</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-restore">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-restore</h2>
+  </div>
+  <pre class="def-signature">(canvas-restore [c :int] :void)</pre>
+  <p class="def-summary">pop the most recently saved drawing state.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-translate">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-translate</h2>
+  </div>
+  <pre class="def-signature">(canvas-translate [c :int tx :float ty :float] :void)</pre>
+  <p class="def-summary">prepend a translation to the current transform.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>tx</td><td></td><td>x offset</td></tr>
+    <tr><td>ty</td><td></td><td>y offset</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-scale">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-scale</h2>
+  </div>
+  <pre class="def-signature">(canvas-scale [c :int sx :float sy :float] :void)</pre>
+  <p class="def-summary">prepend a scale to the current transform.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-rotate">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-rotate</h2>
+  </div>
+  <pre class="def-signature">(canvas-rotate [c :int radians :float] :void)</pre>
+  <p class="def-summary">prepend a rotation (in radians) to the current transform.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>radians</td><td></td><td>rotation angle</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-transform">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-transform</h2>
+  </div>
+  <pre class="def-signature">(canvas-transform [c :int a :float b :float cc :float d :float e :float f :float] :void)</pre>
+  <p class="def-summary">multiply the current transform by a raw 2D matrix.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>a</td><td></td><td>horizontal scaling factor</td></tr>
+    <tr><td>b</td><td></td><td>vertical shear / skew</td></tr>
+    <tr><td>cc</td><td></td><td>horizontal shear / skew</td></tr>
+    <tr><td>d</td><td></td><td>vertical scaling factor</td></tr>
+    <tr><td>e</td><td></td><td>horizontal translation</td></tr>
+    <tr><td>f</td><td></td><td>vertical translation</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-reset-transform">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-reset-transform</h2>
+  </div>
+  <pre class="def-signature">(canvas-reset-transform [c :int] :void)</pre>
+  <p class="def-summary">reset the current transform to the identity.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-line-width">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-line-width</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-line-width [c :int w :float] :void)</pre>
+  <p class="def-summary">set the stroke width in surface units.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-line-cap">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-line-cap</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-line-cap [c :int cap :cstr] :void)</pre>
+  <p class="def-summary">set the stroke end-cap style.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>cap</td><td></td><td>&quot;:butt&quot; (default), &quot;:round&quot;, or &quot;:square&quot;</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-line-join">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-line-join</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-line-join [c :int join :cstr] :void)</pre>
+  <p class="def-summary">set the stroke join style.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>join</td><td></td><td>&quot;:miter&quot; (default), &quot;:round&quot;, or &quot;:bevel&quot;</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-miter-limit">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-miter-limit</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-miter-limit [c :int limit :float] :void)</pre>
+  <p class="def-summary">set the miter-limit ratio for &quot;:miter&quot; joins.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="dash-array-create">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dash-array-create</h2>
+  </div>
+  <pre class="def-signature">(dash-array-create :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">allocate an empty dash-length buffer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok dash-handle) on success; (err 0) on allocation failure.</p>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="dash-array-add">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dash-array-add</h2>
+  </div>
+  <pre class="def-signature">(dash-array-add [dashes :int length :float] :void)</pre>
+  <p class="def-summary">append a dash-segment length.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="dash-array-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dash-array-count</h2>
+  </div>
+  <pre class="def-signature">(dash-array-count [dashes :int] :int)</pre>
+  <p class="def-summary">return the number of dash lengths added.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="dash-array-destroy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>dash-array-destroy</h2>
+  </div>
+  <pre class="def-signature">(dash-array-destroy [dashes :int] :void)</pre>
+  <p class="def-summary">release a dash-array buffer.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-dash-offset">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-dash-offset</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-dash-offset [c :int offset :float] :void)</pre>
+  <p class="def-summary">set the phase offset into the dash pattern.</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-dash-array">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-dash-array</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-dash-array [c :int dashes :int] :void)</pre>
+  <p class="def-summary">set the dash pattern to the lengths in a</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>dashes</td><td></td><td>dash-array handle (from dash-array-create / dash-array-add)</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-fill-rule">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-fill-rule</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-fill-rule [c :int rule :cstr] :void)</pre>
+  <p class="def-summary">set the polygon fill rule for canvas-fill.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>rule</td><td></td><td>&quot;:non-zero&quot; (default) or &quot;:even-odd&quot;</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-operator">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-operator</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-operator [c :int op :cstr] :void)</pre>
+  <p class="def-summary">set the Porter-Duff compositing operator.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>op</td><td></td><td>one of:</td></tr>
+    <tr><td></td><td></td><td>&quot;:clear&quot; &quot;:src&quot; &quot;:dst&quot; &quot;:src-over&quot; (default)</td></tr>
+    <tr><td></td><td></td><td>&quot;:dst-over&quot; &quot;:src-in&quot; &quot;:dst-in&quot; &quot;:src-out&quot; &quot;:dst-out&quot;</td></tr>
+    <tr><td></td><td></td><td>&quot;:src-atop&quot; &quot;:dst-atop&quot; &quot;:xor&quot;</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-set-opacity">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-opacity</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-opacity [c :int alpha :float] :void)</pre>
+  <p class="def-summary">set the global opacity multiplier in [0.0, 1.0].</p>
+  <p class="def-since">Since: PV4</p>
+</div>
+<div class="def-card" id="canvas-arc">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-arc</h2>
+  </div>
+  <pre class="def-signature">(canvas-arc [c :int cx :float cy :float r :float start-angle :float sweep-angle :float] :void)</pre>
+  <p class="def-summary">append a circular arc subpath centered at (cx, cy).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>cx</td><td></td><td>center x</td></tr>
+    <tr><td>cy</td><td></td><td>center y</td></tr>
+    <tr><td>r</td><td></td><td>radius</td></tr>
+    <tr><td>start-angle</td><td></td><td>start angle in radians</td></tr>
+    <tr><td>sweep-angle</td><td></td><td>end angle in radians (interpreted as a0..a1; pass</td></tr>
+    <tr><td></td><td></td><td>start + sweep for a &quot;start + delta&quot; shape)</td></tr>
+    <tr><td></td><td></td><td>The underlying plutovg API takes a clockwise/counter-clockwise flag;</td></tr>
+    <tr><td></td><td></td><td>this binding uses clockwise (`ccw = false`).  For counter-clockwise</td></tr>
+    <tr><td></td><td></td><td>arcs build the path manually with canvas-arc-to.</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV6</p>
+</div>
+<div class="def-card" id="canvas-arc-to">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-arc-to</h2>
+  </div>
+  <pre class="def-signature">(canvas-arc-to [c :int rx :float ry :float rotation :float large-arc? :bool sweep? :bool x :float y :float] :void)</pre>
+  <p class="def-summary">append an SVG-style elliptical arc to (x, y).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>rx</td><td></td><td>horizontal radius</td></tr>
+    <tr><td>ry</td><td></td><td>vertical radius</td></tr>
+    <tr><td>rotation</td><td></td><td>x-axis rotation in radians</td></tr>
+    <tr><td>large-arc?</td><td></td><td>:bool, choose the long (true) or short (false) arc</td></tr>
+    <tr><td>sweep?</td><td></td><td>:bool, sweep direction (true = clockwise)</td></tr>
+    <tr><td>x</td><td></td><td>destination x</td></tr>
+    <tr><td>y</td><td></td><td>destination y</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV6</p>
+</div>
+<div class="def-card" id="canvas-round-rect">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-round-rect</h2>
+  </div>
+  <pre class="def-signature">(canvas-round-rect [c :int x :float y :float w :float h :float rx :float ry :float] :void)</pre>
+  <p class="def-summary">append a rounded-corner rectangle subpath.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>x</td><td></td><td>top-left x</td></tr>
+    <tr><td>y</td><td></td><td>top-left y</td></tr>
+    <tr><td>w</td><td></td><td>width</td></tr>
+    <tr><td>h</td><td></td><td>height</td></tr>
+    <tr><td>rx</td><td></td><td>horizontal corner radius</td></tr>
+    <tr><td>ry</td><td></td><td>vertical corner radius</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: PV6</p>
+</div>
+<div class="def-card" id="canvas-draw-image">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-draw-image</h2>
+  </div>
+  <pre class="def-signature">(canvas-draw-image [c :int src :int x :float y :float w :float h :float] :void)</pre>
+  <p class="def-summary">composite the pixels of `src` onto the canvas,</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>src</td><td></td><td>source surface handle</td></tr>
+    <tr><td>x</td><td></td><td>destination top-left x</td></tr>
+    <tr><td>y</td><td></td><td>destination top-left y</td></tr>
+    <tr><td>w</td><td></td><td>destination width</td></tr>
+    <tr><td>h</td><td></td><td>destination height</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <p class="def-since">Since: PV6</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__ok"><code>__ok</code><span class="internal-item-summary">-- create an ok result wrapping integer value v.</span></div>
+  <div class="internal-item" id="__err"><code>__err</code><span class="internal-item-summary">-- create an err result wrapping integer error value e.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/plutovg/font | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#font-face-load-from-file">font-face-load-from-file</a></li>
+    <li><a href="#font-face-load-from-data">font-face-load-from-data</a></li>
+    <li><a href="#font-face-destroy">font-face-destroy</a></li>
+    <li><a href="#font-face-ascent">font-face-ascent</a></li>
+    <li><a href="#font-face-descent">font-face-descent</a></li>
+    <li><a href="#font-face-line-gap">font-face-line-gap</a></li>
+    <li><a href="#font-face-text-extents">font-face-text-extents</a></li>
+    <li><a href="#font-cache-create">font-cache-create</a></li>
+    <li><a href="#font-cache-destroy">font-cache-destroy</a></li>
+    <li><a href="#font-cache-add-file">font-cache-add-file</a></li>
+    <li><a href="#font-cache-load-system">font-cache-load-system</a></li>
+    <li><a href="#font-cache-get">font-cache-get</a></li>
+    <li><a href="#canvas-set-font-face">canvas-set-font-face</a></li>
+    <li><a href="#canvas-set-font-size">canvas-set-font-size</a></li>
+    <li><a href="#canvas-set-font">canvas-set-font</a></li>
+    <li><a href="#canvas-fill-text">canvas-fill-text</a></li>
+    <li><a href="#canvas-stroke-text">canvas-stroke-text</a></li>
+    <li><a href="#canvas-text-extents">canvas-text-extents</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__ok" style="color:var(--faint)">__ok</a></li>
+    <li><a href="#__err" style="color:var(--faint)">__err</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>plutovg/font</h1>
+    <div class="module-path">src/plutovg/font.tur</div>
+  </div>
+<div class="def-card" id="font-face-load-from-file">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-face-load-from-file</h2>
+  </div>
+  <pre class="def-signature">(font-face-load-from-file [path :cstr index :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">load a font face from disk.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>path</td><td></td><td>filesystem path to a TTF / OTF / TTC file</td></tr>
+    <tr><td>index</td><td></td><td>face index within a TrueType Collection; 0 for the typical</td></tr>
+    <tr><td></td><td></td><td>single-face .ttf/.otf</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok face-handle) on success; (err 0) if plutovg cannot load the file.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(font-face-load-from-file &quot;/Library/Fonts/Helvetica.ttc&quot; 0)</pre>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-face-load-from-data">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-face-load-from-data</h2>
+  </div>
+  <pre class="def-signature">(font-face-load-from-data [data :cstr len :int index :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">load a font face from an in-memory buffer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>data</td><td></td><td>pointer to the raw TTF/OTF bytes (:cstr)</td></tr>
+    <tr><td>len</td><td></td><td>length in bytes</td></tr>
+    <tr><td>index</td><td></td><td>face index (0 for single-face data)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok face-handle) on success; (err 0) on failure.
+
+The buffer is borrowed -- plutovg holds the pointer for the lifetime of
+the face.  Free the buffer only AFTER font-face-destroy.</p>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-face-destroy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-face-destroy</h2>
+  </div>
+  <pre class="def-signature">(font-face-destroy [ff :int] :void)</pre>
+  <p class="def-summary">release a font face.</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-face-ascent">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-face-ascent</h2>
+  </div>
+  <pre class="def-signature">(font-face-ascent [ff :int size :float] :float)</pre>
+  <p class="def-summary">return the ascender (above baseline) in pixels at</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-face-descent">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-face-descent</h2>
+  </div>
+  <pre class="def-signature">(font-face-descent [ff :int size :float] :float)</pre>
+  <p class="def-summary">return the descender (below baseline, typically</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-face-line-gap">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-face-line-gap</h2>
+  </div>
+  <pre class="def-signature">(font-face-line-gap [ff :int size :float] :float)</pre>
+  <p class="def-summary">return the recommended extra spacing between</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-face-text-extents">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-face-text-extents</h2>
+  </div>
+  <pre class="def-signature">(font-face-text-extents [ff :int size :float text :cstr] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">measure a string at a given font size.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>ff</td><td></td><td>font-face handle</td></tr>
+    <tr><td>size</td><td></td><td>font size in pixels</td></tr>
+    <tr><td>text</td><td></td><td>UTF-8 :cstr (use canvas-text-extents for other encodings)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok rect-handle) -- bounding box of the rendered text.  Release with
+  rect-destroy (re-exported from plutovg/path).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (font-face-text-extents ff 24.0 &quot;Hello&quot;)]
+    (let [box (ok-val r)]
+      (println (rect-w box))
+      (rect-destroy box)))</pre>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-cache-create">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-cache-create</h2>
+  </div>
+  <pre class="def-signature">(font-cache-create :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">allocate a new empty font-face cache.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok cache-handle) on success; (err 0) on allocation failure.</p>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-cache-destroy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-cache-destroy</h2>
+  </div>
+  <pre class="def-signature">(font-cache-destroy [fc :int] :void)</pre>
+  <p class="def-summary">release a font-face cache and all faces it owns.</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-cache-add-file">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-cache-add-file</h2>
+  </div>
+  <pre class="def-signature">(font-cache-add-file [fc :int path :cstr] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">load all faces from a font file and register</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fc</td><td></td><td>cache handle</td></tr>
+    <tr><td>path</td><td></td><td>filesystem path to a TTF/OTF/TTC file</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok n) where n is the number of faces actually added; (err 0) on
+  load failure.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(font-cache-add-file fc &quot;/System/Library/Fonts/Helvetica.ttc&quot;)</pre>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-cache-load-system">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-cache-load-system</h2>
+  </div>
+  <pre class="def-signature">(font-cache-load-system [fc :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">discover and register fonts from the</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok n) where n is the number of faces registered; (err 0) if no
+  system fonts were found.</p>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="font-cache-get">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>font-cache-get</h2>
+  </div>
+  <pre class="def-signature">(font-cache-get [fc :int family :cstr style :cstr size :float] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">look up a font face by family name and style.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fc</td><td></td><td>cache handle</td></tr>
+    <tr><td>family</td><td></td><td>CSS-style family name (e.g. &quot;Helvetica&quot;, &quot;Arial&quot;)</td></tr>
+    <tr><td>style</td><td></td><td>&quot;:regular&quot;, &quot;:bold&quot;, &quot;:italic&quot;, &quot;:bold-italic&quot;</td></tr>
+    <tr><td>size</td><td></td><td>requested font size in pixels.  This argument is currently</td></tr>
+    <tr><td></td><td></td><td>ignored at lookup time (plutovg caches faces, not sized</td></tr>
+    <tr><td></td><td></td><td>instances) but is accepted for forward compatibility and</td></tr>
+    <tr><td></td><td></td><td>API symmetry with the plan.</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok face-handle) on success; (err 0) if no matching face is
+  registered.  The face is owned by the cache -- do NOT call
+  font-face-destroy on it.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(font-cache-get fc &quot;Helvetica&quot; &quot;:bold&quot; 24.0)</pre>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="canvas-set-font-face">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-font-face</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-font-face [c :int ff :int] :void)</pre>
+  <p class="def-summary">set the canvas&#x27;s current font face without</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="canvas-set-font-size">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-font-size</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-font-size [c :int size :float] :void)</pre>
+  <p class="def-summary">set the canvas&#x27;s current font size in pixels.</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="canvas-set-font">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-font</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-font [c :int ff :int size :float] :void)</pre>
+  <p class="def-summary">set face + size in a single call.</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="canvas-fill-text">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-fill-text</h2>
+  </div>
+  <pre class="def-signature">(canvas-fill-text [c :int text :cstr encoding :cstr x :float y :float] :void)</pre>
+  <p class="def-summary">fill `text` at (x, y) using the current paint, font</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>text</td><td></td><td>:cstr text buffer</td></tr>
+    <tr><td>encoding</td><td></td><td>&quot;:utf8&quot; (default), &quot;:utf16&quot;, &quot;:utf32&quot;, or &quot;:latin1&quot;</td></tr>
+    <tr><td>x</td><td></td><td>baseline x in surface space</td></tr>
+    <tr><td>y</td><td></td><td>baseline y in surface space</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void.  (plutovg returns the advance width as a float; we drop it.
+  Use canvas-text-extents if you need the bounding box.)</p>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="canvas-stroke-text">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-stroke-text</h2>
+  </div>
+  <pre class="def-signature">(canvas-stroke-text [c :int text :cstr encoding :cstr x :float y :float] :void)</pre>
+  <p class="def-summary">stroke `text` at (x, y) using the current stroke</p>
+  <p class="def-since">Since: PV5</p>
+</div>
+<div class="def-card" id="canvas-text-extents">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-text-extents</h2>
+  </div>
+  <pre class="def-signature">(canvas-text-extents [c :int text :cstr encoding :cstr] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">measure text using the canvas&#x27;s current font.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle (must have a font set via canvas-set-font*)</td></tr>
+    <tr><td>text</td><td></td><td>:cstr text buffer</td></tr>
+    <tr><td>encoding</td><td></td><td>&quot;:utf8&quot; (default), &quot;:utf16&quot;, &quot;:utf32&quot;, or &quot;:latin1&quot;</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok rect-handle) -- release with rect-destroy.</p>
+  </div>
+  <p class="def-since">Since: PV5</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__ok"><code>__ok</code><span class="internal-item-summary">-- create an ok result wrapping integer value v.</span></div>
+  <div class="internal-item" id="__err"><code>__err</code><span class="internal-item-summary">-- create an err result wrapping integer error value e.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

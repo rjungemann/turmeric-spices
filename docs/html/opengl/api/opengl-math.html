@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/opengl/math | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#mat4-identity">mat4-identity</a></li>
+    <li><a href="#mat4-perspective">mat4-perspective</a></li>
+    <li><a href="#mat4-look-at">mat4-look-at</a></li>
+    <li><a href="#mat4-translate">mat4-translate</a></li>
+    <li><a href="#mat4-rotate-x">mat4-rotate-x</a></li>
+    <li><a href="#mat4-rotate-y">mat4-rotate-y</a></li>
+    <li><a href="#mat4-rotate-z">mat4-rotate-z</a></li>
+    <li><a href="#mat4-mul">mat4-mul</a></li>
+    <li><a href="#mat4-ptr">mat4-ptr</a></li>
+    <li><a href="#normal-mat4">normal-mat4</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>opengl/math</h1>
+    <div class="module-path">src/opengl/math.tur</div>
+  </div>
+<div class="def-card" id="mat4-identity">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-identity</h2>
+  </div>
+  <pre class="def-signature">(mat4-identity :int)</pre>
+  <p class="def-summary">return a 4x4 identity matrix.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Opaque :int handle to a heap-allocated 16-float identity matrix.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(mat4-identity)  ; =&gt; :int mat4 handle</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-perspective">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-perspective</h2>
+  </div>
+  <pre class="def-signature">(mat4-perspective [fovy :float aspect :float near :float far :float] :int)</pre>
+  <p class="def-summary">build a perspective projection matrix.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fovy</td><td></td><td>vertical field-of-view in radians (e.g. 0.785 = 45 degrees)</td></tr>
+    <tr><td>aspect</td><td></td><td>viewport width / height ratio</td></tr>
+    <tr><td>near</td><td></td><td>near clip plane distance (positive)</td></tr>
+    <tr><td>far</td><td></td><td>far clip plane distance (positive, &gt; near)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Opaque :int mat4 handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(mat4-perspective 0.785 (/ 800.0 600.0) 0.1 100.0)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-look-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-look-at</h2>
+  </div>
+  <pre class="def-signature">(mat4-look-at [ex :float ey :float ez :float cx :float cy :float cz :float ux :float uy :float uz :float] :int)</pre>
+  <p class="def-summary">build a view matrix using eye/center/up vectors.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>ex ey ez -- eye position</td></tr>
+    <tr><td></td><td></td><td>cx cy cz -- look-at target position</td></tr>
+    <tr><td></td><td></td><td>ux uy uz -- world up vector (usually 0 1 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Opaque :int mat4 handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(mat4-look-at 0.0 0.0 3.0  0.0 0.0 0.0  0.0 1.0 0.0)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-translate">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-translate</h2>
+  </div>
+  <pre class="def-signature">(mat4-translate [tx :float ty :float tz :float] :int)</pre>
+  <p class="def-summary">build a translation matrix.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>tx ty tz -- translation vector</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Opaque :int mat4 handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(mat4-translate 0.0 0.0 -5.0)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-rotate-x">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-rotate-x</h2>
+  </div>
+  <pre class="def-signature">(mat4-rotate-x [angle :float] :int)</pre>
+  <p class="def-summary">build a rotation matrix around the X axis.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>angle</td><td></td><td>rotation angle in radians</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Opaque :int mat4 handle.</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-rotate-y">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-rotate-y</h2>
+  </div>
+  <pre class="def-signature">(mat4-rotate-y [angle :float] :int)</pre>
+  <p class="def-summary">build a rotation matrix around the Y axis.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>angle</td><td></td><td>rotation angle in radians</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Opaque :int mat4 handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(mat4-rotate-y (ref-get angle))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-rotate-z">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-rotate-z</h2>
+  </div>
+  <pre class="def-signature">(mat4-rotate-z [angle :float] :int)</pre>
+  <p class="def-summary">build a rotation matrix around the Z axis.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>angle</td><td></td><td>rotation angle in radians</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-mul">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-mul</h2>
+  </div>
+  <pre class="def-signature">(mat4-mul [a :int b :int] :int)</pre>
+  <p class="def-summary">multiply two mat4 matrices (result = a * b).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>a</td><td></td><td>left mat4 handle</td></tr>
+    <tr><td>b</td><td></td><td>right mat4 handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">New heap-allocated mat4 handle with the product.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(mat4-mul projection (mat4-mul view model))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mat4-ptr">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mat4-ptr</h2>
+  </div>
+  <pre class="def-signature">(mat4-ptr [mat :int] :int)</pre>
+  <p class="def-summary">return the raw float* pointer to a mat4 for uniform upload.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>mat</td><td></td><td>mat4 handle from any mat4-* function</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Opaque :int raw float pointer (pass directly to set-uniform-mat4).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(set-uniform-mat4 prog &quot;model&quot; (mat4-ptr model))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="normal-mat4">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>normal-mat4</h2>
+  </div>
+  <pre class="def-signature">(normal-mat4 [model :int] :int)</pre>
+  <p class="def-summary">compute the normal matrix from a model matrix.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>model</td><td></td><td>model mat4 handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">New heap-allocated mat4 handle for use as the normal matrix uniform.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(set-uniform-mat4 prog &quot;normalMatrix&quot; (mat4-ptr (normal-mat4 model)))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/csv | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#read-csv-string">read-csv-string</a></li>
+    <li><a href="#read-csv">read-csv</a></li>
+    <li><a href="#read-csv-typed">read-csv-typed</a></li>
+    <li><a href="#write-csv-string">write-csv-string</a></li>
+    <li><a href="#write-csv">write-csv</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__c-nil" style="color:var(--faint)">__c-nil</a></li>
+    <li><a href="#__c-cons" style="color:var(--faint)">__c-cons</a></li>
+    <li><a href="#__csv-parse-string" style="color:var(--faint)">__csv-parse-string</a></li>
+    <li><a href="#__csv-table-rows" style="color:var(--faint)">__csv-table-rows</a></li>
+    <li><a href="#__csv-table-cols" style="color:var(--faint)">__csv-table-cols</a></li>
+    <li><a href="#__csv-table-cell" style="color:var(--faint)">__csv-table-cell</a></li>
+    <li><a href="#__csv-table-header" style="color:var(--faint)">__csv-table-header</a></li>
+    <li><a href="#__csv-table-free" style="color:var(--faint)">__csv-table-free</a></li>
+    <li><a href="#__csv-is-null?" style="color:var(--faint)">__csv-is-null?</a></li>
+    <li><a href="#__csv-try-int64" style="color:var(--faint)">__csv-try-int64</a></li>
+    <li><a href="#__csv-parse-int64" style="color:var(--faint)">__csv-parse-int64</a></li>
+    <li><a href="#__csv-try-float64" style="color:var(--faint)">__csv-try-float64</a></li>
+    <li><a href="#__csv-parse-float64" style="color:var(--faint)">__csv-parse-float64</a></li>
+    <li><a href="#__csv-try-bool" style="color:var(--faint)">__csv-try-bool</a></li>
+    <li><a href="#__csv-parse-bool" style="color:var(--faint)">__csv-parse-bool</a></li>
+    <li><a href="#__csv-try-date32" style="color:var(--faint)">__csv-try-date32</a></li>
+    <li><a href="#__csv-parse-date32" style="color:var(--faint)">__csv-parse-date32</a></li>
+    <li><a href="#__csv-try-timestamp" style="color:var(--faint)">__csv-try-timestamp</a></li>
+    <li><a href="#__csv-parse-timestamp" style="color:var(--faint)">__csv-parse-timestamp</a></li>
+    <li><a href="#__csv-infer-col-type" style="color:var(--faint)">__csv-infer-col-type</a></li>
+    <li><a href="#__csv-append-cell" style="color:var(--faint)">__csv-append-cell</a></li>
+    <li><a href="#__csv-fill-builder" style="color:var(--faint)">__csv-fill-builder</a></li>
+    <li><a href="#__csv-storage-tag" style="color:var(--faint)">__csv-storage-tag</a></li>
+    <li><a href="#__csv-retag" style="color:var(--faint)">__csv-retag</a></li>
+    <li><a href="#__csv-build-cols" style="color:var(--faint)">__csv-build-cols</a></li>
+    <li><a href="#__csv-build-fields" style="color:var(--faint)">__csv-build-fields</a></li>
+    <li><a href="#__csv-build-types" style="color:var(--faint)">__csv-build-types</a></li>
+    <li><a href="#__csv-build-types-from-schema" style="color:var(--faint)">__csv-build-types-from-schema</a></li>
+    <li><a href="#__field-type-at" style="color:var(--faint)">__field-type-at</a></li>
+    <li><a href="#__nth-int" style="color:var(--faint)">__nth-int</a></li>
+    <li><a href="#__slurp" style="color:var(--faint)">__slurp</a></li>
+    <li><a href="#__cstr-free" style="color:var(--faint)">__cstr-free</a></li>
+    <li><a href="#__cstr-null?" style="color:var(--faint)">__cstr-null?</a></li>
+    <li><a href="#__write-file" style="color:var(--faint)">__write-file</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/csv</h1>
+    <div class="module-path">src/frame/csv.tur</div>
+  </div>
+<div class="def-card" id="read-csv-string">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>read-csv-string</h2>
+  </div>
+  <pre class="def-signature">(read-csv-string [src :cstr delim :int quote :int has-header :int infer-rows :int null-str :cstr] :int)</pre>
+  <p class="def-summary">parse a CSV blob from memory into a frame.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>src</td><td></td><td>:cstr NUL-terminated CSV text</td></tr>
+    <tr><td>delim</td><td></td><td>:int  field separator codepoint (0 = &#x27;,&#x27;)</td></tr>
+    <tr><td>quote</td><td></td><td>:int  quote character codepoint (0 = &#x27;&quot;&#x27;)</td></tr>
+    <tr><td>has-header</td><td></td><td>:int  0 or 1</td></tr>
+    <tr><td>infer-rows</td><td></td><td>:int  rows to scan for type inference (0 = 100)</td></tr>
+    <tr><td>null-str</td><td></td><td>:cstr cell value treated as null (pass &quot;&quot; for default)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  frame handle, or 0 on parse failure / OOM.  Free with frame-free.</p>
+  </div>
+  <p class="def-since">Since: FR3</p>
+</div>
+<div class="def-card" id="read-csv">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>read-csv</h2>
+  </div>
+  <pre class="def-signature">(read-csv [path :cstr delim :int quote :int has-header :int infer-rows :int null-str :cstr] :int)</pre>
+</div>
+<div class="def-card" id="read-csv-typed">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>read-csv-typed</h2>
+  </div>
+  <pre class="def-signature">(read-csv-typed [src :cstr s :int delim :int quote :int has-header :int null-str :cstr] :int)</pre>
+  <p class="def-summary">parse a CSV blob with an explicit schema (skips inference).</p>
+  <p class="def-since">Since: FR3</p>
+</div>
+<div class="def-card" id="write-csv-string">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>write-csv-string</h2>
+  </div>
+  <pre class="def-signature">(write-csv-string [f :int delim :int quote :int has-header :int] :cstr)</pre>
+  <p class="def-summary">render the frame as a CSV cstr (caller frees with the</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>f</td><td></td><td>:int frame</td></tr>
+    <tr><td>delim</td><td></td><td>:int separator (0 = &#x27;,&#x27;)</td></tr>
+    <tr><td>quote</td><td></td><td>:int quote char (0 = &#x27;&quot;&#x27;)</td></tr>
+    <tr><td>has-header</td><td></td><td>:int 0 or 1</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:cstr  newly-allocated NUL-terminated buffer.</p>
+  </div>
+  <p class="def-since">Since: FR3</p>
+</div>
+<div class="def-card" id="write-csv">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>write-csv</h2>
+  </div>
+  <pre class="def-signature">(write-csv [f :int path :cstr delim :int quote :int has-header :int] :int)</pre>
+  <p class="def-summary">render a frame as CSV and write to `path`.</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__c-nil"><code>__c-nil</code></div>
+  <div class="internal-item" id="__c-cons"><code>__c-cons</code></div>
+  <div class="internal-item" id="__csv-parse-string"><code>__csv-parse-string</code><span class="internal-item-summary">-- parse a NUL-terminated CSV blob into a __csv_table.</span></div>
+  <div class="internal-item" id="__csv-table-rows"><code>__csv-table-rows</code><span class="internal-item-summary">-- number of data rows in a parsed table.</span></div>
+  <div class="internal-item" id="__csv-table-cols"><code>__csv-table-cols</code><span class="internal-item-summary">-- number of columns in a parsed table.</span></div>
+  <div class="internal-item" id="__csv-table-cell"><code>__csv-table-cell</code><span class="internal-item-summary">-- cell at (row, col); empty cells return &quot;&quot;.</span></div>
+  <div class="internal-item" id="__csv-table-header"><code>__csv-table-header</code><span class="internal-item-summary">-- header for column c, or &quot;col_N&quot; if no header row.</span></div>
+  <div class="internal-item" id="__csv-table-free"><code>__csv-table-free</code><span class="internal-item-summary">-- release a parsed table.</span></div>
+  <div class="internal-item" id="__csv-is-null_"><code>__csv-is-null?</code><span class="internal-item-summary">-- true for empty, null-str match, NA/NaN/NULL (case-insensitive).</span></div>
+  <div class="internal-item" id="__csv-try-int64"><code>__csv-try-int64</code><span class="internal-item-summary">-- parse s as int64; returns 1 if successful, 0 otherwise.</span></div>
+  <div class="internal-item" id="__csv-parse-int64"><code>__csv-parse-int64</code></div>
+  <div class="internal-item" id="__csv-try-float64"><code>__csv-try-float64</code></div>
+  <div class="internal-item" id="__csv-parse-float64"><code>__csv-parse-float64</code></div>
+  <div class="internal-item" id="__csv-try-bool"><code>__csv-try-bool</code></div>
+  <div class="internal-item" id="__csv-parse-bool"><code>__csv-parse-bool</code></div>
+  <div class="internal-item" id="__csv-try-date32"><code>__csv-try-date32</code><span class="internal-item-summary">-- match strict &quot;YYYY-MM-DD&quot; (10 chars, all digits/dashes).</span></div>
+  <div class="internal-item" id="__csv-parse-date32"><code>__csv-parse-date32</code><span class="internal-item-summary">-- &quot;YYYY-MM-DD&quot; -&gt; days since 1970-01-01 (Howard</span></div>
+  <div class="internal-item" id="__csv-try-timestamp"><code>__csv-try-timestamp</code><span class="internal-item-summary">-- match &quot;YYYY-MM-DD HH:MM:SS&quot; (19 chars) or with &#x27;T&#x27;.</span></div>
+  <div class="internal-item" id="__csv-parse-timestamp"><code>__csv-parse-timestamp</code><span class="internal-item-summary">-- &quot;YYYY-MM-DD HH:MM:SS&quot; -&gt; microseconds since epoch.</span></div>
+  <div class="internal-item" id="__csv-infer-col-type"><code>__csv-infer-col-type</code><span class="internal-item-summary">-- infer the narrowest type for column c by scanning</span></div>
+  <div class="internal-item" id="__csv-append-cell"><code>__csv-append-cell</code></div>
+  <div class="internal-item" id="__csv-fill-builder"><code>__csv-fill-builder</code></div>
+  <div class="internal-item" id="__csv-storage-tag"><code>__csv-storage-tag</code></div>
+  <div class="internal-item" id="__csv-retag"><code>__csv-retag</code></div>
+  <div class="internal-item" id="__csv-build-cols"><code>__csv-build-cols</code></div>
+  <div class="internal-item" id="__csv-build-fields"><code>__csv-build-fields</code></div>
+  <div class="internal-item" id="__csv-build-types"><code>__csv-build-types</code></div>
+  <div class="internal-item" id="__csv-build-types-from-schema"><code>__csv-build-types-from-schema</code></div>
+  <div class="internal-item" id="__field-type-at"><code>__field-type-at</code></div>
+  <div class="internal-item" id="__nth-int"><code>__nth-int</code></div>
+  <div class="internal-item" id="__slurp"><code>__slurp</code><span class="internal-item-summary">-- read CSV from a file path.  Same options as read-csv-string.</span></div>
+  <div class="internal-item" id="__cstr-free"><code>__cstr-free</code></div>
+  <div class="internal-item" id="__cstr-null_"><code>__cstr-null?</code></div>
+  <div class="internal-item" id="__write-file"><code>__write-file</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

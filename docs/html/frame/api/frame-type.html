@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/type | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#type-int32">type-int32</a></li>
+    <li><a href="#type-int64">type-int64</a></li>
+    <li><a href="#type-float32">type-float32</a></li>
+    <li><a href="#type-float64">type-float64</a></li>
+    <li><a href="#type-bool">type-bool</a></li>
+    <li><a href="#type-utf8">type-utf8</a></li>
+    <li><a href="#type-date32">type-date32</a></li>
+    <li><a href="#type-timestamp">type-timestamp</a></li>
+    <li><a href="#type-null">type-null</a></li>
+    <li><a href="#type-name">type-name</a></li>
+    <li><a href="#type-arrow-fmt">type-arrow-fmt</a></li>
+    <li><a href="#type-size">type-size</a></li>
+    <li><a href="#type-numeric_">type-numeric?</a></li>
+    <li><a href="#type-variable-length_">type-variable-length?</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/type</h1>
+    <div class="module-path">src/frame/type.tur</div>
+  </div>
+<div class="def-card" id="type-int32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-int32</h2>
+  </div>
+  <pre class="def-signature">(type-int32 :int)</pre>
+  <p class="def-summary">int32 type tag.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  1</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(type-int32)  ; =&gt; 1</pre>
+  </div>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="type-int64">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-int64</h2>
+  </div>
+  <pre class="def-signature">(type-int64 :int)</pre>
+  <p class="def-summary">int64 type tag. Since: FR0</p>
+</div>
+<div class="def-card" id="type-float32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-float32</h2>
+  </div>
+  <pre class="def-signature">(type-float32 :int)</pre>
+  <p class="def-summary">float32 type tag. Since: FR0</p>
+</div>
+<div class="def-card" id="type-float64">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-float64</h2>
+  </div>
+  <pre class="def-signature">(type-float64 :int)</pre>
+  <p class="def-summary">float64 type tag. Since: FR0</p>
+</div>
+<div class="def-card" id="type-bool">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-bool</h2>
+  </div>
+  <pre class="def-signature">(type-bool :int)</pre>
+  <p class="def-summary">bool type tag (Arrow 1-bit packed). Since: FR0</p>
+</div>
+<div class="def-card" id="type-utf8">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-utf8</h2>
+  </div>
+  <pre class="def-signature">(type-utf8 :int)</pre>
+  <p class="def-summary">variable-length utf8 string type tag. Since: FR1</p>
+</div>
+<div class="def-card" id="type-date32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-date32</h2>
+  </div>
+  <pre class="def-signature">(type-date32 :int)</pre>
+  <p class="def-summary">days-since-epoch date type tag. Since: FR9</p>
+</div>
+<div class="def-card" id="type-timestamp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-timestamp</h2>
+  </div>
+  <pre class="def-signature">(type-timestamp :int)</pre>
+  <p class="def-summary">microseconds-since-epoch timestamp tag. Since: FR9</p>
+</div>
+<div class="def-card" id="type-null">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-null</h2>
+  </div>
+  <pre class="def-signature">(type-null :int)</pre>
+  <p class="def-summary">all-null sentinel tag. Since: FR0</p>
+</div>
+<div class="def-card" id="type-name">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-name</h2>
+  </div>
+  <pre class="def-signature">(type-name [t :int] :cstr)</pre>
+  <p class="def-summary">human-readable name for a type tag.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>t</td><td></td><td>type tag (e.g. (type-int32))</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:cstr  &quot;int32&quot; / &quot;int64&quot; / &quot;float32&quot; / ... / &quot;unknown&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(type-name (type-int32))  ; =&gt; &quot;int32&quot;</pre>
+  </div>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="type-arrow-fmt">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-arrow-fmt</h2>
+  </div>
+  <pre class="def-signature">(type-arrow-fmt [t :int] :cstr)</pre>
+  <p class="def-summary">Arrow C Data Interface format string for a type tag.</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="type-size">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-size</h2>
+  </div>
+  <pre class="def-signature">(type-size [t :int] :int)</pre>
+  <p class="def-summary">byte size of one element for a fixed-width type.</p>
+  <p class="def-since">Since: FR0</p>
+</div>
+<div class="def-card" id="type-numeric_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-numeric?</h2>
+  </div>
+  <pre class="def-signature">(type-numeric? [t :int] :bool)</pre>
+  <p class="def-summary">true if the type tag is a numeric primitive</p>
+</div>
+<div class="def-card" id="type-variable-length_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>type-variable-length?</h2>
+  </div>
+  <pre class="def-signature">(type-variable-length? [t :int] :bool)</pre>
+  <p class="def-summary">true if the type tag is variable-length (utf8). Since: FR0</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

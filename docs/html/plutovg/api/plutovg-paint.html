@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/plutovg/paint | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#paint-create-color">paint-create-color</a></li>
+    <li><a href="#paint-create-color-hex">paint-create-color-hex</a></li>
+    <li><a href="#paint-destroy">paint-destroy</a></li>
+    <li><a href="#gradient-stops-create">gradient-stops-create</a></li>
+    <li><a href="#gradient-stops-add">gradient-stops-add</a></li>
+    <li><a href="#gradient-stops-count">gradient-stops-count</a></li>
+    <li><a href="#gradient-stops-destroy">gradient-stops-destroy</a></li>
+    <li><a href="#paint-create-linear-gradient">paint-create-linear-gradient</a></li>
+    <li><a href="#paint-create-radial-gradient">paint-create-radial-gradient</a></li>
+    <li><a href="#paint-create-texture">paint-create-texture</a></li>
+    <li><a href="#canvas-set-source">canvas-set-source</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__ok" style="color:var(--faint)">__ok</a></li>
+    <li><a href="#__err" style="color:var(--faint)">__err</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>plutovg/paint</h1>
+    <div class="module-path">src/plutovg/paint.tur</div>
+  </div>
+<div class="def-card" id="paint-create-color">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>paint-create-color</h2>
+  </div>
+  <pre class="def-signature">(paint-create-color [r :float g :float b :float a :float] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">create a paint with a solid RGBA color.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>red   in [0.0, 1.0]</td></tr>
+    <tr><td>g</td><td></td><td>green in [0.0, 1.0]</td></tr>
+    <tr><td>b</td><td></td><td>blue  in [0.0, 1.0]</td></tr>
+    <tr><td>a</td><td></td><td>alpha in [0.0, 1.0]</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok paint-handle) on success; (err 0) on allocation failure.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(paint-create-color 1.0 0.0 0.0 1.0)  ; opaque red</pre>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="paint-create-color-hex">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>paint-create-color-hex</h2>
+  </div>
+  <pre class="def-signature">(paint-create-color-hex [hex :cstr] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">create a paint from a CSS-style color string.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>hex</td><td></td><td>color string, e.g. &quot;#ff0000&quot;, &quot;#ff0000ff&quot;, &quot;red&quot;, &quot;rgba(...)&quot;</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok paint-handle) on success; (err 0) if plutovg cannot parse the
+  string.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(paint-create-color-hex &quot;#ff0000&quot;)</pre>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="paint-destroy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>paint-destroy</h2>
+  </div>
+  <pre class="def-signature">(paint-destroy [paint :int] :void)</pre>
+  <p class="def-summary">release a paint allocated by any paint-create-* call.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>paint</td><td></td><td>paint handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="gradient-stops-create">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gradient-stops-create</h2>
+  </div>
+  <pre class="def-signature">(gradient-stops-create :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">allocate an empty stops buffer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok stops-handle) on success; (err 0) on allocation failure.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [s (gradient-stops-create)]
+    (when (ok? s) (gradient-stops-destroy (ok-val s))))</pre>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="gradient-stops-add">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gradient-stops-add</h2>
+  </div>
+  <pre class="def-signature">(gradient-stops-add [stops :int offset :float r :float g :float b :float a :float] :void)</pre>
+  <p class="def-summary">append a stop to a stops buffer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>stops</td><td></td><td>stops buffer handle</td></tr>
+    <tr><td>offset</td><td></td><td>stop offset in [0.0, 1.0]</td></tr>
+    <tr><td>r/g/b</td><td></td><td>color components in [0.0, 1.0]</td></tr>
+    <tr><td>a</td><td></td><td>alpha in [0.0, 1.0]</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void  (the buffer is grown in place if capacity is exceeded; the
+  handle stays valid, but callers must hold the result of any earlier
+  gradient-stops-* call rather than caching the underlying pointer).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(gradient-stops-add s 0.0 1.0 0.0 0.0 1.0)
+  (gradient-stops-add s 1.0 0.0 0.0 1.0 1.0)</pre>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="gradient-stops-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gradient-stops-count</h2>
+  </div>
+  <pre class="def-signature">(gradient-stops-count [stops :int] :int)</pre>
+  <p class="def-summary">return how many stops have been added.</p>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="gradient-stops-destroy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gradient-stops-destroy</h2>
+  </div>
+  <pre class="def-signature">(gradient-stops-destroy [stops :int] :void)</pre>
+  <p class="def-summary">release a stops buffer.</p>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="paint-create-linear-gradient">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>paint-create-linear-gradient</h2>
+  </div>
+  <pre class="def-signature">(paint-create-linear-gradient [x1 :float y1 :float x2 :float y2 :float spread :cstr stops :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">create a linear-gradient paint.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>x1</td><td></td><td>gradient start x</td></tr>
+    <tr><td>y1</td><td></td><td>gradient start y</td></tr>
+    <tr><td>x2</td><td></td><td>gradient end   x</td></tr>
+    <tr><td>y2</td><td></td><td>gradient end   y</td></tr>
+    <tr><td>spread</td><td></td><td>spread keyword &quot;:pad&quot; / &quot;:reflect&quot; / &quot;:repeat&quot;</td></tr>
+    <tr><td>stops</td><td></td><td>gradient-stops buffer (must contain at least 2 stops)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok paint-handle) on success; (err 0) on allocation failure.
+  The buffer can be freed immediately after the call -- plutovg
+  copies its stops internally.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [stops (ok-val (gradient-stops-create))]
+    (gradient-stops-add stops 0.0 1.0 0.0 0.0 1.0)
+    (gradient-stops-add stops 1.0 0.0 0.0 1.0 1.0)
+    (let [p (ok-val (paint-create-linear-gradient 0.0 0.0 100.0 0.0 &quot;:pad&quot; stops))]
+      (canvas-set-source c p)
+      (gradient-stops-destroy stops)
+      (paint-destroy p)))</pre>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="paint-create-radial-gradient">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>paint-create-radial-gradient</h2>
+  </div>
+  <pre class="def-signature">(paint-create-radial-gradient [cx :float cy :float cr :float fx :float fy :float fr :float spread :cstr stops :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">create a radial-gradient paint.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>cx</td><td></td><td>gradient center x</td></tr>
+    <tr><td>cy</td><td></td><td>gradient center y</td></tr>
+    <tr><td>cr</td><td></td><td>center-circle radius</td></tr>
+    <tr><td>fx</td><td></td><td>focal point x</td></tr>
+    <tr><td>fy</td><td></td><td>focal point y</td></tr>
+    <tr><td>fr</td><td></td><td>focal-circle radius</td></tr>
+    <tr><td>spread</td><td></td><td>&quot;:pad&quot; / &quot;:reflect&quot; / &quot;:repeat&quot;</td></tr>
+    <tr><td>stops</td><td></td><td>gradient-stops buffer</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok paint-handle) on success; (err 0) on allocation failure.</p>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="paint-create-texture">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>paint-create-texture</h2>
+  </div>
+  <pre class="def-signature">(paint-create-texture [surface :int tex-type :cstr opacity :float] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">create a paint backed by a surface.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>surface</td><td></td><td>surface handle (from plutovg/surface)</td></tr>
+    <tr><td>tex-type</td><td></td><td>&quot;:plain&quot; (clamp / one-shot) or &quot;:tiled&quot; (repeat)</td></tr>
+    <tr><td>opacity</td><td></td><td>:float in [0.0, 1.0]</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">(ok paint-handle) on success; (err 0) on allocation failure.  The
+  surface must outlive the paint.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(paint-create-texture s &quot;:plain&quot; 1.0)</pre>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<div class="def-card" id="canvas-set-source">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>canvas-set-source</h2>
+  </div>
+  <pre class="def-signature">(canvas-set-source [c :int paint :int] :void)</pre>
+  <p class="def-summary">set the canvas&#x27;s current paint.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>c</td><td></td><td>canvas handle</td></tr>
+    <tr><td>paint</td><td></td><td>paint handle (any flavour)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(canvas-set-source c my-paint)</pre>
+  </div>
+  <p class="def-since">Since: PV3</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__ok"><code>__ok</code><span class="internal-item-summary">-- create an ok result wrapping integer value v.</span></div>
+  <div class="internal-item" id="__err"><code>__err</code><span class="internal-item-summary">-- create an err result wrapping integer error value e.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tur-signal | Turmeric Spices</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/style.css">
+  <style>
+    .guide-content h1 { font-size:1.75rem; color:var(--gold-bright); margin-bottom:1.5rem; padding-bottom:0.75rem; border-bottom:1px solid var(--border); }
+    .guide-content h2 { font-size:1.2rem; color:var(--text-primary); margin:2rem 0 0.75rem; }
+    .guide-content h3 { font-size:1rem; color:var(--gold-bright); margin:1.5rem 0 0.5rem; }
+    .guide-content p  { margin-bottom:1rem; }
+    .guide-content ul, .guide-content ol { margin:0 0 1rem 1.5rem; }
+    .guide-content li { margin:0.25rem 0; }
+    .guide-content code { font-family:"Iosevka","Fira Code",monospace; font-size:0.85em; background:var(--bg-panel); border:1px solid var(--border); border-radius:3px; padding:0.1em 0.35em; }
+    .guide-content pre { background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+    .guide-content pre code { background:none; border:none; padding:0; font-size:0.85rem; }
+    .guide-content blockquote { border-left:3px solid var(--gold); padding-left:1rem; color:var(--text-sec); margin:1rem 0; }
+    .guide-content table { border-collapse:collapse; width:100%; margin-bottom:1rem; font-size:0.9rem; }
+    .guide-content th { background:var(--bg-surface); border:1px solid var(--border); padding:0.5rem 0.75rem; text-align:left; color:var(--gold-bright); }
+    .guide-content td { border:1px solid var(--border); padding:0.5rem 0.75rem; }
+    .guide-content a { color:var(--gold-bright); }
+    .guide-content strong { color:var(--text-primary); }
+    .hl-comment { color:#48433D; font-style:italic; }
+    .hl-string  { color:#D9735A; }
+    .hl-number  { color:#A8C98A; }
+    .hl-keyword { color:#EFA030; font-weight:bold; }
+    .hl-type    { color:#7AC4B8; }
+    .code-toggle { border:1px solid var(--border); border-radius:4px; margin-bottom:1rem; overflow:hidden; }
+    .code-card-bar { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:0.35rem 0.75rem; display:flex; align-items:center; }
+    .code-syntax-toggle { margin-left:auto; display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden; font-family:"Iosevka","Fira Code",monospace; font-size:11px; }
+    .seg-btn { padding:3px 10px; background:transparent; color:var(--text-sec); border:none; cursor:pointer; transition:all 0.14s; }
+    .seg-btn:hover { color:var(--text-primary); }
+    .seg-btn.active { color:var(--gold-bright); background:var(--bg-hover); }
+    .code-card-body { }
+    .code-version { }
+    .guide-content .code-toggle pre { border:none; border-radius:0; margin-bottom:0; }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <button class="hamburger" aria-label="Toggle navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <a class="nav-logo" href="https://turmeric-lang.com">
+      <img src="/logo-icon.svg" width="28" height="28" alt="">
+      <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+    </a>
+    <nav>
+      <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+      <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+      <a href="https://turmeric-lang.com/try">Try It</a>
+    </nav>
+  </header>
+  <div class="sidebar-overlay"></div>
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      var btn = document.querySelector('.hamburger');
+      var sidebar = document.querySelector('.sidebar');
+      var overlay = document.querySelector('.sidebar-overlay');
+      if (!btn || !sidebar) return;
+      function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+      function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+      btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+      overlay && overlay.addEventListener('click', close);
+    });
+  </script>
+  <div class="page-layout">
+    <div class="sidebar">
+      <div style="margin-bottom:0.5rem"><a href="https://turmeric-lang.com" style="font-size:0.8rem;color:var(--text-sec)">&larr; turmeric-lang.com</a></div>
+      <div style="margin-bottom:1.25rem"><a href="../index.html" style="font-size:0.8rem;color:var(--text-sec)">&larr; All Spices</a></div>
+      <div style="margin-bottom:1.25rem"><a href="api/" style="font-size:0.85rem;color:var(--gold-bright)">API reference &rarr;</a></div>
+      <h3>On this page</h3>
+      <ul><li style=""><a href="#tur-signal" style="">tur-signal</a></li>
+<li style=""><a href="#overview" style="">Overview</a></li>
+<li style=""><a href="#installation" style="">Installation</a></li>
+<li style=""><a href="#quick-start" style="">Quick Start</a></li>
+<li style=""><a href="#module-reference" style="">Module Reference</a></li>
+<li style="padding-left:0.75rem;"><a href="#signalcore" style="color:var(--text-sec);">signal/core</a></li>
+<li style="padding-left:0.75rem;"><a href="#signaldsp" style="color:var(--text-sec);">signal/dsp</a></li>
+<li style="padding-left:0.75rem;"><a href="#signalenvelope" style="color:var(--text-sec);">signal/envelope</a></li>
+<li style="padding-left:0.75rem;"><a href="#signalsynth" style="color:var(--text-sec);">signal/synth</a></li>
+<li style=""><a href="#examples" style="">Examples</a></li>
+<li style=""><a href="#development" style="">Development</a></li></ul>
+    </div>
+    <div class="content guide-content">
+      <h1 id="tur-signal">tur-signal</h1>
+<p>Arrow-based signal processing for <a href="https://github.com/rjungemann/turmeric">Turmeric</a>: Signal Function (SF) combinators, DSP filters, ADSR envelopes, and synthesizer voices.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p><code>tur-signal</code> provides a composable signal processing pipeline built on Turmeric's Arrow typeclass:</p>
+<ul>
+<li><strong><code>signal/core</code></strong> -- Signal type, SF arrow combinators (<code>constant</code>, <code>time-signal</code>, <code>sample</code>, <code>map-signal</code>, <code>pair-signals</code>)</li>
+<li><strong><code>signal/dsp</code></strong> -- Oscillators (<code>sine</code>, <code>square</code>, <code>sawtooth</code>), filters (<code>low-pass</code>, <code>high-pass</code>), amplitude ops (<code>gain</code>, <code>mix</code>, <code>add</code>)</li>
+<li><strong><code>signal/envelope</code></strong> -- Piecewise-linear ADSR envelope generator (<code>adsr-fixed</code>, <code>ADSRParams</code>)</li>
+<li><strong><code>signal/synth</code></strong> -- Synthesizer voices and effects (<code>voice</code>, <code>fm-voice</code>, <code>wavetable-osc</code>, <code>karplus-strong</code>, presets, <code>effects-chain</code>, <code>step-sequencer</code>)</li>
+</ul>
+<hr />
+<h2 id="installation">Installation</h2>
+<p>Add <code>tur-signal</code> to your <code>build.tur</code> <code>:spices</code> block:</p>
+<pre><code class="language-turmeric">(defpackage my-app
+  :spices #{
+    &quot;signal&quot; #{:url    &quot;https://github.com/rjungemann/turmeric-spices&quot;
+               :ref    &quot;signal-v0.1.0&quot;
+               :subdir &quot;spices/signal&quot;}
+  })
+</code></pre>
+<p>Then fetch:</p>
+<pre><code class="language-sh">tur fetch
+</code></pre>
+<hr />
+<h2 id="quick-start">Quick Start</h2>
+<pre><code class="language-turmeric">(import signal/core)
+(import signal/dsp)
+(import signal/envelope)
+
+;; 440 Hz sine wave sampled at t=0.0
+(let [sine-sf (sine 440.0 0.0)
+      dummy   (constant ())
+      out     (sine-sf dummy)]
+  (println (out 0.0)))    ; =&gt; ~0.0
+
+;; Chained: sine -&gt; low-pass filter
+(let [osc     (sine 440.0 0.0)
+      filt    (low-pass 0.3)
+      sig     ((osc (constant ())))
+      filtered (filt sig)]
+  (println (filtered 0.001)))
+
+;; ADSR envelope
+(let [params (ADSRParams 0.01 0.1 0.7 0.3)
+      env    (adsr-fixed params 0.5)
+      out    (env (constant ()))]
+  (println (out 0.005)))  ; =&gt; ~0.5 (mid-attack)
+</code></pre>
+<hr />
+<h2 id="module-reference">Module Reference</h2>
+<h3 id="signalcore"><code>signal/core</code></h3>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>constant val</code></td>
+<td>Signal that always returns <code>val</code></td>
+</tr>
+<tr>
+<td><code>time-signal t</code></td>
+<td>Signal that returns <code>t</code> at each sample</td>
+</tr>
+<tr>
+<td><code>sample sig t</code></td>
+<td>Evaluate signal <code>sig</code> at time <code>t</code></td>
+</tr>
+<tr>
+<td><code>map-signal f sig</code></td>
+<td>Lift pure function <code>f</code> over signal pointwise</td>
+</tr>
+<tr>
+<td><code>pair-signals sig-a sig-b</code></td>
+<td>Zip two signals into a Pair signal</td>
+</tr>
+<tr>
+<td><code>left-signal sig</code></td>
+<td>Identity injection (Left branch placeholder)</td>
+</tr>
+<tr>
+<td><code>right-signal sig</code></td>
+<td>Identity injection (Right branch placeholder)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="signaldsp"><code>signal/dsp</code></h3>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sine freq phase</code></td>
+<td>Sine-wave SF at <code>freq</code> Hz with phase offset</td>
+</tr>
+<tr>
+<td><code>square freq duty</code></td>
+<td>Square-wave SF with duty cycle</td>
+</tr>
+<tr>
+<td><code>sawtooth freq</code></td>
+<td>Sawtooth-wave SF</td>
+</tr>
+<tr>
+<td><code>low-pass alpha</code></td>
+<td>First-order IIR low-pass filter SF</td>
+</tr>
+<tr>
+<td><code>high-pass alpha</code></td>
+<td>First-order IIR high-pass filter SF</td>
+</tr>
+<tr>
+<td><code>gain g</code></td>
+<td>Scale signal by constant factor <code>g</code></td>
+</tr>
+<tr>
+<td><code>mix alpha</code></td>
+<td>Weighted mix of a Pair signal</td>
+</tr>
+<tr>
+<td><code>add</code></td>
+<td>Sample-wise sum of a Pair signal</td>
+</tr>
+</tbody>
+</table>
+<h3 id="signalenvelope"><code>signal/envelope</code></h3>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ADSRParams attack decay sustain release</code></td>
+<td>ADSR parameter struct</td>
+</tr>
+<tr>
+<td><code>adsr-fixed params gate-duration</code></td>
+<td>Piecewise-linear ADSR envelope SF</td>
+</tr>
+</tbody>
+</table>
+<h3 id="signalsynth"><code>signal/synth</code></h3>
+<p>Synthesizer voices, wavetable oscillators, granular synthesis, FM, Karplus-Strong string model, effects chain, and step sequencer. See source for full API.</p>
+<hr />
+<h2 id="examples">Examples</h2>
+<p>Examples live in <code>examples/</code>:</p>
+<pre><code class="language-sh">cd ../turmeric-spices/spices/signal
+tur run examples/01_basics.tur
+tur run examples/02_signals.tur
+tur run examples/03_dsp.tur
+</code></pre>
+<hr />
+<h2 id="development">Development</h2>
+<pre><code class="language-sh">cd spices/signal
+tur check src/signal/synth.tur   # typecheck
+tur run tests/signal/arrow_tests.tur  # run tests
+</code></pre>
+    </div>
+  </div>
+  <footer class="site-footer">
+    Auto-generated by <code>tools/genspices.py (turmeric-spices)</code> &mdash; source: <code>spices/signal/README.md</code>
+  </footer>
+  <script>
+  (function(){
+    var KW = new Set([
+      'defn','defmacro','defstruct','definstance','defdata','defgadt','defclass','def','let','let*','letrec',
+      'if','cond','when','unless','do','begin','and','or','not',
+      'fn','lambda','async','await','match','case',
+      'quote','quasiquote','unquote','for','while','loop','do-m',
+      'set!','try','catch','finally','with','use',
+      'import','export','module','require','provide',
+      'cons','car','cdr','nil-value','some','none','ok','err',
+      'map','filter','reduce','apply','return','yield','raise','throw',
+      'coerce','cast','type-of','any',
+    ]);
+    function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function hl(code){
+      var out='', i=0, n=code.length;
+      while(i<n){
+        var c=code[i];
+        // Line comment
+        if(c===';'){
+          var e=code.indexOf('\n',i); if(e===-1)e=n;
+          out+='<span class="hl-comment">'+esc(code.slice(i,e))+'</span>'; i=e; continue;
+        }
+        // String
+        if(c==='"'){
+          var j=i+1;
+          while(j<n){if(code[j]==='\\'){j+=2;continue;}if(code[j]==='"'){j++;break;}j++;}
+          out+='<span class="hl-string">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Type annotation :keyword
+        if(c===':'&&i+1<n&&/[a-zA-Z_]/.test(code[i+1])){
+          var j=i+1;
+          while(j<n&&/[a-zA-Z0-9_\-?!]/.test(code[j]))j++;
+          out+='<span class="hl-type">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Number (integer or float, possibly negative)
+        if(/[0-9]/.test(c)||(c==='-'&&i+1<n&&/[0-9]/.test(code[i+1]))){
+          var j=i; if(code[j]==='-')j++;
+          while(j<n&&/[0-9a-fA-FxX_\.]/.test(code[j]))j++;
+          out+='<span class="hl-number">'+esc(code.slice(i,j))+'</span>'; i=j; continue;
+        }
+        // Symbol / identifier
+        if(/[a-zA-Z_\-!?*+<>=\/&%^~#@]/.test(c)){
+          var j=i;
+          while(j<n&&/[a-zA-Z0-9_\-!?*+<>=\/&%^~#@\.]/.test(code[j]))j++;
+          var sym=code.slice(i,j);
+          if(sym==='true'||sym==='false'||sym==='nil'){
+            out+='<span class="hl-number">'+esc(sym)+'</span>';
+          } else if(KW.has(sym)){
+            out+='<span class="hl-keyword">'+esc(sym)+'</span>';
+          } else {
+            out+=esc(sym);
+          }
+          i=j; continue;
+        }
+        out+=esc(c); i++;
+      }
+      return out;
+    }
+    document.querySelectorAll('pre code.language-turmeric, pre code.language-sweet-exp').forEach(function(el){
+      el.innerHTML=hl(el.textContent);
+    });
+  })();
+  </script>
+  <script>
+  (function(){
+    function applyToggle(toggle, syntax) {
+      var card = toggle.closest('.code-card');
+      if (!card) return;
+      toggle.querySelectorAll('.seg-btn').forEach(function(btn){
+        var active = btn.dataset.syntax === syntax;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      card.querySelectorAll('.code-version').forEach(function(v){
+        v.style.display = v.classList.contains(syntax + '-version') ? '' : 'none';
+      });
+    }
+
+    // ST1.5: restore stored preference across all cards on load
+    var stored = localStorage.getItem('guide-syntax');
+    if (stored) {
+      document.querySelectorAll('.code-syntax-toggle').forEach(function(t){ applyToggle(t, stored); });
+    }
+
+    document.querySelectorAll('.code-syntax-toggle').forEach(function(toggle){
+      // Click handler
+      toggle.addEventListener('click', function(e){
+        if (!e.target.classList.contains('seg-btn')) return;
+        var syntax = e.target.dataset.syntax;
+        document.querySelectorAll('.code-syntax-toggle').forEach(function(t){ applyToggle(t, syntax); });
+        localStorage.setItem('guide-syntax', syntax);
+      });
+      // ST5.2: arrow-key navigation within the tablist
+      toggle.addEventListener('keydown', function(e){
+        var btns = Array.from(toggle.querySelectorAll('.seg-btn'));
+        var idx = btns.indexOf(document.activeElement);
+        if (idx === -1) return;
+        if (e.key === 'ArrowRight'){ btns[(idx+1)%btns.length].focus(); e.preventDefault(); }
+        if (e.key === 'ArrowLeft') { btns[(idx-1+btns.length)%btns.length].focus(); e.preventDefault(); }
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

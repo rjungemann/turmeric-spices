@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/stats/rng | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#rng-make">rng-make</a></li>
+    <li><a href="#rng-clone">rng-clone</a></li>
+    <li><a href="#rng-free">rng-free</a></li>
+    <li><a href="#rng-uint32">rng-uint32</a></li>
+    <li><a href="#rng-uint64">rng-uint64</a></li>
+    <li><a href="#rng-uniform">rng-uniform</a></li>
+    <li><a href="#rng-uniform-range">rng-uniform-range</a></li>
+    <li><a href="#rng-int-range">rng-int-range</a></li>
+    <li><a href="#rng-shuffle_">rng-shuffle!</a></li>
+    <li><a href="#rng-shuffled">rng-shuffled</a></li>
+    <li><a href="#rng-sample-indices">rng-sample-indices</a></li>
+    <li><a href="#rng-sample">rng-sample</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>stats/rng</h1>
+    <div class="module-path">src/stats/rng.tur</div>
+  </div>
+<div class="def-card" id="rng-make">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-make</h2>
+  </div>
+  <pre class="def-signature">(rng-make [seed :int stream :int] :int)</pre>
+  <p class="def-summary">create a new PCG32 stream seeded with seed.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>seed</td><td></td><td>:int seed value; 0 uses a default fixed seed (PCG default)</td></tr>
+    <tr><td>stream</td><td></td><td>:int stream discriminator; use different values for independent streams</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  opaque rng handle.  Free with rng-free.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (rng-make 42 1)]
+    (rng-uniform r))   ; =&gt; deterministic float in [0,1)</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-clone">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-clone</h2>
+  </div>
+  <pre class="def-signature">(rng-clone [r :int] :int)</pre>
+  <p class="def-summary">create an independent copy of rng r at the same state.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int source rng handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  new rng handle at the same state.  Free with rng-free.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [a (rng-make 1 1)
+        b (rng-clone a)]
+    (= (rng-uniform a) (rng-uniform b)))  ; =&gt; true</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-free</h2>
+  </div>
+  <pre class="def-signature">(rng-free [r :int] :void)</pre>
+  <p class="def-summary">free a rng handle.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(rng-free (rng-make 1 1))</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-uint32">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-uint32</h2>
+  </div>
+  <pre class="def-signature">(rng-uint32 [r :int] :int)</pre>
+  <p class="def-summary">draw a uniform 32-bit integer from [0, 2^32).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  value in [0, 2^32).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(rng-uint32 (rng-make 1 1))  ; =&gt; some :int</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-uint64">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-uint64</h2>
+  </div>
+  <pre class="def-signature">(rng-uint64 [r :int] :int)</pre>
+  <p class="def-summary">draw a uniform 64-bit integer.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  64-bit random value (sign bit may be set).</p>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-uniform">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-uniform</h2>
+  </div>
+  <pre class="def-signature">(rng-uniform [r :int] :float)</pre>
+  <p class="def-summary">draw a uniform float in [0, 1).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float in [0, 1).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(rng-uniform (rng-make 42 1))</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-uniform-range">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-uniform-range</h2>
+  </div>
+  <pre class="def-signature">(rng-uniform-range [r :int lo :float hi :float] :float)</pre>
+  <p class="def-summary">draw a uniform float in [lo, hi).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    <tr><td>lo</td><td></td><td>:float lower bound (inclusive)</td></tr>
+    <tr><td>hi</td><td></td><td>:float upper bound (exclusive)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float in [lo, hi).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(rng-uniform-range r -1.0 1.0)</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-int-range">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-int-range</h2>
+  </div>
+  <pre class="def-signature">(rng-int-range [r :int lo :int hi :int] :int)</pre>
+  <p class="def-summary">draw a uniform integer in [lo, hi).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    <tr><td>lo</td><td></td><td>:int lower bound (inclusive)</td></tr>
+    <tr><td>hi</td><td></td><td>:int upper bound (exclusive)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int in [lo, hi).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(rng-int-range r 0 6)  ; =&gt; 0..5</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-shuffle_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-shuffle!</h2>
+  </div>
+  <pre class="def-signature">(rng-shuffle! [r :int indices :int] :void)</pre>
+  <p class="def-summary">in-place Fisher-Yates shuffle of a cons list of :int indices.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    <tr><td>indices</td><td></td><td>cons list of :int  (modified in-place)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [lst (cons 0 (cons 1 (cons 2 0)))]
+    (rng-shuffle! r lst))</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-shuffled">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-shuffled</h2>
+  </div>
+  <pre class="def-signature">(rng-shuffled [r :int indices :int] :int)</pre>
+  <p class="def-summary">return a new shuffled copy of a cons list of :int.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    <tr><td>indices</td><td></td><td>cons list of :int</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">New cons list of :int in shuffled order.  Caller owns the new list.</p>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-sample-indices">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-sample-indices</h2>
+  </div>
+  <pre class="def-signature">(rng-sample-indices [r :int n :int k :int with-replacement :int] :int)</pre>
+  <p class="def-summary">sample k indices from [0, n) with or without replacement.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    <tr><td>n</td><td></td><td>:int population size</td></tr>
+    <tr><td>k</td><td></td><td>:int sample size</td></tr>
+    <tr><td>with-replacement</td><td></td><td>:int  0 = without replacement, 1 = with replacement</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">cons list of :int  (k indices in [0, n)).  Caller frees.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(rng-sample-indices r 100 10 0)  ; =&gt; 10 distinct indices</pre>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+<div class="def-card" id="rng-sample">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>rng-sample</h2>
+  </div>
+  <pre class="def-signature">(rng-sample [r :int col :int n :int with-replacement :int] :int)</pre>
+  <p class="def-summary">sample n rows from a float64 column, with or without replacement.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int rng handle</td></tr>
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    <tr><td>n</td><td></td><td>:int  number of rows to sample</td></tr>
+    <tr><td>with-replacement</td><td></td><td>:int  0 = without, 1 = with</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  new float64 column of length n.  Caller frees.</p>
+  </div>
+  <p class="def-since">Since: ST0</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

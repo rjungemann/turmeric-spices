@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/tur/vec | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#vec">vec</a></li>
+    <li><a href="#vec--alloc-data">vec--alloc-data</a></li>
+    <li><a href="#vec--free-data">vec--free-data</a></li>
+    <li><a href="#vec-new">vec-new</a></li>
+    <li><a href="#vec-new-zeroed">vec-new-zeroed</a></li>
+    <li><a href="#vec-from-list">vec-from-list</a></li>
+    <li><a href="#vec-copy">vec-copy</a></li>
+    <li><a href="#vec-free">vec-free</a></li>
+    <li><a href="#vec-get">vec-get</a></li>
+    <li><a href="#vec-set_">vec-set!</a></li>
+    <li><a href="#vec-len">vec-len</a></li>
+    <li><a href="#vec-add">vec-add</a></li>
+    <li><a href="#vec-sub">vec-sub</a></li>
+    <li><a href="#vec-scale">vec-scale</a></li>
+    <li><a href="#vec-dot">vec-dot</a></li>
+    <li><a href="#vec-outer">vec-outer</a></li>
+    <li><a href="#vec-norm">vec-norm</a></li>
+    <li><a href="#vec-norm-1">vec-norm-1</a></li>
+    <li><a href="#vec-norm-inf">vec-norm-inf</a></li>
+    <li><a href="#vec-normalize">vec-normalize</a></li>
+    <li><a href="#vec-approx-eq_">vec-approx-eq?</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>tur/vec</h1>
+    <div class="module-path">src/linalg/vec.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">dynamic :float vector type (column vector)</p>
+  </div>
+<div class="def-card" id="vec">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defstruct">defstruct</span>
+    <h2>vec</h2>
+  </div>
+  <pre class="def-signature">(defstruct vec [])</pre>
+  <p class="def-summary">a 1-column mat; alias for column vectors.</p>
+</div>
+<div class="def-card" id="vec--alloc-data">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec--alloc-data</h2>
+  </div>
+  <pre class="def-signature">(vec--alloc-data [n] :int)</pre>
+  <p class="def-summary">Private helper: allocate float array</p>
+</div>
+<div class="def-card" id="vec--free-data">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec--free-data</h2>
+  </div>
+  <pre class="def-signature">(vec--free-data [data] :void)</pre>
+  <p class="def-summary">Private helper: free float array</p>
+</div>
+<div class="def-card" id="vec-new">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-new</h2>
+  </div>
+  <pre class="def-signature">(vec-new [n] :int)</pre>
+  <p class="def-summary">create an uninitialized vector of length n</p>
+</div>
+<div class="def-card" id="vec-new-zeroed">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-new-zeroed</h2>
+  </div>
+  <pre class="def-signature">(vec-new-zeroed [n] :int)</pre>
+  <p class="def-summary">create a zero-initialized vector of length n</p>
+</div>
+<div class="def-card" id="vec-from-list">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-from-list</h2>
+  </div>
+  <pre class="def-signature">(vec-from-list [xs] :int)</pre>
+  <p class="def-summary">create a vector from a cons list of floats</p>
+</div>
+<div class="def-card" id="vec-copy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-copy</h2>
+  </div>
+  <pre class="def-signature">(vec-copy [v] :int)</pre>
+  <p class="def-summary">create a deep copy of a vector</p>
+</div>
+<div class="def-card" id="vec-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-free</h2>
+  </div>
+  <pre class="def-signature">(vec-free [v] :void)</pre>
+  <p class="def-summary">free a vector</p>
+</div>
+<div class="def-card" id="vec-get">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-get</h2>
+  </div>
+  <pre class="def-signature">(vec-get [v i] :float)</pre>
+  <p class="def-summary">get element at index i with bounds checking</p>
+</div>
+<div class="def-card" id="vec-set_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-set!</h2>
+  </div>
+  <pre class="def-signature">(vec-set! [v i x] :void)</pre>
+  <p class="def-summary">set element at index i with bounds checking</p>
+</div>
+<div class="def-card" id="vec-len">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-len</h2>
+  </div>
+  <pre class="def-signature">(vec-len [v] :int)</pre>
+  <p class="def-summary">get vector length</p>
+</div>
+<div class="def-card" id="vec-add">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-add</h2>
+  </div>
+  <pre class="def-signature">(vec-add [a b] :int)</pre>
+  <p class="def-summary">Arithmetic operations</p>
+</div>
+<div class="def-card" id="vec-sub">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-sub</h2>
+  </div>
+  <pre class="def-signature">(vec-sub [a b] :int)</pre>
+  <p class="def-summary">element-wise vector subtraction</p>
+</div>
+<div class="def-card" id="vec-scale">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-scale</h2>
+  </div>
+  <pre class="def-signature">(vec-scale [v s] :int)</pre>
+  <p class="def-summary">scalar multiplication</p>
+</div>
+<div class="def-card" id="vec-dot">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-dot</h2>
+  </div>
+  <pre class="def-signature">(vec-dot [a b] :float)</pre>
+  <p class="def-summary">dot product</p>
+</div>
+<div class="def-card" id="vec-outer">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-outer</h2>
+  </div>
+  <pre class="def-signature">(vec-outer [a b] :int)</pre>
+  <p class="def-summary">outer product (returns a matrix)</p>
+</div>
+<div class="def-card" id="vec-norm">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-norm</h2>
+  </div>
+  <pre class="def-signature">(vec-norm [v] :float)</pre>
+  <p class="def-summary">Euclidean norm (L2 norm)</p>
+</div>
+<div class="def-card" id="vec-norm-1">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-norm-1</h2>
+  </div>
+  <pre class="def-signature">(vec-norm-1 [v] :float)</pre>
+  <p class="def-summary">L1 norm (sum of absolute values)</p>
+</div>
+<div class="def-card" id="vec-norm-inf">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-norm-inf</h2>
+  </div>
+  <pre class="def-signature">(vec-norm-inf [v] :float)</pre>
+  <p class="def-summary">L-infinity norm (maximum absolute value)</p>
+</div>
+<div class="def-card" id="vec-normalize">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-normalize</h2>
+  </div>
+  <pre class="def-signature">(vec-normalize [v] :int)</pre>
+  <p class="def-summary">normalize vector to unit length</p>
+</div>
+<div class="def-card" id="vec-approx-eq_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>vec-approx-eq?</h2>
+  </div>
+  <pre class="def-signature">(vec-approx-eq? [a b tol] :int)</pre>
+  <p class="def-summary">check if two vectors are approximately equal</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

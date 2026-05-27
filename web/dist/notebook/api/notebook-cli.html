@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/notebook/cli | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#cli-main">cli-main</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__cli-build-hint" style="color:var(--faint)">__cli-build-hint</a></li>
+    <li><a href="#__cli-nil-value" style="color:var(--faint)">__cli-nil-value</a></li>
+    <li><a href="#__cli-null-cstr" style="color:var(--faint)">__cli-null-cstr</a></li>
+    <li><a href="#__cli-list-nil?" style="color:var(--faint)">__cli-list-nil?</a></li>
+    <li><a href="#__cli-head" style="color:var(--faint)">__cli-head</a></li>
+    <li><a href="#__cli-tail" style="color:var(--faint)">__cli-tail</a></li>
+    <li><a href="#__cli-cstr-eq?" style="color:var(--faint)">__cli-cstr-eq?</a></li>
+    <li><a href="#__cli-cstr-null?" style="color:var(--faint)">__cli-cstr-null?</a></li>
+    <li><a href="#__cli-cstr-empty?" style="color:var(--faint)">__cli-cstr-empty?</a></li>
+    <li><a href="#__cli-puts" style="color:var(--faint)">__cli-puts</a></li>
+    <li><a href="#__cli-eputs" style="color:var(--faint)">__cli-eputs</a></li>
+    <li><a href="#__cli-result-ok?" style="color:var(--faint)">__cli-result-ok?</a></li>
+    <li><a href="#__cli-result-ok-cstr" style="color:var(--faint)">__cli-result-ok-cstr</a></li>
+    <li><a href="#__cli-result-ok-int" style="color:var(--faint)">__cli-result-ok-int</a></li>
+    <li><a href="#__cli-result-err-cstr" style="color:var(--faint)">__cli-result-err-cstr</a></li>
+    <li><a href="#__cli-pos-count" style="color:var(--faint)">__cli-pos-count</a></li>
+    <li><a href="#__cli-pos-first" style="color:var(--faint)">__cli-pos-first</a></li>
+    <li><a href="#__cli-pos-second" style="color:var(--faint)">__cli-pos-second</a></li>
+    <li><a href="#__cli-parse-state-make" style="color:var(--faint)">__cli-parse-state-make</a></li>
+    <li><a href="#__cli-state-command" style="color:var(--faint)">__cli-state-command</a></li>
+    <li><a href="#__cli-state-target" style="color:var(--faint)">__cli-state-target</a></li>
+    <li><a href="#__cli-state-path" style="color:var(--faint)">__cli-state-path</a></li>
+    <li><a href="#__cli-state-out" style="color:var(--faint)">__cli-state-out</a></li>
+    <li><a href="#__cli-state-error" style="color:var(--faint)">__cli-state-error</a></li>
+    <li><a href="#__cli-state-use-cache" style="color:var(--faint)">__cli-state-use-cache</a></li>
+    <li><a href="#__cli-state-watch" style="color:var(--faint)">__cli-state-watch</a></li>
+    <li><a href="#__cli-state-no-output" style="color:var(--faint)">__cli-state-no-output</a></li>
+    <li><a href="#__cli-state-no-source" style="color:var(--faint)">__cli-state-no-source</a></li>
+    <li><a href="#__cli-state-help" style="color:var(--faint)">__cli-state-help</a></li>
+    <li><a href="#__cli-state-set-command" style="color:var(--faint)">__cli-state-set-command</a></li>
+    <li><a href="#__cli-state-set-target" style="color:var(--faint)">__cli-state-set-target</a></li>
+    <li><a href="#__cli-state-set-path" style="color:var(--faint)">__cli-state-set-path</a></li>
+    <li><a href="#__cli-state-set-out" style="color:var(--faint)">__cli-state-set-out</a></li>
+    <li><a href="#__cli-state-set-error" style="color:var(--faint)">__cli-state-set-error</a></li>
+    <li><a href="#__cli-state-set-use-cache" style="color:var(--faint)">__cli-state-set-use-cache</a></li>
+    <li><a href="#__cli-state-set-watch" style="color:var(--faint)">__cli-state-set-watch</a></li>
+    <li><a href="#__cli-state-set-no-output" style="color:var(--faint)">__cli-state-set-no-output</a></li>
+    <li><a href="#__cli-state-set-no-source" style="color:var(--faint)">__cli-state-set-no-source</a></li>
+    <li><a href="#__cli-state-set-help" style="color:var(--faint)">__cli-state-set-help</a></li>
+    <li><a href="#__cli-state-keybindings-file" style="color:var(--faint)">__cli-state-keybindings-file</a></li>
+    <li><a href="#__cli-state-set-keybindings-file" style="color:var(--faint)">__cli-state-set-keybindings-file</a></li>
+    <li><a href="#__cli-state-no-color" style="color:var(--faint)">__cli-state-no-color</a></li>
+    <li><a href="#__cli-state-set-no-color" style="color:var(--faint)">__cli-state-set-no-color</a></li>
+    <li><a href="#__cli-prefix-value" style="color:var(--faint)">__cli-prefix-value</a></li>
+    <li><a href="#__cli-state-cell-id" style="color:var(--faint)">__cli-state-cell-id</a></li>
+    <li><a href="#__cli-state-exec-all" style="color:var(--faint)">__cli-state-exec-all</a></li>
+    <li><a href="#__cli-state-set-cell-id" style="color:var(--faint)">__cli-state-set-cell-id</a></li>
+    <li><a href="#__cli-state-set-exec-all" style="color:var(--faint)">__cli-state-set-exec-all</a></li>
+    <li><a href="#__cli-output-opts" style="color:var(--faint)">__cli-output-opts</a></li>
+    <li><a href="#__cli-print-help" style="color:var(--faint)">__cli-print-help</a></li>
+    <li><a href="#__cli-render-once" style="color:var(--faint)">__cli-render-once</a></li>
+    <li><a href="#__cli-watch-open" style="color:var(--faint)">__cli-watch-open</a></li>
+    <li><a href="#__cli-watch-close" style="color:var(--faint)">__cli-watch-close</a></li>
+    <li><a href="#__cli-watch-wait" style="color:var(--faint)">__cli-watch-wait</a></li>
+    <li><a href="#__cli-watch-loop" style="color:var(--faint)">__cli-watch-loop</a></li>
+    <li><a href="#__cli-render-or-watch" style="color:var(--faint)">__cli-render-or-watch</a></li>
+    <li><a href="#__cli-parse-positional" style="color:var(--faint)">__cli-parse-positional</a></li>
+    <li><a href="#__cli-parse-args" style="color:var(--faint)">__cli-parse-args</a></li>
+    <li><a href="#__cli-handle-render" style="color:var(--faint)">__cli-handle-render</a></li>
+    <li><a href="#__cli-handle-export" style="color:var(--faint)">__cli-handle-export</a></li>
+    <li><a href="#__cli-handle-tui" style="color:var(--faint)">__cli-handle-tui</a></li>
+    <li><a href="#__cli-cells-from-nodes" style="color:var(--faint)">__cli-cells-from-nodes</a></li>
+    <li><a href="#__cli-print-outputs" style="color:var(--faint)">__cli-print-outputs</a></li>
+    <li><a href="#__cli-file-exists?" style="color:var(--faint)">__cli-file-exists?</a></li>
+    <li><a href="#__cli-write-file" style="color:var(--faint)">__cli-write-file</a></li>
+    <li><a href="#__cli-handle-exec" style="color:var(--faint)">__cli-handle-exec</a></li>
+    <li><a href="#__cli-handle-new" style="color:var(--faint)">__cli-handle-new</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>notebook/cli</h1>
+    <div class="module-path">src/notebook/cli.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">command-line entrypoint for tur-notebook.</p>
+  </div>
+<div class="def-card" id="cli-main">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>cli-main</h2>
+  </div>
+  <pre class="def-signature">(cli-main [argv :int])</pre>
+  <p class="def-summary">parse notebook CLI args and execute the chosen subcommand.</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__cli-build-hint"><code>__cli-build-hint</code></div>
+  <div class="internal-item" id="__cli-nil-value"><code>__cli-nil-value</code></div>
+  <div class="internal-item" id="__cli-null-cstr"><code>__cli-null-cstr</code></div>
+  <div class="internal-item" id="__cli-list-nil_"><code>__cli-list-nil?</code></div>
+  <div class="internal-item" id="__cli-head"><code>__cli-head</code></div>
+  <div class="internal-item" id="__cli-tail"><code>__cli-tail</code></div>
+  <div class="internal-item" id="__cli-cstr-eq_"><code>__cli-cstr-eq?</code></div>
+  <div class="internal-item" id="__cli-cstr-null_"><code>__cli-cstr-null?</code></div>
+  <div class="internal-item" id="__cli-cstr-empty_"><code>__cli-cstr-empty?</code></div>
+  <div class="internal-item" id="__cli-puts"><code>__cli-puts</code></div>
+  <div class="internal-item" id="__cli-eputs"><code>__cli-eputs</code></div>
+  <div class="internal-item" id="__cli-result-ok_"><code>__cli-result-ok?</code></div>
+  <div class="internal-item" id="__cli-result-ok-cstr"><code>__cli-result-ok-cstr</code></div>
+  <div class="internal-item" id="__cli-result-ok-int"><code>__cli-result-ok-int</code></div>
+  <div class="internal-item" id="__cli-result-err-cstr"><code>__cli-result-err-cstr</code></div>
+  <div class="internal-item" id="__cli-pos-count"><code>__cli-pos-count</code></div>
+  <div class="internal-item" id="__cli-pos-first"><code>__cli-pos-first</code></div>
+  <div class="internal-item" id="__cli-pos-second"><code>__cli-pos-second</code></div>
+  <div class="internal-item" id="__cli-parse-state-make"><code>__cli-parse-state-make</code></div>
+  <div class="internal-item" id="__cli-state-command"><code>__cli-state-command</code></div>
+  <div class="internal-item" id="__cli-state-target"><code>__cli-state-target</code></div>
+  <div class="internal-item" id="__cli-state-path"><code>__cli-state-path</code></div>
+  <div class="internal-item" id="__cli-state-out"><code>__cli-state-out</code></div>
+  <div class="internal-item" id="__cli-state-error"><code>__cli-state-error</code></div>
+  <div class="internal-item" id="__cli-state-use-cache"><code>__cli-state-use-cache</code></div>
+  <div class="internal-item" id="__cli-state-watch"><code>__cli-state-watch</code></div>
+  <div class="internal-item" id="__cli-state-no-output"><code>__cli-state-no-output</code></div>
+  <div class="internal-item" id="__cli-state-no-source"><code>__cli-state-no-source</code></div>
+  <div class="internal-item" id="__cli-state-help"><code>__cli-state-help</code></div>
+  <div class="internal-item" id="__cli-state-set-command"><code>__cli-state-set-command</code></div>
+  <div class="internal-item" id="__cli-state-set-target"><code>__cli-state-set-target</code></div>
+  <div class="internal-item" id="__cli-state-set-path"><code>__cli-state-set-path</code></div>
+  <div class="internal-item" id="__cli-state-set-out"><code>__cli-state-set-out</code></div>
+  <div class="internal-item" id="__cli-state-set-error"><code>__cli-state-set-error</code></div>
+  <div class="internal-item" id="__cli-state-set-use-cache"><code>__cli-state-set-use-cache</code></div>
+  <div class="internal-item" id="__cli-state-set-watch"><code>__cli-state-set-watch</code></div>
+  <div class="internal-item" id="__cli-state-set-no-output"><code>__cli-state-set-no-output</code></div>
+  <div class="internal-item" id="__cli-state-set-no-source"><code>__cli-state-set-no-source</code></div>
+  <div class="internal-item" id="__cli-state-set-help"><code>__cli-state-set-help</code></div>
+  <div class="internal-item" id="__cli-state-keybindings-file"><code>__cli-state-keybindings-file</code></div>
+  <div class="internal-item" id="__cli-state-set-keybindings-file"><code>__cli-state-set-keybindings-file</code></div>
+  <div class="internal-item" id="__cli-state-no-color"><code>__cli-state-no-color</code></div>
+  <div class="internal-item" id="__cli-state-set-no-color"><code>__cli-state-set-no-color</code></div>
+  <div class="internal-item" id="__cli-prefix-value"><code>__cli-prefix-value</code></div>
+  <div class="internal-item" id="__cli-state-cell-id"><code>__cli-state-cell-id</code></div>
+  <div class="internal-item" id="__cli-state-exec-all"><code>__cli-state-exec-all</code></div>
+  <div class="internal-item" id="__cli-state-set-cell-id"><code>__cli-state-set-cell-id</code></div>
+  <div class="internal-item" id="__cli-state-set-exec-all"><code>__cli-state-set-exec-all</code></div>
+  <div class="internal-item" id="__cli-output-opts"><code>__cli-output-opts</code></div>
+  <div class="internal-item" id="__cli-print-help"><code>__cli-print-help</code></div>
+  <div class="internal-item" id="__cli-render-once"><code>__cli-render-once</code></div>
+  <div class="internal-item" id="__cli-watch-open"><code>__cli-watch-open</code></div>
+  <div class="internal-item" id="__cli-watch-close"><code>__cli-watch-close</code></div>
+  <div class="internal-item" id="__cli-watch-wait"><code>__cli-watch-wait</code></div>
+  <div class="internal-item" id="__cli-watch-loop"><code>__cli-watch-loop</code></div>
+  <div class="internal-item" id="__cli-render-or-watch"><code>__cli-render-or-watch</code></div>
+  <div class="internal-item" id="__cli-parse-positional"><code>__cli-parse-positional</code></div>
+  <div class="internal-item" id="__cli-parse-args"><code>__cli-parse-args</code></div>
+  <div class="internal-item" id="__cli-handle-render"><code>__cli-handle-render</code></div>
+  <div class="internal-item" id="__cli-handle-export"><code>__cli-handle-export</code></div>
+  <div class="internal-item" id="__cli-handle-tui"><code>__cli-handle-tui</code></div>
+  <div class="internal-item" id="__cli-cells-from-nodes"><code>__cli-cells-from-nodes</code></div>
+  <div class="internal-item" id="__cli-print-outputs"><code>__cli-print-outputs</code></div>
+  <div class="internal-item" id="__cli-file-exists_"><code>__cli-file-exists?</code></div>
+  <div class="internal-item" id="__cli-write-file"><code>__cli-write-file</code></div>
+  <div class="internal-item" id="__cli-handle-exec"><code>__cli-handle-exec</code></div>
+  <div class="internal-item" id="__cli-handle-new"><code>__cli-handle-new</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

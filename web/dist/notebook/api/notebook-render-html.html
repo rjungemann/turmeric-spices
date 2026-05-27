@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/notebook/render-html | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#render-html-string-at">render-html-string-at</a></li>
+    <li><a href="#render-html-string">render-html-string</a></li>
+    <li><a href="#render-html">render-html</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__rhtml-build-hint" style="color:var(--faint)">__rhtml-build-hint</a></li>
+    <li><a href="#__rhtml-nil-value" style="color:var(--faint)">__rhtml-nil-value</a></li>
+    <li><a href="#__rhtml-list-nil?" style="color:var(--faint)">__rhtml-list-nil?</a></li>
+    <li><a href="#__rhtml-cons" style="color:var(--faint)">__rhtml-cons</a></li>
+    <li><a href="#__rhtml-head" style="color:var(--faint)">__rhtml-head</a></li>
+    <li><a href="#__rhtml-tail" style="color:var(--faint)">__rhtml-tail</a></li>
+    <li><a href="#__rhtml-ok" style="color:var(--faint)">__rhtml-ok</a></li>
+    <li><a href="#__rhtml-err" style="color:var(--faint)">__rhtml-err</a></li>
+    <li><a href="#__rhtml-result-ok?" style="color:var(--faint)">__rhtml-result-ok?</a></li>
+    <li><a href="#__rhtml-result-ok-val" style="color:var(--faint)">__rhtml-result-ok-val</a></li>
+    <li><a href="#__rhtml-cstr-as-int" style="color:var(--faint)">__rhtml-cstr-as-int</a></li>
+    <li><a href="#__rhtml-int-as-cstr" style="color:var(--faint)">__rhtml-int-as-cstr</a></li>
+    <li><a href="#__rhtml-cstr-empty?" style="color:var(--faint)">__rhtml-cstr-empty?</a></li>
+    <li><a href="#__rhtml-cstr-eq?" style="color:var(--faint)">__rhtml-cstr-eq?</a></li>
+    <li><a href="#__rhtml-str-concat" style="color:var(--faint)">__rhtml-str-concat</a></li>
+    <li><a href="#__rhtml-join-blocks" style="color:var(--faint)">__rhtml-join-blocks</a></li>
+    <li><a href="#__rhtml-output-path" style="color:var(--faint)">__rhtml-output-path</a></li>
+    <li><a href="#__rhtml-style-path" style="color:var(--faint)">__rhtml-style-path</a></li>
+    <li><a href="#__rhtml-ensure-parent-dir" style="color:var(--faint)">__rhtml-ensure-parent-dir</a></li>
+    <li><a href="#__rhtml-write-file" style="color:var(--faint)">__rhtml-write-file</a></li>
+    <li><a href="#__rhtml-close-cache" style="color:var(--faint)">__rhtml-close-cache</a></li>
+    <li><a href="#__rhtml-render-opts-output-dir" style="color:var(--faint)">__rhtml-render-opts-output-dir</a></li>
+    <li><a href="#__rhtml-render-opts-use-cache" style="color:var(--faint)">__rhtml-render-opts-use-cache</a></li>
+    <li><a href="#__rhtml-render-opts-include-source" style="color:var(--faint)">__rhtml-render-opts-include-source</a></li>
+    <li><a href="#__rhtml-render-opts-include-output" style="color:var(--faint)">__rhtml-render-opts-include-output</a></li>
+    <li><a href="#__rhtml-render-opts-fail-fast" style="color:var(--faint)">__rhtml-render-opts-fail-fast</a></li>
+    <li><a href="#__rhtml-lang-label" style="color:var(--faint)">__rhtml-lang-label</a></li>
+    <li><a href="#__rhtml-status-label" style="color:var(--faint)">__rhtml-status-label</a></li>
+    <li><a href="#__rhtml-cell-class" style="color:var(--faint)">__rhtml-cell-class</a></li>
+    <li><a href="#__rhtml-html-escape" style="color:var(--faint)">__rhtml-html-escape</a></li>
+    <li><a href="#__rhtml-page-title" style="color:var(--faint)">__rhtml-page-title</a></li>
+    <li><a href="#__rhtml-style-css" style="color:var(--faint)">__rhtml-style-css</a></li>
+    <li><a href="#__rhtml-toggle-script" style="color:var(--faint)">__rhtml-toggle-script</a></li>
+    <li><a href="#__rhtml-render-source-pre" style="color:var(--faint)">__rhtml-render-source-pre</a></li>
+    <li><a href="#__rhtml-output-skipped?" style="color:var(--faint)">__rhtml-output-skipped?</a></li>
+    <li><a href="#__rhtml-output-meta" style="color:var(--faint)">__rhtml-output-meta</a></li>
+    <li><a href="#__rhtml-output-body" style="color:var(--faint)">__rhtml-output-body</a></li>
+    <li><a href="#__rhtml-render-output-pre" style="color:var(--faint)">__rhtml-render-output-pre</a></li>
+    <li><a href="#__rhtml-int-&gt;cstr" style="color:var(--faint)">__rhtml-int-&gt;cstr</a></li>
+    <li><a href="#__rhtml-copy-file" style="color:var(--faint)">__rhtml-copy-file</a></li>
+    <li><a href="#__rhtml-png-data-url" style="color:var(--faint)">__rhtml-png-data-url</a></li>
+    <li><a href="#__rhtml-image-rel-name" style="color:var(--faint)">__rhtml-image-rel-name</a></li>
+    <li><a href="#__rhtml-dir-join" style="color:var(--faint)">__rhtml-dir-join</a></li>
+    <li><a href="#__rhtml-output-dir" style="color:var(--faint)">__rhtml-output-dir</a></li>
+    <li><a href="#__rhtml-render-image-block" style="color:var(--faint)">__rhtml-render-image-block</a></li>
+    <li><a href="#__rhtml-cell-shows-source?" style="color:var(--faint)">__rhtml-cell-shows-source?</a></li>
+    <li><a href="#__rhtml-cell-shows-output?" style="color:var(--faint)">__rhtml-cell-shows-output?</a></li>
+    <li><a href="#__rhtml-render-cell-content" style="color:var(--faint)">__rhtml-render-cell-content</a></li>
+    <li><a href="#__rhtml-render-single-cell" style="color:var(--faint)">__rhtml-render-single-cell</a></li>
+    <li><a href="#__rhtml-should-toggle-pair?" style="color:var(--faint)">__rhtml-should-toggle-pair?</a></li>
+    <li><a href="#__rhtml-toggle-button" style="color:var(--faint)">__rhtml-toggle-button</a></li>
+    <li><a href="#__rhtml-toggle-panel" style="color:var(--faint)">__rhtml-toggle-panel</a></li>
+    <li><a href="#__rhtml-render-toggle-pair" style="color:var(--faint)">__rhtml-render-toggle-pair</a></li>
+    <li><a href="#__rhtml-render-state-make" style="color:var(--faint)">__rhtml-render-state-make</a></li>
+    <li><a href="#__rhtml-render-state-text" style="color:var(--faint)">__rhtml-render-state-text</a></li>
+    <li><a href="#__rhtml-render-state-outputs" style="color:var(--faint)">__rhtml-render-state-outputs</a></li>
+    <li><a href="#__rhtml-render-body" style="color:var(--faint)">__rhtml-render-body</a></li>
+    <li><a href="#__rhtml-cells-from-nodes-rev" style="color:var(--faint)">__rhtml-cells-from-nodes-rev</a></li>
+    <li><a href="#__rhtml-reverse" style="color:var(--faint)">__rhtml-reverse</a></li>
+    <li><a href="#__rhtml-cells-from-nodes" style="color:var(--faint)">__rhtml-cells-from-nodes</a></li>
+    <li><a href="#__rhtml-list-length" style="color:var(--faint)">__rhtml-list-length</a></li>
+    <li><a href="#__rhtml-document" style="color:var(--faint)">__rhtml-document</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>notebook/render-html</h1>
+    <div class="module-path">src/notebook/render-html.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">render notebook documents to standalone HTML.</p>
+  </div>
+<div class="def-card" id="render-html-string-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-html-string-at</h2>
+  </div>
+  <pre class="def-signature">(render-html-string-at [nodes :int outputs :int opts :int html_path :cstr])</pre>
+  <p class="def-summary">render a parsed notebook to HTML as if writing html_path.</p>
+</div>
+<div class="def-card" id="render-html-string">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-html-string</h2>
+  </div>
+  <pre class="def-signature">(render-html-string [nodes :int outputs :int opts :int])</pre>
+  <p class="def-summary">render a parsed notebook and its outputs to standalone HTML.</p>
+</div>
+<div class="def-card" id="render-html">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>render-html</h2>
+  </div>
+  <pre class="def-signature">(render-html [path :cstr opts :int])</pre>
+  <p class="def-summary">evaluate a notebook file and write rendered HTML beside it.</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__rhtml-build-hint"><code>__rhtml-build-hint</code></div>
+  <div class="internal-item" id="__rhtml-nil-value"><code>__rhtml-nil-value</code></div>
+  <div class="internal-item" id="__rhtml-list-nil_"><code>__rhtml-list-nil?</code></div>
+  <div class="internal-item" id="__rhtml-cons"><code>__rhtml-cons</code></div>
+  <div class="internal-item" id="__rhtml-head"><code>__rhtml-head</code></div>
+  <div class="internal-item" id="__rhtml-tail"><code>__rhtml-tail</code></div>
+  <div class="internal-item" id="__rhtml-ok"><code>__rhtml-ok</code></div>
+  <div class="internal-item" id="__rhtml-err"><code>__rhtml-err</code></div>
+  <div class="internal-item" id="__rhtml-result-ok_"><code>__rhtml-result-ok?</code></div>
+  <div class="internal-item" id="__rhtml-result-ok-val"><code>__rhtml-result-ok-val</code></div>
+  <div class="internal-item" id="__rhtml-cstr-as-int"><code>__rhtml-cstr-as-int</code></div>
+  <div class="internal-item" id="__rhtml-int-as-cstr"><code>__rhtml-int-as-cstr</code></div>
+  <div class="internal-item" id="__rhtml-cstr-empty_"><code>__rhtml-cstr-empty?</code></div>
+  <div class="internal-item" id="__rhtml-cstr-eq_"><code>__rhtml-cstr-eq?</code></div>
+  <div class="internal-item" id="__rhtml-str-concat"><code>__rhtml-str-concat</code></div>
+  <div class="internal-item" id="__rhtml-join-blocks"><code>__rhtml-join-blocks</code></div>
+  <div class="internal-item" id="__rhtml-output-path"><code>__rhtml-output-path</code></div>
+  <div class="internal-item" id="__rhtml-style-path"><code>__rhtml-style-path</code></div>
+  <div class="internal-item" id="__rhtml-ensure-parent-dir"><code>__rhtml-ensure-parent-dir</code></div>
+  <div class="internal-item" id="__rhtml-write-file"><code>__rhtml-write-file</code></div>
+  <div class="internal-item" id="__rhtml-close-cache"><code>__rhtml-close-cache</code></div>
+  <div class="internal-item" id="__rhtml-render-opts-output-dir"><code>__rhtml-render-opts-output-dir</code></div>
+  <div class="internal-item" id="__rhtml-render-opts-use-cache"><code>__rhtml-render-opts-use-cache</code></div>
+  <div class="internal-item" id="__rhtml-render-opts-include-source"><code>__rhtml-render-opts-include-source</code></div>
+  <div class="internal-item" id="__rhtml-render-opts-include-output"><code>__rhtml-render-opts-include-output</code></div>
+  <div class="internal-item" id="__rhtml-render-opts-fail-fast"><code>__rhtml-render-opts-fail-fast</code></div>
+  <div class="internal-item" id="__rhtml-lang-label"><code>__rhtml-lang-label</code></div>
+  <div class="internal-item" id="__rhtml-status-label"><code>__rhtml-status-label</code></div>
+  <div class="internal-item" id="__rhtml-cell-class"><code>__rhtml-cell-class</code></div>
+  <div class="internal-item" id="__rhtml-html-escape"><code>__rhtml-html-escape</code></div>
+  <div class="internal-item" id="__rhtml-page-title"><code>__rhtml-page-title</code></div>
+  <div class="internal-item" id="__rhtml-style-css"><code>__rhtml-style-css</code></div>
+  <div class="internal-item" id="__rhtml-toggle-script"><code>__rhtml-toggle-script</code></div>
+  <div class="internal-item" id="__rhtml-render-source-pre"><code>__rhtml-render-source-pre</code></div>
+  <div class="internal-item" id="__rhtml-output-skipped_"><code>__rhtml-output-skipped?</code></div>
+  <div class="internal-item" id="__rhtml-output-meta"><code>__rhtml-output-meta</code></div>
+  <div class="internal-item" id="__rhtml-output-body"><code>__rhtml-output-body</code></div>
+  <div class="internal-item" id="__rhtml-render-output-pre"><code>__rhtml-render-output-pre</code></div>
+  <div class="internal-item" id="__rhtml-int-_cstr"><code>__rhtml-int-&gt;cstr</code></div>
+  <div class="internal-item" id="__rhtml-copy-file"><code>__rhtml-copy-file</code></div>
+  <div class="internal-item" id="__rhtml-png-data-url"><code>__rhtml-png-data-url</code></div>
+  <div class="internal-item" id="__rhtml-image-rel-name"><code>__rhtml-image-rel-name</code></div>
+  <div class="internal-item" id="__rhtml-dir-join"><code>__rhtml-dir-join</code></div>
+  <div class="internal-item" id="__rhtml-output-dir"><code>__rhtml-output-dir</code></div>
+  <div class="internal-item" id="__rhtml-render-image-block"><code>__rhtml-render-image-block</code></div>
+  <div class="internal-item" id="__rhtml-cell-shows-source_"><code>__rhtml-cell-shows-source?</code></div>
+  <div class="internal-item" id="__rhtml-cell-shows-output_"><code>__rhtml-cell-shows-output?</code></div>
+  <div class="internal-item" id="__rhtml-render-cell-content"><code>__rhtml-render-cell-content</code></div>
+  <div class="internal-item" id="__rhtml-render-single-cell"><code>__rhtml-render-single-cell</code></div>
+  <div class="internal-item" id="__rhtml-should-toggle-pair_"><code>__rhtml-should-toggle-pair?</code></div>
+  <div class="internal-item" id="__rhtml-toggle-button"><code>__rhtml-toggle-button</code></div>
+  <div class="internal-item" id="__rhtml-toggle-panel"><code>__rhtml-toggle-panel</code></div>
+  <div class="internal-item" id="__rhtml-render-toggle-pair"><code>__rhtml-render-toggle-pair</code></div>
+  <div class="internal-item" id="__rhtml-render-state-make"><code>__rhtml-render-state-make</code></div>
+  <div class="internal-item" id="__rhtml-render-state-text"><code>__rhtml-render-state-text</code></div>
+  <div class="internal-item" id="__rhtml-render-state-outputs"><code>__rhtml-render-state-outputs</code></div>
+  <div class="internal-item" id="__rhtml-render-body"><code>__rhtml-render-body</code></div>
+  <div class="internal-item" id="__rhtml-cells-from-nodes-rev"><code>__rhtml-cells-from-nodes-rev</code></div>
+  <div class="internal-item" id="__rhtml-reverse"><code>__rhtml-reverse</code></div>
+  <div class="internal-item" id="__rhtml-cells-from-nodes"><code>__rhtml-cells-from-nodes</code></div>
+  <div class="internal-item" id="__rhtml-list-length"><code>__rhtml-list-length</code></div>
+  <div class="internal-item" id="__rhtml-document"><code>__rhtml-document</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

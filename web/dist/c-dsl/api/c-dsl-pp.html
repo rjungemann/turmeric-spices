@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/c-dsl/pp | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#c-include">c-include</a></li>
+    <li><a href="#c-include-sys">c-include-sys</a></li>
+    <li><a href="#c-define">c-define</a></li>
+    <li><a href="#c-define-fn">c-define-fn</a></li>
+    <li><a href="#c-undef">c-undef</a></li>
+    <li><a href="#c-ifdef">c-ifdef</a></li>
+    <li><a href="#c-ifndef">c-ifndef</a></li>
+    <li><a href="#c-if-pp">c-if-pp</a></li>
+    <li><a href="#c-static-assert">c-static-assert</a></li>
+    <li><a href="#c-pragma">c-pragma</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>c-dsl/pp</h1>
+    <div class="module-path">src/c-dsl/pp.tur</div>
+  </div>
+<div class="def-card" id="c-include">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-include</h2>
+  </div>
+  <pre class="def-signature">(c-include [header :cstr] :cstr)</pre>
+  <p class="def-summary">emit a #include directive for a local or system header.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>header</td><td></td><td>header filename string (without angle brackets or quotes)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#include \&quot;header\&quot;&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-include &quot;mylib.h&quot;)  ; =&gt; &quot;#include \&quot;mylib.h\&quot;&quot;</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-include-sys">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-include-sys</h2>
+  </div>
+  <pre class="def-signature">(c-include-sys [header :cstr] :cstr)</pre>
+  <p class="def-summary">emit a #include directive for a system header.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>header</td><td></td><td>system header filename string (without angle brackets)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#include &lt;header&gt;&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-include-sys &quot;stdio.h&quot;)  ; =&gt; &quot;#include &lt;stdio.h&gt;&quot;</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-define">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-define</h2>
+  </div>
+  <pre class="def-signature">(c-define [name :cstr value :cstr] :cstr)</pre>
+  <p class="def-summary">emit a simple #define directive.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>name</td><td></td><td>macro name string</td></tr>
+    <tr><td>value</td><td></td><td>replacement string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#define name value&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-define &quot;PI&quot; &quot;3.14159f&quot;)  ; =&gt; &quot;#define PI 3.14159f&quot;</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-define-fn">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-define-fn</h2>
+  </div>
+  <pre class="def-signature">(c-define-fn [signature :cstr body :cstr] :cstr)</pre>
+  <p class="def-summary">emit a function-like #define directive.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>signature</td><td></td><td>macro signature string including params (e.g. &quot;MAX(a,b)&quot;)</td></tr>
+    <tr><td>body</td><td></td><td>macro body string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#define signature body&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-define-fn &quot;MAX(a,b)&quot; &quot;((a)&gt;(b)?(a):(b))&quot;)
+  ; =&gt; &quot;#define MAX(a,b) ((a)&gt;(b)?(a):(b))&quot;</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-undef">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-undef</h2>
+  </div>
+  <pre class="def-signature">(c-undef [name :cstr] :cstr)</pre>
+  <p class="def-summary">emit a #undef directive.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>name</td><td></td><td>macro name to undefine</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#undef name&quot;</p>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-ifdef">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-ifdef</h2>
+  </div>
+  <pre class="def-signature">(c-ifdef [guard :cstr body :cstr] :cstr)</pre>
+  <p class="def-summary">emit an #ifdef / #endif guarded block.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>guard</td><td></td><td>preprocessor symbol name string</td></tr>
+    <tr><td>body</td><td></td><td>body string to wrap</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#ifdef guard\nbody\n#endif&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-ifdef &quot;DEBUG&quot; (c-call-stmt &quot;printf&quot; ...))</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-ifndef">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-ifndef</h2>
+  </div>
+  <pre class="def-signature">(c-ifndef [guard :cstr body :cstr] :cstr)</pre>
+  <p class="def-summary">emit an #ifndef / #endif guarded block.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>guard</td><td></td><td>preprocessor symbol name string</td></tr>
+    <tr><td>body</td><td></td><td>body string to wrap</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#ifndef guard\nbody\n#endif&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-ifndef &quot;MY_HEADER_H&quot; &quot;#define MY_HEADER_H\n...&quot;)</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-if-pp">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-if-pp</h2>
+  </div>
+  <pre class="def-signature">(c-if-pp [cond :cstr body :cstr] :cstr)</pre>
+  <p class="def-summary">emit a #if / #endif guarded block.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>cond</td><td></td><td>preprocessor condition expression string</td></tr>
+    <tr><td>body</td><td></td><td>body string to wrap</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#if cond\nbody\n#endif&quot;</p>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-static-assert">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-static-assert</h2>
+  </div>
+  <pre class="def-signature">(c-static-assert [expr :cstr msg :cstr] :cstr)</pre>
+  <p class="def-summary">emit a static_assert declaration.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>expr</td><td></td><td>compile-time expression string</td></tr>
+    <tr><td>msg</td><td></td><td>assertion message string (with quotes if needed)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;static_assert(expr, msg);&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-static-assert &quot;sizeof(int32_t) == 4&quot; &quot;\&quot;int32_t must be 4 bytes\&quot;&quot;)</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+<div class="def-card" id="c-pragma">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>c-pragma</h2>
+  </div>
+  <pre class="def-signature">(c-pragma [args :cstr] :cstr)</pre>
+  <p class="def-summary">emit a #pragma directive.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>args</td><td></td><td>pragma arguments string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">&quot;#pragma args&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(c-pragma &quot;once&quot;)  ; =&gt; &quot;#pragma once&quot;</pre>
+  </div>
+  <p class="def-since">Since: P1</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

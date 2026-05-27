@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/stats/summary | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#col-count">col-count</a></li>
+    <li><a href="#col-sum">col-sum</a></li>
+    <li><a href="#col-mean">col-mean</a></li>
+    <li><a href="#col-median">col-median</a></li>
+    <li><a href="#col-mode">col-mode</a></li>
+    <li><a href="#col-var">col-var</a></li>
+    <li><a href="#col-sd">col-sd</a></li>
+    <li><a href="#col-min">col-min</a></li>
+    <li><a href="#col-max">col-max</a></li>
+    <li><a href="#col-range">col-range</a></li>
+    <li><a href="#col-quantile">col-quantile</a></li>
+    <li><a href="#col-iqr">col-iqr</a></li>
+    <li><a href="#col-skewness">col-skewness</a></li>
+    <li><a href="#col-kurtosis">col-kurtosis</a></li>
+    <li><a href="#frame-count">frame-count</a></li>
+    <li><a href="#frame-sum">frame-sum</a></li>
+    <li><a href="#frame-mean">frame-mean</a></li>
+    <li><a href="#frame-median">frame-median</a></li>
+    <li><a href="#frame-mode">frame-mode</a></li>
+    <li><a href="#frame-var">frame-var</a></li>
+    <li><a href="#frame-sd">frame-sd</a></li>
+    <li><a href="#frame-min">frame-min</a></li>
+    <li><a href="#frame-max">frame-max</a></li>
+    <li><a href="#frame-range">frame-range</a></li>
+    <li><a href="#frame-quantile">frame-quantile</a></li>
+    <li><a href="#frame-iqr">frame-iqr</a></li>
+    <li><a href="#frame-skewness">frame-skewness</a></li>
+    <li><a href="#frame-kurtosis">frame-kurtosis</a></li>
+    <li><a href="#describe">describe</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__frame-col-by-name" style="color:var(--faint)">__frame-col-by-name</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>stats/summary</h1>
+    <div class="module-path">src/stats/summary.tur</div>
+  </div>
+<div class="def-card" id="col-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-count</h2>
+  </div>
+  <pre class="def-signature">(col-count [col :int] :int)</pre>
+  <p class="def-summary">count non-null values in a float64 column.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  number of non-null elements.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(col-count c)  ; =&gt; 100</pre>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-sum">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-sum</h2>
+  </div>
+  <pre class="def-signature">(col-sum [col :int] :float)</pre>
+  <p class="def-summary">sum of non-null values in a float64 column.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  sum (0.0 if all null / empty).</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-mean">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-mean</h2>
+  </div>
+  <pre class="def-signature">(col-mean [col :int] :float)</pre>
+  <p class="def-summary">arithmetic mean of non-null values.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  mean, or NaN if empty.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-median">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-median</h2>
+  </div>
+  <pre class="def-signature">(col-median [col :int] :float)</pre>
+  <p class="def-summary">median of non-null values (type-7 interpolation).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  median, or NaN if empty.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-mode">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-mode</h2>
+  </div>
+  <pre class="def-signature">(col-mode [col :int] :float)</pre>
+  <p class="def-summary">most frequent value (first occurrence on tie).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  mode, or NaN if empty.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-var">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-var</h2>
+  </div>
+  <pre class="def-signature">(col-var [col :int] :float)</pre>
+  <p class="def-summary">sample variance (n-1 denominator) of non-null values.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  variance, or NaN if fewer than 2 values.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-sd">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-sd</h2>
+  </div>
+  <pre class="def-signature">(col-sd [col :int] :float)</pre>
+  <p class="def-summary">sample standard deviation of non-null values.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  standard deviation, or NaN if fewer than 2 values.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-min">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-min</h2>
+  </div>
+  <pre class="def-signature">(col-min [col :int] :float)</pre>
+  <p class="def-summary">minimum non-null value.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  minimum, or NaN if empty.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-max">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-max</h2>
+  </div>
+  <pre class="def-signature">(col-max [col :int] :float)</pre>
+  <p class="def-summary">maximum non-null value.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  maximum, or NaN if empty.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-range">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-range</h2>
+  </div>
+  <pre class="def-signature">(col-range [col :int] :float)</pre>
+  <p class="def-summary">max - min of non-null values.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  range, or NaN if empty.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-quantile">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-quantile</h2>
+  </div>
+  <pre class="def-signature">(col-quantile [col :int q :float] :float)</pre>
+  <p class="def-summary">quantile via type-7 linear interpolation.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int   tur-frame float64 column handle</td></tr>
+    <tr><td>q</td><td></td><td>:float quantile in [0, 1]</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  quantile value, or NaN if empty.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(col-quantile c 0.25)  ; =&gt; first quartile</pre>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-iqr">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-iqr</h2>
+  </div>
+  <pre class="def-signature">(col-iqr [col :int] :float)</pre>
+  <p class="def-summary">interquartile range (Q3 - Q1).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  IQR, or NaN if empty.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-skewness">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-skewness</h2>
+  </div>
+  <pre class="def-signature">(col-skewness [col :int] :float)</pre>
+  <p class="def-summary">Fisher-Pearson skewness coefficient.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  skewness, or NaN if fewer than 3 values.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="col-kurtosis">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>col-kurtosis</h2>
+  </div>
+  <pre class="def-signature">(col-kurtosis [col :int] :float)</pre>
+  <p class="def-summary">excess kurtosis (Fisher&#x27;s definition, = 0 for normal).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>col</td><td></td><td>:int  tur-frame float64 column handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:float  excess kurtosis, or NaN if fewer than 4 values.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-count</h2>
+  </div>
+  <pre class="def-signature">(frame-count [f :int name :cstr] :int)</pre>
+  <p class="def-summary">count non-null values in a named column of a frame.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>f</td><td></td><td>:int  frame handle</td></tr>
+    <tr><td>name</td><td></td><td>:cstr column name</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  non-null count, or -1 if column not found.</p>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-sum">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-sum</h2>
+  </div>
+  <pre class="def-signature">(frame-sum [f :int name :cstr] :float)</pre>
+  <p class="def-summary">sum of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-mean">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-mean</h2>
+  </div>
+  <pre class="def-signature">(frame-mean [f :int name :cstr] :float)</pre>
+  <p class="def-summary">mean of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-median">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-median</h2>
+  </div>
+  <pre class="def-signature">(frame-median [f :int name :cstr] :float)</pre>
+  <p class="def-summary">median of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-mode">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-mode</h2>
+  </div>
+  <pre class="def-signature">(frame-mode [f :int name :cstr] :float)</pre>
+  <p class="def-summary">mode of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-var">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-var</h2>
+  </div>
+  <pre class="def-signature">(frame-var [f :int name :cstr] :float)</pre>
+  <p class="def-summary">sample variance of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-sd">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-sd</h2>
+  </div>
+  <pre class="def-signature">(frame-sd [f :int name :cstr] :float)</pre>
+  <p class="def-summary">sample standard deviation of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-min">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-min</h2>
+  </div>
+  <pre class="def-signature">(frame-min [f :int name :cstr] :float)</pre>
+  <p class="def-summary">minimum of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-max">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-max</h2>
+  </div>
+  <pre class="def-signature">(frame-max [f :int name :cstr] :float)</pre>
+  <p class="def-summary">maximum of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-range">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-range</h2>
+  </div>
+  <pre class="def-signature">(frame-range [f :int name :cstr] :float)</pre>
+  <p class="def-summary">range (max-min) of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-quantile">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-quantile</h2>
+  </div>
+  <pre class="def-signature">(frame-quantile [f :int name :cstr q :float] :float)</pre>
+  <p class="def-summary">quantile of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-iqr">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-iqr</h2>
+  </div>
+  <pre class="def-signature">(frame-iqr [f :int name :cstr] :float)</pre>
+  <p class="def-summary">IQR of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-skewness">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-skewness</h2>
+  </div>
+  <pre class="def-signature">(frame-skewness [f :int name :cstr] :float)</pre>
+  <p class="def-summary">skewness of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="frame-kurtosis">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>frame-kurtosis</h2>
+  </div>
+  <pre class="def-signature">(frame-kurtosis [f :int name :cstr] :float)</pre>
+  <p class="def-summary">excess kurtosis of a named column.</p>
+  <p class="def-since">Since: ST1</p>
+</div>
+<div class="def-card" id="describe">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>describe</h2>
+  </div>
+  <pre class="def-signature">(describe [f :int] :int)</pre>
+  <p class="def-summary">pandas-style descriptive summary of all float64 columns.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>f</td><td></td><td>:int  frame handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  new frame with columns: stat (utf8), then one column per numeric
+        input column.  Rows: count, mean, sd, min, 25%, 50%, 75%, max.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(describe my-frame)</pre>
+  </div>
+  <p class="def-since">Since: ST1</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__frame-col-by-name"><code>__frame-col-by-name</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

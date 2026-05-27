@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/frame/group | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#agg-count">agg-count</a></li>
+    <li><a href="#agg-sum">agg-sum</a></li>
+    <li><a href="#agg-mean">agg-mean</a></li>
+    <li><a href="#agg-min">agg-min</a></li>
+    <li><a href="#agg-max">agg-max</a></li>
+    <li><a href="#agg-median">agg-median</a></li>
+    <li><a href="#agg-std">agg-std</a></li>
+    <li><a href="#agg-var">agg-var</a></li>
+    <li><a href="#grouped-count">grouped-count</a></li>
+    <li><a href="#grouped-free">grouped-free</a></li>
+    <li><a href="#group-by">group-by</a></li>
+    <li><a href="#agg">agg</a></li>
+    <li><a href="#summarize">summarize</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__g-nil" style="color:var(--faint)">__g-nil</a></li>
+    <li><a href="#__g-cons" style="color:var(--faint)">__g-cons</a></li>
+    <li><a href="#__g-vec-to-cons" style="color:var(--faint)">__g-vec-to-cons</a></li>
+    <li><a href="#__g-list-length" style="color:var(--faint)">__g-list-length</a></li>
+    <li><a href="#__g-list-nth-int" style="color:var(--faint)">__g-list-nth-int</a></li>
+    <li><a href="#__g-list-nth-cstr" style="color:var(--faint)">__g-list-nth-cstr</a></li>
+    <li><a href="#__g-build-grouped" style="color:var(--faint)">__g-build-grouped</a></li>
+    <li><a href="#__g-names-to-ixs" style="color:var(--faint)">__g-names-to-ixs</a></li>
+    <li><a href="#__g-zeros" style="color:var(--faint)">__g-zeros</a></li>
+    <li><a href="#__g-list-to-perm-array" style="color:var(--faint)">__g-list-to-perm-array</a></li>
+    <li><a href="#__group-by-cons" style="color:var(--faint)">__group-by-cons</a></li>
+    <li><a href="#__g-reduce-int64" style="color:var(--faint)">__g-reduce-int64</a></li>
+    <li><a href="#__g-reduce-float64" style="color:var(--faint)">__g-reduce-float64</a></li>
+    <li><a href="#__g-group-empty?" style="color:var(--faint)">__g-group-empty?</a></li>
+    <li><a href="#__g-output-type" style="color:var(--faint)">__g-output-type</a></li>
+    <li><a href="#__g-fill-agg-col" style="color:var(--faint)">__g-fill-agg-col</a></li>
+    <li><a href="#__g-key-col-builder" style="color:var(--faint)">__g-key-col-builder</a></li>
+    <li><a href="#__g-key-rep-rows" style="color:var(--faint)">__g-key-rep-rows</a></li>
+    <li><a href="#__g-rep-rows-free" style="color:var(--faint)">__g-rep-rows-free</a></li>
+    <li><a href="#__g-build-key-col" style="color:var(--faint)">__g-build-key-col</a></li>
+    <li><a href="#__so-take-bridge" style="color:var(--faint)">__so-take-bridge</a></li>
+    <li><a href="#__g-source-frame" style="color:var(--faint)">__g-source-frame</a></li>
+    <li><a href="#__g-n-keys" style="color:var(--faint)">__g-n-keys</a></li>
+    <li><a href="#__g-key-ix-at" style="color:var(--faint)">__g-key-ix-at</a></li>
+    <li><a href="#__g-build-agg-frame" style="color:var(--faint)">__g-build-agg-frame</a></li>
+    <li><a href="#__g-build-key-cols" style="color:var(--faint)">__g-build-key-cols</a></li>
+    <li><a href="#__g-build-key-fields" style="color:var(--faint)">__g-build-key-fields</a></li>
+    <li><a href="#__g-build-agg-cols" style="color:var(--faint)">__g-build-agg-cols</a></li>
+    <li><a href="#__g-build-agg-fields" style="color:var(--faint)">__g-build-agg-fields</a></li>
+    <li><a href="#__g-list-concat" style="color:var(--faint)">__g-list-concat</a></li>
+    <li><a href="#__g-make-identity-perm" style="color:var(--faint)">__g-make-identity-perm</a></li>
+    <li><a href="#__g-make-starts-array" style="color:var(--faint)">__g-make-starts-array</a></li>
+    <li><a href="#__g-make-trivial-grouped" style="color:var(--faint)">__g-make-trivial-grouped</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>frame/group</h1>
+    <div class="module-path">src/frame/group.tur</div>
+  </div>
+<div class="def-card" id="agg-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-count</h2>
+  </div>
+  <pre class="def-signature">(agg-count :int)</pre>
+</div>
+<div class="def-card" id="agg-sum">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-sum</h2>
+  </div>
+  <pre class="def-signature">(agg-sum :int)</pre>
+</div>
+<div class="def-card" id="agg-mean">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-mean</h2>
+  </div>
+  <pre class="def-signature">(agg-mean :int)</pre>
+</div>
+<div class="def-card" id="agg-min">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-min</h2>
+  </div>
+  <pre class="def-signature">(agg-min :int)</pre>
+</div>
+<div class="def-card" id="agg-max">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-max</h2>
+  </div>
+  <pre class="def-signature">(agg-max :int)</pre>
+</div>
+<div class="def-card" id="agg-median">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-median</h2>
+  </div>
+  <pre class="def-signature">(agg-median :int)</pre>
+</div>
+<div class="def-card" id="agg-std">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-std</h2>
+  </div>
+  <pre class="def-signature">(agg-std :int)</pre>
+</div>
+<div class="def-card" id="agg-var">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg-var</h2>
+  </div>
+  <pre class="def-signature">(agg-var :int)</pre>
+</div>
+<div class="def-card" id="grouped-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>grouped-count</h2>
+  </div>
+  <pre class="def-signature">(grouped-count [g :int] :int)</pre>
+  <p class="def-summary">number of distinct groups.  Since: FR5</p>
+</div>
+<div class="def-card" id="grouped-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>grouped-free</h2>
+  </div>
+  <pre class="def-signature">(grouped-free [g :int] :void)</pre>
+  <p class="def-summary">release a grouped-frame handle (does NOT free the source frame).</p>
+  <p class="def-since">Since: FR5</p>
+</div>
+<div class="def-card" id="group-by">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>group-by</h2>
+  </div>
+  <pre class="def-signature">(group-by [f :int names :int] :int)</pre>
+  <p class="def-summary">partition a frame&#x27;s rows by the named key columns.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>f</td><td></td><td>source frame</td></tr>
+    <tr><td>names</td><td></td><td>Vec[cstr] of key column names, built with (vec-of &quot;k1&quot; &quot;k2&quot; ...).</td></tr>
+    <tr><td></td><td></td><td>(Was a cons list of cstrs prior to 0.2.0.)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">an opaque grouped-frame; release with grouped-free.</p>
+  </div>
+  <p class="def-since">Since: FR5</p>
+</div>
+<div class="def-card" id="agg">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>agg</h2>
+  </div>
+  <pre class="def-signature">(agg [g :int out-names :int in-names :int agg-tags :int] :int)</pre>
+  <p class="def-summary">run aggregations over a grouped frame.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int  frame whose rows are one per group: [key-cols..., agg-outputs...].</p>
+  </div>
+  <p class="def-since">Since: FR5</p>
+</div>
+<div class="def-card" id="summarize">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>summarize</h2>
+  </div>
+  <pre class="def-signature">(summarize [f :int out-names :int in-names :int agg-tags :int] :int)</pre>
+  <p class="def-summary">whole-frame aggregation; returns a one-row frame.</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__g-nil"><code>__g-nil</code></div>
+  <div class="internal-item" id="__g-cons"><code>__g-cons</code></div>
+  <div class="internal-item" id="__g-vec-to-cons"><code>__g-vec-to-cons</code><span class="internal-item-summary">-- convert a Vec[cstr] (or any Vec[int]) to a cons list.</span></div>
+  <div class="internal-item" id="__g-list-length"><code>__g-list-length</code></div>
+  <div class="internal-item" id="__g-list-nth-int"><code>__g-list-nth-int</code></div>
+  <div class="internal-item" id="__g-list-nth-cstr"><code>__g-list-nth-cstr</code></div>
+  <div class="internal-item" id="__g-build-grouped"><code>__g-build-grouped</code><span class="internal-item-summary">-- given a frame, the parallel int list of key column</span></div>
+  <div class="internal-item" id="__g-names-to-ixs"><code>__g-names-to-ixs</code></div>
+  <div class="internal-item" id="__g-zeros"><code>__g-zeros</code></div>
+  <div class="internal-item" id="__g-list-to-perm-array"><code>__g-list-to-perm-array</code></div>
+  <div class="internal-item" id="__group-by-cons"><code>__group-by-cons</code><span class="internal-item-summary">-- internal cons-list group-by, used by intra-spice</span></div>
+  <div class="internal-item" id="__g-reduce-int64"><code>__g-reduce-int64</code><span class="internal-item-summary">-- run an aggregation tag over a contiguous range of perm[lo..hi)</span></div>
+  <div class="internal-item" id="__g-reduce-float64"><code>__g-reduce-float64</code></div>
+  <div class="internal-item" id="__g-group-empty_"><code>__g-group-empty?</code></div>
+  <div class="internal-item" id="__g-output-type"><code>__g-output-type</code><span class="internal-item-summary">-- determine the output column&#x27;s type tag for an agg.</span></div>
+  <div class="internal-item" id="__g-fill-agg-col"><code>__g-fill-agg-col</code><span class="internal-item-summary">-- build a column for one aggregation over all groups.</span></div>
+  <div class="internal-item" id="__g-key-col-builder"><code>__g-key-col-builder</code></div>
+  <div class="internal-item" id="__g-key-rep-rows"><code>__g-key-rep-rows</code></div>
+  <div class="internal-item" id="__g-rep-rows-free"><code>__g-rep-rows-free</code></div>
+  <div class="internal-item" id="__g-build-key-col"><code>__g-build-key-col</code><span class="internal-item-summary">-- materialize a key column for the result frame by</span></div>
+  <div class="internal-item" id="__so-take-bridge"><code>__so-take-bridge</code></div>
+  <div class="internal-item" id="__g-source-frame"><code>__g-source-frame</code></div>
+  <div class="internal-item" id="__g-n-keys"><code>__g-n-keys</code></div>
+  <div class="internal-item" id="__g-key-ix-at"><code>__g-key-ix-at</code></div>
+  <div class="internal-item" id="__g-build-agg-frame"><code>__g-build-agg-frame</code></div>
+  <div class="internal-item" id="__g-build-key-cols"><code>__g-build-key-cols</code></div>
+  <div class="internal-item" id="__g-build-key-fields"><code>__g-build-key-fields</code></div>
+  <div class="internal-item" id="__g-build-agg-cols"><code>__g-build-agg-cols</code></div>
+  <div class="internal-item" id="__g-build-agg-fields"><code>__g-build-agg-fields</code></div>
+  <div class="internal-item" id="__g-list-concat"><code>__g-list-concat</code></div>
+  <div class="internal-item" id="__g-make-identity-perm"><code>__g-make-identity-perm</code></div>
+  <div class="internal-item" id="__g-make-starts-array"><code>__g-make-starts-array</code></div>
+  <div class="internal-item" id="__g-make-trivial-grouped"><code>__g-make-trivial-grouped</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

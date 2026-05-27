@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/notebook/image | Turmeric API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#image-marker">image-marker</a></li>
+    <li><a href="#image-hook-record-path">image-hook-record-path</a></li>
+    <li><a href="#image-hook-install">image-hook-install</a></li>
+    <li><a href="#image-hook-take">image-hook-take</a></li>
+    <li><a href="#png-_data-url">png-&gt;data-url</a></li>
+    <li><a href="#image-display-tui">image-display-tui</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__img-result-handle" style="color:var(--faint)">__img-result-handle</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>notebook/image</h1>
+    <div class="module-path">src/notebook/image.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">image hook, PNG encoding, and terminal image display.</p>
+  </div>
+<div class="def-card" id="image-marker">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>image-marker</h2>
+  </div>
+  <pre class="def-signature">(image-marker :cstr)</pre>
+  <p class="def-summary">the stdout prefix used to signal an image path.</p>
+</div>
+<div class="def-card" id="image-hook-record-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>image-hook-record-path</h2>
+  </div>
+  <pre class="def-signature">(image-hook-record-path [path :cstr])</pre>
+  <p class="def-summary">record an image path via the stdout marker.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>path</td><td></td><td>filesystem path to the PNG file</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">0 (always)</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(image-hook-record-path &quot;/tmp/cell-3-plot.png&quot;)</pre>
+  </div>
+  <p class="def-since">Since: Phase NB11</p>
+</div>
+<div class="def-card" id="image-hook-install">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>image-hook-install</h2>
+  </div>
+  <pre class="def-signature">(image-hook-install [session :int] :int)</pre>
+  <p class="def-summary">no-op stub (capture is handled by session-eval).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>session</td><td></td><td>notebook session handle (ignored)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">0</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(image-hook-install session)</pre>
+  </div>
+  <p class="def-since">Since: Phase NB11</p>
+</div>
+<div class="def-card" id="image-hook-take">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>image-hook-take</h2>
+  </div>
+  <pre class="def-signature">(image-hook-take [session :int] :int)</pre>
+  <p class="def-summary">no-op stub; image paths live in cell-output.image-paths.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>session</td><td></td><td>notebook session handle (ignored)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">0 (nil list; real paths are in cell-output returned by session-eval)</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(image-hook-take session)</pre>
+  </div>
+  <p class="def-since">Since: Phase NB11</p>
+</div>
+<div class="def-card" id="png-_data-url">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>png-&gt;data-url</h2>
+  </div>
+  <pre class="def-signature">(png-&gt;data-url [path :cstr])</pre>
+  <p class="def-summary">read a PNG file and return a base64 data URL.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>path</td><td></td><td>filesystem path to a PNG file</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">A :cstr of the form &quot;data:image/png;base64,&lt;encoded&gt;&quot; on success,
+  or &quot;&quot; if the file cannot be read.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(png-&gt;data-url &quot;/tmp/plot.png&quot;)  ; =&gt; &quot;data:image/png;base64,iVBOR...&quot;</pre>
+  </div>
+  <p class="def-since">Since: Phase NB11</p>
+</div>
+<div class="def-card" id="image-display-tui">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>image-display-tui</h2>
+  </div>
+  <pre class="def-signature">(image-display-tui [path :cstr])</pre>
+  <p class="def-summary">render an image path in the terminal.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>path</td><td></td><td>filesystem path to a PNG file</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">0 (always; output is printed to stdout as a side effect)</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(image-display-tui &quot;/tmp/cell-3-plot.png&quot;)</pre>
+  </div>
+  <p class="def-since">Since: Phase NB11 (AN5: delegated to ansi/image; v0.1.2: sixel via tur-png)</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__img-result-handle"><code>__img-result-handle</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>
