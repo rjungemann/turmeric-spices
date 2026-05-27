@@ -191,40 +191,44 @@
   ;; the full key-name table (F1-F12, Ctrl modifiers, Shift-Tab, etc.).
   ;;
 
-  (defn __ansi-read-key-impl [timeout_ms :int] #{Unsafe} :cstr
+  ;; Internal byte-collection state.  __ansi-collect reads bytes into the
+  ;; file-scope g_ansi_keybuf and returns a code; the Turmeric-level
+  ;; __ansi-read-key-impl dispatches and (for the common path) calls
+  ;; ansi/keys/parse-key-bytes via a regular cross-module call.  Doing the
+  ;; cross-module call at the Turmeric level (rather than from inline-C)
+  ;; keeps the bundler happy when callers reach ansi/term through the
+  ;; ansi/ansi facade.
+
+  ;; Return codes:
+  ;;   -3 = SIGWINCH delivered (caller returns "<Resize>")
+  ;;   -2 = EOF or read error
+  ;;   -1 = scripted-input path (TUR_ANSI_TEST_KEYS)
+  ;;    0 = timeout
+  ;;   >0 = number of bytes written to g_ansi_keybuf
+  (defn __ansi-collect [timeout-ms :int] #{Unsafe} :int
     ```c
     /* __tur_include__: #include <sys/select.h> */
-    /* Scripted-input mode for tests: TUR_ANSI_TEST_KEYS holds a newline-
-     * separated list of key names; each call consumes one line. */
-    static char *script_cache = NULL;
-    static char *script_env = NULL;
-    static size_t script_off = 0;
+    /* __tur_include__: static unsigned char g_ansi_keybuf[32]; */
+    /* __tur_include__: static char *g_ansi_script_cache = 0; */
+    /* __tur_include__: static char *g_ansi_script_env = 0; */
+    /* __tur_include__: static size_t g_ansi_script_off = 0; */
+
     const char *env = getenv("TUR_ANSI_TEST_KEYS");
     if (env && env[0]) {
-      if (!script_env || strcmp(script_env, env) != 0) {
-        if (script_cache) free(script_cache);
-        if (script_env) free(script_env);
-        script_cache = strdup(env);
-        script_env = strdup(env);
-        script_off = 0;
+      if (!g_ansi_script_env || strcmp(g_ansi_script_env, env) != 0) {
+        if (g_ansi_script_cache) free(g_ansi_script_cache);
+        if (g_ansi_script_env)   free(g_ansi_script_env);
+        g_ansi_script_cache = strdup(env);
+        g_ansi_script_env   = strdup(env);
+        g_ansi_script_off   = 0;
       }
-      if (!script_cache[script_off]) return strdup("<EOF>");
-      char *start = script_cache + script_off;
-      char *nl = strchr(start, '\n');
-      if (nl) {
-        *nl = '\0';
-        script_off = (size_t)((nl - script_cache) + 1);
-      } else {
-        script_off = strlen(script_cache);
-      }
-      return strdup(start);
-    } else {
-      if (script_cache) { free(script_cache); script_cache = NULL; }
-      if (script_env) { free(script_env); script_env = NULL; }
-      script_off = 0;
+      return -1;
+    } else if (g_ansi_script_cache) {
+      free(g_ansi_script_cache); g_ansi_script_cache = NULL;
+      free(g_ansi_script_env);   g_ansi_script_env   = NULL;
+      g_ansi_script_off = 0;
     }
 
-    /* select() on stdin + the SIGWINCH self-pipe (if installed). */
     for (;;) {
       fd_set rfds;
       FD_ZERO(&rfds);
@@ -237,63 +241,86 @@
       struct timeval tv;
       struct timeval *ptv = NULL;
       if (timeout_ms >= 0) {
-        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_sec  = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
         ptv = &tv;
       }
       int n = select(maxfd + 1, &rfds, NULL, NULL, ptv);
       if (n < 0) {
         if (errno == EINTR) continue;
-        return strdup("<EOF>");
+        return -2;
       }
-      if (n == 0) return strdup("");
+      if (n == 0) return 0;
       if (g_ansi_winch_rfd >= 0 && FD_ISSET(g_ansi_winch_rfd, &rfds)) {
-        /* Drain all pending resize bytes. */
-        char buf[32];
-        while (read(g_ansi_winch_rfd, buf, sizeof(buf)) > 0) { /* spin */ }
+        char drain[32];
+        while (read(g_ansi_winch_rfd, drain, sizeof(drain)) > 0) { }
         if (g_ansi_resize_cb) g_ansi_resize_cb();
-        return strdup("<Resize>");
+        return -3;
       }
       if (FD_ISSET(STDIN_FILENO, &rfds)) break;
     }
 
-    /* Collect bytes into a small buffer, then hand them to ansi/keys'
-     * parse-key-bytes for the full state-machine pass.  After the first
-     * byte we drain additional bytes (escape sequences, UTF-8 trailers)
-     * with a 15ms read timeout. */
-    unsigned char buf[32];
-    ssize_t r = read(STDIN_FILENO, &buf[0], 1);
-    if (r <= 0) return strdup("<EOF>");
+    ssize_t r = read(STDIN_FILENO, &g_ansi_keybuf[0], 1);
+    if (r <= 0) return -2;
     int total = 1;
-    if (buf[0] == 0x1B || buf[0] >= 0x80) {
-      while (total < (int)sizeof(buf)) {
-        fd_set rfds3;
-        FD_ZERO(&rfds3);
-        FD_SET(STDIN_FILENO, &rfds3);
-        struct timeval tv3;
-        tv3.tv_sec = 0;
-        tv3.tv_usec = 15000;
-        if (select(STDIN_FILENO + 1, &rfds3, NULL, NULL, &tv3) <= 0) break;
-        ssize_t rr = read(STDIN_FILENO, &buf[total], 1);
+    if (g_ansi_keybuf[0] == 0x1B || g_ansi_keybuf[0] >= 0x80) {
+      while (total < (int)sizeof(g_ansi_keybuf)) {
+        fd_set rfds2;
+        FD_ZERO(&rfds2);
+        FD_SET(STDIN_FILENO, &rfds2);
+        struct timeval tv2;
+        tv2.tv_sec = 0;
+        tv2.tv_usec = 15000;
+        if (select(STDIN_FILENO + 1, &rfds2, NULL, NULL, &tv2) <= 0) break;
+        ssize_t rr = read(STDIN_FILENO, &g_ansi_keybuf[total], 1);
         if (rr <= 0) break;
         total += (int)rr;
       }
     }
-    return (char *)ansi__keys__parse_key_bytes((const char *)buf, (int64_t)total);
+    return total;
     ```)
+
+  ;; Pop the next scripted key from $TUR_ANSI_TEST_KEYS, advancing the offset.
+  (defn __ansi-scripted-pop [] #{Unsafe} :cstr
+    ```c
+    if (!g_ansi_script_cache || !g_ansi_script_cache[g_ansi_script_off]) {
+      return strdup("<EOF>");
+    }
+    char *start = g_ansi_script_cache + g_ansi_script_off;
+    char *nl = strchr(start, '\n');
+    if (nl) {
+      *nl = '\0';
+      g_ansi_script_off = (size_t)((nl - g_ansi_script_cache) + 1);
+    } else {
+      g_ansi_script_off = strlen(g_ansi_script_cache);
+    }
+    return strdup(start);
+    ```)
+
+  ;; Pointer to the static byte buffer filled by __ansi-collect.
+  (defn __ansi-keybuf-ptr [] #{Unsafe} :cstr
+    ```c return (const char *)g_ansi_keybuf; ```)
+
+  (defn __ansi-strdup-cstr [s :cstr] #{Unsafe} :cstr
+    ```c return strdup((const char *)s); ```)
 
   ;;; term-read-key -- block until one keypress; return a normalized key string.
   ;;;
   ;;; Returns one of: a single-character cstr ("a", "A", " "), a bracketed
   ;;; key name ("<Enter>", "<Up>", "<Resize>"), or "<EOF>" when stdin closes.
-  ;;;
-  ;;; AN0 covers basic keys + arrows + <Resize>.  AN2 expands the key table
-  ;;; to F-keys, Ctrl/Shift modifiers, and the kitty keyboard protocol.
   (defn term-read-key [] #{Unsafe} :cstr
     (__ansi-read-key-impl -1))
 
   ;;; term-read-key-timeout -- like term-read-key but returns "" after ms millis.
   (defn term-read-key-timeout [ms :int] #{Unsafe} :cstr
     (__ansi-read-key-impl ms))
+
+  (defn __ansi-read-key-impl [timeout-ms :int] #{Unsafe} :cstr
+    (let [r (__ansi-collect timeout-ms)]
+      (if (= r -3) (__ansi-strdup-cstr "<Resize>")
+        (if (= r -2) (__ansi-strdup-cstr "<EOF>")
+          (if (= r -1) (__ansi-scripted-pop)
+            (if (= r  0) (__ansi-strdup-cstr "")
+              (parse-key-bytes (__ansi-keybuf-ptr) r)))))))
 
 ) ;; end defmodule ansi/term

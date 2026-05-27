@@ -1,0 +1,155 @@
+;;; ansi/box -- Unicode box-drawing constants and rectangle helpers.
+;;
+;; All glyphs are emitted as raw UTF-8 byte sequences via inline-C \x
+;; escapes so the source itself remains 7-bit ASCII (Turmeric's reader
+;; is sensitive to non-ASCII bytes in some contexts).
+
+(defmodule ansi/box
+  (import ansi/cursor :refer [cursor-move-to])
+  (export box-tl-single box-tr-single box-bl-single box-br-single
+          box-h-single  box-v-single
+          box-tl-double box-tr-double box-bl-double box-br-double
+          box-h-double  box-v-double
+          box-tl-round  box-tr-round  box-bl-round  box-br-round
+          box-draw box-fill box-title)
+
+  ;; Single-line border glyphs.
+  (defn box-tl-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x8c"); ```)
+  (defn box-tr-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x90"); ```)
+  (defn box-bl-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x94"); ```)
+  (defn box-br-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x98"); ```)
+  (defn box-h-single  [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x80"); ```)
+  (defn box-v-single  [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x82"); ```)
+
+  ;; Double-line border glyphs.
+  (defn box-tl-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x94"); ```)
+  (defn box-tr-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x97"); ```)
+  (defn box-bl-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x9a"); ```)
+  (defn box-br-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x9d"); ```)
+  (defn box-h-double  [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x90"); ```)
+  (defn box-v-double  [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x91"); ```)
+
+  ;; Round-corner glyphs (horizontal/vertical reuse single-line).
+  (defn box-tl-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xad"); ```)
+  (defn box-tr-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xae"); ```)
+  (defn box-bl-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xb0"); ```)
+  (defn box-br-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xaf"); ```)
+
+  ;;; box-draw -- draw a bordered rectangle at (row col) of size height x width.
+  ;;;
+  ;;; Parameters:
+  ;;;   row, col      -- 1-based top-left corner
+  ;;;   height, width -- must be >= 2; a 2x2 box is the smallest meaningful size
+  ;;;   style         -- 0 = single line, 1 = double line, 2 = round corners
+  ;;;
+  ;;; Out-of-range style values are treated as 0.  Sizes less than 2 are
+  ;;; no-ops.
+  ;;;
+  ;;; Since: tur-ansi AN3
+  (defn box-draw [row :int col :int height :int width :int style :int] #{Unsafe} :void
+    ```c
+    int s = (int)style;
+    int H = (int)height, W = (int)width;
+    int R = (int)row, C = (int)col;
+    if (H < 2 || W < 2) return;
+    const char *tl, *tr, *bl, *br, *h, *v;
+    switch (s) {
+      case 1:
+        tl = "\xe2\x95\x94"; tr = "\xe2\x95\x97";
+        bl = "\xe2\x95\x9a"; br = "\xe2\x95\x9d";
+        h  = "\xe2\x95\x90"; v  = "\xe2\x95\x91";
+        break;
+      case 2:
+        tl = "\xe2\x95\xad"; tr = "\xe2\x95\xae";
+        bl = "\xe2\x95\xb0"; br = "\xe2\x95\xaf";
+        h  = "\xe2\x94\x80"; v  = "\xe2\x94\x82";
+        break;
+      default:
+        tl = "\xe2\x94\x8c"; tr = "\xe2\x94\x90";
+        bl = "\xe2\x94\x94"; br = "\xe2\x94\x98";
+        h  = "\xe2\x94\x80"; v  = "\xe2\x94\x82";
+        break;
+    }
+    /* Top border. */
+    printf("\033[%d;%dH%s", R, C, tl);
+    for (int i = 0; i < W - 2; i++) fputs(h, stdout);
+    fputs(tr, stdout);
+    /* Side borders. */
+    for (int i = 1; i < H - 1; i++) {
+      printf("\033[%d;%dH%s", R + i, C, v);
+      printf("\033[%d;%dH%s", R + i, C + W - 1, v);
+    }
+    /* Bottom border. */
+    printf("\033[%d;%dH%s", R + H - 1, C, bl);
+    for (int i = 0; i < W - 2; i++) fputs(h, stdout);
+    fputs(br, stdout);
+    fflush(stdout);
+    ```)
+
+  ;;; box-fill -- fill the interior (height-2 x width-2) of a rectangle with ch.
+  ;;;
+  ;;; Parameters:
+  ;;;   row, col, height, width -- same as box-draw
+  ;;;   ch                       -- ASCII codepoint (32-126).  Out-of-range
+  ;;;                              values fall back to space (32).
+  ;;;
+  ;;; Use box-fill BEFORE box-draw so the border isn't overwritten by the fill.
+  (defn box-fill [row :int col :int height :int width :int ch :int] #{Unsafe} :void
+    ```c
+    int H = (int)height, W = (int)width;
+    int R = (int)row, C = (int)col;
+    int C32 = (int)ch;
+    if (H < 3 || W < 3) return;
+    if (C32 < 32 || C32 > 126) C32 = 32;
+    char buf[256];
+    int inner_w = W - 2;
+    if (inner_w > (int)sizeof(buf)) inner_w = (int)sizeof(buf);
+    for (int i = 0; i < inner_w; i++) buf[i] = (char)C32;
+    for (int i = 1; i < H - 1; i++) {
+      printf("\033[%d;%dH", R + i, C + 1);
+      fwrite(buf, 1, (size_t)inner_w, stdout);
+    }
+    fflush(stdout);
+    ```)
+
+  ;;; box-title -- write a title string centered on the top border.
+  ;;;
+  ;;; Parameters:
+  ;;;   row, col, width -- the box's top-left and width
+  ;;;   title           -- caption (ASCII byte length used for centering;
+  ;;;                      truncated with "..." if it doesn't fit in width-4
+  ;;;                      so there is at least one border glyph on each side)
+  ;;;
+  ;;; box-title should be called AFTER box-draw so it overwrites the top
+  ;;; border with the title text.
+  (defn box-title [row :int col :int width :int title :cstr] #{Unsafe} :void
+    ```c
+    int W = (int)width;
+    int R = (int)row, C = (int)col;
+    if (W < 6 || !title) return;
+    int max = W - 4; /* leave 1 corner + 1 horiz on each side */
+    int tlen = (int)strlen((const char *)title);
+    char buf[256];
+    if (max > (int)sizeof(buf) - 1) max = (int)sizeof(buf) - 1;
+    if (tlen <= max) {
+      memcpy(buf, title, (size_t)tlen);
+      buf[tlen] = '\0';
+    } else {
+      /* Truncate with "..." */
+      int keep = max - 3;
+      if (keep < 1) keep = 1;
+      memcpy(buf, title, (size_t)keep);
+      buf[keep] = '.';
+      buf[keep + 1] = '.';
+      buf[keep + 2] = '.';
+      buf[keep + 3] = '\0';
+      tlen = keep + 3;
+    }
+    int slot = W - 2; /* horizontal cells between corners */
+    int start = (slot - tlen) / 2;
+    if (start < 1) start = 1;
+    printf("\033[%d;%dH%s", R, C + 1 + start, buf);
+    fflush(stdout);
+    ```)
+
+) ;; end defmodule ansi/box

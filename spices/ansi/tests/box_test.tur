@@ -1,0 +1,204 @@
+;; tests/box_test.tur -- AN3 tests for ansi/box glyph constants and emission.
+
+(defmodule ansi/tests/box
+  (import ansi/box :refer [box-tl-single box-tr-single box-bl-single box-br-single
+                           box-h-single box-v-single
+                           box-tl-double box-tr-double box-bl-double box-br-double
+                           box-h-double box-v-double
+                           box-tl-round box-tr-round box-bl-round box-br-round
+                           box-draw box-fill box-title])
+
+  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_box_fails = 0; */
+    if (!ok) g_box_fails++;
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-finish [count :int] #{Unsafe} :int
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (g_box_fails == 0) {
+      fprintf(stderr, "# All %lld ansi/box tests passed.\n", (long long)count);
+      return 0;
+    }
+    fprintf(stderr, "# %d/%lld ansi/box tests failed.\n",
+            g_box_fails, (long long)count);
+    return 1;
+    ```)
+
+  ;; Glyph constant assertions: each returns a 3-byte UTF-8 codepoint.
+  (defn glyph-eq? [test-id :int got :cstr] #{Unsafe} :bool
+    ```c
+    const char *exp = NULL;
+    switch ((int)test_id) {
+      case  1: exp = "\xe2\x94\x8c"; break; /* tl single */
+      case  2: exp = "\xe2\x94\x90"; break; /* tr single */
+      case  3: exp = "\xe2\x94\x94"; break; /* bl single */
+      case  4: exp = "\xe2\x94\x98"; break; /* br single */
+      case  5: exp = "\xe2\x94\x80"; break; /* h  single */
+      case  6: exp = "\xe2\x94\x82"; break; /* v  single */
+      case  7: exp = "\xe2\x95\x94"; break; /* tl double */
+      case  8: exp = "\xe2\x95\x97"; break; /* tr double */
+      case  9: exp = "\xe2\x95\x9a"; break; /* bl double */
+      case 10: exp = "\xe2\x95\x9d"; break; /* br double */
+      case 11: exp = "\xe2\x95\x90"; break; /* h  double */
+      case 12: exp = "\xe2\x95\x91"; break; /* v  double */
+      case 13: exp = "\xe2\x95\xad"; break; /* tl round  */
+      case 14: exp = "\xe2\x95\xae"; break; /* tr round  */
+      case 15: exp = "\xe2\x95\xb0"; break; /* bl round  */
+      case 16: exp = "\xe2\x95\xaf"; break; /* br round  */
+      default: return 0;
+    }
+    return strcmp((const char *)got, exp) == 0 ? 1 : 0;
+    ```)
+
+  ;; Stdout-capture machinery (same pattern as cursor/color/style tests).
+  (defn __capture-begin [] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_box_saved_fd = -1; */
+    /* __tur_include__: static int g_box_pipe_r = -1; */
+    /* __tur_include__: static int g_box_pipe_w = -1; */
+    fflush(stdout);
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    int sf = fcntl(fds[0], F_GETFL, 0);
+    if (sf >= 0) fcntl(fds[0], F_SETFL, sf | O_NONBLOCK);
+    g_box_pipe_r = fds[0];
+    g_box_pipe_w = fds[1];
+    g_box_saved_fd = dup(STDOUT_FILENO);
+    dup2(g_box_pipe_w, STDOUT_FILENO);
+    ```)
+
+  ;; Compares the captured stdout against a hand-crafted expected sequence
+  ;; selected by test-id.
+  (defn __capture-check [test-id :int] #{Unsafe} :bool
+    ```c
+    fflush(stdout);
+    if (g_box_saved_fd < 0) return 0;
+    dup2(g_box_saved_fd, STDOUT_FILENO);
+    close(g_box_saved_fd);
+    close(g_box_pipe_w);
+    g_box_saved_fd = -1;
+    g_box_pipe_w = -1;
+    char buf[1024];
+    size_t len = 0;
+    for (;;) {
+      if (len >= sizeof(buf) - 1) break;
+      ssize_t n = read(g_box_pipe_r, buf + len, sizeof(buf) - 1 - len);
+      if (n <= 0) break;
+      len += (size_t)n;
+    }
+    buf[len] = '\0';
+    close(g_box_pipe_r);
+    g_box_pipe_r = -1;
+    const char *exp = "";
+    size_t elen = 0;
+    switch ((int)test_id) {
+      case 100: {
+        /* (box-draw 1 1 3 4 0):
+         *  row 1: CSI 1;1H tl, h h, tr
+         *  row 2: CSI 2;1H v ; CSI 2;4H v
+         *  row 3: CSI 3;1H bl, h h, br */
+        exp = "\033[1;1H\xe2\x94\x8c"   /* tl */
+              "\xe2\x94\x80\xe2\x94\x80" /* 2 h */
+              "\xe2\x94\x90"             /* tr */
+              "\033[2;1H\xe2\x94\x82"   /* v left */
+              "\033[2;4H\xe2\x94\x82"   /* v right */
+              "\033[3;1H\xe2\x94\x94"   /* bl */
+              "\xe2\x94\x80\xe2\x94\x80" /* 2 h */
+              "\xe2\x94\x98";            /* br */
+        elen = 54;
+        break;
+      }
+      case 101: {
+        /* (box-fill 1 1 3 5 ord('x')) draws ONE row of 3 'x' between borders */
+        exp = "\033[2;2Hxxx";
+        elen = strlen(exp);
+        break;
+      }
+      case 102: {
+        /* box-title with simple short title.  width=12 box, title=" Hi " (4 chars).
+         * slot = width-2 = 10, start = (10 - 4) / 2 = 3, col offset = 1 + 3 = 4.
+         * Emits CSI 1;5H then title text. */
+        exp = "\033[1;5H Hi ";
+        elen = strlen(exp);
+        break;
+      }
+      case 103: {
+        /* box-title truncation: width=10, max = 10-4 = 6.  title is 20 chars.
+         * Truncated to keep=3 + "..." = 6 chars: "abc...".
+         * slot=8, start=(8-6)/2=1, col offset=1+1=2.  Output: CSI 1;3H abc... */
+        exp = "\033[1;3Habc...";
+        elen = strlen(exp);
+        break;
+      }
+      case 104: {
+        /* (box-draw 5 5 2 2 1):  double-line 2x2.
+         *  row 5: CSI 5;5H tl, (no inner h), tr
+         *  row 6: CSI 6;5H bl, (no inner h), br */
+        exp = "\033[5;5H\xe2\x95\x94"   /* tl */
+              "\xe2\x95\x97"             /* tr */
+              "\033[6;5H\xe2\x95\x9a"   /* bl */
+              "\xe2\x95\x9d";            /* br */
+        elen = 6 + 3 + 3 + 6 + 3 + 3;
+        break;
+      }
+      case 105: {
+        /* (box-draw 1 1 1 5 0) -- height < 2, no-op. */
+        exp = "";
+        elen = 0;
+        break;
+      }
+      default: return 0;
+    }
+    if (len != elen) return 0;
+    return memcmp(buf, exp, elen) == 0 ? 1 : 0;
+    ```)
+
+  (defn run-glyph [idx :int label :cstr tid :int glyph :cstr] #{Unsafe} :void
+    (tap-record idx label (glyph-eq? tid glyph)))
+
+  (defn t-box-draw-single [] #{Unsafe} :bool
+    (do (__capture-begin) (box-draw 1 1 3 4 0) (__capture-check 100)))
+  (defn t-box-fill [] #{Unsafe} :bool
+    (do (__capture-begin) (box-fill 1 1 3 5 120) (__capture-check 101)))
+  (defn t-box-title-short [] #{Unsafe} :bool
+    (do (__capture-begin) (box-title 1 1 12 " Hi ") (__capture-check 102)))
+  (defn t-box-title-long [] #{Unsafe} :bool
+    (do (__capture-begin) (box-title 1 1 10 "abcdefghijklmnopqrst") (__capture-check 103)))
+  (defn t-box-draw-double-2x2 [] #{Unsafe} :bool
+    (do (__capture-begin) (box-draw 5 5 2 2 1) (__capture-check 104)))
+  (defn t-box-draw-noop [] #{Unsafe} :bool
+    (do (__capture-begin) (box-draw 1 1 1 5 0) (__capture-check 105)))
+
+  (defn main [] #{Unsafe} :int
+    (do
+      ;; Glyph constants
+      (run-glyph  1 "box-tl-single"  1 (box-tl-single))
+      (run-glyph  2 "box-tr-single"  2 (box-tr-single))
+      (run-glyph  3 "box-bl-single"  3 (box-bl-single))
+      (run-glyph  4 "box-br-single"  4 (box-br-single))
+      (run-glyph  5 "box-h-single"   5 (box-h-single))
+      (run-glyph  6 "box-v-single"   6 (box-v-single))
+      (run-glyph  7 "box-tl-double"  7 (box-tl-double))
+      (run-glyph  8 "box-tr-double"  8 (box-tr-double))
+      (run-glyph  9 "box-bl-double"  9 (box-bl-double))
+      (run-glyph 10 "box-br-double" 10 (box-br-double))
+      (run-glyph 11 "box-h-double"  11 (box-h-double))
+      (run-glyph 12 "box-v-double"  12 (box-v-double))
+      (run-glyph 13 "box-tl-round"  13 (box-tl-round))
+      (run-glyph 14 "box-tr-round"  14 (box-tr-round))
+      (run-glyph 15 "box-bl-round"  15 (box-bl-round))
+      (run-glyph 16 "box-br-round"  16 (box-br-round))
+      ;; Emission sequences
+      (tap-record 17 "box-draw 3x4 single emits expected escapes" (t-box-draw-single))
+      (tap-record 18 "box-fill draws one inner row of fill char"  (t-box-fill))
+      (tap-record 19 "box-title centers a short title"             (t-box-title-short))
+      (tap-record 20 "box-title truncates oversize titles with ..." (t-box-title-long))
+      (tap-record 21 "box-draw 2x2 double emits four corners"     (t-box-draw-double-2x2))
+      (tap-record 22 "box-draw height<2 is a no-op"               (t-box-draw-noop))
+      (tap-finish 22)))
+
+) ;; end defmodule
