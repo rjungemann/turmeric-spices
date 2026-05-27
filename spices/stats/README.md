@@ -60,8 +60,8 @@ and sampling
 (import frame/frame :refer [frame])
 
 ;; Two-sample t-test
-(let [a (frame "x" (cons 1.0 (cons 2.0 (cons 3.0 0))))
-      b (frame "x" (cons 4.0 (cons 5.0 (cons 6.0 0))))
+(let [a (frame "x" (list 1.0 2.0 3.0))
+      b (frame "x" (list 4.0 5.0 6.0))
       r (t-test-2samp a b)]
   (println r))
 ```
@@ -91,8 +91,8 @@ import stats/test :refer [t-test-2samp]
 import frame/frame :refer [frame]
 
 ;; Two-sample t-test
-let [a frame("x" cons(1.0 cons(2.0 cons(3.0 0))))
-     b frame("x" cons(4.0 cons(5.0 cons(6.0 0))))
+let [a frame("x" list(1.0 2.0 3.0))
+     b frame("x" list(4.0 5.0 6.0))
      r t-test-2samp(a b)]
   println(r)
 ```

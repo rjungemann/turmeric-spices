@@ -41,8 +41,8 @@ tur add https://github.com/rjungemann/turmeric-spices \
 (import linalg/vec :refer [vec-from-list vec-dot vec-free])
 
 ;; Create matrices
-(let [A (mat-from-list 2 2 (cons 1.0 (cons 2.0 (cons 3.0 (cons 4.0 0)))))
-      B (mat-from-list 2 2 (cons 5.0 (cons 6.0 (cons 7.0 (cons 8.0 0)))))
+(let [A (mat-from-list 2 2 (list 1.0 2.0 3.0 4.0))
+      B (mat-from-list 2 2 (list 5.0 6.0 7.0 8.0))
       C (mat-mul A B)]
   (mat-print C)
   (mat-free A)

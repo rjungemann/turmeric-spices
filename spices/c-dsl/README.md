@@ -30,12 +30,12 @@ string concatenation would be error-prone.
 (import c-dsl/fns     :refer [c-defn c-param c-call])
 (import c-dsl/core    :refer [c-return c-binop])
 
-(let [body (c-stmts (cons (c-return (c-binop "+" "a" "b")) 0))
+(let [body (c-stmts (list (c-return (c-binop "+" "a" "b"))))
       fn   (c-defn "add"
-                   (cons (c-param "a" ":int")
-                         (cons (c-param "b" ":int") 0))
+                   (list (c-param "a" ":int")
+                         (c-param "b" ":int"))
                    ":int" body)]
-  (println (compile-c (cons fn 0))))
+  (println (compile-c (list fn))))
 ```
 
 ```sweet-exp
@@ -44,11 +44,11 @@ import c-dsl/codegen :refer [compile-c c-stmts]
 import c-dsl/fns     :refer [c-defn c-param c-call]
 import c-dsl/core    :refer [c-return c-binop]
 
-let [body c-stmts(cons(c-return(c-binop("+" "a" "b")) 0))
+let [body c-stmts(list(c-return(c-binop("+" "a" "b"))))
      fn   c-defn("add"
-                 cons(c-param("a" ":int") cons(c-param("b" ":int") 0))
+                 list(c-param("a" ":int") c-param("b" ":int"))
                  ":int" body)]
-  println $ compile-c cons(fn 0)
+  println $ compile-c list(fn)
 ```
 
 ## See also

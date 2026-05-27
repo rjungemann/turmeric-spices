@@ -35,10 +35,10 @@ CSV I/O, printing, and Arrow interop.
 (import frame/print  :refer [print-frame])
 
 (let [f       (read-csv-string "g,v\nA,10\nB,20\nA,30\n" 0 0 1 0 "")
-      g       (group-by f (cons "g" 0))
-      outs    (cons "total" 0)
-      ins     (cons "v" 0)
-      tags    (cons (agg-sum) 0)
+      g       (group-by f (list "g"))
+      outs    (list "total")
+      ins     (list "v")
+      tags    (list (agg-sum))
       summary (agg g outs ins tags)]
   (print-frame summary))
 ```
@@ -52,10 +52,10 @@ import frame/group  :refer [group-by agg agg-sum]
 import frame/print  :refer [print-frame]
 
 let [f       read-csv-string("g,v\nA,10\nB,20\nA,30\n" 0 0 1 0 "")
-     g       group-by(f cons("g" 0))
-     outs    cons("total" 0)
-     ins     cons("v" 0)
-     tags    cons(agg-sum() 0)
+     g       group-by(f list("g"))
+     outs    list("total")
+     ins     list("v")
+     tags    list(agg-sum())
      summary agg(g outs ins tags)]
   print-frame(summary)
 ```

@@ -34,7 +34,7 @@ or use it stand-alone to bake GLSL strings at build time.
 (println
   (compile-glsl
     (glsl-fragment-shader "330 core"
-      (cons (glsl-output "FragColor" ":vec4") 0)
+      (list (glsl-output "FragColor" ":vec4"))
       (glsl-set! "FragColor" "vec4(1.0, 0.5, 0.2, 1.0)"))))
 ```
 
@@ -47,7 +47,7 @@ import glsl/codegen :refer [compile-glsl]
 println $
   compile-glsl
     glsl-fragment-shader "330 core"
-      cons(glsl-output("FragColor" ":vec4") 0)
+      list(glsl-output("FragColor" ":vec4"))
       glsl-set!("FragColor" "vec4(1.0, 0.5, 0.2, 1.0)")
 ```
 
