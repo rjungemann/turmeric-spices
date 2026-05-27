@@ -1,0 +1,395 @@
+;;; linalg/mat -- dynamic :float matrix type and core operations
+;;;
+;;; This module provides a heap-allocated row-major m x n float matrix type
+;;; with constructors, element access, and basic properties.
+
+(declare malloc free)
+(declare printf)
+
+;;; mat -- a heap-allocated row-major m x n float matrix.
+;;; Fields:
+;;;   rows  :int      -- number of rows
+;;;   cols  :int      -- number of columns
+;;;   data  :int      -- :ptr to float64 array of rows*cols elements
+(defstruct mat
+  rows  :int
+  cols  :int
+  data  :int)
+
+;;; Private helper: allocate float array
+(defn mat--alloc-data [n] :int
+  (malloc (* n 8)))
+
+;;; Private helper: free float array
+(defn mat--free-data [data] :void
+  (free data))
+
+;;; mat-new -- create an uninitialized m x n matrix
+;;; Returns: mat
+(defn mat-new [rows cols] :int
+  (let [m (malloc (sizeof mat))
+        data (mat--alloc-data (* rows cols))]
+    (set! (mat-rows m) rows)
+    (set! (mat-cols m) cols)
+    (set! (mat-data m) data)
+    m))
+
+;;; mat-new-zeroed -- create an m x n matrix filled with zeros
+;;; Returns: mat
+(defn mat-new-zeroed [rows cols] :int
+  (let [m (mat-new rows cols)
+        data (mat-data m)
+        n (* rows cols)]
+    (dotimes [i n]
+      (set! (float64* data i) 0.0))
+    m))
+
+;;; mat-identity -- create an n x n identity matrix
+;;; Returns: mat
+(defn mat-identity [n] :int
+  (let [m (mat-new-zeroed n n)
+        data (mat-data m)]
+    (dotimes [i n]
+      (set! (float64* data (+ (* i n) i)) 1.0))
+    m))
+
+;;; mat-diag -- create a diagonal matrix from a vector
+;;; v: vec (column vector)
+;;; Returns: mat (n x n diagonal matrix)
+(defn mat-diag [v] :int
+  (let [n (vec-len v)
+        m (mat-new-zeroed n n)
+        data (mat-data m)
+        vdata (vec-data v)]
+    (dotimes [i n]
+      (set! (float64* data (+ (* i n) i)) (float64* vdata i)))
+    m))
+
+;;; mat-from-list -- create a matrix from a cons list of floats (row-major)
+;;; rows: number of rows
+;;; cols: number of columns
+;;; data: cons list of floats (must have rows*cols elements)
+;;; Returns: mat or err
+(defn mat-from-list [rows cols data] :int
+  (let [n (* rows cols)
+        m (mat-new rows cols)
+        mdata (mat-data m)]
+    (let loop [i 0
+               lst data]
+      (if (or (>= i n) (null? lst))
+        (if (and (= i n) (null? lst))
+          m
+          (do
+            (mat-free m)
+            (err "mat-from-list: expected %d elements, got %d" n i)))
+        (do
+          (set! (float64* mdata i) (float (car lst)))
+          (loop (+ i 1) (cdr lst)))))))
+
+;;; mat-copy -- create a deep copy of a matrix
+;;; m: mat
+;;; Returns: mat
+(defn mat-copy [m] :int
+  (let [rows (mat-rows m)
+        cols (mat-cols m)
+        copy (mat-new rows cols)
+        cdata (mat-data copy)
+        mdata (mat-data m)
+        n (* rows cols)]
+    (dotimes [i n]
+      (set! (float64* cdata i) (float64* mdata i)))
+    copy))
+
+;;; mat-free -- free a matrix
+;;; m: mat
+;;; Returns: :void
+(defn mat-free [m] :void
+  (mat--free-data (mat-data m))
+  (free m))
+
+;;; mat-rows -- get number of rows
+;;; m: mat
+;;; Returns: :int
+(defn mat-rows [m] :int (mat-rows m))
+
+;;; mat-cols -- get number of columns
+;;; m: mat
+;;; Returns: :int
+(defn mat-cols [m] :int (mat-cols m))
+
+;;; mat-shape -- get matrix shape as (cons rows cols)
+;;; m: mat
+;;; Returns: cons of (:int . :int)
+(defn mat-shape [m] :int
+  (cons (mat-rows m) (mat-cols m)))
+
+;;; mat-get -- get element at (r, c) with bounds checking
+;;; m: mat
+;;; r: row index
+;;; c: column index
+;;; Returns: :float or raises error
+(defn mat-get [m r c] :float
+  (let [rows (mat-rows m)
+        cols (mat-cols m)]
+    (when (or (< r 0) (>= r rows) (< c 0) (>= c cols))
+      (error "mat-get: index out of bounds (%d, %d) for %dx%d matrix" r c rows cols))
+    (float64* (mat-data m) (+ (* r cols) c))))
+
+;;; mat-set! -- set element at (r, c) with bounds checking
+;;; m: mat
+;;; r: row index
+;;; c: column index
+;;; v: value
+;;; Returns: :void
+(defn mat-set! [m r c v] :void
+  (let [rows (mat-rows m)
+        cols (mat-cols m)]
+    (when (or (< r 0) (>= r rows) (< c 0) (>= c cols))
+      (error "mat-set!: index out of bounds (%d, %d) for %dx%d matrix" r c rows cols))
+    (set! (float64* (mat-data m) (+ (* r cols) c)) (float v))))
+
+;;; mat-row -- get a copy of row r as a vector
+;;; m: mat
+;;; r: row index
+;;; Returns: vec
+(defn mat-row [m r] :int
+  (let [cols (mat-cols m)
+        mdata (mat-data m)
+        v (vec-new cols)
+        vdata (vec-data v)]
+    (dotimes [c cols]
+      (set! (float64* vdata c) (float64* mdata (+ (* r cols) c))))
+    v))
+
+;;; mat-col -- get a copy of column c as a vector
+;;; m: mat
+;;; c: column index
+;;; Returns: vec
+(defn mat-col [m c] :int
+  (let [rows (mat-rows m)
+        cols (mat-cols m)
+        mdata (mat-data m)
+        v (vec-new rows)
+        vdata (vec-data v)]
+    (dotimes [r rows]
+      (set! (float64* vdata r) (float64* mdata (+ (* r cols) c))))
+    v))
+
+;;; mat-submat -- get a copy of submatrix from (r0, c0) to (r1, c1) (exclusive)
+;;; m: mat
+;;; r0: start row
+;;; c0: start column
+;;; r1: end row (exclusive)
+;;; c1: end column (exclusive)
+;;; Returns: mat
+(defn mat-submat [m r0 c0 r1 c1] :int
+  (let [rows (mat-rows m)
+        cols (mat-cols m)]
+    (when (or (< r0 0) (>= r0 rows) (> r1 rows) (< r1 r0)
+              (< c0 0) (>= c0 cols) (> c1 cols) (< c1 c0))
+      (error "mat-submat: invalid submatrix range"))
+    (let [sub-rows (- r1 r0)
+          sub-cols (- c1 c0)
+          sub (mat-new sub-rows sub-cols)
+          sub-data (mat-data sub)
+          mdata (mat-data m)]
+      (dotimes [sr sub-rows]
+        (dotimes [sc sub-cols]
+          (set! (float64* sub-data (+ (* sr sub-cols) sc))
+                (float64* mdata (+ (* (+ r0 sr) cols) (+ c0 sc))))))
+      sub)))
+
+;;; LA1 -- Arithmetic operations
+
+;;; mat-add -- element-wise matrix addition
+;;; a: mat
+;;; b: mat (must have same dimensions as a)
+;;; Returns: mat
+(defn mat-add [a b] :int
+  (let [arows (mat-rows a)
+        acols (mat-cols a)
+        brows (mat-rows b)
+        bcols (mat-cols b)]
+    (when (or (not= arows brows) (not= acols bcols))
+      (error "mat-add: matrix dimensions must match (%dx%d vs %dx%d)" arows acols brows bcols))
+    (let [c (mat-new arows acols)
+          cdata (mat-data c)
+          adata (mat-data a)
+          bdata (mat-data b)
+          n (* arows acols)]
+      (dotimes [i n]
+        (set! (float64* cdata i) (+ (float64* adata i) (float64* bdata i))))
+      c)))
+
+;;; mat-sub -- element-wise matrix subtraction
+;;; a: mat
+;;; b: mat (must have same dimensions as a)
+;;; Returns: mat
+(defn mat-sub [a b] :int
+  (let [arows (mat-rows a)
+        acols (mat-cols a)
+        brows (mat-rows b)
+        bcols (mat-cols b)]
+    (when (or (not= arows brows) (not= acols bcols))
+      (error "mat-sub: matrix dimensions must match (%dx%d vs %dx%d)" arows acols brows bcols))
+    (let [c (mat-new arows acols)
+          cdata (mat-data c)
+          adata (mat-data a)
+          bdata (mat-data b)
+          n (* arows acols)]
+      (dotimes [i n]
+        (set! (float64* cdata i) (- (float64* adata i) (float64* bdata i))))
+      c)))
+
+;;; mat-scale -- scalar multiplication
+;;; m: mat
+;;; s: scalar (:float)
+;;; Returns: mat
+(defn mat-scale [m s] :int
+  (let [rows (mat-rows m)
+        cols (mat-cols m)
+        c (mat-new rows cols)
+        cdata (mat-data c)
+        mdata (mat-data m)
+        n (* rows cols)]
+    (dotimes [i n]
+      (set! (float64* cdata i) (* (float64* mdata i) (float s))))
+    c))
+
+;;; mat-mul -- matrix multiplication
+;;; a: mat (m x n)
+;;; b: mat (n x p)
+;;; Returns: mat (m x p)
+(defn mat-mul [a b] :int
+  (let [arows (mat-rows a)
+        acols (mat-cols a)
+        brows (mat-rows b)
+        bcols (mat-cols b)]
+    (when (not= acols brows)
+      (error "mat-mul: incompatible dimensions (%dx%d vs %dx%d)" arows acols brows bcols))
+    (let [c (mat-new-zeroed arows bcols)
+          cdata (mat-data c)
+          adata (mat-data a)
+          bdata (mat-data b)]
+      (dotimes [i arows]
+        (dotimes [k acols]
+          (let [a-ik (float64* adata (+ (* i acols) k))]
+            (dotimes [j bcols]
+              (set! (float64* cdata (+ (* i bcols) j))
+                    (+ (float64* cdata (+ (* i bcols) j))
+                       (* a-ik (float64* bdata (+ (* k bcols) j)))))))))
+      c)))
+
+;;; mat-mul-vec -- matrix-vector multiplication
+;;; m: mat (m x n)
+;;; v: vec (length n)
+;;; Returns: vec (length m)
+(defn mat-mul-vec [m v] :int
+  (let [mrows (mat-rows m)
+        mcols (mat-cols m)
+        vlen (vec-len v)]
+    (when (not= mcols vlen)
+      (error "mat-mul-vec: incompatible dimensions (%dx%d vs %d)" mrows mcols vlen))
+    (let [result (vec-new-zeroed mrows)
+          rdata (vec-data result)
+          mdata (mat-data m)
+          vdata (vec-data v)]
+      (dotimes [i mrows]
+        (dotimes [k mcols]
+          (set! (float64* rdata i)
+                (+ (float64* rdata i)
+                   (* (float64* mdata (+ (* i mcols) k))
+                      (float64* vdata k))))))
+      result)))
+
+;;; mat-transpose -- transpose a matrix
+;;; m: mat (m x n)
+;;; Returns: mat (n x m)
+(defn mat-transpose [m] :int
+  (let [rows (mat-rows m)
+        cols (mat-cols m)
+        t (mat-new cols rows)
+        tdata (mat-data t)
+        mdata (mat-data m)]
+    (dotimes [r rows]
+      (dotimes [c cols]
+        (set! (float64* tdata (+ (* c rows) r))
+              (float64* mdata (+ (* r cols) c)))))
+    t))
+
+;;; mat-trace -- sum of diagonal elements (for square matrices)
+;;; m: mat (must be square)
+;;; Returns: :float
+(defn mat-trace [m] :float
+  (let [rows (mat-rows m)
+        cols (mat-cols m)]
+    (when (not= rows cols)
+      (error "mat-trace: matrix must be square (%dx%d)" rows cols))
+    (let [mdata (mat-data m)
+          trace 0.0]
+      (dotimes [i rows]
+        (set! trace (+ trace (float64* mdata (+ (* i cols) i)))))
+      trace)))
+
+;;; mat-norm-fro -- Frobenius norm (sqrt of sum of squares of all elements)
+;;; m: mat
+;;; Returns: :float
+(defn mat-norm-fro [m] :float
+  (let [rows (mat-rows m)
+        cols (mat-cols m)
+        mdata (mat-data m)
+        sum-sq 0.0
+        n (* rows cols)]
+    (dotimes [i n]
+      (let [x (float64* mdata i)]
+        (set! sum-sq (+ sum-sq (* x x)))))
+    (sqrt sum-sq)))
+
+;;; mat-norm-max -- maximum absolute element
+;;; m: mat
+;;; Returns: :float
+(defn mat-norm-max [m] :float
+  (let [rows (mat-rows m)
+        cols (mat-cols m)
+        mdata (mat-data m)
+        max-abs 0.0
+        n (* rows cols)]
+    (dotimes [i n]
+      (let [x (float64* mdata i)
+            abs-x (fabs x)]
+        (when (> abs-x max-abs)
+          (set! max-abs abs-x))))
+    max-abs))
+
+;;; mat-square? -- check if matrix is square
+;;; m: mat
+;;; Returns: :int (1 if square, 0 otherwise)
+(defn mat-square? [m] :int
+  (if (= (mat-rows m) (mat-cols m)) 1 0))
+
+;;; mat-approx-eq? -- check if two matrices are approximately equal
+;;; a: mat
+;;; b: mat
+;;; tol: tolerance (max absolute difference allowed)
+;;; Returns: :int (1 if approximately equal, 0 otherwise)
+(defn mat-approx-eq? [a b tol] :int
+  (let [arows (mat-rows a)
+        acols (mat-cols a)
+        brows (mat-rows b)
+        bcols (mat-cols b)]
+    (when (or (not= arows brows) (not= acols bcols))
+      (return 0))
+    (let [adata (mat-data a)
+          bdata (mat-data b)
+          n (* arows acols)]
+      (dotimes [i n]
+        (when (> (fabs (- (float64* adata i) (float64* bdata i))) (float tol))
+          (return 0)))
+      1)))
+
+;;; inline-C helpers for math functions
+```c
+#include <math.h>
+double fabs(double x) { return fabs(x); }
+double sqrt(double x) { return sqrt(x); }
+```

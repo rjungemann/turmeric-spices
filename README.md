@@ -12,6 +12,7 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 |-------|-------------|------|-------|
 | [`tur-test`](spices/test/) | Testing framework utilities | 1 -- pure Turmeric | -- |
 | [`tur-math`](spices/math/) | 2D/3D vector and matrix math | 1 -- pure Turmeric | -- |
+| [`tur-linalg`](spices/linalg/) | Dense float linear algebra: matrices, vectors, Cholesky/LU/QR solvers, mat4 graphics helpers | 1 -- pure Turmeric + inline-C | -- |
 | [`tur-c-dsl`](spices/c-dsl/) | Lisp-syntax DSL that compiles to C99 source | 1 -- pure Turmeric | -- |
 | [`tur-glsl`](spices/glsl/) | Lisp-syntax DSL that compiles to GLSL shader source | 1 -- pure Turmeric | -- |
 | [`tur-opengl`](spices/opengl/) | OpenGL 3.3 Core + GLFW + GLAD bindings | 2 -- cmake-dep | glfw 3.4, glad v2.0.6 |

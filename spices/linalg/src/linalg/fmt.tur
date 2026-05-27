@@ -1,0 +1,188 @@
+;;; linalg/fmt -- pretty-printing and string conversion for mat and vec
+
+(declare printf snprintf malloc free)
+
+(defmodule linalg/fmt
+  (export mat-print vec-print mat->str vec->str
+          mat-print-prec vec-print-prec)
+
+  (import linalg/mat :refer [mat mat-rows mat-cols mat-data mat-get])
+  (import linalg/vec :refer [vec vec-len vec-data vec-get]))
+
+;;; Private helper: format a float with given precision
+(defn fmt--float->str [x prec] :cstr
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <string.h>
+  char *buf = malloc(64);
+  if (prec < 0) prec = 4;
+  snprintf(buf, 64, "%.*f", prec, (double)x);
+  return (intptr_t)buf;
+  ```)
+
+;;; Private helper: free a string allocated by fmt--float->str
+(defn fmt--str-free [s] :void
+  ```c
+  #include <stdlib.h>
+  free((void*)(intptr_t)s);
+  ```)
+
+;;; Private helper: compute max width needed for a column
+(defn fmt--mat-col-width [m c prec] :int
+  (let [rows (mat-rows m)
+        mdata (mat-data m)
+        max-width 1]
+    (dotimes [r rows]
+      (let [x (float64* mdata (+ (* r (mat-cols m)) c))
+            s (fmt--float->str x prec)
+            len (string-length s)]
+        (when (> len max-width)
+          (set! max-width len))
+        (fmt--str-free s)))
+    max-width))
+
+;;; Private helper: format a matrix row
+(defn fmt--mat-row->str [m r prec] :cstr
+  (let [cols (mat-cols m)
+        mdata (mat-data m)
+        buf-size 256
+        buf (malloc buf-size)
+        offset 0]
+    (dotimes [c cols]
+      (let [x (float64* mdata (+ (* r cols) c))
+            s (fmt--float->str x prec)
+            slen (string-length s)]
+        (when (> (+ offset slen 1) buf-size)
+          (free buf)
+          (set! buf-size (* buf-size 2))
+          (set! buf (malloc buf-size))
+          (set! offset 0))
+        (dotimes [i slen]
+          (set! (char* buf offset) (char* s i))
+          (set! offset (+ offset 1)))
+        (when (< c (- cols 1))
+          (set! (char* buf offset) 32) ; space
+          (set! offset (+ offset 1)))
+        (fmt--str-free s)))
+    (set! (char* buf offset) 0) ; null-terminate
+    buf))
+
+;;; mat->str -- convert matrix to string
+;;; m: mat
+;;; Returns: :cstr (caller must free)
+(defn mat->str [m] :cstr
+  (mat->str-prec m 4))
+
+;;; mat->str-prec -- convert matrix to string with precision control
+;;; m: mat
+;;; prec: number of decimal places
+;;; Returns: :cstr (caller must free)
+(defn mat->str-prec [m prec] :cstr
+  (let [rows (mat-rows m)
+        cols (mat-cols m)
+        ;; Calculate column widths
+        col-widths (do
+                     (let [widths (malloc (* cols (sizeof :int)))]
+                       (dotimes [c cols]
+                         (set! (int32* widths c) (fmt--mat-col-width m c prec)))
+                       widths))]
+    (let [;; Calculate total line width
+          total-width (do
+                        (let [sum 0]
+                          (dotimes [c cols]
+                            (set! sum (+ sum (int32* col-widths c) 1)))
+                          (- sum 1) ; remove last space
+                          sum))
+          ;; Allocate buffer for entire output
+          line-size (+ total-width 1)
+          total-size (+ (* rows line-size) 100) ; extra for newlines
+          buf (malloc total-size)
+          offset 0]
+      ;; Write each row
+      (dotimes [r rows]
+        (let [row-str (fmt--mat-row->str m r prec)
+              row-len (string-length row-str)]
+          (dotimes [i row-len]
+            (set! (char* buf offset) (char* row-str i))
+            (set! offset (+ offset 1)))
+          (free row-str)
+          (when (< r (- rows 1))
+            (set! (char* buf offset) 10) ; newline
+            (set! offset (+ offset 1)))))
+      (set! (char* buf offset) 0) ; null-terminate
+      (free col-widths)
+      buf)))
+
+;;; mat-print -- print matrix to stdout
+;;; m: mat
+;;; Returns: :void
+(defn mat-print [m] :void
+  (mat-print-prec m 4))
+
+;;; mat-print-prec -- print matrix to stdout with precision control
+;;; m: mat
+;;; prec: number of decimal places
+;;; Returns: :void
+(defn mat-print-prec [m prec] :void
+  (let [s (mat->str-prec m prec)]
+    (println s)
+    (free s)))
+
+;;; vec->str -- convert vector to string
+;;; v: vec
+;;; Returns: :cstr (caller must free)
+(defn vec->str [v] :cstr
+  (vec->str-prec v 4))
+
+;;; vec->str-prec -- convert vector to string with precision control
+;;; v: vec
+;;; prec: number of decimal places
+;;; Returns: :cstr (caller must free)
+(defn vec->str-prec [v prec] :cstr
+  (let [n (vec-len v)
+        vdata (vec-data v)
+        ;; Calculate total size needed
+        total-size 0]
+    (dotimes [i n]
+      (let [x (float64* vdata i)
+            s (fmt--float->str x prec)
+            slen (string-length s)]
+        (set! total-size (+ total-size slen 2)) ; +2 for space or parentheses
+        (fmt--str-free s)))
+    (let [buf (malloc (+ total-size 10))
+          offset 0]
+      (set! (char* buf offset) 40) ; '('
+      (set! offset (+ offset 1))
+      (dotimes [i n]
+        (let [x (float64* vdata i)
+              s (fmt--float->str x prec)
+              slen (string-length s)]
+          (dotimes [j slen]
+            (set! (char* buf offset) (char* s j))
+            (set! offset (+ offset 1)))
+          (when (< i (- n 1))
+            (set! (char* buf offset) 32) ; space
+            (set! offset (+ offset 1)))
+          (fmt--str-free s)))
+      (set! (char* buf offset) 41) ; ')'
+      (set! offset (+ offset 1))
+      (set! (char* buf offset) 0) ; null-terminate
+      buf)))
+
+;;; vec-print -- print vector to stdout
+;;; v: vec
+;;; Returns: :void
+(defn vec-print [v] :void
+  (vec-print-prec v 4))
+
+;;; vec-print-prec -- print vector to stdout with precision control
+;;; v: vec
+;;; prec: number of decimal places
+;;; Returns: :void
+(defn vec-print-prec [v prec] :void
+  (let [s (vec->str-prec v prec)]
+    (println s)
+    (free s)))
+
+) ;; end defmodule linalg/fmt

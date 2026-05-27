@@ -1,0 +1,259 @@
+;;; linalg/vec -- dynamic :float vector type (column vector)
+;;;
+;;; This module provides a heap-allocated column vector type as a thin wrapper
+;;; around a 1-column matrix. A vec is essentially a mat with cols=1.
+
+(declare malloc free)
+
+;;; vec -- a 1-column mat; alias for column vectors.
+;;; Fields:
+;;;   len   :int      -- number of elements
+;;;   data  :int      -- :ptr to float64 array of len elements
+(defstruct vec
+  len   :int
+  data  :int)
+
+;;; Private helper: allocate float array
+(defn vec--alloc-data [n] :int
+  (malloc (* n 8)))
+
+;;; Private helper: free float array
+(defn vec--free-data [data] :void
+  (free data))
+
+;;; vec-new -- create an uninitialized vector of length n
+;;; n: length
+;;; Returns: vec
+(defn vec-new [n] :int
+  (let [v (malloc (sizeof vec))
+        data (vec--alloc-data n)]
+    (set! (vec-len v) n)
+    (set! (vec-data v) data)
+    v))
+
+;;; vec-new-zeroed -- create a zero-initialized vector of length n
+;;; n: length
+;;; Returns: vec
+(defn vec-new-zeroed [n] :int
+  (let [v (vec-new n)
+        data (vec-data v)]
+    (dotimes [i n]
+      (set! (float64* data i) 0.0))
+    v))
+
+;;; vec-from-list -- create a vector from a cons list of floats
+;;; xs: cons list of floats
+;;; Returns: vec or err
+(defn vec-from-list [xs] :int
+  (let [n (length xs)
+        v (vec-new n)
+        vdata (vec-data v)]
+    (let loop [i 0
+               lst xs]
+      (if (or (>= i n) (null? lst))
+        (if (and (= i n) (null? lst))
+          v
+          (do
+            (vec-free v)
+            (err "vec-from-list: expected %d elements, got %d" n i)))
+        (do
+          (set! (float64* vdata i) (float (car lst)))
+          (loop (+ i 1) (cdr lst)))))))
+
+;;; vec-copy -- create a deep copy of a vector
+;;; v: vec
+;;; Returns: vec
+(defn vec-copy [v] :int
+  (let [n (vec-len v)
+        copy (vec-new n)
+        cdata (vec-data copy)
+        vdata (vec-data v)]
+    (dotimes [i n]
+      (set! (float64* cdata i) (float64* vdata i)))
+    copy))
+
+;;; vec-free -- free a vector
+;;; v: vec
+;;; Returns: :void
+(defn vec-free [v] :void
+  (vec--free-data (vec-data v))
+  (free v))
+
+;;; vec-get -- get element at index i with bounds checking
+;;; v: vec
+;;; i: index
+;;; Returns: :float or raises error
+(defn vec-get [v i] :float
+  (let [n (vec-len v)]
+    (when (or (< i 0) (>= i n))
+      (error "vec-get: index %d out of bounds for vector of length %d" i n))
+    (float64* (vec-data v) i)))
+
+;;; vec-set! -- set element at index i with bounds checking
+;;; v: vec
+;;; i: index
+;;; x: value
+;;; Returns: :void
+(defn vec-set! [v i x] :void
+  (let [n (vec-len v)]
+    (when (or (< i 0) (>= i n))
+      (error "vec-set!: index %d out of bounds for vector of length %d" i n))
+    (set! (float64* (vec-data v) i) (float x))))
+
+;;; vec-len -- get vector length
+;;; v: vec
+;;; Returns: :int
+(defn vec-len [v] :int (vec-len v))
+
+;;; LA1 -- Arithmetic operations
+
+;;; vec-add -- element-wise vector addition
+;;; a: vec
+;;; b: vec (must have same length as a)
+;;; Returns: vec
+(defn vec-add [a b] :int
+  (let [an (vec-len a)
+        bn (vec-len b)]
+    (when (not= an bn)
+      (error "vec-add: vectors must have same length (%d vs %d)" an bn))
+    (let [c (vec-new an)
+          cdata (vec-data c)
+          adata (vec-data a)
+          bdata (vec-data b)]
+      (dotimes [i an]
+        (set! (float64* cdata i) (+ (float64* adata i) (float64* bdata i))))
+      c)))
+
+;;; vec-sub -- element-wise vector subtraction
+;;; a: vec
+;;; b: vec (must have same length as a)
+;;; Returns: vec
+(defn vec-sub [a b] :int
+  (let [an (vec-len a)
+        bn (vec-len b)]
+    (when (not= an bn)
+      (error "vec-sub: vectors must have same length (%d vs %d)" an bn))
+    (let [c (vec-new an)
+          cdata (vec-data c)
+          adata (vec-data a)
+          bdata (vec-data b)]
+      (dotimes [i an]
+        (set! (float64* cdata i) (- (float64* adata i) (float64* bdata i))))
+      c)))
+
+;;; vec-scale -- scalar multiplication
+;;; v: vec
+;;; s: scalar (:float)
+;;; Returns: vec
+(defn vec-scale [v s] :int
+  (let [n (vec-len v)
+        c (vec-new n)
+        cdata (vec-data c)
+        vdata (vec-data v)]
+    (dotimes [i n]
+      (set! (float64* cdata i) (* (float64* vdata i) (float s))))
+    c))
+
+;;; vec-dot -- dot product
+;;; a: vec
+;;; b: vec (must have same length as a)
+;;; Returns: :float
+(defn vec-dot [a b] :float
+  (let [an (vec-len a)
+        bn (vec-len b)]
+    (when (not= an bn)
+      (error "vec-dot: vectors must have same length (%d vs %d)" an bn))
+    (let [adata (vec-data a)
+          bdata (vec-data b)
+          sum 0.0]
+      (dotimes [i an]
+        (set! sum (+ sum (* (float64* adata i) (float64* bdata i)))))
+      sum)))
+
+;;; vec-outer -- outer product (returns a matrix)
+;;; a: vec (length m)
+;;; b: vec (length n)
+;;; Returns: mat (m x n)
+(defn vec-outer [a b] :int
+  (let [am (vec-len a)
+        bn (vec-len b)
+        c (mat-new am bn)
+        cdata (mat-data c)
+        adata (vec-data a)
+        bdata (vec-data b)]
+    (dotimes [i am]
+      (dotimes [j bn]
+        (set! (float64* cdata (+ (* i bn) j))
+              (* (float64* adata i) (float64* bdata j)))))
+    c))
+
+;;; vec-norm -- Euclidean norm (L2 norm)
+;;; v: vec
+;;; Returns: :float
+(defn vec-norm [v] :float
+  (let [n (vec-len v)
+        vdata (vec-data v)
+        sum-sq 0.0]
+    (dotimes [i n]
+      (let [x (float64* vdata i)]
+        (set! sum-sq (+ sum-sq (* x x)))))
+    (sqrt sum-sq)))
+
+;;; vec-norm-1 -- L1 norm (sum of absolute values)
+;;; v: vec
+;;; Returns: :float
+(defn vec-norm-1 [v] :float
+  (let [n (vec-len v)
+        vdata (vec-data v)
+        sum 0.0]
+    (dotimes [i n]
+      (set! sum (+ sum (fabs (float64* vdata i)))))
+    sum))
+
+;;; vec-norm-inf -- L-infinity norm (maximum absolute value)
+;;; v: vec
+;;; Returns: :float
+(defn vec-norm-inf [v] :float
+  (let [n (vec-len v)
+        vdata (vec-data v)
+        max-abs 0.0]
+    (dotimes [i n]
+      (let [abs-x (fabs (float64* vdata i))]
+        (when (> abs-x max-abs)
+          (set! max-abs abs-x))))
+    max-abs))
+
+;;; vec-normalize -- normalize vector to unit length
+;;; v: vec
+;;; Returns: vec (unit vector) or error if zero vector
+(defn vec-normalize [v] :int
+  (let [n (vec-len v)
+        norm (vec-norm v)]
+    (when (< norm 1e-12)
+      (error "vec-normalize: cannot normalize zero vector"))
+    (let [c (vec-new n)
+          cdata (vec-data c)
+          vdata (vec-data v)
+          inv-norm (/ 1.0 norm)]
+      (dotimes [i n]
+        (set! (float64* cdata i) (* (float64* vdata i) inv-norm)))
+      c)))
+
+;;; vec-approx-eq? -- check if two vectors are approximately equal
+;;; a: vec
+;;; b: vec
+;;; tol: tolerance (max absolute difference allowed)
+;;; Returns: :int (1 if approximately equal, 0 otherwise)
+(defn vec-approx-eq? [a b tol] :int
+  (let [an (vec-len a)
+        bn (vec-len b)]
+    (when (not= an bn)
+      (return 0))
+    (let [adata (vec-data a)
+          bdata (vec-data b)]
+      (dotimes [i an]
+        (when (> (fabs (- (float64* adata i) (float64* bdata i))) (float tol))
+          (return 0)))
+      1)))
+
+;;; inline-C helpers for math functions (already declared in mat.tur)

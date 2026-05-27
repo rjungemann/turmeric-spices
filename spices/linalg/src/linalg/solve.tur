@@ -1,0 +1,248 @@
+;;; linalg/solve -- linear system solvers and matrix inverse
+
+(declare malloc free)
+
+(defmodule linalg/solve
+  (export fwd-sub back-sub chol-solve lu-solve qr-solve
+          mat-solve mat-inv mat-det)
+
+  (import linalg/mat :refer [mat mat-new mat-new-zeroed mat-free mat-rows mat-cols
+                              mat-data mat-get mat-set! mat-copy mat-transpose
+                              mat-mul mat-mul-vec mat-add mat-scale mat-identity
+                              mat-approx-eq? mat-square?])
+  (import linalg/vec :refer [vec vec-new vec-new-zeroed vec-free vec-len
+                              vec-data vec-get vec-set! vec-copy vec-dot])
+  (import linalg/decomp :refer [chol-factor lu-factor qr-factor
+                                  chol chol-free lu lu-free qr qr-free]))
+
+;;; LA3 -- Forward and backward substitution
+
+;;; fwd-sub -- solve Lx = b where L is lower triangular
+;;; L: mat (lower triangular)
+;;; b: vec
+;;; Returns: vec (solution x)
+(defn fwd-sub [L b] :int
+  (let [n (mat-rows L)
+        m (mat-cols L)]
+    (when (or (not (mat-square? L)) (not= n (vec-len b)))
+      (error "fwd-sub: L must be square and same size as b"))
+    
+    (let [x (vec-new-zeroed n)
+          xdata (vec-data x)
+          Ldata (mat-data L)
+          bdata (vec-data b)]
+      (dotimes [i n]
+        (let [sum 0.0]
+          (dotimes [j i]
+            (set! sum (+ sum (* (float64* Ldata (+ (* i n) j))
+                               (float64* xdata j))))
+          (set! (float64* xdata i) (/ (- (float64* bdata i) sum)
+                                  (float64* Ldata (+ (* i n) i)))))
+      x)))
+
+;;; back-sub -- solve Ux = b where U is upper triangular
+;;; U: mat (upper triangular)
+;;; b: vec
+;;; Returns: vec (solution x)
+(defn back-sub [U b] :int
+  (let [n (mat-rows U)
+        m (mat-cols U)]
+    (when (or (not (mat-square? U)) (not= n (vec-len b)))
+      (error "back-sub: U must be square and same size as b"))
+    
+    (let [x (vec-new-zeroed n)
+          xdata (vec-data x)
+          Udata (mat-data U)
+          bdata (vec-data b)]
+      ;; Solve from bottom up
+      (let loop [i (- n 1)]
+        (when (>= i 0)
+          (let [sum 0.0]
+            (dotimes [j (+ i 1)]
+              (set! sum (+ sum (* (float64* Udata (+ (* i n) j))
+                                 (float64* xdata j))))
+            (set! (float64* xdata i) (/ (- (float64* bdata i) sum)
+                                    (float64* Udata (+ (* i n) i))))
+          (loop (- i 1)))
+        x)))))
+
+;;; chol-solve -- solve Ax = b using Cholesky factorization
+;;; f: chol-factor (A = L L')
+;;; b: vec
+;;; Returns: vec (solution x)
+(defn chol-solve [f b] :int
+  (let [L (chol-factor-L f)
+        n (mat-rows L)]
+    (when (not= n (vec-len b))
+      (error "chol-solve: dimension mismatch"))
+    
+    (let [y (fwd-sub L b)
+          x (back-sub (mat-transpose L) y)]
+      (vec-free y)
+      x)))
+
+;;; LA4 -- LU-based solvers
+
+;;; lu-solve -- solve Ax = b using LU factorization
+;;; f: lu-factor (PA = LU)
+;;; b: vec
+;;; Returns: vec (solution x)
+(defn lu-solve [f b] :int
+  (let [L (lu-factor-L f)
+        U (lu-factor-U f)
+        piv (lu-factor-piv f)
+        n (mat-rows L)]
+    (when (not= n (vec-len b))
+      (error "lu-solve: dimension mismatch"))
+    
+    ;; Apply permutation to b: Pb
+    (let [Pb (vec-new n)
+          Pbdata (vec-data Pb)
+          bdata (vec-data b)]
+      (dotimes [i n]
+        (set! (float64* Pbdata i) (float64* bdata (int32* piv i))))
+      
+      ;; Solve L y = Pb
+      (let [y (fwd-sub L Pb)]
+        (vec-free Pb)
+        
+        ;; Solve U x = y
+        (let [x (back-sub U y)]
+          (vec-free y)
+          x))))))
+
+;;; mat-solve -- solve Ax = b (factorize and solve in one call)
+;;; A: mat (square, non-singular)
+;;; b: vec
+;;; spd?: :int (1 if A is symmetric positive-definite, 0 otherwise)
+;;; Returns: result<vec> or err
+(defn mat-solve [A b spd?] :int
+  (let [n (mat-rows A)]
+    (when (or (not (mat-square? A)) (not= n (vec-len b)))
+      (return (err "mat-solve: A must be square and same size as b")))
+    
+    (if (= spd? 1)
+      ;; Use Cholesky
+      (let [f (chol A)]
+        (when (err? f)
+          (return (err "mat-solve: Cholesky failed (matrix not SPD): %v" (err-val f))))
+        (let [x (chol-solve f b)]
+          (chol-free f)
+          x))
+      
+      ;; Use LU
+      (let [f (lu A)]
+        (when (err? f)
+          (return (err "mat-solve: LU failed: %v" (err-val f))))
+        (let [x (lu-solve f b)]
+          (lu-free f)
+          x)))))
+
+;;; mat-inv -- compute matrix inverse using LU decomposition
+;;; A: mat (square, non-singular)
+;;; Returns: result<mat> or err
+(defn mat-inv [A] :int
+  (let [n (mat-rows A)]
+    (when (not (mat-square? A))
+      (return (err "mat-inv: matrix must be square")))
+    
+    (let [f (lu A)]
+      (when (err? f)
+        (return (err "mat-inv: LU failed: %v" (err-val f))))
+      
+      (let [Ainv (mat-new-zeroed n n)
+            Ainvdata (mat-data Ainv)]
+        
+        ;; Solve A x_i = e_i for each column of identity
+        (dotimes [i n]
+          (let [ei (vec-new-zeroed n)
+                eidata (vec-data ei)]
+            (set! (float64* eidata i) 1.0)
+            
+            (let [x (lu-solve f ei)]
+              (vec-free ei)
+              
+              ;; Copy x into column i of Ainv
+              (let [xdata (vec-data x)]
+                (dotimes [r n]
+                  (set! (float64* Ainvdata (+ (* r n) i)) (float64* xdata r)))
+                (vec-free x)))))
+        
+        (lu-free f)
+        Ainv))))
+
+;;; mat-det -- compute determinant using LU decomposition
+;;; A: mat (square)
+;;; Returns: result<:float> or err
+(defn mat-det [A] :float
+  (let [n (mat-rows A)]
+    (when (not (mat-square? A))
+      (return (err "mat-det: matrix must be square")))
+    
+    (let [f (lu A)]
+      (when (err? f)
+        (return (err "mat-det: LU failed: %v" (err-val f))))
+      
+      (let [U (lu-factor-U f)
+            Udata (mat-data U)
+            piv (lu-factor-piv f)
+            det 1.0
+            sign 1.0]
+        
+        ;; Product of diagonal elements of U
+        (dotimes [i n]
+          (set! det (* det (float64* Udata (+ (* i n) i)))))
+        
+        ;; Account for row permutations (pivot vector)
+        (dotimes [i n]
+          (when (not= (int32* piv i) i)
+            (let [j i]
+              (while (not= (int32* piv j) i)
+                (set! j (int32* piv j))
+              (set! sign (* sign -1.0)))))
+        
+        (lu-free f)
+        (* det sign)))))
+
+;;; LA5 -- QR-based least squares solver
+
+;;; qr-solve -- solve min ||Ax - b|| using QR decomposition
+;;; f: qr-factor (A = QR)
+;;; b: vec
+;;; Returns: vec (solution x that minimizes ||Ax - b||)
+;;;
+;;; For overdetermined systems (m > n), this finds the least-squares solution.
+;;; For square systems (m = n), this is equivalent to direct solve.
+(defn qr-solve [f b] :int
+  (let [Q (qr-factor-Q f)
+        R (qr-factor-R f)
+        m (mat-rows Q)
+        n (mat-cols R)]
+    (when (not= (vec-len b) m)
+      (error "qr-solve: dimension mismatch"))
+    
+    ;; Compute Q^T b
+    (let [Qtb (vec-new-zeroed n)
+          Qtbdata (vec-data Qtb)
+          bdata (vec-data b)
+          Qdata (mat-data Q)]
+      
+      (dotimes [i n]
+        (let [sum 0.0]
+          (dotimes [j m]
+            (set! sum (+ sum (* (float64* Qdata (+ (* j m) i))
+                               (float64* bdata j))))
+          (set! (float64* Qtbdata i) sum)))
+      
+      ;; Solve R x = Q^T b using back substitution
+      (let [x (back-sub R Qtb)]
+        (vec-free Qtb)
+        x))))
+
+;;; inline-C helpers for math functions
+```c
+#include <math.h>
+double fabs(double x) { return fabs(x); }
+```
+
+) ;; end defmodule linalg/solve

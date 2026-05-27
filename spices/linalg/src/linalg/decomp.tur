@@ -1,0 +1,295 @@
+;;; linalg/decomp -- matrix decompositions (Cholesky, LU, QR)
+
+(declare malloc free printf)
+
+(defmodule linalg/decomp
+  (export chol-factor lu-factor qr-factor
+          chol chol-free lu lu-free qr qr-free)
+
+  (import linalg/mat :refer [mat mat-new mat-new-zeroed mat-free mat-rows mat-cols
+                              mat-data mat-get mat-set! mat-copy mat-transpose
+                              mat-mul mat-square?])
+  (import linalg/vec :refer [vec vec-new vec-free vec-len vec-data vec-get vec-set!]))
+
+;;; chol-factor -- result of a Cholesky decomposition A = L L'.
+;;; Fields:
+;;;   L     :int      -- lower-triangular mat
+(defstruct chol-factor
+  L     :int)
+
+;;; lu-factor -- result of LU decomposition PA = LU.
+;;; Fields:
+;;;   L     :int      -- lower-triangular mat (unit diagonal)
+;;;   U     :int      -- upper-triangular mat
+;;;   piv   :int      -- permutation vector (cons list of :int)
+(defstruct lu-factor
+  L     :int
+  U     :int
+  piv   :int)
+
+;;; qr-factor -- result of QR decomposition A = QR.
+;;; Fields:
+;;;   Q     :int      -- orthogonal mat (m x m)
+;;;   R     :int      -- upper-triangular mat (m x n)
+(defstruct qr-factor
+  Q     :int
+  R     :int)
+
+;;; LA3 -- Cholesky decomposition (Cholesky-Banachiewicz algorithm)
+
+;;; chol -- Cholesky decomposition: A = L L'
+;;; A: mat (must be symmetric positive-definite, square)
+;;; Returns: result<chol-factor> or err
+;;;
+;;; The Cholesky-Banachiewicz algorithm computes the lower triangular matrix L
+;;; such that A = L * L'. A must be symmetric positive-definite.
+;;; The algorithm detects non-SPD matrices by checking for non-positive pivots.
+(defn chol [A] :int
+  (let [n (mat-rows A)]
+    (when (not (mat-square? A))
+      (return (err "chol: matrix must be square")))
+    
+    (let [L (mat-new-zeroed n n)
+          Ldata (mat-data L)
+          Adata (mat-data A)]
+      
+      ;; Cholesky-Banachiewicz: L[i][j] = sqrt(A[i][i] - sum_{k=0}^{j-1} L[i][k]^2)
+      ;;                        L[j][i] = (A[j][i] - sum_{k=0}^{i-1} L[j][k] * L[i][k]) / L[i][i]
+      (dotimes [i n]
+        (dotimes [j (+ i 1)]
+          (if (= i j)
+            ;; Diagonal element
+            (let [sum 0.0]
+              (dotimes [k i]
+                (let [L-ik (float64* Ldata (+ (* i n) k))]
+                  (set! sum (+ sum (* L-ik L-ik)))))
+              (let [diag-val (- (float64* Adata (+ (* i n) i)) sum)]
+                (when (<= diag-val 0.0)
+                  (mat-free L)
+                  (return (err "chol: matrix is not positive definite (pivot at %d is %f)" i diag-val)))
+                (set! (float64* Ldata (+ (* i n) i)) (sqrt diag-val))))
+            ;; Off-diagonal element (only lower triangle)
+            (let [sum 0.0]
+              (dotimes [k j]
+                (set! sum (+ sum (* (float64* Ldata (+ (* i n) k))
+                                    (float64* Ldata (+ (* j n) k)))))
+              (let [L-ii (float64* Ldata (+ (* i n) i))
+                    val (/ (- (float64* Adata (+ (* i n) j)) sum) L-ii)]
+                (set! (float64* Ldata (+ (* i n) j)) val))))))
+      
+      ;; Create chol-factor
+      (let [f (malloc (sizeof chol-factor))]
+        (set! (chol-factor-L f) L)
+        f))))
+
+;;; chol-free -- free a Cholesky factor
+;;; f: chol-factor
+;;; Returns: :void
+(defn chol-free [f] :void
+  (mat-free (chol-factor-L f))
+  (free f))
+
+;;; LA4 -- LU decomposition with partial pivoting (Doolittle algorithm)
+
+;;; lu -- LU decomposition: PA = LU with partial pivoting
+;;; A: mat (must be square, non-singular)
+;;; Returns: result<lu-factor> or err
+(defn lu [A] :int
+  (let [n (mat-rows A)]
+    (when (not (mat-square? A))
+      (return (err "lu: matrix must be square")))
+    
+    (let [L (mat-new-zeroed n n)
+          U (mat-new-zeroed n n)
+          Ldata (mat-data L)
+          Udata (mat-data U)
+          Adata (mat-data A)
+          piv (malloc (* n (sizeof :int)))]
+      
+      ;; Initialize pivot vector
+      (dotimes [i n]
+        (set! (int32* piv i) i))
+      
+      ;; Doolittle algorithm with partial pivoting
+      (dotimes [k n]
+        ;; Partial pivoting: find row with maximum element in column k
+        (let [max-abs 0.0
+              max-row k]
+          (dotimes [i n]
+            (when (>= i k)
+              (let [abs-val (fabs (float64* Adata (+ (* (int32* piv i) n) k)))]
+                (when (> abs-val max-abs)
+                  (set! max-abs abs-val)
+                  (set! max-row i)))))
+          
+          ;; Swap pivot entries
+          (when (not= max-row k)
+            (let [tmp (int32* piv k)]
+              (set! (int32* piv k) (int32* piv max-row))
+              (set! (int32* piv max-row) tmp)))
+          
+          ;; Check for singularity
+          (let [U-kk (float64* Adata (+ (* (int32* piv k) n) k))]
+            (when (< (fabs U-kk) 1e-12)
+              (mat-free L)
+              (mat-free U)
+              (free piv)
+              (return (err "lu: matrix is singular (zero pivot at column %d)" k)))
+            
+            ;; Set U[k][k]
+            (set! (float64* Udata (+ (* k n) k)) U-kk)
+            
+            ;; Compute row k of U and column k of L
+            (dotimes [j (+ k 1)]
+              (let [sum-u 0.0
+                    sum-l 0.0]
+                (dotimes [m k]
+                  (set! sum-u (+ sum-u (* (float64* Ldata (+ (* k n) m))
+                                        (float64* Udata (+ (* m n) j))))
+                  (set! sum-l (+ sum-l (* (float64* Ldata (+ (* j n) m))
+                                        (float64* Udata (+ (* m n) k)))))
+                (let [A-kj (float64* Adata (+ (* (int32* piv k) n) j))]
+                  (set! (float64* Udata (+ (* k n) j)) (- A-kj sum-u))
+                  (let [A-jk (float64* Adata (+ (* (int32* piv j) n) k))]
+                    (set! (float64* Ldata (+ (* j n) k)) (/ (- A-jk sum-l)
+                                                         (float64* Udata (+ (* k n) k)))))))))
+          
+          ;; Set diagonal of L to 1
+          (set! (float64* Ldata (+ (* k n) k)) 1.0)))
+      
+      ;; Create lu-factor
+      (let [f (malloc (sizeof lu-factor))]
+        (set! (lu-factor-L f) L)
+        (set! (lu-factor-U f) U)
+        (set! (lu-factor-piv f) piv)
+        f))))
+
+;;; lu-free -- free an LU factor
+;;; f: lu-factor
+;;; Returns: :void
+(defn lu-free [f] :void
+  (mat-free (lu-factor-L f))
+  (mat-free (lu-factor-U f))
+  (free (lu-factor-piv f))
+  (free f))
+
+;;; LA5 -- QR decomposition via Householder reflections
+
+;;; qr -- QR decomposition: A = QR
+;;; A: mat (m x n, m >= n)
+;;; Returns: qr-factor
+;;;
+;;; Uses Householder reflections to compute Q (orthogonal) and R (upper triangular).
+;;; Q is computed as a product of Householder matrices and is m x m.
+;;; R is m x n and upper triangular.
+(defn qr [A] :int
+  (let [m (mat-rows A)
+        n (mat-cols A)]
+    
+    (when (< m n)
+      (return (err "qr: number of rows must be >= number of columns (%d < %d)" m n)))
+    
+    (let [R (mat-copy A)
+          Rdata (mat-data R)
+          Q (mat-identity m)
+          Qdata (mat-data Q)]
+      
+      (dotimes [k (min m n)]
+        ;; Compute Householder vector for column k
+        (let [x-norm 0.0
+              col-data (malloc (* m (sizeof :float)))
+              colptr col-data]
+          
+          ;; Extract column k from R (rows k to m-1)
+          (dotimes [i m]
+            (when (>= i k)
+              (set! (float64* colptr (- i k)) (float64* Rdata (+ (* i n) k)))))
+          
+          ;; Compute norm of column below diagonal
+          (dotimes [i (- m k)]
+            (let [x (float64* colptr i)]
+              (set! x-norm (+ x-norm (* x x)))))
+          
+          (set! x-norm (sqrt x-norm))
+          
+          ;; Check for zero column (rank deficiency)
+          (when (< x-norm 1e-12)
+            (free col-data)
+            (continue))
+          
+          ;; Create Householder vector v
+          (let [alpha (if (< (float64* colptr 0) 0) (- x-norm) x-norm)
+                beta (/ 1.0 (+ alpha x-norm))
+                v0 (+ (float64* colptr 0) alpha)]
+            
+            (set! (float64* colptr 0) v0)
+            
+            ;; Scale the rest of the vector
+            (dotimes [i (- m k)]
+              (when (> i 0)
+                (set! (float64* colptr i) (* (float64* colptr i) beta))))
+            
+            ;; Normalize v
+            (let [v-norm 0.0]
+              (dotimes [i (- m k)]
+                (let [v (float64* colptr i)]
+                  (set! v-norm (+ v-norm (* v v)))))
+              (set! v-norm (sqrt v-norm))
+              
+              (when (> v-norm 0)
+                (dotimes [i (- m k)]
+                  (set! (float64* colptr i) (/ (float64* colptr i) v-norm))))
+              
+              ;; Apply Householder transformation to R
+              (dotimes [j n]
+                (when (>= j k)
+                  (let [dot-product 0.0]
+                    (dotimes [i (- m k)]
+                      (set! dot-product (+ dot-product
+                                          (* (float64* colptr i)
+                                             (float64* Rdata (+ (* (+ k i) n) j))))))
+                    
+                    (dotimes [i (- m k)]
+                      (let [idx (+ k i)]
+                        (set! (float64* Rdata (+ (* idx n) j))
+                              (- (float64* Rdata (+ (* idx n) j))
+                                 (* 2.0 (float64* colptr i) dot-product)))))))
+              
+              ;; Apply Householder transformation to Q
+              (dotimes [j m]
+                (let [dot-product 0.0]
+                  (dotimes [i (- m k)]
+                    (set! dot-product (+ dot-product
+                                        (* (float64* colptr i)
+                                           (float64* Qdata (+ (* j m) (+ k i))))))
+                  
+                  (dotimes [i (- m k)]
+                    (let [idx (+ k i)]
+                      (set! (float64* Qdata (+ (* j m) idx))
+                            (- (float64* Qdata (+ (* j m) idx))
+                               (* 2.0 (float64* colptr i) dot-product)))))))))
+          
+          (free col-data)))
+      
+      ;; Create qr-factor
+      (let [f (malloc (sizeof qr-factor))]
+        (set! (qr-factor-Q f) Q)
+        (set! (qr-factor-R f) R)
+        f))))
+
+;;; qr-free -- free a QR factor
+;;; f: qr-factor
+;;; Returns: :void
+(defn qr-free [f] :void
+  (mat-free (qr-factor-Q f))
+  (mat-free (qr-factor-R f))
+  (free f))
+
+;;; inline-C helpers for math functions
+```c
+#include <math.h>
+double fabs(double x) { return fabs(x); }
+double sqrt(double x) { return sqrt(x); }
+```
+
+) ;; end defmodule linalg/decomp
