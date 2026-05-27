@@ -215,6 +215,11 @@
     ```)
 
   ;;; plot-into-canvas -- render into an existing canvas and viewport.
+  ;;;
+  ;;; renderers is a Vec[Renderer] (built with vec-of or vec-new/vec-push!),
+  ;;; not a cons list. Internal renderer payload data (e.g. lists of point
+  ;;; pairs inside each renderer) is still cons-shaped -- only the top-level
+  ;;; sequence of renderers is a Vec.
   (defn plot-into-canvas [canvas :int renderers :int opts :int
                           px :int py :int pw :int ph :int] :ptr<void>
     ```c
@@ -369,8 +374,11 @@
       } \
     } while (0)
 
-    for (Cons *node = (Cons *)(intptr_t)renderers; node; node = (Cons *)(intptr_t)node->tail) {
-      PlotRenderer *r = (PlotRenderer *)(intptr_t)node->head;
+    typedef struct { int64_t *data; size_t len; size_t cap; } RendVec;
+    RendVec *__rvec = (RendVec *)(intptr_t)renderers;
+    size_t __rlen = __rvec ? __rvec->len : 0;
+    for (size_t __ri = 0; __ri < __rlen; __ri++) {
+      PlotRenderer *r = (PlotRenderer *)(intptr_t)__rvec->data[__ri];
       if (!r) continue;
       if (r->kind == RK_X_AXIS || r->kind == RK_AXES) want_x_axis = true;
       if (r->kind == RK_Y_AXIS || r->kind == RK_AXES) want_y_axis = true;
@@ -676,8 +684,11 @@
     plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)canvas, (float)left, (float)top, (float)plot_w, (float)plot_h);
     plutovg_canvas_clip((plutovg_canvas_t *)(intptr_t)canvas);
 
-    for (Cons *node = (Cons *)(intptr_t)renderers; node; node = (Cons *)(intptr_t)node->tail) {
-      PlotRenderer *r = (PlotRenderer *)(intptr_t)node->head;
+    {
+      RendVec *__rvec2 = (RendVec *)(intptr_t)renderers;
+      size_t __rlen2 = __rvec2 ? __rvec2->len : 0;
+      for (size_t __ri2 = 0; __ri2 < __rlen2; __ri2++) {
+      PlotRenderer *r = (PlotRenderer *)(intptr_t)__rvec2->data[__ri2];
       if (!r) continue;
       switch ((int)r->kind) {
         case RK_HRULE:
@@ -1094,6 +1105,7 @@
         } break;
         default: break;
       }
+      }
     }
 
     plutovg_canvas_restore((plutovg_canvas_t *)(intptr_t)canvas);
@@ -1104,8 +1116,10 @@
       plutovg_canvas_set_font_face((plutovg_canvas_t *)(intptr_t)canvas, font);
       plutovg_canvas_set_font_size((plutovg_canvas_t *)(intptr_t)canvas, 12.0f);
       int row = 0;
-      for (Cons *node = (Cons *)(intptr_t)renderers; node; node = (Cons *)(intptr_t)node->tail) {
-        PlotRenderer *r = (PlotRenderer *)(intptr_t)node->head;
+      RendVec *__rvec3 = (RendVec *)(intptr_t)renderers;
+      size_t __rlen3 = __rvec3 ? __rvec3->len : 0;
+      for (size_t __ri3 = 0; __ri3 < __rlen3; __ri3++) {
+        PlotRenderer *r = (PlotRenderer *)(intptr_t)__rvec3->data[__ri3];
         if (!r || !r->label || !r->label[0]) continue;
         double y = ly + row * 16.0;
         int color = row % 8;
@@ -1125,7 +1139,10 @@
     RETURN_OK(0);
     ```)
 
-  ;;; plot -- render a renderer list to a new surface and return it.
+  ;;; plot -- render a Vec[Renderer] to a new surface and return it.
+  ;;;
+  ;;; renderers is a Vec[Renderer] (build with vec-of, or vec-new + vec-push!).
+  ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
   (defn plot [renderers :int opts :int] :ptr<void>
     (let [w (if (> (plot-opts-width opts) 0) (plot-opts-width opts) 600)
           h (if (> (plot-opts-height opts) 0) (plot-opts-height opts) 450)
@@ -1145,7 +1162,10 @@
             (__err (err-val cr))))
         (__err (err-val sr)))))
 
-  ;;; plot-write-png -- render a plot and write it to a PNG file.
+  ;;; plot-write-png -- render a Vec[Renderer] and write it to a PNG file.
+  ;;;
+  ;;; renderers is a Vec[Renderer] (build with vec-of, or vec-new + vec-push!).
+  ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
   (defn plot-write-png [renderers :int opts :int path :cstr] :ptr<void>
     (let [r (plot renderers opts)]
       (if (ok? r)

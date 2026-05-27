@@ -13,7 +13,7 @@
   (import frame/frame  :refer [frame frame-nrows frame-ncols frame-schema
                                 frame-column-at])
   (import frame/sort   :refer [arrange-indices reorder])
-  (import frame/group  :refer [group-by grouped-count grouped-free])
+  (import frame/group  :refer [__group-by-cons grouped-count grouped-free])
 
 (defn __f-nil [] :int ```c return 0; ```)
 
@@ -340,7 +340,7 @@
 ;;; Since: FR7
 (defn distinct [f :int names :int] :int
   (let [effective (if (= names 0) (__all-column-names (frame-schema f) (- (frame-ncols f) 1) (__f-nil)) names)
-        g         (group-by f effective)]
+        g         (__group-by-cons f effective)]
     (if (= g 0)
       0
       (let [n-grp (grouped-count g)

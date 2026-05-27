@@ -86,14 +86,15 @@
 ;;; c-fn-type -- create a C function-pointer type string.
 ;;;
 ;;; Parameters:
-;;;   param-types -- cons list of type keyword or C type strings
+;;;   param-types -- Vec[cstr] of type keyword or C type strings, built with
+;;;                  (vec-of ...). (Was a cons list prior to v0.2.0.)
 ;;;   ret         -- return type keyword or C type string
 ;;;
 ;;; Returns:
 ;;;   "<ret>(*)(p1, p2, ...)"
 ;;;
 ;;; Example:
-;;;   (c-fn-type (cons ":int" (cons ":int" 0)) ":int")
+;;;   (c-fn-type (vec-of ":int" ":int") ":int")
 ;;;   ; => "int32_t(*)(int32_t, int32_t)"
 ;;;
 ;;; Since: P1
@@ -101,33 +102,26 @@
   ```c
   #include <string.h>
   #include <stdlib.h>
-  struct __cdsl_cons { int64_t value; int64_t next; };
-  /* param-types values are already mapped C strings from caller */
+  typedef struct { int64_t *data; size_t len; size_t cap; } CstrVec;
+  CstrVec *vec = (CstrVec *)(intptr_t)param_types;
   const char *rct = (const char*)(intptr_t)ret;
   size_t total = 0;
-  int count = 0;
-  struct __cdsl_cons *cur = (void*)(intptr_t)param_types;
-  while (cur) {
-    total += strlen((const char*)(intptr_t)cur->value);
-    count++;
-    cur = (void*)(intptr_t)cur->next;
+  size_t n = vec ? vec->len : 0;
+  for (size_t i = 0; i < n; i++) {
+    total += strlen((const char*)(intptr_t)vec->data[i]);
   }
-  if (count > 1) total += 2 * (size_t)(count - 1);
+  if (n > 1) total += 2 * (n - 1);
   size_t rlen = strlen(rct);
   /* rct + "(*)" + "(" + params + ")" */
   char *out = malloc(rlen + total + 8);
   char *p = out;
   memcpy(p, rct, rlen); p += rlen;
   memcpy(p, "(*)(", 4); p += 4;
-  cur = (void*)(intptr_t)param_types;
-  int first = 1;
-  while (cur) {
-    if (!first) { *p++ = ','; *p++ = ' '; }
-    const char *s = (const char*)(intptr_t)cur->value;
+  for (size_t i = 0; i < n; i++) {
+    if (i > 0) { *p++ = ','; *p++ = ' '; }
+    const char *s = (const char*)(intptr_t)vec->data[i];
     size_t slen = strlen(s);
     memcpy(p, s, slen); p += slen;
-    first = 0;
-    cur = (void*)(intptr_t)cur->next;
   }
   *p++ = ')'; *p = '\0';
   return (int64_t)(intptr_t)out;

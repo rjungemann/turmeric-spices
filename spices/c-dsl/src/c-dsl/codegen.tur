@@ -1,7 +1,7 @@
 ;; c-dsl/codegen.tur -- string-building utilities and compile-c entry point.
 
 (defmodule c-dsl/codegen
-  (export c-cat2 c-cat3 c-cat4 c-join c-lines c-indent c-stmts c-block
+  (export c-cat2 c-cat3 c-cat4 c-join c-join-vec c-lines c-indent c-stmts c-block
           compile-c emit-c-file c-raw c-int->str c-float->str
           c-sprintf1 c-sprintf2 c-sprintf3 c-sprintf4)
 
@@ -297,17 +297,66 @@
   return (int64_t)(intptr_t)out;
   ```)
 
-;;; c-stmts -- join a cons list of statement strings with newlines.
+;;; c-join-vec -- join a Vec[cstr] of strings with a separator.
+;;;
+;;; Like c-join but takes a Vec[cstr] (build with vec-of) instead of a
+;;; cons list. Used by the public c-stmts API; the cons-list c-join is
+;;; kept for internal callers that already build cons lists.
 ;;;
 ;;; Parameters:
-;;;   stmts -- cons list of :cstr statement strings
+;;;   items -- Vec[cstr] of :cstr values
+;;;   sep   -- separator
+;;;
+;;; Returns:
+;;;   Items joined by sep.
+;;;
+;;; Example:
+;;;   (c-join-vec (vec-of "int32_t a" "float b") ", ")
+;;;   ; => "int32_t a, float b"
+;;;
+;;; Since: v0.2.0
+(defn c-join-vec [items :int sep :cstr] :cstr
+  ```c
+  #include <string.h>
+  #include <stdlib.h>
+  typedef struct { int64_t *data; size_t len; size_t cap; } CstrVec;
+  CstrVec *vec = (CstrVec *)(intptr_t)items;
+  const char *csep = (const char*)(intptr_t)sep;
+  size_t seplen = strlen(csep);
+  if (!vec || vec->len == 0) {
+    char *empty = malloc(1);
+    empty[0] = '\0';
+    return (int64_t)(intptr_t)empty;
+  }
+  size_t total = 0;
+  for (size_t i = 0; i < vec->len; i++) {
+    total += strlen((const char *)(intptr_t)vec->data[i]);
+  }
+  if (vec->len > 1) total += seplen * (vec->len - 1);
+  char *out = malloc(total + 1);
+  char *p = out;
+  for (size_t i = 0; i < vec->len; i++) {
+    if (i > 0) { memcpy(p, csep, seplen); p += seplen; }
+    const char *s = (const char *)(intptr_t)vec->data[i];
+    size_t slen = strlen(s);
+    memcpy(p, s, slen); p += slen;
+  }
+  *p = '\0';
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;;; c-stmts -- join a Vec[cstr] of statement strings with newlines.
+;;;
+;;; Parameters:
+;;;   stmts -- Vec[cstr] of statement strings, built with (vec-of ...).
+;;;            (Was a cons list of :cstr prior to v0.2.0.)
 ;;;
 ;;; Returns:
 ;;;   Statements joined by "\n".
 ;;;
 ;;; Since: P1
 (defn c-stmts [stmts :int] :cstr
-  (c-join stmts "\n"))
+  (c-join-vec stmts "\n"))
 
 ;;; c-block -- wrap a cons list of statement strings in a braced block.
 ;;;

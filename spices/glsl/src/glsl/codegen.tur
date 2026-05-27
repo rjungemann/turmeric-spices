@@ -5,7 +5,7 @@
 ;; by the time the user calls it, the string is already fully built.
 
 (defmodule glsl/codegen
-  (export compile-glsl glsl-join glsl-cat2 glsl-cat3 glsl-cat4
+  (export compile-glsl glsl-join glsl-join-vec glsl-cat2 glsl-cat3 glsl-cat4
           glsl-indent glsl-raw glsl-stmts glsl-int->str
           glsl-sprintf1 glsl-sprintf2 glsl-sprintf3 glsl-sprintf4)
 
@@ -195,6 +195,46 @@
 ;;;   ; => "float x, vec3 n"
 ;;;
 ;;; Since: v0.1.0
+;;; glsl-join-vec -- join a Vec[cstr] of strings with a separator.
+;;;
+;;; Like glsl-join, but takes a Vec[cstr] (build with vec-of) instead of a
+;;; cons list. Used by the public shader-builder functions for their decls
+;;; argument.
+;;;
+;;; Parameters:
+;;;   sep   -- separator inserted between elements
+;;;   items -- Vec[cstr] of strings to concatenate
+;;;
+;;; Returns:
+;;;   The joined string.
+;;;
+;;; Example:
+;;;   (glsl-join-vec ", " (vec-of "float x" "vec3 n"))
+;;;   ; => "float x, vec3 n"
+;;;
+;;; Since: v0.2.0
+(defn glsl-join-vec [sep :cstr items :int] :cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  typedef struct { int64_t *data; size_t len; size_t cap; } StrVec;
+  StrVec *vec = (StrVec *)(intptr_t)items;
+  if (!vec || vec->len == 0) return (char *)"";
+  size_t sep_len = strlen(sep);
+  size_t total = 0;
+  for (size_t i = 0; i < vec->len; i++) {
+    total += strlen((const char *)(intptr_t)vec->data[i]);
+  }
+  if (vec->len > 1) total += sep_len * (vec->len - 1);
+  char *out = malloc(total + 1);
+  out[0] = '\0';
+  for (size_t i = 0; i < vec->len; i++) {
+    strcat(out, (const char *)(intptr_t)vec->data[i]);
+    if (i + 1 < vec->len) strcat(out, sep);
+  }
+  return out;
+  ```)
+
 (defn glsl-join [sep :cstr items :int] :cstr
   ```c
   #include <stdlib.h>

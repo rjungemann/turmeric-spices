@@ -46,7 +46,7 @@
       (it "counts distinct groups"
         (let [src "g,v\nA,1\nB,2\nA,3\nC,4\nB,5\n"
               f   (read-csv-string src 0 0 1 0 "")
-              ks  (t-cons (cstr->int "g") (t-nil))
+              ks  (vec-of (cstr->int "g"))
               g   (group-by f ks)
               n   (grouped-count g)]
           (grouped-free g) (frame-free f)
@@ -54,7 +54,7 @@
       (it "produces n_groups == n_rows for all-unique keys"
         (let [src "g\n1\n2\n3\n4\n"
               f   (read-csv-string src 0 0 1 0 "")
-              ks  (t-cons (cstr->int "g") (t-nil))
+              ks  (vec-of (cstr->int "g"))
               g   (group-by f ks)
               n   (grouped-count g)]
           (grouped-free g) (frame-free f)
@@ -62,7 +62,7 @@
       (it "produces one group when every row has the same key"
         (let [src "g\nx\nx\nx\n"
               f   (read-csv-string src 0 0 1 0 "")
-              ks  (t-cons (cstr->int "g") (t-nil))
+              ks  (vec-of (cstr->int "g"))
               g   (group-by f ks)
               n   (grouped-count g)]
           (grouped-free g) (frame-free f)
@@ -72,7 +72,7 @@
       (it "sum per group"
         (let [src "g,v\nA,1\nB,10\nA,2\nB,20\nA,3\n"
               f   (read-csv-string src 0 0 1 0 "")
-              ks  (t-cons (cstr->int "g") (t-nil))
+              ks  (vec-of (cstr->int "g"))
               g   (group-by f ks)
               outs (t-cons (cstr->int "sum_v") (t-nil))
               ins  (t-cons (cstr->int "v")     (t-nil))
@@ -93,7 +93,7 @@
       (it "count and mean side-by-side"
         (let [src "g,v\nA,10\nB,1\nA,30\nB,3\n"
               f   (read-csv-string src 0 0 1 0 "")
-              ks  (t-cons (cstr->int "g") (t-nil))
+              ks  (vec-of (cstr->int "g"))
               g   (group-by f ks)
               outs (t-cons (cstr->int "n")
                   (t-cons (cstr->int "avg") (t-nil)))
@@ -117,7 +117,7 @@
       (it "min and max"
         (let [src "g,v\nA,5\nA,2\nA,9\nB,7\nB,7\n"
               f   (read-csv-string src 0 0 1 0 "")
-              ks  (t-cons (cstr->int "g") (t-nil))
+              ks  (vec-of (cstr->int "g"))
               g   (group-by f ks)
               outs (t-cons (cstr->int "lo")
                   (t-cons (cstr->int "hi") (t-nil)))

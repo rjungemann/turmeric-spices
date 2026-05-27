@@ -45,34 +45,33 @@
     ```)
 
   (defn line-renderers [] :int
-    (t-cons (tick-grid)
-      (t-cons (axes)
-        (t-cons (function (fn [x :float] :float (* x x))
-                        -2.0 2.0 96
+    (vec-of (tick-grid)
+            (axes)
+            (function (fn [x :float] :float (* x x))
+                      -2.0 2.0 96
+                      (default-line-style)
+                      "f")
+            (lines (t-cons (pair -2.0 -1.0)
+                     (t-cons (pair -1.0 0.5)
+                       (t-cons (pair 1.0 1.5) 0)))
+                   (default-line-style)
+                   "l")
+            (parametric (fn [t :float] :int (pair t (* 0.5 t)))
+                        -1.0 1.0 96
                         (default-line-style)
-                        "f")
-          (t-cons (lines (t-cons (pair -2.0 -1.0)
-                            (t-cons (pair -1.0 0.5)
-                              (t-cons (pair 1.0 1.5) 0)))
-                       (default-line-style)
-                       "l")
-            (t-cons (parametric (fn [t :float] :int (pair t (* 0.5 t)))
-                              -1.0 1.0 96
-                              (default-line-style)
-                              "p")
-              (t-cons (polar (fn [t :float] :float (+ 0.4 (* 0.1 (* t t))))
-                           -1.0 1.0 96
-                           (default-line-style)
-                           "r")
-                (t-cons (inverse (fn [y :float] :float (* y y))
-                               -1.0 1.0 96
-                               (default-line-style)
-                               "i")
-                  (t-cons (density (f-cons 0.0 (f-cons 1.0 (f-cons 1.1 (f-cons 1.2 (f-cons 2.0 0)))))
-                                 0.0 64
-                                 (default-line-style)
-                                 "d")
-                        0)))))))))
+                        "p")
+            (polar (fn [t :float] :float (+ 0.4 (* 0.1 (* t t))))
+                   -1.0 1.0 96
+                   (default-line-style)
+                   "r")
+            (inverse (fn [y :float] :float (* y y))
+                     -1.0 1.0 96
+                     (default-line-style)
+                     "i")
+            (density (f-cons 0.0 (f-cons 1.0 (f-cons 1.1 (f-cons 1.2 (f-cons 2.0 0)))))
+                     0.0 64
+                     (default-line-style)
+                     "d")))
 
   (defn write-line-png-ok [] :bool
     (let [rs (line-renderers)]

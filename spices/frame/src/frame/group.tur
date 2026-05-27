@@ -17,7 +17,7 @@
 ;; Coming later: first/last/median/std/var and utf8-aware reductions.
 
 (defmodule frame/group
-  (export group-by grouped-count grouped-free
+  (export group-by __group-by-cons grouped-count grouped-free
           agg summarize
           agg-count agg-sum agg-mean agg-min agg-max
           agg-median agg-std agg-var)
@@ -61,6 +61,28 @@
   if (!c) return 0;
   c->value = v; c->next = n;
   return (int64_t)(intptr_t)c;
+  ```)
+
+;;; __g-vec-to-cons -- convert a Vec[cstr] (or any Vec[int]) to a cons list.
+;;; Used at the group-by public boundary to adapt the Vec[cstr] callers
+;;; pass to the cons-list-shaped helpers that walk names internally.
+(defn __g-vec-to-cons [v :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct { int64_t *data; size_t len; size_t cap; } CstrVec;
+  struct __cons { int64_t value; int64_t next; };
+  CstrVec *vec = (CstrVec *)(intptr_t)v;
+  if (!vec || vec->len == 0) return 0;
+  int64_t head = 0;
+  for (size_t i = vec->len; i-- > 0; ) {
+    struct __cons *c = (struct __cons *)malloc(sizeof(*c));
+    if (!c) return 0;
+    c->value = vec->data[i];
+    c->next  = head;
+    head = (int64_t)(intptr_t)c;
+  }
+  return head;
   ```)
 
 (defn __g-list-length [xs :int] :int
@@ -282,9 +304,9 @@
   return (int64_t)(intptr_t)p;
   ```)
 
-;;; group-by -- partition a frame's rows by the named key columns.  Returns
-;;; an opaque grouped-frame; release with grouped-free.  Since: FR5
-(defn group-by [f :int names :int] :int
+;;; __group-by-cons -- internal cons-list group-by, used by intra-spice
+;;; callers (e.g. `distinct`) that already have a cons list of names.
+(defn __group-by-cons [f :int names :int] :int
   (let [src-sch (frame-schema f)
         n-keys  (__g-list-length names)
         key-ixs (__g-names-to-ixs src-sch names (- n-keys 1) (__g-nil))]
@@ -295,6 +317,20 @@
             perm-lst (arrange-indices f names dirs)
             perm     (__g-list-to-perm-array perm-lst nrows)]
         (__g-build-grouped f key-ixs n-keys perm nrows)))))
+
+;;; group-by -- partition a frame's rows by the named key columns.
+;;;
+;;; Parameters:
+;;;   f     -- source frame
+;;;   names -- Vec[cstr] of key column names, built with (vec-of "k1" "k2" ...).
+;;;            (Was a cons list of cstrs prior to 0.2.0.)
+;;;
+;;; Returns:
+;;;   an opaque grouped-frame; release with grouped-free.
+;;;
+;;; Since: FR5
+(defn group-by [f :int names :int] :int
+  (__group-by-cons f (__g-vec-to-cons names)))
 
 ;; ---------------------------------------------------------------------------
 ;; Aggregations.

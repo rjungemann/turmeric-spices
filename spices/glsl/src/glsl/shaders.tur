@@ -12,7 +12,7 @@
           glsl-vertex-shader glsl-fragment-shader
           glsl-compute-shader glsl-geometry-shader)
 
-(import glsl/codegen :refer [glsl-cat2 glsl-cat3 glsl-indent glsl-join
+(import glsl/codegen :refer [glsl-cat2 glsl-cat3 glsl-indent glsl-join glsl-join-vec
                               glsl-sprintf1 glsl-sprintf2 glsl-sprintf3
                               glsl-int->str])
 (import glsl/types   :refer [glsl-type])
@@ -72,7 +72,7 @@
 ;;; __build-shader -- internal helper: assemble a complete shader source.
 (defn __build-shader [version :cstr decls :int main-body :cstr] :cstr
   (let [ver   (glsl-sprintf1 "#version %s\n\n" version)
-        dlist (glsl-join "\n" decls)
+        dlist (glsl-join-vec "\n" decls)
         head  (glsl-cat4 ver dlist "\n\n" "void main() {\n")]
     (glsl-cat3 head (glsl-indent main-body) "\n}")))
 
@@ -80,7 +80,8 @@
 ;;;
 ;;; Parameters:
 ;;;   version   -- GLSL version string, e.g. "330 core"
-;;;   decls     -- cons list of declaration strings (inputs, outputs, uniforms)
+;;;   decls     -- Vec[cstr] of declaration strings (inputs, outputs, uniforms),
+;;;                built with (vec-of ...). Pass (vec-of) for none.
 ;;;   main-body -- body of void main(), built with glsl-stmts
 ;;;
 ;;; Returns:
@@ -88,8 +89,8 @@
 ;;;
 ;;; Example:
 ;;;   (glsl-vertex-shader "330 core"
-;;;     (cons (glsl-input "aPos" ":vec3" 0)
-;;;           (cons (glsl-uniform "model" ":mat4") 0))
+;;;     (vec-of (glsl-input "aPos" ":vec3" 0)
+;;;             (glsl-uniform "model" ":mat4"))
 ;;;     (glsl-set! "gl_Position" "model * vec4(aPos, 1.0)"))
 ;;;
 ;;; Since: v0.1.0
@@ -100,7 +101,8 @@
 ;;;
 ;;; Parameters:
 ;;;   version   -- GLSL version string, e.g. "330 core"
-;;;   decls     -- cons list of declaration strings (inputs, outputs, uniforms)
+;;;   decls     -- Vec[cstr] of declaration strings (inputs, outputs, uniforms),
+;;;                built with (vec-of ...). Pass (vec-of) for none.
 ;;;   main-body -- body of void main(), built with glsl-stmts
 ;;;
 ;;; Returns:
@@ -108,8 +110,8 @@
 ;;;
 ;;; Example:
 ;;;   (glsl-fragment-shader "330 core"
-;;;     (cons (glsl-input "ourColor" ":vec3" 0)
-;;;           (cons (glsl-output "FragColor" ":vec4") 0))
+;;;     (vec-of (glsl-input "ourColor" ":vec3" 0)
+;;;             (glsl-output "FragColor" ":vec4"))
 ;;;     (glsl-set! "FragColor" "vec4(ourColor, 1.0)"))
 ;;;
 ;;; Since: v0.1.0
@@ -130,7 +132,7 @@
 ;;;   Complete compute shader GLSL source string.
 ;;;
 ;;; Example:
-;;;   (glsl-compute-shader "450 core" 16 16 1 0 body)
+;;;   (glsl-compute-shader "450 core" 16 16 1 (vec-of) body)
 ;;;
 ;;; Since: v0.1.0
 (defn glsl-compute-shader [version :cstr wg-x :int wg-y :int wg-z :int decls :int main-body :cstr] :cstr
@@ -138,7 +140,7 @@
         wg    (glsl-sprintf3
                 "layout(local_size_x = %s, local_size_y = %s, local_size_z = %s) in;\n\n"
                 (glsl-int->str wg-x) (glsl-int->str wg-y) (glsl-int->str wg-z))
-        dlist (glsl-join "\n" decls)
+        dlist (glsl-join-vec "\n" decls)
         head  (glsl-cat4 ver wg dlist "\n\nvoid main() {\n")]
     (glsl-cat3 head (glsl-indent main-body) "\n}")))
 
@@ -149,7 +151,7 @@
 ;;;   input-layout   -- input primitive keyword, e.g. ":points" or ":triangles"
 ;;;   output-layout  -- output primitive keyword, e.g. ":triangle-strip" or ":line-strip"
 ;;;   max-vertices   -- maximum vertices the shader emits
-;;;   decls          -- cons list of declaration strings
+;;;   decls          -- Vec[cstr] of declaration strings, built with (vec-of ...)
 ;;;   main-body      -- body of void main()
 ;;;
 ;;; __prim-keyword -- map a Turmeric keyword to a GLSL primitive layout string.
@@ -170,7 +172,7 @@
 ;;;   Complete geometry shader GLSL source string.
 ;;;
 ;;; Example:
-;;;   (glsl-geometry-shader "330 core" ":points" ":triangle-strip" 4 0 body)
+;;;   (glsl-geometry-shader "330 core" ":points" ":triangle-strip" 4 (vec-of) body)
 ;;;
 ;;; Since: v0.1.0
 (defn glsl-geometry-shader [version :cstr input-layout :cstr output-layout :cstr
@@ -181,7 +183,7 @@
         in-line  (glsl-sprintf1 "layout(%s) in;\n" in-prim)
         out-line (glsl-sprintf2 "layout(%s, max_vertices = %s) out;\n\n"
                    out-prim (glsl-int->str max-vertices))
-        dlist    (glsl-join "\n" decls)
+        dlist    (glsl-join-vec "\n" decls)
         head     (glsl-cat4 ver (glsl-cat2 in-line out-line) dlist "\n\nvoid main() {\n")]
     (glsl-cat3 head (glsl-indent main-body) "\n}")))
 

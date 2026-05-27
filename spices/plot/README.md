@@ -18,7 +18,7 @@ plots into a larger image.
 ```turmeric no-check
 :spices {
   "plot" {:url    "https://github.com/rjungemann/turmeric-spices"
-          :ref    "plot-v0.1.0"
+          :ref    "plot-v0.2.0"
           :subdir "spices/plot"}
 }
 ```
@@ -32,12 +32,12 @@ plots into a larger image.
 (import plot/style :refer [default-line-style default-plot-opts])
 
 (plot-write-png
-  (list (tick-grid)
-        (axes)
-        (function (fn [x :float] :float (* x x))
-                  -2.0 2.0 128
-                  (default-line-style)
-                  "x^2"))
+  (vec-of (tick-grid)
+          (axes)
+          (function (fn [x :float] :float (* x x))
+                    -2.0 2.0 128
+                    (default-line-style)
+                    "x^2"))
   (default-plot-opts)
   "quadratic.png")
 ```
@@ -50,12 +50,12 @@ import plot/decor :refer [axes tick-grid]
 import plot/style :refer [default-line-style default-plot-opts]
 
 plot-write-png
-  list(tick-grid()
-       axes()
-       function((fn [x :float] :float *(x x))
-                -2.0 2.0 128
-                default-line-style()
-                "x^2"))
+  vec-of(tick-grid()
+         axes()
+         function((fn [x :float] :float *(x x))
+                  -2.0 2.0 128
+                  default-line-style()
+                  "x^2"))
   default-plot-opts()
   "quadratic.png"
 ```

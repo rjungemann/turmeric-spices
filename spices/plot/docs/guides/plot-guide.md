@@ -9,12 +9,12 @@
 (import plot/style :refer [default-line-style default-plot-opts])
 
 (plot-write-png
-  (list (tick-grid)
-        (axes)
-        (function (fn [x :float] :float (* x x))
-                  -2.0 2.0 128
-                  (default-line-style)
-                  "x^2"))
+  (vec-of (tick-grid)
+          (axes)
+          (function (fn [x :float] :float (* x x))
+                    -2.0 2.0 128
+                    (default-line-style)
+                    "x^2"))
   (default-plot-opts)
   "function.png")
 ```

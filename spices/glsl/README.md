@@ -19,7 +19,7 @@ or use it stand-alone to bake GLSL strings at build time.
 ```turmeric no-check
 :spices {
   "glsl" {:url    "https://github.com/rjungemann/turmeric-spices"
-          :ref    "glsl-v0.1.0"
+          :ref    "glsl-v0.2.0"
           :subdir "spices/glsl"}
 }
 ```
@@ -34,7 +34,7 @@ or use it stand-alone to bake GLSL strings at build time.
 (println
   (compile-glsl
     (glsl-fragment-shader "330 core"
-      (list (glsl-output "FragColor" ":vec4"))
+      (vec-of (glsl-output "FragColor" ":vec4"))
       (glsl-set! "FragColor" "vec4(1.0, 0.5, 0.2, 1.0)"))))
 ```
 
@@ -47,7 +47,7 @@ import glsl/codegen :refer [compile-glsl]
 println $
   compile-glsl
     glsl-fragment-shader "330 core"
-      list(glsl-output("FragColor" ":vec4"))
+      vec-of(glsl-output("FragColor" ":vec4"))
       glsl-set!("FragColor" "vec4(1.0, 0.5, 0.2, 1.0)")
 ```
 

@@ -18,7 +18,7 @@ string concatenation would be error-prone.
 ```turmeric no-check
 :spices {
   "c-dsl" {:url    "https://github.com/rjungemann/turmeric-spices"
-           :ref    "c-dsl-v0.1.0"
+           :ref    "c-dsl-v0.2.0"
            :subdir "spices/c-dsl"}
 }
 ```
@@ -30,7 +30,7 @@ string concatenation would be error-prone.
 (import c-dsl/fns     :refer [c-defn c-param c-call])
 (import c-dsl/core    :refer [c-return c-binop])
 
-(let [body (c-stmts (list (c-return (c-binop "+" "a" "b"))))
+(let [body (c-stmts (vec-of (c-return (c-binop "+" "a" "b"))))
       fn   (c-defn "add"
                    (list (c-param "a" ":int")
                          (c-param "b" ":int"))
@@ -44,7 +44,7 @@ import c-dsl/codegen :refer [compile-c c-stmts]
 import c-dsl/fns     :refer [c-defn c-param c-call]
 import c-dsl/core    :refer [c-return c-binop]
 
-let [body c-stmts(list(c-return(c-binop("+" "a" "b"))))
+let [body c-stmts(vec-of(c-return(c-binop("+" "a" "b"))))
      fn   c-defn("add"
                  list(c-param("a" ":int") c-param("b" ":int"))
                  ":int" body)]

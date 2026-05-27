@@ -60,30 +60,30 @@
   (describe "glsl/shaders -- vertex shader assembly"
 
     (it "glsl-vertex-shader produces #version line"
-      (let [src (glsl-vertex-shader "330 core" 0 (glsl-return "0.0"))]
+      (let [src (glsl-vertex-shader "330 core" (vec-of) (glsl-return "0.0"))]
         (assert-true (cstr-contains src "#version 330 core"))))
 
     (it "glsl-vertex-shader produces void main"
-      (let [src (glsl-vertex-shader "330 core" 0 (glsl-return "0.0"))]
+      (let [src (glsl-vertex-shader "330 core" (vec-of) (glsl-return "0.0"))]
         (assert-true (cstr-contains src "void main()"))))
 
     (it "glsl-vertex-shader includes main body"
-      (let [src (glsl-vertex-shader "330 core" 0 (glsl-set! "gl_Position" "vec4(0.0)"))]
+      (let [src (glsl-vertex-shader "330 core" (vec-of) (glsl-set! "gl_Position" "vec4(0.0)"))]
         (assert-true (cstr-contains src "gl_Position = vec4(0.0);"))))
 
     (it "glsl-vertex-shader includes input declarations"
-      (let [decls (cons (glsl-input "aPos" ":vec3" 0) 0)
+      (let [decls (vec-of (glsl-input "aPos" ":vec3" 0))
             src   (glsl-vertex-shader "330 core" decls (glsl-return "0.0"))]
         (assert-true (cstr-contains src "layout(location = 0) in vec3 aPos;"))))
 
     (it "glsl-vertex-shader includes uniform declarations"
-      (let [decls (cons (glsl-uniform "model" ":mat4") 0)
+      (let [decls (vec-of (glsl-uniform "model" ":mat4"))
             src   (glsl-vertex-shader "330 core" decls (glsl-return "0.0"))]
         (assert-true (cstr-contains src "uniform mat4 model;"))))
 
     (it "complete minimal vertex shader contains all expected sections"
-      (let [decls (cons (glsl-input "aPos" ":vec3" 0)
-                     (cons (glsl-uniform "model" ":mat4") 0))
+      (let [decls (vec-of (glsl-input "aPos" ":vec3" 0)
+                          (glsl-uniform "model" ":mat4"))
             body  (glsl-set! "gl_Position" "model * vec4(aPos, 1.0)")
             src   (glsl-vertex-shader "330 core" decls body)
             ok    (and (cstr-contains src "#version 330 core")
@@ -96,11 +96,11 @@
   (describe "glsl/shaders -- fragment shader assembly"
 
     (it "glsl-fragment-shader produces #version line"
-      (let [src (glsl-fragment-shader "330 core" 0 (glsl-return "0.0"))]
+      (let [src (glsl-fragment-shader "330 core" (vec-of) (glsl-return "0.0"))]
         (assert-true (cstr-contains src "#version 330 core"))))
 
     (it "glsl-fragment-shader includes output and body"
-      (let [decls (cons (glsl-output "FragColor" ":vec4") 0)
+      (let [decls (vec-of (glsl-output "FragColor" ":vec4"))
             body  (glsl-set! "FragColor" "vec4(1.0, 0.0, 0.0, 1.0)")
             src   (glsl-fragment-shader "330 core" decls body)]
         (assert-true (cstr-contains src "out vec4 FragColor;"))

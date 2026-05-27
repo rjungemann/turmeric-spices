@@ -20,7 +20,7 @@ CSV I/O, printing, and Arrow interop.
 ```turmeric no-check
 :spices {
   "frame" {:url    "https://github.com/rjungemann/turmeric-spices"
-           :ref    "frame-v0.1.0"
+           :ref    "frame-v0.2.0"
            :subdir "spices/frame"}
 }
 ```
@@ -35,7 +35,7 @@ CSV I/O, printing, and Arrow interop.
 (import frame/print  :refer [print-frame])
 
 (let [f       (read-csv-string "g,v\nA,10\nB,20\nA,30\n" 0 0 1 0 "")
-      g       (group-by f (list "g"))
+      g       (group-by f (vec-of "g"))
       outs    (list "total")
       ins     (list "v")
       tags    (list (agg-sum))
@@ -52,7 +52,7 @@ import frame/group  :refer [group-by agg agg-sum]
 import frame/print  :refer [print-frame]
 
 let [f       read-csv-string("g,v\nA,10\nB,20\nA,30\n" 0 0 1 0 "")
-     g       group-by(f list("g"))
+     g       group-by(f vec-of("g"))
      outs    list("total")
      ins     list("v")
      tags    list(agg-sum())

@@ -32,11 +32,10 @@
 
   (defn contour-renderers [] :int
     (let [fills (t-cons (default-fill-style) (t-cons (default-fill-style) (t-cons (default-fill-style) 0)))]
-      (t-cons (color-field colorize -2.0 2.0 -2.0 2.0 32 0.35)
-        (t-cons (contour-intervals saddle -2.0 2.0 -2.0 2.0 32 3 fills "bands")
-          (t-cons (contours saddle -2.0 2.0 -2.0 2.0 32 4 0 "contours")
-            (t-cons (isoline saddle -2.0 2.0 -2.0 2.0 32 0.0 (default-line-style) "zero")
-                  0))))))
+      (vec-of (color-field colorize -2.0 2.0 -2.0 2.0 32 0.35)
+              (contour-intervals saddle -2.0 2.0 -2.0 2.0 32 3 fills "bands")
+              (contours saddle -2.0 2.0 -2.0 2.0 32 4 0 "contours")
+              (isoline saddle -2.0 2.0 -2.0 2.0 32 0.0 (default-line-style) "zero"))))
 
   (defn write-contour-png-ok [] :bool
     (let [rs (contour-renderers)]
