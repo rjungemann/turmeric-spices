@@ -1,0 +1,106 @@
+;; tests/style_test.tur -- AN1 byte-exact tests for ansi/style SGR emission.
+
+(defmodule ansi/tests/style
+  (import ansi/style :refer [style-bold style-dim style-italic style-underline
+                             style-blink style-blink-fast style-reverse
+                             style-strikethrough style-reset])
+
+  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (fails == 0) {
+      fprintf(stderr, "# All %lld ansi/style tests passed.\n", (long long)count);
+    } else {
+      fprintf(stderr, "# %lld ansi/style tests failed.\n", (long long)fails);
+    }
+    ```)
+
+  (defn bool->fail [ok :bool] :int (if ok 0 1))
+  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+    (do (tap-line idx name ok) (bool->fail ok)))
+
+  (defn __capture-begin [] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_style_saved_fd = -1; */
+    /* __tur_include__: static int g_style_pipe_r = -1; */
+    /* __tur_include__: static int g_style_pipe_w = -1; */
+    fflush(stdout);
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    int sf = fcntl(fds[0], F_GETFL, 0);
+    if (sf >= 0) fcntl(fds[0], F_SETFL, sf | O_NONBLOCK);
+    g_style_pipe_r = fds[0];
+    g_style_pipe_w = fds[1];
+    g_style_saved_fd = dup(STDOUT_FILENO);
+    dup2(g_style_pipe_w, STDOUT_FILENO);
+    ```)
+
+  (defn __capture-check [test-id :int] #{Unsafe} :bool
+    ```c
+    fflush(stdout);
+    if (g_style_saved_fd < 0) return 0;
+    dup2(g_style_saved_fd, STDOUT_FILENO);
+    close(g_style_saved_fd);
+    close(g_style_pipe_w);
+    g_style_saved_fd = -1;
+    g_style_pipe_w = -1;
+    char buf[64];
+    size_t len = 0;
+    for (;;) {
+      if (len >= sizeof(buf) - 1) break;
+      ssize_t n = read(g_style_pipe_r, buf + len, sizeof(buf) - 1 - len);
+      if (n <= 0) break;
+      len += (size_t)n;
+    }
+    buf[len] = '\0';
+    close(g_style_pipe_r);
+    g_style_pipe_r = -1;
+    const char *expected = "";
+    size_t exp_len = 0;
+    switch ((int)test_id) {
+      case 1: expected = "\033[1m"; exp_len = 4; break;
+      case 2: expected = "\033[2m"; exp_len = 4; break;
+      case 3: expected = "\033[3m"; exp_len = 4; break;
+      case 4: expected = "\033[4m"; exp_len = 4; break;
+      case 5: expected = "\033[5m"; exp_len = 4; break;
+      case 6: expected = "\033[6m"; exp_len = 4; break;
+      case 7: expected = "\033[7m"; exp_len = 4; break;
+      case 8: expected = "\033[9m"; exp_len = 4; break;
+      case 9: expected = "\033[0m"; exp_len = 4; break;
+      default: return 0;
+    }
+    if (len != exp_len) return 0;
+    return memcmp(buf, expected, exp_len) == 0;
+    ```)
+
+  (defn t-bold      [] #{Unsafe} :bool (do (__capture-begin) (style-bold)          (__capture-check 1)))
+  (defn t-dim       [] #{Unsafe} :bool (do (__capture-begin) (style-dim)           (__capture-check 2)))
+  (defn t-italic    [] #{Unsafe} :bool (do (__capture-begin) (style-italic)        (__capture-check 3)))
+  (defn t-underline [] #{Unsafe} :bool (do (__capture-begin) (style-underline)     (__capture-check 4)))
+  (defn t-blink     [] #{Unsafe} :bool (do (__capture-begin) (style-blink)         (__capture-check 5)))
+  (defn t-blink-f   [] #{Unsafe} :bool (do (__capture-begin) (style-blink-fast)    (__capture-check 6)))
+  (defn t-reverse   [] #{Unsafe} :bool (do (__capture-begin) (style-reverse)       (__capture-check 7)))
+  (defn t-strike    [] #{Unsafe} :bool (do (__capture-begin) (style-strikethrough) (__capture-check 8)))
+  (defn t-reset     [] #{Unsafe} :bool (do (__capture-begin) (style-reset)         (__capture-check 9)))
+
+  (defn main [] #{Unsafe} :int
+    (let [r1 (run-case 1 "style-bold = SGR 1"                 (t-bold))
+          r2 (run-case 2 "style-dim = SGR 2"                  (t-dim))
+          r3 (run-case 3 "style-italic = SGR 3"               (t-italic))
+          r4 (run-case 4 "style-underline = SGR 4"            (t-underline))
+          r5 (run-case 5 "style-blink = SGR 5"                (t-blink))
+          r6 (run-case 6 "style-blink-fast = SGR 6"           (t-blink-f))
+          r7 (run-case 7 "style-reverse = SGR 7"              (t-reverse))
+          r8 (run-case 8 "style-strikethrough = SGR 9"        (t-strike))
+          r9 (run-case 9 "style-reset = SGR 0"                (t-reset))]
+      (do
+        (tap-plan 9 (+ r1 (+ r2 (+ r3 (+ r4 (+ r5 (+ r6 (+ r7 (+ r8 r9)))))))))
+        (if (= (+ r1 (+ r2 (+ r3 (+ r4 (+ r5 (+ r6 (+ r7 (+ r8 r9))))))))  0) 0 1))))
+
+) ;; end defmodule

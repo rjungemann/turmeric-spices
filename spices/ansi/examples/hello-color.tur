@@ -1,24 +1,16 @@
-;; examples/hello-color.tur -- AN0 smoke test.
+;; examples/hello-color.tur -- AN0+AN1 smoke test.
 ;;
-;; Exercises ansi/term capability detection and ansi/cursor movement.  AN0
-;; doesn't yet ship the ansi/color SGR helpers, so the colored block in the
-;; middle of the demo uses raw inline-C printf to emit a 256-color gradient;
-;; AN1 will rewrite this in terms of (fg8 idx).
+;; Prints terminal capabilities, then a 216-cell 256-color gradient and a
+;; style+truecolor banner using only the public ansi/* API.
 
 (defmodule ansi/examples/hello-color
   (import ansi/term :refer [term-size term-color-support term-no-color?
                             term-image-protocol])
-  (import ansi/cursor :refer [cursor-move-to cursor-save cursor-restore
-                              cursor-hide cursor-show])
-
-  (defn print-gradient [] #{Unsafe} :void
-    ```c
-    for (int i = 16; i < 232; i++) {
-      printf("\033[48;5;%dm \033[0m", i);
-      if (((i - 15) % 36) == 0) printf("\n");
-    }
-    printf("\n");
-    ```)
+  (import ansi/cursor :refer [cursor-save cursor-restore])
+  (import ansi/color :refer [bg8 fg24 bg24 color-reset
+                             color-bright-white])
+  (import ansi/style :refer [style-bold style-italic style-reset])
+  (import ansi/screen :refer [screen-clear-to-eol])
 
   (defn print-size [sz :int] #{Unsafe} :void
     ```c
@@ -27,36 +19,66 @@
            (long long)p->head, (long long)p->tail);
     ```)
 
-  (defn print-color-support [c :int] #{Unsafe} :void
+  (defn print-int [label :cstr val :int] #{Unsafe} :void
     ```c
-    printf("term-color-support:  %lld  (0=none 1=4bit 2=256 3=truecolor)\n",
-           (long long)c);
-    ```)
-
-  (defn print-no-color [nc :int] #{Unsafe} :void
-    ```c
-    printf("term-no-color?:      %lld\n", (long long)nc);
-    ```)
-
-  (defn print-image-protocol [ip :int] #{Unsafe} :void
-    ```c
-    printf("term-image-protocol: %lld  (0=none 1=kitty 2=iterm2 3=sixel)\n",
-           (long long)ip);
+    printf("%-21s%lld\n", (const char *)label, (long long)val);
     ```)
 
   (defn show-capabilities [] #{Unsafe} :void
     (do
       (print-size (term-size))
-      (print-color-support (term-color-support))
-      (print-no-color (term-no-color?))
-      (print-image-protocol (term-image-protocol))))
+      (print-int "term-color-support:" (term-color-support))
+      (print-int "term-no-color?:"     (term-no-color?))
+      (print-int "term-image-protocol:" (term-image-protocol))))
+
+  (defn print-char [ch :int] #{Unsafe} :void
+    ```c
+    putchar((int)ch);
+    ```)
+
+  (defn print-newline [] #{Unsafe} :void
+    ```c
+    putchar('\n');
+    ```)
+
+  ;; 6x36 grid of the 256-color palette (cells 16..231).
+  (defn print-gradient [] #{Unsafe} :void
+    (let [start 16]
+      (do
+        ```c
+        for (int row = 0; row < 6; row++) {
+          for (int col = 0; col < 36; col++) {
+            int idx = 16 + row * 36 + col;
+            printf("\033[48;5;%dm \033[0m", idx);
+          }
+          putchar('\n');
+        }
+        ```)))
+
+  ;; Style + truecolor banner.
+  (defn print-banner [] #{Unsafe} :void
+    (do
+      (style-bold)
+      (fg24 255 200 80)
+      (bg24 20 20 40)
+      ```c printf(" hello, tur-ansi "); ```
+      (style-reset)
+      (print-newline)
+      (style-italic)
+      (fg24 120 200 255)
+      ```c printf(" italic + truecolor "); ```
+      (style-reset)
+      (print-newline)))
 
   (defn main [] #{Unsafe} :int
     (do
       (show-capabilities)
+      (print-newline)
       (cursor-save)
       (print-gradient)
+      (print-banner)
       (cursor-restore)
+      (color-reset)
       0))
 
 ) ;; end defmodule

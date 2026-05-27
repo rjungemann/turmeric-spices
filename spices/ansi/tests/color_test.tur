@@ -1,0 +1,125 @@
+;; tests/color_test.tur -- AN1 byte-exact tests for ansi/color SGR emission.
+
+(defmodule ansi/tests/color
+  (import ansi/color :refer [fg4 bg4 fg8 bg8 fg24 bg24 color-reset
+                             color-black color-red color-green color-yellow
+                             color-blue color-magenta color-cyan color-white
+                             color-bright-black color-bright-red
+                             color-bright-green color-bright-yellow
+                             color-bright-blue color-bright-magenta
+                             color-bright-cyan color-bright-white])
+
+  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (fails == 0) {
+      fprintf(stderr, "# All %lld ansi/color tests passed.\n", (long long)count);
+    } else {
+      fprintf(stderr, "# %lld ansi/color tests failed.\n", (long long)fails);
+    }
+    ```)
+
+  (defn bool->fail [ok :bool] :int (if ok 0 1))
+  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+    (do (tap-line idx name ok) (bool->fail ok)))
+
+  (defn __capture-begin [] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_color_saved_fd = -1; */
+    /* __tur_include__: static int g_color_pipe_r = -1; */
+    /* __tur_include__: static int g_color_pipe_w = -1; */
+    fflush(stdout);
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    int sf = fcntl(fds[0], F_GETFL, 0);
+    if (sf >= 0) fcntl(fds[0], F_SETFL, sf | O_NONBLOCK);
+    g_color_pipe_r = fds[0];
+    g_color_pipe_w = fds[1];
+    g_color_saved_fd = dup(STDOUT_FILENO);
+    dup2(g_color_pipe_w, STDOUT_FILENO);
+    ```)
+
+  (defn __capture-check [test-id :int] #{Unsafe} :bool
+    ```c
+    fflush(stdout);
+    if (g_color_saved_fd < 0) return 0;
+    dup2(g_color_saved_fd, STDOUT_FILENO);
+    close(g_color_saved_fd);
+    close(g_color_pipe_w);
+    g_color_saved_fd = -1;
+    g_color_pipe_w = -1;
+    char buf[256];
+    size_t len = 0;
+    for (;;) {
+      if (len >= sizeof(buf) - 1) break;
+      ssize_t n = read(g_color_pipe_r, buf + len, sizeof(buf) - 1 - len);
+      if (n <= 0) break;
+      len += (size_t)n;
+    }
+    buf[len] = '\0';
+    close(g_color_pipe_r);
+    g_color_pipe_r = -1;
+    const char *expected = "";
+    size_t exp_len = 0;
+    switch ((int)test_id) {
+      case 1: expected = "\033[31m";          exp_len = 5;  break; /* fg4 1 (red)      */
+      case 2: expected = "\033[97m";          exp_len = 5;  break; /* fg4 15 (br-white)*/
+      case 3: expected = "\033[40m";          exp_len = 5;  break; /* bg4 0 (black)    */
+      case 4: expected = "\033[100m";         exp_len = 6;  break; /* bg4 8 (br-black) */
+      case 5: expected = "\033[38;5;208m";    exp_len = 11; break; /* fg8 208          */
+      case 6: expected = "\033[48;5;0m";      exp_len = 9;  break; /* bg8 0            */
+      case 7: expected = "\033[38;2;255;128;0m"; exp_len = 17; break; /* fg24 truecolor*/
+      case 8: expected = "\033[48;2;0;0;0m";  exp_len = 13; break; /* bg24 0,0,0       */
+      case 9: expected = "\033[39;49m";       exp_len = 8;  break; /* color-reset      */
+      case 10: expected = "\033[37m";         exp_len = 5;  break; /* fg4 7 (white)    */
+      case 11: expected = "\033[90m";         exp_len = 5;  break; /* fg4 8 (br-black) */
+      case 12: expected = "\033[30m";         exp_len = 5;  break; /* clamp -1 -> fg4 0*/
+      case 13: expected = "\033[97m";         exp_len = 5;  break; /* clamp 99 -> fg4 15*/
+      case 14: expected = "\033[38;5;255m";   exp_len = 11; break; /* fg8 clamp 999 */
+      default: return 0;
+    }
+    if (len != exp_len) return 0;
+    return memcmp(buf, expected, exp_len) == 0;
+    ```)
+
+  (defn t-fg4-red       [] #{Unsafe} :bool (do (__capture-begin) (fg4 (color-red))           (__capture-check 1)))
+  (defn t-fg4-br-white  [] #{Unsafe} :bool (do (__capture-begin) (fg4 (color-bright-white))  (__capture-check 2)))
+  (defn t-bg4-black     [] #{Unsafe} :bool (do (__capture-begin) (bg4 (color-black))         (__capture-check 3)))
+  (defn t-bg4-br-black  [] #{Unsafe} :bool (do (__capture-begin) (bg4 (color-bright-black))  (__capture-check 4)))
+  (defn t-fg8-orange    [] #{Unsafe} :bool (do (__capture-begin) (fg8 208)                   (__capture-check 5)))
+  (defn t-bg8-zero      [] #{Unsafe} :bool (do (__capture-begin) (bg8 0)                     (__capture-check 6)))
+  (defn t-fg24-orange   [] #{Unsafe} :bool (do (__capture-begin) (fg24 255 128 0)            (__capture-check 7)))
+  (defn t-bg24-black    [] #{Unsafe} :bool (do (__capture-begin) (bg24 0 0 0)                (__capture-check 8)))
+  (defn t-color-reset   [] #{Unsafe} :bool (do (__capture-begin) (color-reset)               (__capture-check 9)))
+  (defn t-fg4-white     [] #{Unsafe} :bool (do (__capture-begin) (fg4 (color-white))         (__capture-check 10)))
+  (defn t-fg4-br-black  [] #{Unsafe} :bool (do (__capture-begin) (fg4 (color-bright-black))  (__capture-check 11)))
+  (defn t-fg4-clamp-lo  [] #{Unsafe} :bool (do (__capture-begin) (fg4 -1)                    (__capture-check 12)))
+  (defn t-fg4-clamp-hi  [] #{Unsafe} :bool (do (__capture-begin) (fg4 99)                    (__capture-check 13)))
+  (defn t-fg8-clamp-hi  [] #{Unsafe} :bool (do (__capture-begin) (fg8 999)                   (__capture-check 14)))
+
+  (defn main [] #{Unsafe} :int
+    (let [r1  (run-case 1  "fg4 red"                       (t-fg4-red))
+          r2  (run-case 2  "fg4 bright-white"              (t-fg4-br-white))
+          r3  (run-case 3  "bg4 black"                     (t-bg4-black))
+          r4  (run-case 4  "bg4 bright-black"              (t-bg4-br-black))
+          r5  (run-case 5  "fg8 208"                       (t-fg8-orange))
+          r6  (run-case 6  "bg8 0"                         (t-bg8-zero))
+          r7  (run-case 7  "fg24 255 128 0"                (t-fg24-orange))
+          r8  (run-case 8  "bg24 0 0 0"                    (t-bg24-black))
+          r9  (run-case 9  "color-reset emits 39;49"       (t-color-reset))
+          r10 (run-case 10 "fg4 white (index 7)"           (t-fg4-white))
+          r11 (run-case 11 "fg4 bright-black uses 90"      (t-fg4-br-black))
+          r12 (run-case 12 "fg4 -1 clamps to 0"            (t-fg4-clamp-lo))
+          r13 (run-case 13 "fg4 99 clamps to 15"           (t-fg4-clamp-hi))
+          r14 (run-case 14 "fg8 999 clamps to 255"         (t-fg8-clamp-hi))]
+      (do
+        (tap-plan 14 (+ r1 (+ r2 (+ r3 (+ r4 (+ r5 (+ r6 (+ r7 (+ r8 (+ r9 (+ r10 (+ r11 (+ r12 (+ r13 r14))))))))))))))
+        (if (= (+ r1 (+ r2 (+ r3 (+ r4 (+ r5 (+ r6 (+ r7 (+ r8 (+ r9 (+ r10 (+ r11 (+ r12 (+ r13 r14))))))))))))) 0) 0 1))))
+
+) ;; end defmodule
