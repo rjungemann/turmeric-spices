@@ -505,7 +505,8 @@
   ```)
 
 (defn __ds-fill [f :int sch :int ncols :int c :int
-                 b-var :int b-count :int b-mean :int b-std :int] :void
+                 b-var :int b-count :int b-mean :int b-std :int
+                 b-min :int b-q25 :int b-med :int b-q75 :int b-max :int] :void
   (if (>= c ncols)
     nil
     (let [col (frame-column-at f c)
@@ -520,47 +521,16 @@
                 (builder-append-int64   b-count (__ds-count h))
                 (builder-append-float64 b-mean  (__ds-mean  h))
                 (builder-append-float64 b-std   (__ds-std   h))
+                (builder-append-float64 b-min   (__ds-mn    h))
+                (builder-append-float64 b-q25   (__ds-q25   h))
+                (builder-append-float64 b-med   (__ds-med   h))
+                (builder-append-float64 b-q75   (__ds-q75   h))
+                (builder-append-float64 b-max   (__ds-mx    h))
                 (__ds-free h))))
           nil)
-        (__ds-fill f sch ncols (+ c 1) b-var b-count b-mean b-std)))))
-
-;; Second pass: fill min/q25/median/q75/max.  Doing this in two passes lets us
-;; stay within the 8-parameter limit per defn.
-(defn __ds-fill-2 [f :int sch :int ncols :int c :int
-                   b-min :int b-q25 :int b-med :int b-q75 :int] :void
-  (if (>= c ncols)
-    nil
-    (let [col (frame-column-at f c)
-          tt  (column-type col)]
-      (do
-        (if (__ds-is-numeric? tt)
-          (let [h (__ds-stats col)]
-            (if (= h 0)
-              nil
-              (do
-                (builder-append-float64 b-min (__ds-mn  h))
-                (builder-append-float64 b-q25 (__ds-q25 h))
-                (builder-append-float64 b-med (__ds-med h))
-                (builder-append-float64 b-q75 (__ds-q75 h))
-                (__ds-free h))))
-          nil)
-        (__ds-fill-2 f sch ncols (+ c 1) b-min b-q25 b-med b-q75)))))
-
-(defn __ds-fill-max [f :int sch :int ncols :int c :int b-max :int] :void
-  (if (>= c ncols)
-    nil
-    (let [col (frame-column-at f c)
-          tt  (column-type col)]
-      (do
-        (if (__ds-is-numeric? tt)
-          (let [h (__ds-stats col)]
-            (if (= h 0)
-              nil
-              (do
-                (builder-append-float64 b-max (__ds-mx h))
-                (__ds-free h))))
-          nil)
-        (__ds-fill-max f sch ncols (+ c 1) b-max)))))
+        (__ds-fill f sch ncols (+ c 1)
+                   b-var b-count b-mean b-std
+                   b-min b-q25 b-med b-q75 b-max)))))
 
 ;;; describe -- pandas-style summary table for numeric columns.
 ;;;
@@ -584,9 +554,9 @@
         b-q75   (column-builder (type-float64) ncols)
         b-max   (column-builder (type-float64) ncols)]
     (do
-      (__ds-fill   f sch ncols 0 b-var b-cnt b-mean b-std)
-      (__ds-fill-2 f sch ncols 0 b-min b-q25 b-med b-q75)
-      (__ds-fill-max f sch ncols 0 b-max)
+      (__ds-fill f sch ncols 0
+                 b-var b-cnt b-mean b-std
+                 b-min b-q25 b-med b-q75 b-max)
       (let [c-var  (builder-finish b-var)
             c-cnt  (builder-finish b-cnt)
             c-mean (builder-finish b-mean)
