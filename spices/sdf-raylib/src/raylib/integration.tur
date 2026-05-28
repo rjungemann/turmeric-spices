@@ -1,0 +1,290 @@
+;;; raylib/integration -- CPU ray-marching preview window using raylib.
+;;;
+;;; sdf-preview-window opens a window and renders the scene each frame by
+;;; marching rays on the CPU.  The render resolution is configurable via the
+;;; scale parameter: scale=1 renders at full window resolution (slow),
+;;; scale=4 renders at 1/4 resolution (recommended for interactive use).
+;;;
+;;; The C EVAL_SDF macro embeds the full iterative SDF evaluator so that
+;;; the inner march loop never calls back into the Turmeric interpreter,
+;;; giving acceptable (~20-30 FPS) performance for simple scenes at scale=4.
+;;;
+;;; Camera controls:
+;;;   Arrow keys    -- orbit the camera (left/right = azimuth, up/down = elevation)
+;;;   +/-           -- zoom in / out
+;;;   ESC           -- close the window
+;;;
+;;; Since: Phase 1
+;; -------------------------------------------------------------------------
+
+(defmodule raylib/integration
+  (export sdf-preview-window))
+
+;;; sdf-preview-window -- open a window and live-preview an SdfExpr scene.
+;;;
+;;; Parameters:
+;;;   sdf    -- SdfExpr handle to render
+;;;   width  -- window width in pixels
+;;;   height -- window height in pixels
+;;;   scale  -- render divisor (1 = full res, 4 = quarter res recommended)
+;;;   title  -- window title string
+;;;
+;;; Returns:
+;;;   :void  Blocks until the window is closed.
+;;;
+;;; Example:
+;;;   (sdf-preview-window (sdf-sphere 0.0 0.0 0.0 1.0) 800 600 4 "Preview")
+;;;
+;;; Since: Phase 1
+(defn sdf-preview-window [sdf :int width :int height :int scale :int title :cstr] :void
+  ```c
+  #include <raylib.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  #include <stdint.h>
+
+  /* ---------- SDF node layout (mirrors sdf/expr.tur) ---------- */
+  typedef struct sdf_node {
+    int64_t tag;
+    double v0x,v0y,v0z, v1x,v1y,v1z, s0,s1;
+    struct sdf_node *left, *right;
+  } sdf_node;
+
+  /* Tag constants -- must match sdf/expr.tur */
+#define CT_SPHERE    0
+#define CT_BOX       1
+#define CT_CYLINDER  2
+#define CT_PLANE     3
+#define CT_UNION     10
+#define CT_INTERSECT 11
+#define CT_DIFF      12
+#define CT_SMUNION   13
+#define CT_OFFSET    20
+#define CT_SHELL     21
+#define CT_TRANSLATE 30
+
+  /* ---------- Iterative SDF evaluator (no nested C functions) ----------
+     EVAL_SDF(result_out, root, px, py, pz) evaluates the tree at (px,py,pz).
+     Uses two fixed-size stacks on the C stack; max tree depth = 62. */
+#define EVAL_SDF(result_out, root_ptr, spx, spy, spz) \
+  do { \
+    struct { sdf_node *n; int phase; } _stk[64]; \
+    double _res[64]; \
+    int _st=0,_rt=0; \
+    _stk[_st].n=(sdf_node*)(intptr_t)(root_ptr); _stk[_st].phase=0; _st++; \
+    while (_st>0) { \
+      sdf_node *_n=_stk[_st-1].n; int _ph=_stk[_st-1].phase; int64_t _tg=_n->tag; \
+      if (_tg==CT_SPHERE){ double _dx=(spx)-_n->v0x,_dy=(spy)-_n->v0y,_dz=(spz)-_n->v0z; _res[_rt++]=sqrt(_dx*_dx+_dy*_dy+_dz*_dz)-_n->s0; _st--; } \
+      else if (_tg==CT_BOX){ double _cx=(_n->v0x+_n->v1x)*0.5,_cy=(_n->v0y+_n->v1y)*0.5,_cz=(_n->v0z+_n->v1z)*0.5,_ex=(_n->v1x-_n->v0x)*0.5,_ey=(_n->v1y-_n->v0y)*0.5,_ez=(_n->v1z-_n->v0z)*0.5,_qx=fabs((spx)-_cx)-_ex,_qy=fabs((spy)-_cy)-_ey,_qz=fabs((spz)-_cz)-_ez,_mx=_qx>_qy?(_qx>_qz?_qx:_qz):(_qy>_qz?_qy:_qz),_lq=sqrt((_qx>0?_qx*_qx:0)+(_qy>0?_qy*_qy:0)+(_qz>0?_qz*_qz:0)); _res[_rt++]=_lq+(_mx<0?_mx:0); _st--; } \
+      else if (_tg==CT_CYLINDER){ double _dx=(spx)-_n->v0x,_dy=(spy)-_n->v0y; _res[_rt++]=sqrt(_dx*_dx+_dy*_dy)-_n->s0; _st--; } \
+      else if (_tg==CT_PLANE){ _res[_rt++]=_n->v0x*(spx)+_n->v0y*(spy)+_n->v0z*(spz)+_n->s0; _st--; } \
+      else if (_tg==CT_UNION||_tg==CT_INTERSECT||_tg==CT_DIFF||_tg==CT_SMUNION){ \
+        if(_ph==0){_stk[_st-1].phase=1;_stk[_st].n=_n->left;_stk[_st].phase=0;_st++;} \
+        else if(_ph==1){_stk[_st-1].phase=2;_stk[_st].n=_n->right;_stk[_st].phase=0;_st++;} \
+        else{double _r=_res[--_rt],_l=_res[--_rt]; \
+          if(_tg==CT_UNION)_res[_rt++]=_l<_r?_l:_r; \
+          else if(_tg==CT_INTERSECT)_res[_rt++]=_l>_r?_l:_r; \
+          else if(_tg==CT_DIFF){double _nr=-_r;_res[_rt++]=_l>_nr?_l:_nr;} \
+          else{double _k=_n->s0,_h=fmax(_k-fabs(_l-_r),0.0)/_k;_res[_rt++]=fmin(_l,_r)-_h*_h*_k*0.25;} \
+          _st--;} \
+      } else if(_tg==CT_OFFSET){ \
+        if(_ph==0){_stk[_st-1].phase=1;_stk[_st].n=_n->left;_stk[_st].phase=0;_st++;} \
+        else{_res[_rt-1]+=_n->s0;_st--;} \
+      } else if(_tg==CT_SHELL){ \
+        if(_ph==0){_stk[_st-1].phase=1;_stk[_st].n=_n->left;_stk[_st].phase=0;_st++;} \
+        else{double _d=_res[--_rt];_res[_rt++]=fabs(_d)-_n->s0;_st--;} \
+      } else if(_tg==CT_TRANSLATE){ \
+        if(_ph==0){ \
+          /* Adjust query point and re-evaluate the child with new coords */ \
+          double _tx=_n->v0x,_ty=_n->v0y,_tz=_n->v0z; \
+          double _npx=(spx)-_tx,_npy=(spy)-_ty,_npz=(spz)-_tz; \
+          _st--; /* pop translate node before inner eval */ \
+          struct { sdf_node *n; int phase; } _stk2[64]; double _res2[64]; int _s2=0,_r2=0; \
+          _stk2[0].n=_n->left; _stk2[0].phase=0; _s2=1; \
+          while(_s2>0){ sdf_node *_m=_stk2[_s2-1].n; int _p2=_stk2[_s2-1].phase; int64_t _t2=_m->tag; \
+            if(_t2==CT_SPHERE){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y,_dz2=_npz-_m->v0z;_res2[_r2++]=sqrt(_dx2*_dx2+_dy2*_dy2+_dz2*_dz2)-_m->s0;_s2--;} \
+            else if(_t2==CT_BOX){double _cx2=(_m->v0x+_m->v1x)*0.5,_cy2=(_m->v0y+_m->v1y)*0.5,_cz2=(_m->v0z+_m->v1z)*0.5,_ex2=(_m->v1x-_m->v0x)*0.5,_ey2=(_m->v1y-_m->v0y)*0.5,_ez2=(_m->v1z-_m->v0z)*0.5,_qx2=fabs(_npx-_cx2)-_ex2,_qy2=fabs(_npy-_cy2)-_ey2,_qz2=fabs(_npz-_cz2)-_ez2,_mx2=_qx2>_qy2?(_qx2>_qz2?_qx2:_qz2):(_qy2>_qz2?_qy2:_qz2),_lq2=sqrt((_qx2>0?_qx2*_qx2:0)+(_qy2>0?_qy2*_qy2:0)+(_qz2>0?_qz2*_qz2:0));_res2[_r2++]=_lq2+(_mx2<0?_mx2:0);_s2--;} \
+            else if(_t2==CT_CYLINDER){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y;_res2[_r2++]=sqrt(_dx2*_dx2+_dy2*_dy2)-_m->s0;_s2--;} \
+            else if(_t2==CT_PLANE){_res2[_r2++]=_m->v0x*_npx+_m->v0y*_npy+_m->v0z*_npz+_m->s0;_s2--;} \
+            else if(_t2==CT_UNION||_t2==CT_INTERSECT||_t2==CT_DIFF||_t2==CT_SMUNION){ \
+              if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;} \
+              else if(_p2==1){_stk2[_s2-1].phase=2;_stk2[_s2].n=_m->right;_stk2[_s2].phase=0;_s2++;} \
+              else{double _rr=_res2[--_r2],_ll=_res2[--_r2]; \
+                if(_t2==CT_UNION)_res2[_r2++]=_ll<_rr?_ll:_rr; \
+                else if(_t2==CT_INTERSECT)_res2[_r2++]=_ll>_rr?_ll:_rr; \
+                else if(_t2==CT_DIFF){double _nrr=-_rr;_res2[_r2++]=_ll>_nrr?_ll:_nrr;} \
+                else{double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_r2++]=fmin(_ll,_rr)-_h2*_h2*_k2*0.25;} \
+                _s2--;} \
+            } else if(_t2==CT_OFFSET){ \
+              if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;} \
+              else{_res2[_r2-1]+=_m->s0;_s2--;} \
+            } else if(_t2==CT_SHELL){ \
+              if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;} \
+              else{double _d2=_res2[--_r2];_res2[_r2++]=fabs(_d2)-_m->s0;_s2--;} \
+            } else{_res2[_r2++]=1e9;_s2--;} \
+          } \
+          _res[_rt++]=_res2[0]; \
+        } \
+      } else{_res[_rt++]=1e9;_st--;} \
+    } \
+    (result_out)=_res[0]; \
+  } while(0)
+
+  int W = (int)width, H = (int)height;
+  int sc = (int)scale;
+  if (sc < 1) sc = 1;
+  int rW = W / sc, rH = H / sc;
+  if (rW < 1) rW = 1; if (rH < 1) rH = 1;
+
+  /* CPU pixel buffer: RGBA8 */
+  unsigned char *pixels = (unsigned char *)malloc(rW * rH * 4);
+  if (!pixels) return;
+
+  InitWindow(W, H, (const char *)(intptr_t)title);
+  SetTargetFPS(60);
+
+  /* Create texture from initial black image */
+  Image img; img.width=rW; img.height=rH; img.mipmaps=1;
+  img.format=PIXELFORMAT_UNCOMPRESSED_R8G8B8A8; img.data=pixels;
+  Texture2D tex = LoadTextureFromImage(img);
+
+  sdf_node *root = (sdf_node *)(intptr_t)sdf;
+
+  /* Camera state: spherical coordinates */
+  double cam_theta = 0.5;   /* azimuth (radians) */
+  double cam_phi   = 0.7;   /* elevation (radians) */
+  double cam_dist  = 5.0;   /* distance from origin */
+  double cam_step  = 0.05;  /* orbit step per frame */
+
+  while (!WindowShouldClose()) {
+    /* Camera controls */
+    if (IsKeyDown(KEY_LEFT))  cam_theta -= cam_step;
+    if (IsKeyDown(KEY_RIGHT)) cam_theta += cam_step;
+    if (IsKeyDown(KEY_UP))    cam_phi   -= cam_step;
+    if (IsKeyDown(KEY_DOWN))  cam_phi   += cam_step;
+    if (IsKeyDown(KEY_EQUAL) || IsKeyDown(KEY_KP_ADD))      cam_dist -= cam_step * 2.0;
+    if (IsKeyDown(KEY_MINUS)  || IsKeyDown(KEY_KP_SUBTRACT)) cam_dist += cam_step * 2.0;
+    if (cam_phi < 0.05) cam_phi = 0.05;
+    if (cam_phi > 3.09) cam_phi = 3.09;
+    if (cam_dist < 0.5) cam_dist = 0.5;
+
+    /* Compute eye position */
+    double eye_x = cam_dist * sin(cam_phi) * cos(cam_theta);
+    double eye_y = cam_dist * cos(cam_phi);
+    double eye_z = cam_dist * sin(cam_phi) * sin(cam_theta);
+
+    /* Simple look-at: forward = -eye direction (looking at origin) */
+    double fw_x = -eye_x, fw_y = -eye_y, fw_z = -eye_z;
+    double fw_len = sqrt(fw_x*fw_x + fw_y*fw_y + fw_z*fw_z);
+    fw_x /= fw_len; fw_y /= fw_len; fw_z /= fw_len;
+
+    /* Right = forward x world_up */
+    double wy = 1.0;  /* world up = (0,1,0) */
+    double rt_x = fw_y*0.0 - fw_z*wy;
+    double rt_y = fw_z*0.0 - fw_x*0.0;
+    double rt_z = fw_x*wy  - fw_y*0.0;
+    double rt_len = sqrt(rt_x*rt_x + rt_y*rt_y + rt_z*rt_z);
+    if (rt_len < 1e-8) { rt_x=1.0; rt_y=0.0; rt_z=0.0; rt_len=1.0; }
+    rt_x /= rt_len; rt_y /= rt_len; rt_z /= rt_len;
+
+    /* Up = right x forward */
+    double up_x = rt_y*fw_z - rt_z*fw_y;
+    double up_y = rt_z*fw_x - rt_x*fw_z;
+    double up_z = rt_x*fw_y - rt_y*fw_x;
+
+    double aspect = (double)rW / (double)rH;
+    double fov_scale = 1.0;  /* tan(45 deg / 2) = 1 */
+
+    /* Render each pixel */
+    for (int py = 0; py < rH; py++) {
+      for (int px = 0; px < rW; px++) {
+        /* NDC in [-1, 1] */
+        double nx = ((px + 0.5) / rW * 2.0 - 1.0) * aspect * fov_scale;
+        double ny = (1.0 - (py + 0.5) / rH * 2.0) * fov_scale;
+
+        /* Ray direction */
+        double rdx = fw_x + rt_x*nx + up_x*ny;
+        double rdy = fw_y + rt_y*nx + up_y*ny;
+        double rdz = fw_z + rt_z*nx + up_z*ny;
+        double rdl = sqrt(rdx*rdx + rdy*rdy + rdz*rdz);
+        rdx /= rdl; rdy /= rdl; rdz /= rdl;
+
+        /* Sphere-traced ray march */
+        double t = 0.0;
+        double hit = -1.0;
+        for (int step = 0; step < 128; step++) {
+          double qx = eye_x + rdx*t;
+          double qy = eye_y + rdy*t;
+          double qz = eye_z + rdz*t;
+          double d;
+          EVAL_SDF(d, root, qx, qy, qz);
+          if (d < 0.001) { hit = t; break; }
+          if (t > 100.0) break;
+          t += d > 0.01 ? d : 0.01;
+        }
+
+        int idx = (py * rW + px) * 4;
+        if (hit < 0.0) {
+          /* Sky gradient */
+          unsigned char sky = (unsigned char)(40 + (int)(ny * 20.0 + 20.0));
+          pixels[idx+0] = 30; pixels[idx+1] = 40; pixels[idx+2] = sky; pixels[idx+3] = 255;
+        } else {
+          /* Hit: compute normal via central differences */
+          double hx = eye_x + rdx*hit;
+          double hy = eye_y + rdy*hit;
+          double hz = eye_z + rdz*hit;
+          double eps = 0.002;
+          double dx_p, dx_m, dy_p, dy_m, dz_p, dz_m;
+          EVAL_SDF(dx_p, root, hx+eps, hy,     hz    );
+          EVAL_SDF(dx_m, root, hx-eps, hy,     hz    );
+          EVAL_SDF(dy_p, root, hx,     hy+eps, hz    );
+          EVAL_SDF(dy_m, root, hx,     hy-eps, hz    );
+          EVAL_SDF(dz_p, root, hx,     hy,     hz+eps);
+          EVAL_SDF(dz_m, root, hx,     hy,     hz-eps);
+          double nx2 = dx_p - dx_m, ny2 = dy_p - dy_m, nz2 = dz_p - dz_m;
+          double nl = sqrt(nx2*nx2 + ny2*ny2 + nz2*nz2);
+          if (nl > 1e-10) { nx2/=nl; ny2/=nl; nz2/=nl; }
+
+          /* Key light direction (normalized) */
+          double lx=0.577, ly=0.577, lz=-0.577;
+          double diff = nx2*lx + ny2*ly + nz2*lz;
+          if (diff < 0.0) diff = 0.0;
+          /* Fill light */
+          double fill = (-nx2*0.3 - ny2*0.1 + nz2*0.2);
+          if (fill < 0.0) fill = 0.0;
+          double intensity = 0.05 + diff * 0.8 + fill * 0.15;
+          if (intensity > 1.0) intensity = 1.0;
+
+          /* Ambient occlusion proxy: sky lerp based on up-normal */
+          double ao = 0.5 + 0.5 * ny2;
+          intensity = intensity * 0.85 + ao * 0.15;
+
+          pixels[idx+0] = (unsigned char)(intensity * 210);
+          pixels[idx+1] = (unsigned char)(intensity * 220);
+          pixels[idx+2] = (unsigned char)(intensity * 240);
+          pixels[idx+3] = 255;
+        }
+      }
+    }
+
+    /* Upload pixel buffer to texture and draw */
+    UpdateTexture(tex, pixels);
+
+    BeginDrawing();
+    ClearBackground(BLACK);
+    /* Scale-up: draw texture stretched to full window */
+    Rectangle src = { 0, 0, (float)rW, (float)rH };
+    Rectangle dst = { 0, 0, (float)W, (float)H };
+    Vector2 origin = { 0, 0 };
+    DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
+    DrawFPS(10, 10);
+    EndDrawing();
+  }
+
+  UnloadTexture(tex);
+  free(pixels);
+  CloseWindow();
+  ```)
+
+) ;; end defmodule raylib/integration
