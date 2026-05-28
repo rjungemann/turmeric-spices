@@ -2,7 +2,7 @@
 ;; notebook/cli -- argv dispatch for render/export/exec/new workflows.
 
 (defmodule notebook/cli
-  (import notebook/render-md :refer [render-opts-make render-md])
+  (import notebook/render-md :refer [render-opts-make render-opts-set-math-mode render-opts-set-assets-mode render-md])
   (import notebook/render-html :refer [render-html])
   (import notebook/tui :refer [tui-opts-make tui-run])
   (import notebook/format :refer [parse-file node-tag node-cell])
@@ -140,6 +140,8 @@
       int64_t no_color;
       char *cell_id;
       int64_t exec_all;
+      int64_t math_mode;
+      int64_t assets_mode;
     } CliParseState;
     CliParseState *st = calloc(1, sizeof(*st));
     st->command = strdup("");
@@ -151,6 +153,8 @@
     st->cell_id = strdup("");
     st->no_color = 0;
     st->exec_all = 0;
+    st->math_mode = 0;
+    st->assets_mode = 0;
     return (int64_t)(intptr_t)st;
     ```)
 
@@ -672,7 +676,7 @@
       char *command; char *target; char *path; char *out; char *error_msg;
       int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
       int64_t help; char *keybindings_file; int64_t no_color;
-      char *cell_id; int64_t exec_all;
+      char *cell_id; int64_t exec_all; int64_t math_mode;
     } CliParseState;
     CliParseState *st = (CliParseState *)(intptr_t)state;
     if (!st) return state;
@@ -680,20 +684,89 @@
     return state;
     ```)
 
+  (defn __cli-state-math-mode [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all; int64_t math_mode; int64_t assets_mode;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->math_mode : 0;
+    ```)
+
+  (defn __cli-state-set-math-mode [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all; int64_t math_mode; int64_t assets_mode;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->math_mode = value;
+    return state;
+    ```)
+
+  (defn __cli-state-assets-mode [state :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all; int64_t math_mode; int64_t assets_mode;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    return st ? st->assets_mode : 0;
+    ```)
+
+  (defn __cli-state-set-assets-mode [state :int value :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *command; char *target; char *path; char *out; char *error_msg;
+      int64_t use_cache; int64_t watch; int64_t no_output; int64_t no_source;
+      int64_t help; char *keybindings_file; int64_t no_color;
+      char *cell_id; int64_t exec_all; int64_t math_mode; int64_t assets_mode;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (st) st->assets_mode = value;
+    return state;
+    ```)
+
+  (defn __cli-math-mode-parse [value :cstr] #{Unsafe} :int
+    ```c
+    const char *v = value ? (const char *)(intptr_t)value : "";
+    if (strcmp(v, "always") == 0) return 1;
+    if (strcmp(v, "never")  == 0) return 2;
+    return 0; /* auto */
+    ```)
+
+  (defn __cli-assets-mode-parse [value :cstr] #{Unsafe} :int
+    ```c
+    const char *v = value ? (const char *)(intptr_t)value : "";
+    if (strcmp(v, "sibling") == 0) return 1;
+    return 0; /* inline */
+    ```)
+
   (defn __cli-output-opts [state :int] #{Unsafe} :int
-    (render-opts-make
-      (__cli-state-out state)
-      (__cli-state-use-cache state)
-      (if (= (__cli-state-no-source state) 1) 0 1)
-      (if (= (__cli-state-no-output state) 1) 0 1)
-      1))
+    (render-opts-set-assets-mode
+      (render-opts-set-math-mode
+        (render-opts-make
+          (__cli-state-out state)
+          (__cli-state-use-cache state)
+          (if (= (__cli-state-no-source state) 1) 0 1)
+          (if (= (__cli-state-no-output state) 1) 0 1)
+          1)
+        (__cli-state-math-mode state))
+      (__cli-state-assets-mode state)))
 
   (defn __cli-print-help [] #{Unsafe} :int
     ```c
     printf("Usage: tur-nb <subcommand> [options] <args>\n\n");
     printf("Subcommands:\n");
-    printf("  render <file.tur.md> [--to md|html] [--out DIR] [--cache] [--watch] [--no-output] [--no-source]\n");
-    printf("  export md|html <file.tur.md> [--out DIR] [--cache] [--watch] [--no-output] [--no-source]\n");
+    printf("  render <file.tur.md> [--to md|html] [--out DIR] [--cache] [--watch] [--no-output] [--no-source] [--math=auto|always|never] [--assets=inline|sibling]\n");
+    printf("  export md|html <file.tur.md> [--out DIR] [--cache] [--watch] [--no-output] [--no-source] [--math=auto|always|never] [--assets=inline|sibling]\n");
     printf("  tui <file.tur.md> [--keybindings FILE] [--no-color]\n");
     printf("  exec <file.tur.md> (--cell <id> | --all)\n");
     printf("  new <file.tur.md>\n");
@@ -1024,7 +1097,9 @@
                   (let [out-eq (__cli-prefix-value tok "--out=")
                        to-eq (__cli-prefix-value tok "--to=")
                        keybindings-eq (__cli-prefix-value tok "--keybindings=")
-                       cell-eq (__cli-prefix-value tok "--cell=")]
+                       cell-eq (__cli-prefix-value tok "--cell=")
+                       math-eq (__cli-prefix-value tok "--math=")
+                       assets-eq (__cli-prefix-value tok "--assets=")]
                     (if (not (__cli-cstr-null? out-eq))
                      (__cli-parse-args rest (__cli-state-set-out state out-eq) "")
                      (if (not (__cli-cstr-null? to-eq))
@@ -1033,29 +1108,35 @@
                          (__cli-parse-args rest (__cli-state-set-keybindings-file state keybindings-eq) "")
                          (if (not (__cli-cstr-null? cell-eq))
                            (__cli-parse-args rest (__cli-state-set-cell-id state cell-eq) "")
-                           (if (__cli-cstr-eq? tok "--out")
-                             (__cli-parse-args rest state "out")
-                             (if (__cli-cstr-eq? tok "--to")
-                               (__cli-parse-args rest state "to")
-                               (if (__cli-cstr-eq? tok "--keybindings")
-                                 (__cli-parse-args rest state "keybindings")
-                                 (if (__cli-cstr-eq? tok "--cell")
-                                   (__cli-parse-args rest state "cell")
-                                   (if (__cli-cstr-eq? tok "--all")
-                                     (__cli-parse-args rest (__cli-state-set-exec-all state 1) "")
-                                     (if (__cli-cstr-eq? tok "--cache")
-                                       (__cli-parse-args rest (__cli-state-set-use-cache state 1) "")
-                                       (if (__cli-cstr-eq? tok "--watch")
-                                         (__cli-parse-args rest (__cli-state-set-watch state 1) "")
-                                         (if (__cli-cstr-eq? tok "--no-output")
-                                           (__cli-parse-args rest (__cli-state-set-no-output state 1) "")
-                                           (if (__cli-cstr-eq? tok "--no-source")
-                                             (__cli-parse-args rest (__cli-state-set-no-source state 1) "")
-                                             (if (__cli-cstr-eq? tok "--no-color")
-                                               (__cli-parse-args rest (__cli-state-set-no-color state 1) "")
-                                               (if (not (__cli-cstr-null? (__cli-prefix-value tok "--")))
-                                                 (__cli-state-set-error state "unknown option")
-                                                 (__cli-parse-args rest (__cli-parse-positional rest state tok) "")))))))))))))))))))))))))
+                           (if (not (__cli-cstr-null? math-eq))
+                             (__cli-parse-args rest (__cli-state-set-math-mode state (__cli-math-mode-parse math-eq)) "")
+                             (if (not (__cli-cstr-null? assets-eq))
+                               (__cli-parse-args rest (__cli-state-set-assets-mode state (__cli-assets-mode-parse assets-eq)) "")
+                               (if (__cli-cstr-eq? tok "--out")
+                               (__cli-parse-args rest state "out")
+                               (if (__cli-cstr-eq? tok "--to")
+                                 (__cli-parse-args rest state "to")
+                                 (if (__cli-cstr-eq? tok "--keybindings")
+                                   (__cli-parse-args rest state "keybindings")
+                                   (if (__cli-cstr-eq? tok "--cell")
+                                     (__cli-parse-args rest state "cell")
+                                     (if (__cli-cstr-eq? tok "--all")
+                                       (__cli-parse-args rest (__cli-state-set-exec-all state 1) "")
+                                       (if (__cli-cstr-eq? tok "--cache")
+                                         (__cli-parse-args rest (__cli-state-set-use-cache state 1) "")
+                                         (if (__cli-cstr-eq? tok "--watch")
+                                           (__cli-parse-args rest (__cli-state-set-watch state 1) "")
+                                           (if (__cli-cstr-eq? tok "--no-output")
+                                             (__cli-parse-args rest (__cli-state-set-no-output state 1) "")
+                                             (if (__cli-cstr-eq? tok "--no-source")
+                                               (__cli-parse-args rest (__cli-state-set-no-source state 1) "")
+                                               (if (__cli-cstr-eq? tok "--no-color")
+                                                 (__cli-parse-args rest (__cli-state-set-no-color state 1) "")
+                                                 (if (__cli-cstr-eq? tok "--math")
+                                                   (__cli-parse-args rest (__cli-state-set-math-mode state 1) "")
+                                                   (if (not (__cli-cstr-null? (__cli-prefix-value tok "--")))
+                                                     (__cli-state-set-error state "unknown option")
+                                                     (__cli-parse-args rest (__cli-parse-positional rest state tok) ""))))))))))))))))))))))))))))
 
   (defn __cli-handle-render [state :int] #{Unsafe} :int
     (let [path (__cli-state-path state)

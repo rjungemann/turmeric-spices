@@ -15,7 +15,7 @@
   (export render-opts-make
           render-opts-output-dir render-opts-use-cache
           render-opts-include-source render-opts-include-output
-          render-opts-fail-fast
+          render-opts-fail-fast render-opts-set-math-mode render-opts-set-assets-mode
           default-render-opts
           render-md-string render-md)
 
@@ -151,6 +151,8 @@
       int64_t include_source;
       int64_t include_output;
       int64_t fail_fast;
+      int64_t math_mode;    /* 0=auto 1=always 2=never */
+      int64_t assets_mode;  /* 0=inline 1=sibling */
     } RenderOpts;
     RenderOpts *opts = malloc(sizeof(*opts));
     opts->output_dir = output_dir ? strdup((const char *)(intptr_t)output_dir) : strdup("");
@@ -158,6 +160,8 @@
     opts->include_source = include_source;
     opts->include_output = include_output;
     opts->fail_fast = fail_fast;
+    opts->math_mode = 0;
+    opts->assets_mode = 0;
     return (int64_t)(intptr_t)opts;
     ```)
 
@@ -224,6 +228,40 @@
     } RenderOpts;
     RenderOpts *o = (RenderOpts *)(intptr_t)opts;
     return o ? o->fail_fast : 1;
+    ```)
+
+  ;;; render-opts-set-math-mode -- set math rendering mode on an opts value.
+  (defn render-opts-set-math-mode [opts :int mode :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+      int64_t math_mode;
+      int64_t assets_mode;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    if (o) o->math_mode = mode;
+    return opts;
+    ```)
+
+  ;;; render-opts-set-assets-mode -- set asset embedding mode (0=inline 1=sibling).
+  (defn render-opts-set-assets-mode [opts :int mode :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+      int64_t math_mode;
+      int64_t assets_mode;
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    if (o) o->assets_mode = mode;
+    return opts;
     ```)
 
   (defn default-render-opts [] #{Unsafe} :int

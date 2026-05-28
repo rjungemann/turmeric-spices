@@ -9,6 +9,7 @@
                                  md-tag-code-span md-tag-link md-tag-image
                                  md-tag-strikethrough
                                  md-tag-autolink md-tag-hard-break md-tag-soft-break
+                                 md-tag-math-block md-tag-math-inline
                                  md-parse md-node-tag md-node-children md-node-text
                                  md-node-info md-node-meta md-source-span md-emit
                                  md-emit-html])
@@ -218,6 +219,69 @@
            (and (cstr-eq? (md-node-info node) "turmeric {id=demo eval=false}")
                 (cstr-eq? (md-emit doc) "```turmeric {id=demo eval=false}\n(+ 1 2)\n```")))))
 
+  (defn test-math-block-multiline [] #{Unsafe} :bool
+    (let [doc (md-parse "$$\na = b + c\nd = e\n$$")
+          node (first-child doc)]
+      (and (= (md-node-tag node) (md-tag-math-block))
+           (cstr-eq? (md-node-text node) "a = b + c\nd = e"))))
+
+  (defn test-math-block-oneline [] #{Unsafe} :bool
+    (let [doc (md-parse "$$ x = 1 $$")
+          node (first-child doc)]
+      (and (= (md-node-tag node) (md-tag-math-block))
+           (cstr-eq? (md-node-text node) "x = 1"))))
+
+  (defn test-math-block-roundtrip [] #{Unsafe} :bool
+    (cstr-eq?
+      "$$\nE = mc^2\n$$"
+      (md-emit (md-parse "$$\nE = mc^2\n$$"))))
+
+  (defn test-math-inline [] #{Unsafe} :bool
+    (let [doc (md-parse "when $\\sigma = 1$ then ok")
+          para (first-child doc)
+          m (second-child para)]
+      (and (= (md-node-tag para) (md-tag-paragraph))
+           (and (= (md-node-tag m) (md-tag-math-inline))
+                (cstr-eq? (md-node-text m) "\\sigma = 1")))))
+
+  (defn test-math-inline-currency [] #{Unsafe} :bool
+    ;; A '$' followed by a digit is NOT an opener (currency rule).
+    (let [doc (md-parse "price is $5 and $10")
+          para (first-child doc)
+          first (first-child para)]
+      (and (= (md-node-tag para) (md-tag-paragraph))
+           (= (md-node-tag first) (md-tag-text)))))
+
+  (defn test-math-block-after-paragraph [] #{Unsafe} :bool
+    ;; A $$-opener line breaks an open paragraph.
+    (let [doc (md-parse "intro\n$$\nx = 1\n$$")
+          first (first-child doc)
+          second (second-child doc)]
+      (and (= (md-node-tag first) (md-tag-paragraph))
+           (and (cstr-eq? (md-node-text first) "intro")
+                (= (md-node-tag second) (md-tag-math-block))))))
+
+  (defn test-math-block-unterminated [] #{Unsafe} :bool
+    ;; Unterminated $$ degrades to a paragraph (no math-block node).
+    (let [doc (md-parse "$$\nx = 1")
+          first (first-child doc)]
+      (= (md-node-tag first) (md-tag-paragraph))))
+
+  (defn test-math-roundtrip-mixed [] #{Unsafe} :bool
+    (cstr-eq?
+      "before\n\n$$\na = b\n$$\n\nafter $c$ tail"
+      (md-emit (md-parse "before\n\n$$\na = b\n$$\n\nafter $c$ tail"))))
+
+  (defn test-math-block-html [] #{Unsafe} :bool
+    (cstr-eq?
+      "<span class=\"math display\">$$x &lt; y &amp; z$$</span>"
+      (md-emit-html (md-parse "$$\nx < y & z\n$$"))))
+
+  (defn test-math-inline-html [] #{Unsafe} :bool
+    (cstr-eq?
+      "<p>when <span class=\"math inline\">$\\sigma = 1$</span> ok</p>"
+      (md-emit-html (md-parse "when $\\sigma = 1$ ok"))))
+
   (defn main [] #{Unsafe} :int
     (let [f1 (run-case 1 "parses an ATX heading" (test-atx))
           f2 (run-case 2 "parses a setext heading" (test-setext))
@@ -235,9 +299,19 @@
           f14 (run-case 14 "parses gfm tables and strikethrough" (test-gfm-table))
           f15 (run-case 15 "emits html for gfm tables" (test-gfm-table-html))
           f16 (run-case 16 "parses and re-emits task lists" (test-task-list))
-          f17 (run-case 17 "preserves fence attribute strings" (test-fence-attrs))]
-      (tap-plan 17 (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 f17)))))))))))))))))
-      (if (= (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 f17)))))))))))))))) 0)
+          f17 (run-case 17 "preserves fence attribute strings" (test-fence-attrs))
+          f18 (run-case 18 "parses multi-line math blocks" (test-math-block-multiline))
+          f19 (run-case 19 "parses one-line math blocks" (test-math-block-oneline))
+          f20 (run-case 20 "round-trips math blocks" (test-math-block-roundtrip))
+          f21 (run-case 21 "parses inline math spans" (test-math-inline))
+          f22 (run-case 22 "skips currency-style dollar signs" (test-math-inline-currency))
+          f23 (run-case 23 "math block breaks an open paragraph" (test-math-block-after-paragraph))
+          f24 (run-case 24 "unterminated math block degrades to paragraph" (test-math-block-unterminated))
+          f25 (run-case 25 "round-trips mixed prose and math" (test-math-roundtrip-mixed))
+          f26 (run-case 26 "emits html for math blocks" (test-math-block-html))
+          f27 (run-case 27 "emits html for inline math" (test-math-inline-html))]
+      (tap-plan 27 (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 (+ f17 (+ f18 (+ f19 (+ f20 (+ f21 (+ f22 (+ f23 (+ f24 (+ f25 (+ f26 f27)))))))))))))))))))))))))))
+      (if (= (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 (+ f17 (+ f18 (+ f19 (+ f20 (+ f21 (+ f22 (+ f23 (+ f24 (+ f25 (+ f26 f27)))))))))))))))))))))))))) 0)
         0
         1)))
 

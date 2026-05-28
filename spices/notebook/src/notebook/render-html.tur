@@ -247,6 +247,7 @@
       int64_t include_source;
       int64_t include_output;
       int64_t fail_fast;
+      int64_t math_mode;  /* 0=auto 1=always 2=never */
     } RenderOpts;
     RenderOpts *o = (RenderOpts *)(intptr_t)opts;
     return o && o->output_dir ? o->output_dir : "";
@@ -260,6 +261,7 @@
       int64_t include_source;
       int64_t include_output;
       int64_t fail_fast;
+      int64_t math_mode;  /* 0=auto 1=always 2=never */
     } RenderOpts;
     RenderOpts *o = (RenderOpts *)(intptr_t)opts;
     return o ? o->use_cache : 0;
@@ -273,6 +275,7 @@
       int64_t include_source;
       int64_t include_output;
       int64_t fail_fast;
+      int64_t math_mode;  /* 0=auto 1=always 2=never */
     } RenderOpts;
     RenderOpts *o = (RenderOpts *)(intptr_t)opts;
     return o ? o->include_source : 1;
@@ -286,6 +289,7 @@
       int64_t include_source;
       int64_t include_output;
       int64_t fail_fast;
+      int64_t math_mode;  /* 0=auto 1=always 2=never */
     } RenderOpts;
     RenderOpts *o = (RenderOpts *)(intptr_t)opts;
     return o ? o->include_output : 1;
@@ -299,9 +303,40 @@
       int64_t include_source;
       int64_t include_output;
       int64_t fail_fast;
+      int64_t math_mode;  /* 0=auto 1=always 2=never */
     } RenderOpts;
     RenderOpts *o = (RenderOpts *)(intptr_t)opts;
     return o ? o->fail_fast : 1;
+    ```)
+
+  (defn __rhtml-render-opts-math-mode [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+      int64_t math_mode;    /* 0=auto 1=always 2=never */
+      int64_t assets_mode;  /* 0=inline 1=sibling */
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->math_mode : 0;
+    ```)
+
+  (defn __rhtml-render-opts-assets-mode [opts :int] #{Unsafe} :int
+    ```c
+    typedef struct {
+      char *output_dir;
+      int64_t use_cache;
+      int64_t include_source;
+      int64_t include_output;
+      int64_t fail_fast;
+      int64_t math_mode;    /* 0=auto 1=always 2=never */
+      int64_t assets_mode;  /* 0=inline 1=sibling */
+    } RenderOpts;
+    RenderOpts *o = (RenderOpts *)(intptr_t)opts;
+    return o ? o->assets_mode : 0;
     ```)
 
   (defn __rhtml-lang-label [lang :int] #{Unsafe} :cstr
@@ -612,6 +647,100 @@
                 (__rhtml-str-concat "</div><pre class=\"cell-output\">"
                                     (__rhtml-str-concat body "</pre></div>")))))))))
 
+  (defn __rhtml-render-math-body [text :cstr] #{Unsafe} :cstr
+    ```c
+    /* Scan text for $$...$$  and $...$, emit HTML math spans interleaved with
+       escaped plain text.  Produces markup that KaTeX auto-render will pick up
+       via class="math display|inline". */
+    const char *src = text ? (const char *)(intptr_t)text : "";
+    size_t slen = strlen(src);
+    size_t cap = slen * 4 + 256;
+    char *out = malloc(cap);
+    size_t j = 0;
+
+#define ENSURE(n) do { \
+    if (j + (n) + 1 >= cap) { cap = (j + (n) + 1) * 2; out = realloc(out, cap); } \
+} while (0)
+
+#define APPEND(s) do { \
+    size_t _len = strlen(s); ENSURE(_len); memcpy(out + j, s, _len); j += _len; \
+} while (0)
+
+#define APPEND_CHAR_ESC(c) do { \
+    if ((c) == '&') { ENSURE(5); memcpy(out+j,"&amp;",5); j+=5; } \
+    else if ((c) == '<') { ENSURE(4); memcpy(out+j,"&lt;",4); j+=4; } \
+    else if ((c) == '>') { ENSURE(4); memcpy(out+j,"&gt;",4); j+=4; } \
+    else { ENSURE(1); out[j++] = (c); } \
+} while (0)
+
+    for (size_t i = 0; i < slen; ) {
+        /* Display math: $$ ... $$ */
+        if (i + 1 < slen && src[i] == '$' && src[i+1] == '$') {
+            size_t start = i + 2;
+            size_t k = start;
+            while (k + 1 < slen && !(src[k] == '$' && src[k+1] == '$')) k++;
+            if (k + 1 < slen) {
+                /* found closing $$ */
+                APPEND("<span class=\"math display\">$$");
+                for (size_t m = start; m < k; m++) {
+                    if (src[m] == '&') { ENSURE(5); memcpy(out+j,"&amp;",5); j+=5; }
+                    else if (src[m] == '<') { ENSURE(4); memcpy(out+j,"&lt;",4); j+=4; }
+                    else if (src[m] == '>') { ENSURE(4); memcpy(out+j,"&gt;",4); j+=4; }
+                    else { ENSURE(1); out[j++] = src[m]; }
+                }
+                APPEND("$$</span>");
+                i = k + 2;
+                continue;
+            }
+        }
+        /* Inline math: $ ... $ (not followed by digit/space) */
+        if (src[i] == '$') {
+            char prv = (i > 0) ? src[i-1] : '\0';
+            char nxt = (i + 1 < slen) ? src[i+1] : '\0';
+            int opener = (nxt != '\0' && nxt != ' ' && nxt != '\t' && nxt != '\n'
+                          && !(nxt >= '0' && nxt <= '9') && prv != '\\');
+            if (opener) {
+                size_t start = i + 1;
+                size_t k = start;
+                while (k < slen && src[k] != '$') k++;
+                if (k < slen) {
+                    APPEND("<span class=\"math inline\">$");
+                    for (size_t m = start; m < k; m++) {
+                        if (src[m] == '&') { ENSURE(5); memcpy(out+j,"&amp;",5); j+=5; }
+                        else if (src[m] == '<') { ENSURE(4); memcpy(out+j,"&lt;",4); j+=4; }
+                        else if (src[m] == '>') { ENSURE(4); memcpy(out+j,"&gt;",4); j+=4; }
+                        else { ENSURE(1); out[j++] = src[m]; }
+                    }
+                    APPEND("$</span>");
+                    i = k + 1;
+                    continue;
+                }
+            }
+        }
+        APPEND_CHAR_ESC(src[i]);
+        i++;
+    }
+    out[j] = '\0';
+    return out;
+    ```)
+
+  (defn __rhtml-render-math-output [output :int] #{Unsafe} :cstr
+    (if (__rhtml-output-skipped? output)
+      ""
+      (let [status (__rhtml-status-label (cell-output-status output))
+            meta (__rhtml-html-escape (__rhtml-output-meta output))
+            body (__rhtml-render-math-body (__rhtml-output-body output))]
+        (__rhtml-str-concat
+          "<div class=\"cell-output-block\"><div class=\"cell-output-meta status-"
+          (__rhtml-str-concat
+            status
+            (__rhtml-str-concat
+              "\">"
+              (__rhtml-str-concat
+                meta
+                (__rhtml-str-concat "</div><div class=\"math-output\">"
+                                    (__rhtml-str-concat body "</div></div>")))))))))
+
   (defn __rhtml-int->cstr [value :int] #{Unsafe} :cstr
     ```c
     char buf[32];
@@ -893,8 +1022,11 @@
     (let [source-part (if (__rhtml-cell-shows-source? cell opts)
                         (__rhtml-render-source-pre cell)
                         "")
+          math-cell? (= (attr-get-bool (cell-attrs cell) "math" 0) 1)
           output-part (if (__rhtml-cell-shows-output? cell output opts)
-                        (__rhtml-render-output-pre output)
+                        (if math-cell?
+                          (__rhtml-render-math-output output)
+                          (__rhtml-render-output-pre output))
                         "")
           image-part (if (__rhtml-cell-shows-output? cell output opts)
                        (__rhtml-render-image-block output
@@ -1038,32 +1170,232 @@
       0
       (+ 1 (__rhtml-list-length (__rhtml-tail lst)))))
 
-  (defn __rhtml-document [title :cstr body :cstr] #{Unsafe} :cstr
+  (defn __rhtml-cells-has-math-attr? [cells :int] #{Unsafe} :bool
+    (if (__rhtml-list-nil? cells)
+      false
+      (if (= (attr-get-bool (cell-attrs (__rhtml-head cells)) "math" 0) 1)
+        true
+        (__rhtml-cells-has-math-attr? (__rhtml-tail cells)))))
+
+  (defn __rhtml-find-katex-vendor-dir [] #{Unsafe} :cstr
+    ```c
+    #include <sys/stat.h>
+    const char *env = getenv("TUR_NOTEBOOK_VENDOR_KATEX");
+    if (env && env[0]) return strdup(env);
+    char cwd[4096];
+    if (!getcwd(cwd, sizeof(cwd))) return strdup("");
+    char *p = cwd + strlen(cwd);
+    while (p >= cwd) {
+      char path[4096 + 64];
+      snprintf(path, sizeof(path), "%.*s/src/notebook/vendor/katex", (int)(p - cwd), cwd);
+      struct stat st;
+      if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return strdup(path);
+      while (p > cwd && *p != '/') p--;
+      p--;
+    }
+    return strdup("");
+    ```)
+
+  (defn __rhtml-read-vendor-file [vendor_dir :cstr name :cstr] #{Unsafe} :cstr
+    ```c
+    const char *dir = vendor_dir ? (const char *)(intptr_t)vendor_dir : "";
+    const char *fname = name ? (const char *)(intptr_t)name : "";
+    if (!dir[0]) return strdup("");
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/%s", dir, fname);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return strdup("");
+    fseek(fp, 0, SEEK_END);
+    long sz = ftell(fp);
+    rewind(fp);
+    if (sz <= 0) { fclose(fp); return strdup(""); }
+    char *buf = malloc((size_t)sz + 1);
+    fread(buf, 1, (size_t)sz, fp);
+    buf[sz] = '\0';
+    fclose(fp);
+    return buf;
+    ```)
+
+  (defn __rhtml-katex-css-rewrite [css :cstr] #{Unsafe} :cstr
+    ```c
+    /* Rewrite @font-face src urls from "fonts/KaTeX_..." to "katex-fonts/KaTeX_..."
+       so inline-embedded CSS can find the sibling font directory. */
+    const char *src = css ? (const char *)(intptr_t)css : "";
+    size_t slen = strlen(src);
+    size_t cap = slen * 2 + 1;
+    char *out = malloc(cap);
+    size_t j = 0;
+    const char *needle = "fonts/KaTeX_";
+    size_t nlen = strlen(needle);
+    for (size_t i = 0; i < slen; ) {
+      if (strncmp(src + i, needle, nlen) == 0) {
+        const char *rep = "katex-fonts/KaTeX_";
+        size_t rlen = strlen(rep);
+        if (j + rlen + 1 >= cap) { cap = (j + rlen + 1) * 2; out = realloc(out, cap); }
+        memcpy(out + j, rep, rlen);
+        j += rlen;
+        i += nlen;
+      } else {
+        if (j + 2 >= cap) { cap *= 2; out = realloc(out, cap); }
+        out[j++] = src[i++];
+      }
+    }
+    out[j] = '\0';
+    return out;
+    ```)
+
+  (defn __rhtml-body-has-math? [body :cstr] #{Unsafe} :bool
+    ```c
+    const char *src = body ? (const char *)(intptr_t)body : "";
+    return strstr(src, "class=\"math ") != NULL;
+    ```)
+
+  (defn __rhtml-katex-copy-fonts [vendor_dir :cstr html_path :cstr] #{Unsafe} :int
+    ```c
+    #include <dirent.h>
+    const char *dir = vendor_dir ? (const char *)(intptr_t)vendor_dir : "";
+    const char *html = html_path ? (const char *)(intptr_t)html_path : "";
+    if (!dir[0] || !html[0]) return 0;
+    const char *slash = strrchr(html, '/');
+    char out_dir[4096];
+    if (slash) snprintf(out_dir, sizeof(out_dir), "%.*s/katex-fonts", (int)(slash - html), html);
+    else snprintf(out_dir, sizeof(out_dir), "katex-fonts");
+    struct stat st;
+    if (stat(out_dir, &st) != 0) {
+      if (mkdir(out_dir, 0755) != 0) return 0;
+    }
+    char fonts_dir[4096];
+    snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", dir);
+    DIR *d = opendir(fonts_dir);
+    if (!d) return 0;
+    struct dirent *ent;
+    while ((ent = readdir(d))) {
+      const char *n = ent->d_name;
+      size_t nlen = strlen(n);
+      if (nlen < 6 || strcmp(n + nlen - 5, "woff2") != 0) continue;
+      char src_path[4096], dst_path[4096];
+      snprintf(src_path, sizeof(src_path), "%s/%s", fonts_dir, n);
+      snprintf(dst_path, sizeof(dst_path), "%s/%s", out_dir, n);
+      FILE *in = fopen(src_path, "rb");
+      if (!in) continue;
+      FILE *out = fopen(dst_path, "wb");
+      if (!out) { fclose(in); continue; }
+      char buf[8192];
+      size_t nb;
+      while ((nb = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, nb, out);
+      fclose(in); fclose(out);
+    }
+    closedir(d);
+    return 1;
+    ```)
+
+  (defn __rhtml-katex-write-sibling [vendor_dir :cstr html_path :cstr name :cstr rewrite :int] #{Unsafe} :int
+    ```c
+    #include <stdio.h>
+    #include <string.h>
+    #include <libgen.h>
+    const char *vdir = vendor_dir ? (const char *)(intptr_t)vendor_dir : "";
+    const char *hp   = html_path  ? (const char *)(intptr_t)html_path  : "";
+    const char *nm   = name       ? (const char *)(intptr_t)name       : "";
+    /* build src path */
+    char src[4096]; snprintf(src, sizeof(src), "%s/%s", vdir, nm);
+    /* build dst path: dirname(html_path)/name */
+    char hpcopy[4096]; strncpy(hpcopy, hp, sizeof(hpcopy)-1); hpcopy[sizeof(hpcopy)-1]='\0';
+    char *dir = dirname(hpcopy);
+    char dst[4096]; snprintf(dst, sizeof(dst), "%s/%s", dir, nm);
+    FILE *fsrc = fopen(src, "rb");
+    if (!fsrc) return 0;
+    fseek(fsrc, 0, SEEK_END); long sz = ftell(fsrc); rewind(fsrc);
+    char *buf = malloc(sz + 1);
+    fread(buf, 1, sz, fsrc); fclose(fsrc); buf[sz] = '\0';
+    char *out = buf;
+    if (rewrite) {
+      /* rewrite fonts/KaTeX_ -> katex-fonts/KaTeX_ */
+      size_t slen = sz;
+      size_t cap = slen * 2 + 1;
+      char *rw = malloc(cap); size_t j = 0;
+      const char *needle = "fonts/KaTeX_"; size_t nlen = strlen(needle);
+      const char *rep = "katex-fonts/KaTeX_"; size_t rlen = strlen(rep);
+      for (size_t i = 0; i < slen; ) {
+        if (strncmp(buf + i, needle, nlen) == 0) {
+          if (j + rlen + 1 >= cap) { cap = (j+rlen+1)*2; rw = realloc(rw, cap); }
+          memcpy(rw + j, rep, rlen); j += rlen; i += nlen;
+        } else { rw[j++] = buf[i++]; }
+      }
+      rw[j] = '\0'; free(buf); out = rw;
+    }
+    FILE *fdst = fopen(dst, "wb");
+    if (fdst) { fwrite(out, 1, strlen(out), fdst); fclose(fdst); }
+    free(out);
+    return fdst ? 1 : 0;
+    ```)
+
+  (defn __rhtml-katex-inject [math_mode :int assets_mode :int body :cstr html_path :cstr] #{Unsafe} :cstr
+    (let [should-inject (if (= math_mode 2)
+                          false
+                          (if (= math_mode 1)
+                            true
+                            (__rhtml-body-has-math? body)))]
+      (if (not should-inject)
+        ""
+        (if (= assets_mode 1)
+          (__rhtml-str-concat
+            "<link rel=\"stylesheet\" href=\"katex.min.css\" />"
+            (__rhtml-str-concat
+              "<script src=\"katex.min.js\"></script>"
+              "<script src=\"auto-render.min.js\"></script>"))
+          (let [vendor-dir (__rhtml-find-katex-vendor-dir)
+                raw-css (__rhtml-read-vendor-file vendor-dir "katex.min.css")
+                css (__rhtml-katex-css-rewrite raw-css)
+                js (__rhtml-read-vendor-file vendor-dir "katex.min.js")
+                ar (__rhtml-read-vendor-file vendor-dir "auto-render.min.js")]
+            (__rhtml-str-concat
+              "<style>" (__rhtml-str-concat css
+                (__rhtml-str-concat "</style><script>" (__rhtml-str-concat js
+                  (__rhtml-str-concat "</script><script>" (__rhtml-str-concat ar
+                    "</script>")))))))))))
+
+
+  (defn __rhtml-document [title :cstr body :cstr math_mode :int assets_mode :int html_path :cstr] #{Unsafe} :cstr
     (let [title_esc (__rhtml-html-escape title)
-          script (__rhtml-toggle-script)]
+          script (__rhtml-toggle-script)
+          katex-head (__rhtml-katex-inject math_mode assets_mode body html_path)
+          bootstrap "<script>document.addEventListener(\"DOMContentLoaded\",function(){renderMathInElement(document.body,{delimiters:[{left:\"$$\",right:\"$$\",display:true},{left:\"$\",right:\"$\",display:false}],throwOnError:false,errorColor:\"#cc0000\",strict:\"ignore\"});});</script>"]
       (__rhtml-str-concat
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><meta name=\"color-scheme\" content=\"dark\" /><title>"
         (__rhtml-str-concat
           title_esc
           (__rhtml-str-concat
-            "</title><link rel=\"stylesheet\" href=\"style.css\" /></head><body class=\"notebook-page\"><main class=\"notebook-document\">"
+            "</title><link rel=\"stylesheet\" href=\"style.css\" />"
             (__rhtml-str-concat
-              body
+              katex-head
               (__rhtml-str-concat
-                "</main><script>"
-                (__rhtml-str-concat script "</script></body></html>"))))))))
+                "</head><body class=\"notebook-page\"><main class=\"notebook-document\">"
+                (__rhtml-str-concat
+                  body
+                  (__rhtml-str-concat
+                    "</main><script>"
+                    (__rhtml-str-concat script
+                      (__rhtml-str-concat "</script>"
+                        (__rhtml-str-concat
+                          (if (__rhtml-body-has-math? body) bootstrap "")
+                          "</body></html>"))))))))))))
 
   ;;; render-html-string-at -- render a parsed notebook to HTML as if writing html_path.
   (defn render-html-string-at [nodes :int outputs :int opts :int html_path :cstr] #{Unsafe} :cstr
     (let [body (__rhtml-render-state-text (__rhtml-render-body nodes outputs opts html_path))
-          title "Notebook"]
-      (__rhtml-document title body)))
+          title "Notebook"
+          math-mode (__rhtml-render-opts-math-mode opts)
+          assets-mode (__rhtml-render-opts-assets-mode opts)]
+      (__rhtml-document title body math-mode assets-mode html_path)))
 
   ;;; render-html-string -- render a parsed notebook and its outputs to standalone HTML.
   (defn render-html-string [nodes :int outputs :int opts :int] #{Unsafe} :cstr
     (let [body (__rhtml-render-state-text (__rhtml-render-body nodes outputs opts ""))
-          title "Notebook"]
-      (__rhtml-document title body)))
+          title "Notebook"
+          math-mode (__rhtml-render-opts-math-mode opts)
+          assets-mode (__rhtml-render-opts-assets-mode opts)]
+      (__rhtml-document title body math-mode assets-mode "")))
 
   ;;; render-html -- evaluate a notebook file and write rendered HTML beside it.
   (defn render-html [path :cstr opts :int] #{Unsafe} :int
@@ -1088,7 +1420,22 @@
                   style-path (__rhtml-style-path out-path)
                   title (__rhtml-page-title path)
                   body (__rhtml-render-state-text (__rhtml-render-body nodes outputs opts out-path))
-                  html (__rhtml-document title body)
+                  math-mode (if (__rhtml-cells-has-math-attr? cells)
+                               1
+                               (__rhtml-render-opts-math-mode opts))
+                  assets-mode (__rhtml-render-opts-assets-mode opts)
+                  vendor-dir (__rhtml-find-katex-vendor-dir)
+                  _ (if (__rhtml-body-has-math? body)
+                       (do
+                         (__rhtml-katex-copy-fonts vendor-dir out-path)
+                         (if (= assets-mode 1)
+                           (do
+                             (__rhtml-katex-write-sibling vendor-dir out-path "katex.min.css" 1)
+                             (__rhtml-katex-write-sibling vendor-dir out-path "katex.min.js" 0)
+                             (__rhtml-katex-write-sibling vendor-dir out-path "auto-render.min.js" 0))
+                           0))
+                       0)
+                  html (__rhtml-document title body math-mode assets-mode out-path)
                   css (__rhtml-style-css)]
               (do
                 (session-close session)
