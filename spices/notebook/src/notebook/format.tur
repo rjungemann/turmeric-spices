@@ -186,11 +186,38 @@
   (defn __span-end [span :int] #{Unsafe} :int
     (__fmt-head (__fmt-tail span)))
 
+  (defn __inject-no-check-attr [info :cstr attrs :int] #{Unsafe} :int
+    ```c
+    const char *s = info ? (const char *)(intptr_t)info : "";
+    const char *brace = strchr(s, '{');
+    size_t limit = brace ? (size_t)(brace - s) : strlen(s);
+    for (size_t i = 0; i + 8 <= limit; i++) {
+      if (strncmp(s + i, "no-check", 8) == 0) {
+        int pre_ok  = (i == 0 || s[i-1] == ' ' || s[i-1] == '\t');
+        char after  = s[i + 8];
+        int post_ok = (after == '\0' || after == ' ' || after == '\t' || after == '{');
+        if (pre_ok && post_ok) {
+          typedef struct { char *name; char *value; } Attr;
+          typedef struct { int64_t head; int64_t tail; } Cons;
+          Attr *a = malloc(sizeof(*a));
+          a->name  = strdup("eval");
+          a->value = strdup("false");
+          Cons *c  = malloc(sizeof(*c));
+          c->head  = (int64_t)(intptr_t)a;
+          c->tail  = attrs;
+          return (int64_t)(intptr_t)c;
+        }
+      }
+    }
+    return attrs;
+    ```)
+
   (defn __block->node [block :int] #{Unsafe} :int
     (if (and (= (md-node-tag block) (md-tag-code-block))
              (>= (__lang-from-info (md-node-info block)) 0))
-      (let [attrs (parse-attrs (md-node-info block))
-            lang (__lang-from-info (md-node-info block))
+      (let [info (md-node-info block)
+            attrs (__inject-no-check-attr info (parse-attrs info))
+            lang (__lang-from-info info)
             span (md-source-span block)
             cell (cell-make (attr-get attrs "id" "")
                             lang

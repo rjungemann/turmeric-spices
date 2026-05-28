@@ -1,0 +1,362 @@
+;;; sdf/colors -- ColoredSDF: SdfExpr paired with per-leaf color and object ID.
+;;;
+;;; A ColoredSDF (colored_node) mirrors the SdfExpr tree.  Each leaf carries
+;;; an RGB color and an objectId >= 0; interior nodes carry the combined
+;;; SdfExpr for their subtree plus left/right colored child pointers.
+;;;
+;;; The combined SdfExpr at the root can be passed to sdf-eval or mc-extract
+;;; for fast distance queries.  The colored tree drives sdf-attribute: for a
+;;; query point, the tree is walked tracking which child wins (min for union,
+;;; max for intersection, etc.) and the winning leaf's color/id is returned.
+;;;
+;;; Since: Phase 2
+;; -------------------------------------------------------------------------
+
+(defmodule sdf/colors
+  (export colored-sphere colored-box colored-cylinder colored-plane
+          colored-union colored-intersection colored-difference colored-smooth-union
+          colored-translate
+          csdf-sdf csdf-left csdf-right
+          csdf-r csdf-g csdf-b csdf-object-id
+          csdf-free))
+
+(import sdf/primitives :refer [sdf-sphere sdf-box sdf-cylinder sdf-plane])
+(import sdf/boolean    :refer [sdf-union sdf-intersection sdf-difference sdf-smooth-union])
+
+;; ---- private allocators ----
+
+;;; csdf--make-leaf -- allocate a ColoredSDF leaf.
+(defn csdf--make-leaf [sdf :int r :float g :float b :float objid :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct colored_node {
+    int64_t sdf;
+    float r, g, b;
+    int32_t object_id;
+    struct colored_node *left_cn, *right_cn;
+  } colored_node;
+  colored_node *cn = (colored_node *)calloc(1, sizeof(colored_node));
+  if (!cn) return 0;
+  cn->sdf = sdf;
+  cn->r = (float)r; cn->g = (float)g; cn->b = (float)b;
+  cn->object_id = (int32_t)objid;
+  return (int64_t)(intptr_t)cn;
+  ```)
+
+;;; csdf--make-node -- allocate a ColoredSDF interior node.
+(defn csdf--make-node [sdf :int left :int right :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct colored_node {
+    int64_t sdf;
+    float r, g, b;
+    int32_t object_id;
+    struct colored_node *left_cn, *right_cn;
+  } colored_node;
+  colored_node *cn = (colored_node *)calloc(1, sizeof(colored_node));
+  if (!cn) return 0;
+  cn->sdf = sdf;
+  cn->object_id = -1;
+  cn->left_cn  = (colored_node *)(intptr_t)left;
+  cn->right_cn = (colored_node *)(intptr_t)right;
+  return (int64_t)(intptr_t)cn;
+  ```)
+
+;; ---- accessor ----
+
+;;; csdf-sdf -- the combined SdfExpr handle for this colored subtree.
+;;;
+;;; Pass this to sdf-eval or mc-extract for distance evaluation.
+;;;
+;;; Parameters:
+;;;   cn -- ColoredSDF handle
+;;;
+;;; Returns:
+;;;   SdfExpr handle.
+;;;
+;;; Example:
+;;;   (sdf-eval (csdf-sdf scene) 0.0 0.0 0.0)
+;;;
+;;; Since: Phase 2
+(defn csdf-sdf [cn :int] :int
+  ```c
+  #include <stdint.h>
+  typedef struct colored_node {
+    int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn;
+  } colored_node;
+  return cn ? ((colored_node *)(intptr_t)cn)->sdf : 0;
+  ```)
+
+;;; csdf-left -- left colored child handle (0 for leaves). Since: Phase 3
+(defn csdf-left [cn :int] :int
+  ```c
+  #include <stdint.h>
+  typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
+  return cn ? (int64_t)(intptr_t)((colored_node *)(intptr_t)cn)->left_cn : 0;
+  ```)
+
+;;; csdf-right -- right colored child handle (0 for leaves and unaries). Since: Phase 3
+(defn csdf-right [cn :int] :int
+  ```c
+  #include <stdint.h>
+  typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
+  return cn ? (int64_t)(intptr_t)((colored_node *)(intptr_t)cn)->right_cn : 0;
+  ```)
+
+;;; csdf-r -- red color component of a leaf node. Since: Phase 3
+(defn csdf-r [cn :int] :float
+  ```c
+  #include <stdint.h>
+  typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
+  return cn ? (double)((colored_node *)(intptr_t)cn)->r : 0.0;
+  ```)
+
+;;; csdf-g -- green color component of a leaf node. Since: Phase 3
+(defn csdf-g [cn :int] :float
+  ```c
+  #include <stdint.h>
+  typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
+  return cn ? (double)((colored_node *)(intptr_t)cn)->g : 0.0;
+  ```)
+
+;;; csdf-b -- blue color component of a leaf node. Since: Phase 3
+(defn csdf-b [cn :int] :float
+  ```c
+  #include <stdint.h>
+  typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
+  return cn ? (double)((colored_node *)(intptr_t)cn)->b : 0.0;
+  ```)
+
+;;; csdf-object-id -- object ID of a colored node (-1 for interior). Since: Phase 3
+(defn csdf-object-id [cn :int] :int
+  ```c
+  #include <stdint.h>
+  typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
+  return cn ? (int64_t)((colored_node *)(intptr_t)cn)->object_id : -1;
+  ```)
+
+;; ---- free ----
+
+;;; csdf-free -- free a ColoredSDF tree and its associated SdfExpr tree.
+;;;
+;;; The root's combined SdfExpr is freed first (recursively freeing all SDF
+;;; nodes), then all colored_node structs are freed.  Do NOT call sdf-free
+;;; separately on the SdfExpr after calling csdf-free.
+;;;
+;;; Parameters:
+;;;   cn -- ColoredSDF handle; safe to call with 0.
+;;;
+;;; Example:
+;;;   (csdf-free scene)
+;;;
+;;; Since: Phase 2
+(defn csdf-free [cn :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct colored_node {
+    int64_t sdf; float r,g,b; int32_t object_id;
+    struct colored_node *left_cn, *right_cn;
+  } colored_node;
+  typedef struct sdf_node {
+    int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1;
+    struct sdf_node *left, *right;
+  } sdf_node;
+  if (!cn) return;
+  colored_node *root = (colored_node *)(intptr_t)cn;
+
+  /* Free the SDF tree rooted at root->sdf (frees all SDF nodes). */
+  {
+    struct { void *n; } stk[256]; int top = 0;
+    stk[top++].n = (void *)(intptr_t)root->sdf;
+    while (top > 0) {
+      sdf_node *n = (sdf_node *)stk[--top].n;
+      if (!n) continue;
+      if (top < 254) {
+        if (n->left)  stk[top++].n = n->left;
+        if (n->right) stk[top++].n = n->right;
+      }
+      free(n);
+    }
+  }
+
+  /* Free colored_node structs only (do not touch .sdf -- already freed). */
+  {
+    struct { colored_node *cn; } stk[256]; int top = 0;
+    stk[top++].cn = root;
+    while (top > 0) {
+      colored_node *c = stk[--top].cn;
+      if (!c) continue;
+      if (top < 254) {
+        if (c->left_cn)  stk[top++].cn = c->left_cn;
+        if (c->right_cn) stk[top++].cn = c->right_cn;
+      }
+      free(c);
+    }
+  }
+  ```)
+
+;; ---- leaf constructors ----
+
+;;; colored-sphere -- sphere centred at (cx,cy,cz) with radius r and RGB color.
+;;;
+;;; Parameters:
+;;;   cx cy cz -- centre position
+;;;   r        -- radius (> 0)
+;;;   cr cg cb -- diffuse RGB color in [0, 1]
+;;;   objid    -- object ID (>= 0; unique per colored leaf in the scene)
+;;;
+;;; Returns:
+;;;   ColoredSDF handle.
+;;;
+;;; Example:
+;;;   (colored-sphere 0.0 0.0 0.0 1.5  1.0 0.0 0.0  1)
+;;;
+;;; Since: Phase 2
+(defn colored-sphere [cx :float cy :float cz :float r :float
+                      cr :float cg :float cb :float objid :int] :int
+  (csdf--make-leaf (sdf-sphere cx cy cz r) cr cg cb objid))
+
+;;; colored-box -- AABB from (lx,ly,lz) to (hx,hy,hz) with RGB color.
+;;;
+;;; Parameters:
+;;;   lx ly lz -- minimum corner
+;;;   hx hy hz -- maximum corner
+;;;   cr cg cb -- diffuse RGB color in [0, 1]
+;;;   objid    -- object ID (>= 0)
+;;;
+;;; Returns:
+;;;   ColoredSDF handle.
+;;;
+;;; Example:
+;;;   (colored-box -1.0 -1.0 -1.0  1.0 1.0 1.0  0.0 1.0 0.0  2)
+;;;
+;;; Since: Phase 2
+(defn colored-box [lx :float ly :float lz :float
+                   hx :float hy :float hz :float
+                   cr :float cg :float cb :float objid :int] :int
+  (csdf--make-leaf (sdf-box lx ly lz hx hy hz) cr cg cb objid))
+
+;;; colored-cylinder -- infinite cylinder through (cx,cy,*) radius r with color.
+;;;
+;;; Since: Phase 2
+(defn colored-cylinder [cx :float cy :float cz :float r :float
+                        cr :float cg :float cb :float objid :int] :int
+  (csdf--make-leaf (sdf-cylinder cx cy cz r) cr cg cb objid))
+
+;;; colored-plane -- infinite plane n.p + d = 0 with given color.
+;;;
+;;; Since: Phase 2
+(defn colored-plane [nx :float ny :float nz :float d :float
+                     cr :float cg :float cb :float objid :int] :int
+  (csdf--make-leaf (sdf-plane nx ny nz d) cr cg cb objid))
+
+;; ---- CSG combinators ----
+
+;;; colored-union -- CSG union of two colored SDFs.
+;;;
+;;; The surface color at each point is the color of whichever child SDF is
+;;; closest to that point.
+;;;
+;;; Parameters:
+;;;   a b -- ColoredSDF handles
+;;;
+;;; Returns:
+;;;   Combined ColoredSDF handle.
+;;;
+;;; Example:
+;;;   (colored-union
+;;;     (colored-sphere -1.0 0.0 0.0 0.8  1.0 0.0 0.0  1)
+;;;     (colored-sphere  1.0 0.0 0.0 0.8  0.0 1.0 0.0  2))
+;;;
+;;; Since: Phase 2
+(defn colored-union [a :int b :int] :int
+  (csdf--make-node (sdf-union (csdf-sdf a) (csdf-sdf b)) a b))
+
+;;; colored-intersection -- CSG intersection of two colored SDFs.
+;;;
+;;; The surface color follows whichever child provides the limiting constraint
+;;; (the child with the larger distance, since intersection = max(a, b)).
+;;;
+;;; Since: Phase 2
+(defn colored-intersection [a :int b :int] :int
+  (csdf--make-node (sdf-intersection (csdf-sdf a) (csdf-sdf b)) a b))
+
+;;; colored-difference -- CSG difference: a minus b.
+;;;
+;;; The color on the outer surface (where a > -b) comes from a; the color on
+;;; the carved surface (where -b > a) comes from b.
+;;;
+;;; Parameters:
+;;;   a -- base shape
+;;;   b -- shape to subtract
+;;;
+;;; Since: Phase 2
+(defn colored-difference [a :int b :int] :int
+  (csdf--make-node (sdf-difference (csdf-sdf a) (csdf-sdf b)) a b))
+
+;;; colored-smooth-union -- smooth union of two colored SDFs (Quilez blend).
+;;;
+;;; Color attribution uses winner-takes-all (same logic as colored-union).
+;;; Geometry is smoothly blended; color switches sharply at the midpoint.
+;;;
+;;; Parameters:
+;;;   a b -- ColoredSDF handles
+;;;   k   -- blend radius (>= 0)
+;;;
+;;; Since: Phase 2
+(defn colored-smooth-union [a :int b :int k :float] :int
+  (csdf--make-node (sdf-smooth-union (csdf-sdf a) (csdf-sdf b) k) a b))
+
+;; ---- transforms ----
+
+;;; colored-translate -- translate a colored SDF by (tx, ty, tz).
+;;;
+;;; The color attribution is inherited entirely from the child; this is a
+;;; unary wrapper that adjusts the query point before recursing.
+;;;
+;;; Parameters:
+;;;   cn       -- ColoredSDF handle
+;;;   tx ty tz -- translation vector
+;;;
+;;; Returns:
+;;;   Translated ColoredSDF handle.
+;;;
+;;; Example:
+;;;   (colored-translate my-sphere 0.0 2.0 0.0)
+;;;
+;;; Since: Phase 2
+(defn colored-translate [cn :int tx :float ty :float tz :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct colored_node {
+    int64_t sdf; float r,g,b; int32_t object_id;
+    struct colored_node *left_cn, *right_cn;
+  } colored_node;
+  typedef struct sdf_node {
+    int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1;
+    struct sdf_node *left, *right;
+  } sdf_node;
+  /* Build the translate SDF wrapping the child's combined SDF. */
+  colored_node *child = (colored_node *)(intptr_t)cn;
+  if (!child) return 0;
+  sdf_node *child_sdf = (sdf_node *)(intptr_t)child->sdf;
+  sdf_node *tn = (sdf_node *)calloc(1, sizeof(sdf_node));
+  if (!tn) return 0;
+  tn->tag = 30; /* SDF_TRANSLATE */
+  tn->v0x = tx; tn->v0y = ty; tn->v0z = tz;
+  tn->left = child_sdf;
+  /* Wrap in a colored_node (unary: right_cn = NULL). */
+  colored_node *wrap = (colored_node *)calloc(1, sizeof(colored_node));
+  if (!wrap) { free(tn); return 0; }
+  wrap->sdf = (int64_t)(intptr_t)tn;
+  wrap->object_id = -1;
+  wrap->left_cn  = child;
+  wrap->right_cn = NULL;
+  return (int64_t)(intptr_t)wrap;
+  ```)
+
+) ;; end defmodule sdf/colors

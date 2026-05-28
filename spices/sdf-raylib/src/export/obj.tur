@@ -1,0 +1,152 @@
+;;; export/obj -- OBJ + MTL export for colored meshes.
+;;;
+;;; export-obj writes two files: <path>.obj (geometry with normals) and
+;;; <path>.mtl (one Phong material per unique object ID).  Faces are grouped
+;;; by material; each group emits a usemtl directive before its faces.
+;;;
+;;; The OBJ format uses `f v//vn v//vn v//vn` (vertex and normal indices,
+;;; no UV coords) since colored SDFs do not yet generate UV coordinates.
+;;; Colors travel through the MTL Kd (diffuse) channel; viewers that do
+;;; not load MTL files will still see correct geometry.
+;;;
+;;; Since: Phase 2
+;; -------------------------------------------------------------------------
+
+(defmodule export/obj
+  (export export-obj))
+
+(import mesh/extraction :refer [cmesh-vertex-count])
+
+;;; export-obj -- write a colored mesh to OBJ + MTL files.
+;;;
+;;; Parameters:
+;;;   mesh -- cmesh handle from mc-extract-colored
+;;;   path -- file path base WITHOUT extension (e.g. "output/scene")
+;;;
+;;; Returns:
+;;;   0 on success; -1 if either file could not be opened.
+;;;
+;;; Example:
+;;;   (export-obj my-mesh "output")  ; writes output.obj + output.mtl
+;;;
+;;; Since: Phase 2
+(defn export-obj [mesh :int path :cstr] :int
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+
+  typedef struct {
+    float   *vertices;
+    float   *normals;
+    float   *colors;
+    int32_t *object_ids;
+    int      count;
+    int      capacity;
+  } cmesh;
+
+  if (!mesh || !path) return -1;
+  cmesh *ms = (cmesh *)(intptr_t)mesh;
+  if (!ms || ms->count < 3) return -1;
+
+  const char *fpath = (const char *)(intptr_t)path;
+  int plen = (int)strlen(fpath);
+
+  char obj_path[1024], mtl_path[1024];
+  if (plen + 5 > 1023) return -1;
+  memcpy(obj_path, fpath, (size_t)plen); memcpy(obj_path + plen, ".obj", 5);
+  memcpy(mtl_path, fpath, (size_t)plen); memcpy(mtl_path + plen, ".mtl", 5);
+
+  /* Derive the MTL filename (basename only, for the mtllib directive). */
+  const char *mtl_base = mtl_path;
+  for (int i = plen - 1; i >= 0; i--) {
+    if (fpath[i] == '/' || fpath[i] == '\\') { mtl_base = mtl_path + i + 1; break; }
+  }
+
+  /* ---- Collect unique (objectId, r, g, b) pairs ---- */
+  int      mats[256];
+  float    mat_r[256], mat_g[256], mat_b[256];
+  int      n_mats = 0;
+
+  for (int v = 0; v < ms->count && n_mats < 256; v++) {
+    int oid = (int)ms->object_ids[v];
+    int found = 0;
+    for (int m = 0; m < n_mats; m++) {
+      if (mats[m] == oid) { found = 1; break; }
+    }
+    if (!found) {
+      mats[n_mats]  = oid;
+      mat_r[n_mats] = ms->colors[v * 3 + 0];
+      mat_g[n_mats] = ms->colors[v * 3 + 1];
+      mat_b[n_mats] = ms->colors[v * 3 + 2];
+      n_mats++;
+    }
+  }
+
+  /* ---- Write MTL file ---- */
+  FILE *mf = fopen(mtl_path, "w");
+  if (!mf) return -1;
+  for (int m = 0; m < n_mats; m++) {
+    fprintf(mf, "newmtl mat_%d\n", mats[m]);
+    fprintf(mf, "Ka %.6f %.6f %.6f\n",
+            (double)mat_r[m] * 0.1, (double)mat_g[m] * 0.1, (double)mat_b[m] * 0.1);
+    fprintf(mf, "Kd %.6f %.6f %.6f\n",
+            (double)mat_r[m], (double)mat_g[m], (double)mat_b[m]);
+    fprintf(mf, "Ks 0.000000 0.000000 0.000000\n");
+    fprintf(mf, "Ns 10.000000\n\n");
+  }
+  fclose(mf);
+
+  /* ---- Write OBJ file ---- */
+  FILE *of = fopen(obj_path, "w");
+  if (!of) return -1;
+
+  fprintf(of, "# Turmeric SDF colored mesh -- tur-sdf-raylib Phase 2\n");
+  fprintf(of, "mtllib %s\n\n", mtl_base);
+
+  /* Vertices */
+  for (int v = 0; v < ms->count; v++) {
+    fprintf(of, "v %.9g %.9g %.9g\n",
+            (double)ms->vertices[v*3+0],
+            (double)ms->vertices[v*3+1],
+            (double)ms->vertices[v*3+2]);
+  }
+  fprintf(of, "\n");
+
+  /* Normals */
+  for (int v = 0; v < ms->count; v++) {
+    fprintf(of, "vn %.9g %.9g %.9g\n",
+            (double)ms->normals[v*3+0],
+            (double)ms->normals[v*3+1],
+            (double)ms->normals[v*3+2]);
+  }
+  fprintf(of, "\n");
+
+  /* Faces grouped by material.
+     For each unique material, scan all triangles and emit those that match.
+     Triangle material is determined by the objectId of its first vertex. */
+  int n_tris = ms->count / 3;
+  for (int m = 0; m < n_mats; m++) {
+    int emitted = 0;
+    for (int t = 0; t < n_tris; t++) {
+      int v0 = t * 3;
+      if ((int)ms->object_ids[v0] != mats[m]) continue;
+      if (!emitted) {
+        fprintf(of, "usemtl mat_%d\n", mats[m]);
+        emitted = 1;
+      }
+      /* OBJ indices are 1-based; format is v//vn (no UV) */
+      fprintf(of, "f %d//%d %d//%d %d//%d\n",
+              v0+1, v0+1,
+              v0+2, v0+2,
+              v0+3, v0+3);
+    }
+    if (emitted) fprintf(of, "\n");
+  }
+
+  fclose(of);
+  return 0;
+  ```)
+
+) ;; end defmodule export/obj

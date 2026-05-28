@@ -18,7 +18,9 @@
 ;; -------------------------------------------------------------------------
 
 (defmodule raylib/integration
-  (export sdf-preview-window))
+  (export sdf-preview-window csdf-preview-window))
+
+(import glsl/codegen :refer [csdf->glsl csdf-glsl-free])
 
 ;;; sdf-preview-window -- open a window and live-preview an SdfExpr scene.
 ;;;
@@ -286,5 +288,178 @@
   free(pixels);
   CloseWindow();
   ```)
+
+;;; csdf-preview-window -- open a window and GPU-raytrace a ColoredSDF scene.
+;;;
+;;; Generates a GLSL sceneSDF function from the ColoredSDF tree, compiles it
+;;; together with a fixed raymarching fragment shader, and renders using
+;;; raylib's shader API.  Per-object colors appear on the surface in real time.
+;;; Camera controls are the same as sdf-preview-window (arrow keys + +/-).
+;;;
+;;; Parameters:
+;;;   csdf   -- ColoredSDF handle
+;;;   width  -- window width in pixels
+;;;   height -- window height in pixels
+;;;   title  -- window title string
+;;;
+;;; Returns:
+;;;   :void  Blocks until the window is closed.
+;;;
+;;; Example:
+;;;   (csdf-preview-window scene 800 600 "GPU Preview")
+;;;
+;;; Since: Phase 3
+(defn csdf-preview-window [csdf :int width :int height :int title :cstr] :void
+  (let [scene-glsl (csdf->glsl csdf)]
+    ```c
+    #include <raylib.h>
+    #include <stdlib.h>
+    #include <string.h>
+    #include <stdio.h>
+    #include <math.h>
+    #include <stdint.h>
+
+    /* scene-glsl is the csdf->glsl result passed in from Turmeric. */
+    const char *scene_src = (const char *)(intptr_t)scene_glsl;
+
+    /* Fixed vertex shader: passthrough fullscreen quad. */
+    const char *vert_src =
+      "#version 330\n"
+      "in vec3 vertexPosition;\n"
+      "in vec2 vertexTexCoord;\n"
+      "out vec2 fragTexCoord;\n"
+      "void main() {\n"
+      "  fragTexCoord = vertexTexCoord;\n"
+      "  gl_Position = vec4(vertexPosition, 1.0);\n"
+      "}\n";
+
+    /* Fixed raymarching boilerplate (prepended to scene_src). */
+    const char *march_src =
+      "#version 330\n"
+      "uniform vec3 u_cam_pos;\n"
+      "uniform vec3 u_cam_fwd;\n"
+      "uniform vec3 u_cam_right;\n"
+      "uniform vec3 u_cam_up;\n"
+      "uniform vec2 u_resolution;\n"
+      "out vec4 fragColor;\n"
+      "in vec2 fragTexCoord;\n"
+      /* sceneSDF injected here at runtime */
+      "vec3 calcNormal(vec3 p) {\n"
+      "  const float e = 0.002;\n"
+      "  int oi; vec3 co;\n"
+      "  return normalize(vec3(\n"
+      "    sceneSDF(p+vec3(e,0,0),oi,co)-sceneSDF(p-vec3(e,0,0),oi,co),\n"
+      "    sceneSDF(p+vec3(0,e,0),oi,co)-sceneSDF(p-vec3(0,e,0),oi,co),\n"
+      "    sceneSDF(p+vec3(0,0,e),oi,co)-sceneSDF(p-vec3(0,0,e),oi,co)\n"
+      "  ));\n"
+      "}\n"
+      "void main() {\n"
+      "  vec2 uv = (fragTexCoord * 2.0 - 1.0);\n"
+      "  uv.x *= u_resolution.x / u_resolution.y;\n"
+      "  vec3 ro = u_cam_pos;\n"
+      "  vec3 rd = normalize(u_cam_fwd + uv.x * u_cam_right + uv.y * u_cam_up);\n"
+      "  float t = 0.0;\n"
+      "  int objId = -1; vec3 col = vec3(0.0);\n"
+      "  for (int i = 0; i < 128; i++) {\n"
+      "    vec3 p = ro + rd * t;\n"
+      "    int oi; vec3 oc;\n"
+      "    float d = sceneSDF(p, oi, oc);\n"
+      "    if (d < 0.001) { objId = oi; col = oc; break; }\n"
+      "    if (t > 100.0) break;\n"
+      "    t += max(d, 0.01);\n"
+      "  }\n"
+      "  if (objId < 0) {\n"
+      "    fragColor = vec4(0.12, 0.16, 0.22, 1.0);\n"
+      "    return;\n"
+      "  }\n"
+      "  vec3 hp = ro + rd * t;\n"
+      "  vec3 nm = calcNormal(hp);\n"
+      "  vec3 ldir = normalize(vec3(0.6, 0.8, -0.4));\n"
+      "  float diff = max(dot(nm, ldir), 0.0);\n"
+      "  float amb  = 0.5 + 0.5 * nm.y;\n"
+      "  vec3 shaded = col * (0.15 * amb + 0.85 * diff);\n"
+      "  fragColor = vec4(shaded, 1.0);\n"
+      "}\n";
+
+    /* Build full fragment shader: scene_src + march_src.
+       sceneSDF must appear before it is called. */
+    int slen = (int)strlen(scene_src);
+    int mlen = (int)strlen(march_src);
+    char *frag_src = (char *)malloc(slen + mlen + 1);
+    if (!frag_src) { return; }
+    memcpy(frag_src,         scene_src, slen);
+    memcpy(frag_src + slen,  march_src, mlen);
+    frag_src[slen + mlen] = '\0';
+
+    int W = (int)width, H = (int)height;
+    InitWindow(W, H, (const char *)(intptr_t)title);
+    SetTargetFPS(60);
+
+    Shader shader = LoadShaderFromMemory(vert_src, frag_src);
+    free(frag_src);
+
+    int loc_cam_pos   = GetShaderLocation(shader, "u_cam_pos");
+    int loc_cam_fwd   = GetShaderLocation(shader, "u_cam_fwd");
+    int loc_cam_right = GetShaderLocation(shader, "u_cam_right");
+    int loc_cam_up    = GetShaderLocation(shader, "u_cam_up");
+    int loc_res       = GetShaderLocation(shader, "u_resolution");
+
+    /* Camera state: spherical coordinates */
+    double cam_theta = 0.5;
+    double cam_phi   = 0.7;
+    double cam_dist  = 5.0;
+    double cam_step  = 0.05;
+
+    while (!WindowShouldClose()) {
+      if (IsKeyDown(KEY_LEFT))  cam_theta -= cam_step;
+      if (IsKeyDown(KEY_RIGHT)) cam_theta += cam_step;
+      if (IsKeyDown(KEY_UP))    cam_phi   -= cam_step;
+      if (IsKeyDown(KEY_DOWN))  cam_phi   += cam_step;
+      if (IsKeyDown(KEY_EQUAL) || IsKeyDown(KEY_KP_ADD))       cam_dist -= cam_step * 2.0;
+      if (IsKeyDown(KEY_MINUS)  || IsKeyDown(KEY_KP_SUBTRACT)) cam_dist += cam_step * 2.0;
+      if (cam_phi < 0.05) cam_phi = 0.05;
+      if (cam_phi > 3.09) cam_phi = 3.09;
+      if (cam_dist < 0.5) cam_dist = 0.5;
+
+      double ex = cam_dist * sin(cam_phi) * cos(cam_theta);
+      double ey = cam_dist * cos(cam_phi);
+      double ez = cam_dist * sin(cam_phi) * sin(cam_theta);
+
+      double fwx=-ex, fwy=-ey, fwz=-ez;
+      double fwl=sqrt(fwx*fwx+fwy*fwy+fwz*fwz);
+      fwx/=fwl; fwy/=fwl; fwz/=fwl;
+
+      double rtx=fwy*0.0-fwz*1.0, rty=fwz*0.0-fwx*0.0, rtz=fwx*1.0-fwy*0.0;
+      double rtl=sqrt(rtx*rtx+rty*rty+rtz*rtz);
+      if (rtl<1e-8){rtx=1.0;rty=0.0;rtz=0.0;rtl=1.0;}
+      rtx/=rtl; rty/=rtl; rtz/=rtl;
+
+      double upx=rty*fwz-rtz*fwy, upy=rtz*fwx-rtx*fwz, upz=rtx*fwy-rty*fwx;
+
+      float cp[3]  = { (float)ex,  (float)ey,  (float)ez  };
+      float cf[3]  = { (float)fwx, (float)fwy, (float)fwz };
+      float cr2[3] = { (float)rtx, (float)rty, (float)rtz };
+      float cu[3]  = { (float)upx, (float)upy, (float)upz };
+      float res[2] = { (float)W,   (float)H    };
+
+      SetShaderValue(shader, loc_cam_pos,   cp,  SHADER_UNIFORM_VEC3);
+      SetShaderValue(shader, loc_cam_fwd,   cf,  SHADER_UNIFORM_VEC3);
+      SetShaderValue(shader, loc_cam_right, cr2, SHADER_UNIFORM_VEC3);
+      SetShaderValue(shader, loc_cam_up,    cu,  SHADER_UNIFORM_VEC3);
+      SetShaderValue(shader, loc_res,       res, SHADER_UNIFORM_VEC2);
+
+      BeginDrawing();
+      ClearBackground(BLACK);
+      BeginShaderMode(shader);
+      DrawRectangle(0, 0, W, H, WHITE);
+      EndShaderMode();
+      DrawFPS(10, 10);
+      EndDrawing();
+    }
+
+    UnloadShader(shader);
+    CloseWindow();
+    ```)
+  (csdf-glsl-free scene-glsl))
 
 ) ;; end defmodule raylib/integration

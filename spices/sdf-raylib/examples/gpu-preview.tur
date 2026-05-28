@@ -1,0 +1,35 @@
+;;; examples/gpu-preview -- Phase 3 demo: GPU raymarched preview of a colored CSG scene.
+;;;
+;;; Opens a window and renders the same three-object scene from colored-csg.tur
+;;; using a GPU fragment shader generated from the ColoredSDF tree.  Per-object
+;;; colors are visible in real time with Blinn-Phong shading.
+;;;
+;;; Camera controls:
+;;;   Arrow keys  -- orbit (left/right = azimuth, up/down = elevation)
+;;;   +/-         -- zoom in / out
+;;;   ESC         -- close
+;;;
+;;; Since: Phase 3
+;; -------------------------------------------------------------------------
+
+(import sdf/colors       :refer [colored-sphere colored-box colored-cylinder
+                                  colored-union colored-difference colored-translate
+                                  csdf-free])
+(import raylib/integration :refer [csdf-preview-window])
+
+(defn make-scene [] :int
+  (let [red-sphere  (colored-sphere 0.0 0.0 0.0 1.5  1.0 0.15 0.05  1)
+        green-box   (colored-box   -0.6 -0.6 -0.6  0.6 0.6 0.6
+                                    0.1 0.8 0.2  2)
+        green-box-t (colored-translate green-box 0.9 0.0 0.0)
+        blue-cyl    (colored-cylinder  0.0 0.0 0.0 0.4  0.1 0.4 1.0  3)
+        combined    (colored-difference
+                      (colored-union red-sphere green-box-t)
+                      blue-cyl)]
+    combined))
+
+(defn main [] :int
+  (let [scene (make-scene)]
+    (csdf-preview-window scene 800 600 "SDF GPU Preview -- Phase 3")
+    (csdf-free scene)
+    0))
