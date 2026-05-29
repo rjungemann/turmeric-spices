@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tur/mesh/extraction | Turmeric API</title>
+<title>tur/mesh/optimization | Turmeric API</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -111,178 +111,167 @@
   <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
   <h3>Exported</h3>
   <ul>
-    <li><a href="#mc-extract-colored">mc-extract-colored</a></li>
-    <li><a href="#cmesh-vertex-count">cmesh-vertex-count</a></li>
-    <li><a href="#cmesh-get-vx">cmesh-get-vx</a></li>
-    <li><a href="#cmesh-get-vy">cmesh-get-vy</a></li>
-    <li><a href="#cmesh-get-vz">cmesh-get-vz</a></li>
-    <li><a href="#cmesh-get-nx">cmesh-get-nx</a></li>
-    <li><a href="#cmesh-get-ny">cmesh-get-ny</a></li>
-    <li><a href="#cmesh-get-nz">cmesh-get-nz</a></li>
-    <li><a href="#cmesh-get-cr">cmesh-get-cr</a></li>
-    <li><a href="#cmesh-get-cg">cmesh-get-cg</a></li>
-    <li><a href="#cmesh-get-cb">cmesh-get-cb</a></li>
-    <li><a href="#cmesh-get-object-id">cmesh-get-object-id</a></li>
-    <li><a href="#dc-extract-colored">dc-extract-colored</a></li>
-    <li><a href="#cmesh-free">cmesh-free</a></li>
+    <li><a href="#cmesh-weld">cmesh-weld</a></li>
+    <li><a href="#imesh-vertex-count">imesh-vertex-count</a></li>
+    <li><a href="#imesh-triangle-count">imesh-triangle-count</a></li>
+    <li><a href="#imesh-get-vx">imesh-get-vx</a></li>
+    <li><a href="#imesh-get-vy">imesh-get-vy</a></li>
+    <li><a href="#imesh-get-vz">imesh-get-vz</a></li>
+    <li><a href="#imesh-get-nx">imesh-get-nx</a></li>
+    <li><a href="#imesh-get-ny">imesh-get-ny</a></li>
+    <li><a href="#imesh-get-nz">imesh-get-nz</a></li>
+    <li><a href="#imesh-get-cr">imesh-get-cr</a></li>
+    <li><a href="#imesh-get-cg">imesh-get-cg</a></li>
+    <li><a href="#imesh-get-cb">imesh-get-cb</a></li>
+    <li><a href="#imesh-get-object-id">imesh-get-object-id</a></li>
+    <li><a href="#imesh-get-index">imesh-get-index</a></li>
+    <li><a href="#imesh-free">imesh-free</a></li>
   </ul>
 </div>
 <div class="content">
   <div class="module-heading">
-    <h1>mesh/extraction</h1>
-    <div class="module-path">src/mesh/extraction.tur</div>
+    <h1>mesh/optimization</h1>
+    <div class="module-path">src/mesh/optimization.tur</div>
   </div>
   <div class="module-doc">
-    <p class="module-doc-summary">Marching Cubes extraction from a ColoredSDF.</p>
-    <p class="def-since">Since: Phase 2</p>
+    <p class="module-doc-summary">vertex welding: convert a cmesh triangle soup to an indexed imesh.</p>
+    <p class="def-since">Since: Phase 4</p>
   </div>
-<div class="def-card" id="mc-extract-colored">
+<div class="def-card" id="cmesh-weld">
   <div class="def-card-header">
     <span class="kind-badge kind-defn">defn</span>
-    <h2>mc-extract-colored</h2>
+    <h2>cmesh-weld</h2>
   </div>
-  <pre class="def-signature">(mc-extract-colored [csdf :int res :int bx0 :float by0 :float bz0 :float bx1 :float by1 :float bz1 :float] :int)</pre>
-  <p class="def-summary">run Marching Cubes on a ColoredSDF tree.</p>
+  <pre class="def-signature">(cmesh-weld [m :int tol :float] :int)</pre>
+  <p class="def-summary">weld a cmesh triangle soup into an indexed imesh.</p>
   <div class="def-section">
     <div class="def-section-label">Parameters</div>
     <table class="param-table">
-    <tr><td>csdf</td><td></td><td>ColoredSDF handle</td></tr>
-    <tr><td>res</td><td></td><td>voxel resolution per axis (e.g. 32, 64)</td></tr>
-    <tr><td></td><td></td><td>bx0 by0 bz0  -- bounding-box minimum</td></tr>
-    <tr><td></td><td></td><td>bx1 by1 bz1  -- bounding-box maximum</td></tr>
+    <tr><td>m</td><td></td><td>cmesh handle from mc-extract-colored or dc-extract-colored</td></tr>
+    <tr><td>tol</td><td></td><td>position tolerance for vertex merging (e.g. 1e-5)</td></tr>
     </table>
   </div>
   <div class="def-section">
     <div class="def-section-label">Returns</div>
-    <p class="def-returns">Opaque cmesh handle, or 0 on failure.  Free with cmesh-free.</p>
+    <p class="def-returns">Opaque imesh handle, or 0 on failure.  Free with imesh-free.</p>
   </div>
   <div class="def-section">
     <div class="def-section-label">Example</div>
-    <pre class="def-example">(mc-extract-colored scene 32  -2.0 -2.0 -2.0  2.0 2.0 2.0)</pre>
-  </div>
-  <p class="def-since">Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-vertex-count">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-vertex-count</h2>
-  </div>
-  <pre class="def-signature">(cmesh-vertex-count [m :int] :int)</pre>
-  <p class="def-summary">number of vertices (3 per triangle). Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-vx">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-vx</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-vx [m :int i :int] :float)</pre>
-  <p class="def-summary">x position of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-vy">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-vy</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-vy [m :int i :int] :float)</pre>
-  <p class="def-summary">y position of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-vz">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-vz</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-vz [m :int i :int] :float)</pre>
-  <p class="def-summary">z position of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-nx">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-nx</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-nx [m :int i :int] :float)</pre>
-  <p class="def-summary">x normal of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-ny">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-ny</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-ny [m :int i :int] :float)</pre>
-  <p class="def-summary">y normal of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-nz">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-nz</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-nz [m :int i :int] :float)</pre>
-  <p class="def-summary">z normal of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-cr">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-cr</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-cr [m :int i :int] :float)</pre>
-  <p class="def-summary">red color channel of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-cg">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-cg</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-cg [m :int i :int] :float)</pre>
-  <p class="def-summary">green color channel of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-cb">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-cb</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-cb [m :int i :int] :float)</pre>
-  <p class="def-summary">blue color channel of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="cmesh-get-object-id">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-get-object-id</h2>
-  </div>
-  <pre class="def-signature">(cmesh-get-object-id [m :int i :int] :int)</pre>
-  <p class="def-summary">object ID of vertex i. Since: Phase 2</p>
-</div>
-<div class="def-card" id="dc-extract-colored">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>dc-extract-colored</h2>
-  </div>
-  <pre class="def-signature">(dc-extract-colored [csdf :int res :int bx0 :float by0 :float bz0 :float bx1 :float by1 :float bz1 :float] :int)</pre>
-  <p class="def-summary">run Dual Contouring (Ju et al. 2002) on a ColoredSDF tree.</p>
-  <div class="def-section">
-    <div class="def-section-label">Parameters</div>
-    <table class="param-table">
-    <tr><td>csdf</td><td></td><td>ColoredSDF handle</td></tr>
-    <tr><td>res</td><td></td><td>voxel resolution per axis (e.g. 32, 64)</td></tr>
-    <tr><td></td><td></td><td>bx0 by0 bz0  -- bounding-box minimum</td></tr>
-    <tr><td></td><td></td><td>bx1 by1 bz1  -- bounding-box maximum</td></tr>
-    </table>
-  </div>
-  <div class="def-section">
-    <div class="def-section-label">Returns</div>
-    <p class="def-returns">Opaque cmesh handle (triangle soup), or 0 on failure.  Free with cmesh-free.</p>
-  </div>
-  <div class="def-section">
-    <div class="def-section-label">Example</div>
-    <pre class="def-example">(dc-extract-colored scene 32  -2.0 -2.0 -2.0  2.0 2.0 2.0)</pre>
+    <pre class="def-example">(cmesh-weld my-mesh 1.0e-5)</pre>
   </div>
   <p class="def-since">Since: Phase 4</p>
 </div>
-<div class="def-card" id="cmesh-free">
+<div class="def-card" id="imesh-vertex-count">
   <div class="def-card-header">
     <span class="kind-badge kind-defn">defn</span>
-    <h2>cmesh-free</h2>
+    <h2>imesh-vertex-count</h2>
   </div>
-  <pre class="def-signature">(cmesh-free [m :int] :void)</pre>
-  <p class="def-summary">free a colored mesh returned by mc-extract-colored. Since: Phase 2</p>
+  <pre class="def-signature">(imesh-vertex-count [im :int] :int)</pre>
+  <p class="def-summary">number of unique vertices. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-triangle-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-triangle-count</h2>
+  </div>
+  <pre class="def-signature">(imesh-triangle-count [im :int] :int)</pre>
+  <p class="def-summary">number of triangles. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-vx">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-vx</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-vx [im :int i :int] :float)</pre>
+  <p class="def-summary">x position of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-vy">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-vy</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-vy [im :int i :int] :float)</pre>
+  <p class="def-summary">y position of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-vz">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-vz</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-vz [im :int i :int] :float)</pre>
+  <p class="def-summary">z position of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-nx">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-nx</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-nx [im :int i :int] :float)</pre>
+  <p class="def-summary">x normal of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-ny">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-ny</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-ny [im :int i :int] :float)</pre>
+  <p class="def-summary">y normal of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-nz">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-nz</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-nz [im :int i :int] :float)</pre>
+  <p class="def-summary">z normal of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-cr">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-cr</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-cr [im :int i :int] :float)</pre>
+  <p class="def-summary">red color channel of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-cg">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-cg</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-cg [im :int i :int] :float)</pre>
+  <p class="def-summary">green color channel of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-cb">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-cb</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-cb [im :int i :int] :float)</pre>
+  <p class="def-summary">blue color channel of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-object-id">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-object-id</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-object-id [im :int i :int] :int)</pre>
+  <p class="def-summary">object ID of unique vertex i. Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-get-index">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-get-index</h2>
+  </div>
+  <pre class="def-signature">(imesh-get-index [im :int j :int] :int)</pre>
+  <p class="def-summary">index entry j (0 .. n_tris*3-1). Since: Phase 4</p>
+</div>
+<div class="def-card" id="imesh-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>imesh-free</h2>
+  </div>
+  <pre class="def-signature">(imesh-free [im :int] :void)</pre>
+  <p class="def-summary">free an indexed mesh returned by cmesh-weld. Since: Phase 4</p>
 </div>
 </div>
 </div>

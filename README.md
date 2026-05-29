@@ -8,27 +8,38 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 
 ## Spices
 
+Tiers: **1** = pure Turmeric, **2** = inline-C, **3** = cmake-dep
+
 | Spice | Description | Tier | C dep |
 |-------|-------------|------|-------|
 | [`tur-test`](spices/test/) | Testing framework utilities | 1 -- pure Turmeric | -- |
 | [`tur-math`](spices/math/) | 2D/3D vector and matrix math | 1 -- pure Turmeric | -- |
-| [`tur-linalg`](spices/linalg/) | Dense float linear algebra: matrices, vectors, Cholesky/LU/QR solvers, mat4 graphics helpers | 1 -- pure Turmeric + inline-C | -- |
 | [`tur-c-dsl`](spices/c-dsl/) | Lisp-syntax DSL that compiles to C99 source | 1 -- pure Turmeric | -- |
 | [`tur-glsl`](spices/glsl/) | Lisp-syntax DSL that compiles to GLSL shader source | 1 -- pure Turmeric | -- |
-| [`tur-opengl`](spices/opengl/) | OpenGL 3.3 Core + GLFW + GLAD bindings | 2 -- cmake-dep | glfw 3.4, glad v2.0.6 |
-| [`tur-sqlite`](spices/sqlite/) | SQLite3 database bindings | 2 -- cmake-dep | sqlite 3.47.2 |
-| [`tur-raylib`](spices/raylib/) | Raylib 5.5 graphics and input | 2 -- cmake-dep | raylib 5.5 |
-| [`tur-plutovg`](spices/plutovg/) | 2D vector graphics rendering via plutovg | 2 -- cmake-dep | plutovg 1.3 |
-| [`tur-json`](spices/json/) | JSON parsing and serialization | 3 -- cmake-dep | yyjson 0.10.0 |
-| [`tur-http`](spices/http/) | HTTP/HTTPS client | 3 -- cmake-dep | mbedTLS 3.6.2 |
-| [`tur-regex`](spices/regex/) | PCRE2 regex bindings | 3 -- cmake-dep | PCRE2 10.44 |
-| [`tur-scscm`](spices/scscm/) | scscm s-expression -> sclang compiler + scsynth/hcsynth OSC client | 1 -- inline-C only | tur-osc (optional, server module only) |
-| [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 1 -- inline-C only | -- |
 | [`tur-signal`](spices/signal/) | Arrow-based signal processing (SF, DSP, ADSR, synth) | 1 -- pure Turmeric | -- |
 | [`tur-frame`](spices/frame/) | In-memory dataframe (Arrow-compatible columnar) | 1 -- pure Turmeric | -- |
 | [`tur-plot`](spices/plot/) | 2D data visualization (functions, points, histograms, contours) | 1 -- pure Turmeric | tur-plutovg |
+| [`tur-linalg`](spices/linalg/) | Dense float linear algebra: matrices, vectors, Cholesky/LU/QR solvers, mat4 graphics helpers | 2 -- inline-C | -- |
+| [`tur-scscm`](spices/scscm/) | scscm s-expression -> sclang compiler + scsynth/hcsynth OSC client | 2 -- inline-C | tur-osc (optional, server module only) |
+| [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 2 -- inline-C | -- |
+| [`tur-stats`](spices/stats/) | Statistical analysis on dataframes (summary, distributions, hypothesis tests, OLS, resampling) | 2 -- inline-C | -- |
+| [`tur-ansi`](spices/ansi/) | ANSI terminal control, raw-mode key input, color, style, inline images (Kitty/iTerm2/sixel) | 2 -- inline-C | -- |
+| [`tur-opengl`](spices/opengl/) | OpenGL 3.3 Core + GLFW + GLAD bindings | 3 -- cmake-dep | glfw 3.4, glad v2.0.6 |
+| [`tur-sqlite`](spices/sqlite/) | SQLite3 database bindings | 3 -- cmake-dep | sqlite 3.47.2 |
+| [`tur-raylib`](spices/raylib/) | Raylib 5.5 graphics and input | 3 -- cmake-dep | raylib 5.5 |
+| [`tur-plutovg`](spices/plutovg/) | 2D vector graphics rendering via plutovg | 3 -- cmake-dep | plutovg 1.3 |
+| [`tur-json`](spices/json/) | JSON parsing and serialization | 3 -- cmake-dep | yyjson 0.10.0 |
+| [`tur-http`](spices/http/) | HTTP/HTTPS client | 3 -- cmake-dep | mbedTLS 3.6.2 |
+| [`tur-regex`](spices/regex/) | PCRE2 regex bindings | 3 -- cmake-dep | PCRE2 10.44 |
 | [`tur-notebook`](spices/notebook/) | Literate `.tur.md` notebooks with TUI, HTML export, and cell execution | 3 -- cmake-dep | libturi (linked against turmeric build) |
-| [`tur-stats`](spices/stats/) | Statistical analysis on dataframes (summary, distributions, hypothesis tests, OLS, resampling) | 1 -- inline-C only | -- |
+| [`tur-osc`](spices/osc/) | Open Sound Control (OSC) messaging via liblo | 3 -- cmake-dep | liblo 0.32 |
+| [`tur-png`](spices/png/) | PNG image read/write via libpng | 3 -- cmake-dep | libpng 1.6.43 |
+| [`tur-postgres`](spices/postgres/) | PostgreSQL client via libpq | 3 -- cmake-dep | libpq (system) |
+| [`tur-rtaudio`](spices/rtaudio/) | Cross-platform audio I/O via RtAudio | 3 -- cmake-dep | RtAudio 6.0.1 |
+| [`tur-rtmidi`](spices/rtmidi/) | Cross-platform MIDI I/O via RtMidi | 3 -- cmake-dep | RtMidi 6.0.0 |
+| [`tur-sdf-raylib`](spices/sdf-raylib/) | SDF-based solid modeling with raylib rendering and colored mesh export | 3 -- cmake-dep | raylib 5.5 |
+| [`tur-valkey`](spices/valkey/) | Valkey/Redis client via hiredis | 3 -- cmake-dep | hiredis 1.2.0 |
+| [`tur-wav`](spices/wav/) | WAV and PCM audio file read/write via libsndfile | 3 -- cmake-dep | libsndfile 1.2.2 |
 
 ---
 
@@ -518,5 +529,5 @@ cd spices/test && tur test
 cd spices/math && tur test
 ```
 
-C/CMake deps (Tiers 2 and 3) are fetched via `tur fetch` and built with CMake
+C/CMake deps (Tier 3) are fetched via `tur fetch` and built with CMake
 at compile time. No manual CMake invocation is needed.

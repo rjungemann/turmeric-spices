@@ -2,6 +2,15 @@
 docs:
     python3 tools/genspices.py --out docs/html/ --emit-json docs/html/doc-names-spices.json
 
+# Run the spices doc site locally via wrangler dev.
+web-dev: docs
+    rm -rf web/dist
+    mkdir -p web/dist
+    cp -R docs/html/. web/dist/
+    cp -R web/public/. web/dist/
+    cp -R web/styles web/dist/styles
+    cd web && npm install && npx wrangler dev
+
 # Deploy docs to spices.turmeric-lang.com via Cloudflare.
 # Requires wrangler to be authenticated (wrangler login).
 deploy-web: docs
