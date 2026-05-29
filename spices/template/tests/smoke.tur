@@ -1,0 +1,130 @@
+;; tests/smoke.tur -- end-to-end smoke test for tur-template.
+
+(defmodule template/tests/smoke
+  (import template/env    :refer [env-new env-set env-set-list env-free])
+  (import template/render :refer [render])
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn cstr-free [p :cstr] :void
+    ```c
+    #include <stdlib.h>
+    if (p) free((void *)(intptr_t)p);
+    ```)
+
+  (defn tap [idx :int name :cstr ok :bool] :void
+    ```c
+    #include <stdio.h>
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)name);
+    ```)
+
+  (defn cons2 [a :cstr b :cstr] :int
+    ```c
+    #include <stdlib.h>
+    struct __c { int64_t head; int64_t tail; };
+    struct __c *c2 = (struct __c *)malloc(sizeof(*c2));
+    c2->head = (int64_t)(intptr_t)b; c2->tail = 0;
+    struct __c *c1 = (struct __c *)malloc(sizeof(*c1));
+    c1->head = (int64_t)(intptr_t)a; c1->tail = (int64_t)(intptr_t)c2;
+    return (int64_t)(intptr_t)c1;
+    ```)
+
+  (defn cons3 [a :cstr b :cstr c :cstr] :int
+    ```c
+    #include <stdlib.h>
+    struct __c { int64_t head; int64_t tail; };
+    struct __c *c3 = (struct __c *)malloc(sizeof(*c3));
+    c3->head = (int64_t)(intptr_t)c; c3->tail = 0;
+    struct __c *c2 = (struct __c *)malloc(sizeof(*c2));
+    c2->head = (int64_t)(intptr_t)b; c2->tail = (int64_t)(intptr_t)c3;
+    struct __c *c1 = (struct __c *)malloc(sizeof(*c1));
+    c1->head = (int64_t)(intptr_t)a; c1->tail = (int64_t)(intptr_t)c2;
+    return (int64_t)(intptr_t)c1;
+    ```)
+
+  (defn test1-basic [] :bool
+    (let [e (env-new)]
+      (do
+        (env-set e "name" "World")
+        (let [out (render "Hello, <%= name %>!" e)
+              ok (cstr-eq? out "Hello, World!")]
+          (do (cstr-free out) (env-free e) ok)))))
+
+  (defn test2-if-true [] :bool
+    (let [e (env-new)]
+      (do
+        (env-set e "flag" "yes")
+        (let [out (render "<% if flag %>on<% else %>off<% end %>" e)
+              ok (cstr-eq? out "on")]
+          (do (cstr-free out) (env-free e) ok)))))
+
+  (defn test3-if-false [] :bool
+    (let [e (env-new)]
+      (do
+        (env-set e "flag" "")
+        (let [out (render "<% if flag %>on<% else %>off<% end %>" e)
+              ok (cstr-eq? out "off")]
+          (do (cstr-free out) (env-free e) ok)))))
+
+  (defn test4-for [] :bool
+    (let [e (env-new)]
+      (do
+        (env-set-list e "items" (cons3 "a" "b" "c"))
+        (let [out (render "<% for [x items] %><%= x %>;<% end %>" e)
+              ok (cstr-eq? out "a;b;c;")]
+          (do (cstr-free out) (env-free e) ok)))))
+
+  (defn test5-escape [] :bool
+    (let [e (env-new)]
+      (let [out (render "code: <%% if x %>" e)
+            ok (cstr-eq? out "code: <% if x %>")]
+        (do (cstr-free out) (env-free e) ok))))
+
+  (defn test6-comment [] :bool
+    (let [e (env-new)]
+      (do
+        (env-set e "x" "X")
+        (let [out (render "A<%# this is hidden %>B<%= x %>" e)
+              ok (cstr-eq? out "ABX")]
+          (do (cstr-free out) (env-free e) ok)))))
+
+  (defn test7-let [] :bool
+    (let [e (env-new)]
+      (let [out (render "<% let [g \"Hi\"] %><%= g %><% end %>!" e)
+            ok (cstr-eq? out "Hi!")]
+        (do (cstr-free out) (env-free e) ok))))
+
+  (defn test8-nested-for-if [] :bool
+    (let [e (env-new)]
+      (do
+        (env-set-list e "items" (cons3 "a" "" "c"))
+        (env-set e "show" "1")
+        (let [out (render "<% for [x items] %><% if x %>[<%= x %>]<% end %><% end %>" e)
+              ok (cstr-eq? out "[a][c]")]
+          (do (cstr-free out) (env-free e) ok)))))
+
+  (defn plan-line [n :int] :void
+    ```c
+    #include <stdio.h>
+    printf("1..%lld\n", (long long)n);
+    ```)
+
+  (defn main [] :int
+    (do
+      (plan-line 8)
+      (tap 1 "basic interpolation" (test1-basic))
+      (tap 2 "if-true branch"      (test2-if-true))
+      (tap 3 "if-false branch"     (test3-if-false))
+      (tap 4 "for over list"       (test4-for))
+      (tap 5 "<%% escape"          (test5-escape))
+      (tap 6 "comment skipped"     (test6-comment))
+      (tap 7 "let binding"         (test7-let))
+      (tap 8 "nested for/if"       (test8-nested-for-if))
+      0))
+
+) ;; end defmodule

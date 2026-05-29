@@ -1,0 +1,81 @@
+;; tests/fixtures/for-loop/main.tur -- for-loop over list values.
+
+(defmodule template/tests/fixtures/for-loop
+  (import template/env    :refer [env-new env-set-list env-free])
+  (import template/render :refer [render-file]))
+
+(defn cons3 [a :cstr b :cstr c :cstr] :int
+  ```c
+  #include <stdlib.h>
+  struct __c { int64_t head; int64_t tail; };
+  struct __c *c3 = (struct __c *)malloc(sizeof(*c3));
+  c3->head = (int64_t)(intptr_t)c; c3->tail = 0;
+  struct __c *c2 = (struct __c *)malloc(sizeof(*c2));
+  c2->head = (int64_t)(intptr_t)b; c2->tail = (int64_t)(intptr_t)c3;
+  struct __c *c1 = (struct __c *)malloc(sizeof(*c1));
+  c1->head = (int64_t)(intptr_t)a; c1->tail = (int64_t)(intptr_t)c2;
+  return (int64_t)(intptr_t)c1;
+  ```)
+
+(defn cstr-eq? [a :cstr b :cstr] :bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+(defn cstr-free [p :cstr] :void
+  ```c
+  #include <stdlib.h>
+  if (p) free((void *)(intptr_t)p);
+  ```)
+
+(defn read-file [path :cstr] :cstr
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  FILE *f = fopen((const char *)path, "rb");
+  if (!f) return (char *)"";
+  fseek(f, 0, SEEK_END);
+  long sz = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  char *buf = (char *)malloc((size_t)sz + 1);
+  size_t got = fread(buf, 1, (size_t)sz, f);
+  buf[got] = '\0';
+  fclose(f);
+  return buf;
+  ```)
+
+(defn ok-val-cstr [r :int] :cstr
+  ```c
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *rr = (struct __res *)(intptr_t)r;
+  return (char *)(intptr_t)rr->ok_val;
+  ```)
+
+(defn is-ok? [r :int] :bool
+  ```c
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *rr = (struct __res *)(intptr_t)r;
+  return rr && rr->is_ok;
+  ```)
+
+(defn tap [n :int name :cstr ok :bool] :void
+  ```c
+  #include <stdio.h>
+  printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+         (long long)n, (const char *)name);
+  ```)
+
+(defn main [] :int
+  (let [e (env-new)
+        path "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/for-loop/template.html.tur"
+        expected-path "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/for-loop/expected.txt"]
+    (do
+      (env-set-list e "items" (cons3 "alpha" "beta" "gamma"))
+      (let [r (render-file path e)]
+        (if (is-ok? r)
+          (let [got (ok-val-cstr r)
+                expected (read-file expected-path)
+                ok (cstr-eq? got expected)]
+            (do (tap 1 "for-loop" ok) (if ok 0 1)))
+          (do (tap 1 "for-loop" false) 1))))))

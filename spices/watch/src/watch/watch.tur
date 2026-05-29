@@ -1,0 +1,338 @@
+;;; watch/watch -- public watcher API.
+;;
+;; Layers stat-compare classification + debounce on top of watch/backend
+;; to produce normalized watch-event records.
+;;
+;; v0.1.0 scope:
+;;   - watch-open accepts a single file path
+;;   - watch-add-path / watch-remove-path / watch-refresh exist but are
+;;     no-ops; they will become meaningful when multi-path + recursive
+;;     watch land (WT6).
+;;   - directory recursive watch is deferred to WT6.
+;;
+;; Watcher state is a heap-allocated C struct holding the backend handle,
+;; the root directory and target basename, debounce settings, and a stat
+;; snapshot used for kind classification.
+
+(defmodule watch/watch
+  (import watch/backend :refer [backend-supported? backend-open backend-close
+                                backend-wait backend-drain
+                                backend-last-overflow?])
+  (import watch/event :refer [watch-kind-write watch-kind-create
+                              watch-kind-delete watch-kind-rename
+                              watch-kind-overflow
+                              watch-event-make])
+  (import watch/opts :refer [watch-opts-debounce-ms watch-opts-coalesce
+                             watch-opts-attrib watch-opts-follow-moves])
+
+  (export watch-supported?
+          watch-open watch-open-one watch-close
+          watch-add-path watch-remove-path watch-refresh
+          watch-next watch-drain)
+
+  ;;; watch-supported? -- 1 if a real backend is compiled in.
+  (defn watch-supported? [] #{Unsafe} :int
+    (backend-supported?))
+
+  ;; --------------------------------------------------------------------
+  ;; Watcher struct.  All public functions below assume the layout below.
+  ;; --------------------------------------------------------------------
+
+  ;;; __watcher-make -- internal: allocate a watcher record around a backend.
+  (defn __watcher-make [backend :int dir :cstr base :cstr full-path :cstr
+                        debounce-ms :int coalesce :int attrib :int
+                        follow-moves :int] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <sys/stat.h> */
+    /* __tur_include__: #include <stdlib.h> */
+    /* __tur_include__: #include <string.h> */
+    /* __tur_include__: typedef struct { int64_t backend; char *dir; char *base; char *full_path; int debounce_ms; int coalesce; int attrib_enabled; int follow_moves; int exists; long long mtime_sec; long long mtime_nsec; long long size; long long ino; } TurWatcher; */
+
+    TurWatcher *w = (TurWatcher *)calloc(1, sizeof(*w));
+    if (!w) return 0;
+    w->backend         = backend;
+    w->dir             = strdup(dir       ? (const char *)(intptr_t)dir       : "");
+    w->base            = strdup(base      ? (const char *)(intptr_t)base      : "");
+    w->full_path       = strdup(full_path ? (const char *)(intptr_t)full_path : "");
+    w->debounce_ms     = (int)debounce_ms;
+    w->coalesce        = (int)coalesce;
+    w->attrib_enabled  = (int)attrib;
+    w->follow_moves    = (int)follow_moves;
+
+    /* Initial stat snapshot. */
+    struct stat st;
+    if (stat(w->full_path, &st) == 0) {
+      w->exists     = 1;
+    #if defined(__APPLE__)
+      w->mtime_sec  = (long long)st.st_mtimespec.tv_sec;
+      w->mtime_nsec = (long long)st.st_mtimespec.tv_nsec;
+    #else
+      w->mtime_sec  = (long long)st.st_mtim.tv_sec;
+      w->mtime_nsec = (long long)st.st_mtim.tv_nsec;
+    #endif
+      w->size       = (long long)st.st_size;
+      w->ino        = (long long)st.st_ino;
+    }
+    return (int64_t)(intptr_t)w;
+    ```)
+
+  (defn __watcher-backend [watcher :int] #{Unsafe} :int
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    return w ? w->backend : 0;
+    ```)
+
+  (defn __watcher-dir [watcher :int] #{Unsafe} :cstr
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    return (const char *)(w ? w->dir : "");
+    ```)
+
+  (defn __watcher-full-path [watcher :int] #{Unsafe} :cstr
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    return (const char *)(w ? w->full_path : "");
+    ```)
+
+  (defn __watcher-debounce-ms [watcher :int] #{Unsafe} :int
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    return w ? (int64_t)w->debounce_ms : 0;
+    ```)
+
+  ;;; __watcher-sleep-ms -- sleep for ms milliseconds.
+  (defn __watcher-sleep-ms [ms :int] #{Unsafe} :void
+    ```c
+    /* __tur_include__: #include <unistd.h> */
+    int v = (int)ms;
+    if (v > 0) usleep((useconds_t)v * 1000u);
+    ```)
+
+  ;;; __watcher-reclassify -- re-stat the target and return a kind value.
+  ;;;
+  ;;; Returns:
+  ;;;   0 (watch-kind-none) if nothing material changed since the last
+  ;;;   snapshot.  Otherwise one of watch-kind-write/create/delete/rename.
+  ;;;   Updates the snapshot in place.
+  (defn __watcher-reclassify [watcher :int] #{Unsafe} :int
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    if (!w) return 0;
+
+    struct stat st;
+    int exists = stat(w->full_path, &st) == 0;
+    long long mtime_sec  = 0, mtime_nsec = 0, size = 0, ino = 0;
+    if (exists) {
+    #if defined(__APPLE__)
+      mtime_sec  = (long long)st.st_mtimespec.tv_sec;
+      mtime_nsec = (long long)st.st_mtimespec.tv_nsec;
+    #else
+      mtime_sec  = (long long)st.st_mtim.tv_sec;
+      mtime_nsec = (long long)st.st_mtim.tv_nsec;
+    #endif
+      size       = (long long)st.st_size;
+      ino        = (long long)st.st_ino;
+    }
+
+    int kind = 0;
+    if (!w->exists && exists) {
+      kind = 2; /* create */
+    } else if (w->exists && !exists) {
+      kind = 3; /* delete */
+    } else if (w->exists && exists && w->ino != ino) {
+      kind = 4; /* rename (atomic-save: inode changed) */
+    } else if (w->exists && exists &&
+               (w->mtime_sec  != mtime_sec  ||
+                w->mtime_nsec != mtime_nsec ||
+                w->size       != size)) {
+      kind = 1; /* write */
+    }
+
+    w->exists     = exists;
+    w->mtime_sec  = mtime_sec;
+    w->mtime_nsec = mtime_nsec;
+    w->size       = size;
+    w->ino        = ino;
+    return kind;
+    ```)
+
+  ;;; __watcher-split-dir -- return malloc'd dir component of an absolute or
+  ;;; relative path.  Returns "." if path has no slash.
+  (defn __watcher-split-dir [path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *p = path ? (const char *)(intptr_t)path : "";
+    const char *slash = strrchr(p, '/');
+    char *out;
+    if (slash) {
+      size_t n = (size_t)(slash - p);
+      if (n == 0) {
+        /* root-level file: "/foo" -> dir is "/" */
+        out = strdup("/");
+      } else {
+        out = (char *)malloc(n + 1);
+        memcpy(out, p, n);
+        out[n] = '\0';
+      }
+    } else {
+      out = strdup(".");
+    }
+    return (const char *)out;
+    ```)
+
+  ;;; __watcher-split-base -- return malloc'd basename component.
+  (defn __watcher-split-base [path :cstr] #{Unsafe} :cstr
+    ```c
+    const char *p = path ? (const char *)(intptr_t)path : "";
+    const char *slash = strrchr(p, '/');
+    return (const char *)strdup(slash ? slash + 1 : p);
+    ```)
+
+  ;;; __watcher-free-cstr -- release a string returned by the splitters.
+  (defn __watcher-free-cstr [s :cstr] #{Unsafe} :void
+    ```c
+    char *p = (char *)(intptr_t)s;
+    if (p) free(p);
+    ```)
+
+  ;; --------------------------------------------------------------------
+  ;; Public API
+  ;; --------------------------------------------------------------------
+
+  ;;; watch-open-one -- open a watcher on a single file path.
+  ;;;
+  ;;; Parameters:
+  ;;;   path -- file path (absolute or relative) to observe
+  ;;;   opts -- options handle from watch/opts (may be 0 for defaults)
+  ;;;
+  ;;; Returns: watcher handle, or 0 on failure.
+  (defn watch-open-one [path :cstr opts :int] #{Unsafe} :int
+    (let [dir   (__watcher-split-dir  path)
+          base  (__watcher-split-base path)
+          back  (backend-open dir base)]
+      (if (= back 0)
+        (do
+          (__watcher-free-cstr dir)
+          (__watcher-free-cstr base)
+          0)
+        (let [w (__watcher-make back dir base path
+                                (if (= opts 0) 150 (watch-opts-debounce-ms  opts))
+                                (if (= opts 0) 1   (watch-opts-coalesce     opts))
+                                (if (= opts 0) 0   (watch-opts-attrib       opts))
+                                (if (= opts 0) 1   (watch-opts-follow-moves opts)))]
+          (do
+            ;; __watcher-make strdups dir/base/path; release our copies.
+            (__watcher-free-cstr dir)
+            (__watcher-free-cstr base)
+            w)))))
+
+  ;;; watch-open -- open a watcher on a single file path.
+  ;;;
+  ;;; The spice plan describes this as accepting a list of paths.  v0.1.0
+  ;;; ships single-path watch only -- callers pass one :cstr.  Multi-path
+  ;;; support arrives with WT6 (recursive watch).
+  (defn watch-open [path :cstr opts :int] #{Unsafe} :int
+    (watch-open-one path opts))
+
+  ;;; __watcher-release-storage -- free strings + struct (without backend).
+  (defn __watcher-release-storage [watcher :int] #{Unsafe} :void
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    if (!w) return;
+    if (w->dir)       free(w->dir);
+    if (w->base)      free(w->base);
+    if (w->full_path) free(w->full_path);
+    free(w);
+    ```)
+
+  ;;; watch-close -- release a watcher.  Safe on 0.
+  (defn watch-close [watcher :int] #{Unsafe} :void
+    (do
+      (backend-close (__watcher-backend watcher))
+      (__watcher-release-storage watcher)))
+
+  ;;; watch-add-path -- v0.1.0 stub.  Multi-path lands with WT6.
+  (defn watch-add-path [watcher :int path :cstr] #{Unsafe} :int
+    ```c
+    (void)watcher; (void)path;
+    return -1;
+    ```)
+
+  ;;; watch-remove-path -- v0.1.0 stub.  Multi-path lands with WT6.
+  (defn watch-remove-path [watcher :int path :cstr] #{Unsafe} :int
+    ```c
+    (void)watcher; (void)path;
+    return -1;
+    ```)
+
+  ;;; watch-refresh -- v0.1.0 stub.  Used for recursive directory updates.
+  (defn watch-refresh [watcher :int] #{Unsafe} :int
+    ```c
+    (void)watcher;
+    return 0;
+    ```)
+
+  ;;; watch-next -- block until the next event, return its handle or 0.
+  ;;;
+  ;;; Parameters:
+  ;;;   watcher    -- handle from watch-open
+  ;;;   timeout-ms -- -1 = forever, 0 = poll, N = bounded wait
+  ;;;
+  ;;; Returns:
+  ;;;   Event handle (free via watch-event-free), or 0 on timeout.
+  ;;;
+  ;;; Algorithm:
+  ;;;   1. backend-wait(timeout-ms)
+  ;;;   2. drain backend events; record overflow if any
+  ;;;   3. sleep for debounce-ms (lets atomic-save bursts settle)
+  ;;;   4. drain again
+  ;;;   5. re-stat the target and classify the change
+  ;;;   6. emit a watch-event for the classified kind
+  (defn watch-next [watcher :int timeout-ms :int] #{Unsafe} :int
+    (let [back (__watcher-backend watcher)]
+      (if (= back 0)
+        0
+        (let [rc (backend-wait back timeout-ms)]
+          (if (<= rc 0)
+            0
+            (do
+              (backend-drain back)
+              (if (= (backend-last-overflow? back) 1)
+                (watch-event-make (__watcher-dir watcher) (__watcher-full-path watcher)
+                                  (__watcher-full-path watcher)
+                                  (watch-kind-overflow) 0 0)
+                (do
+                  (__watcher-sleep-ms (__watcher-debounce-ms watcher))
+                  (backend-drain back)
+                  (let [kind (__watcher-reclassify watcher)]
+                    (if (= kind 0)
+                      0
+                      (watch-event-make (__watcher-dir watcher)
+                                        (__watcher-full-path watcher)
+                                        (__watcher-full-path watcher)
+                                        kind 0 0)))))))))))
+
+  ;;; __watch-make-cons -- internal: wrap a single event handle in a cons cell.
+  (defn __watch-make-cons [head :int] #{Unsafe} :int
+    ```c
+    /* __tur_include__: typedef struct __tur_cons_s { int64_t head; int64_t tail; } __tur_cons_cell; */
+    if (head == 0) return 0;
+    __tur_cons_cell *cell = (__tur_cons_cell *)calloc(1, sizeof(*cell));
+    if (!cell) return 0;
+    cell->head = head;
+    cell->tail = 0;
+    return (int64_t)(intptr_t)cell;
+    ```)
+
+  ;;; watch-drain -- gather a debounced batch (see watch/debounce).
+  ;;;
+  ;;; v0.1.0 single-file: at most one logical event accrues per debounce
+  ;;; window, so watch-drain returns a cons-list containing 0 or 1 event
+  ;;; handle.  Multi-event batches arrive with multi-path / recursive watch.
+  ;;;
+  ;;; Returns a Turmeric cons-list (use list head/tail accessors).
+  (defn watch-drain [watcher :int timeout-ms :int debounce-ms :int] #{Unsafe} :int
+    ;; debounce-ms is honored implicitly by watch-next's internal sleep;
+    ;; multi-element batches arrive with WT6.
+    (let [_ debounce-ms
+          ev (watch-next watcher timeout-ms)]
+      (__watch-make-cons ev))))

@@ -1,0 +1,141 @@
+;; tests/drain_burst_test.tur -- WT5 acceptance: a simulated burst-save
+;; flow produces one stable debounced batch from watch-drain.
+;;
+;; The scenario: an editor saves a file via "write temp + rename" three
+;; times within ~50 ms.  We expect watch-drain to return exactly one
+;; cons cell (one logical event) -- not three.
+
+(defmodule watch/tests/drain-burst
+  (import watch/event  :refer [watch-kind-rename watch-kind-write
+                               watch-event-kind watch-event-path
+                               watch-event-free])
+  (import watch/opts   :refer [default-watch-opts])
+  (import watch/watch  :refer [watch-open-one watch-close watch-drain])
+
+  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_drain_burst_fails = 0; */
+    if (!ok) g_drain_burst_fails++;
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)(intptr_t)name);
+    ```)
+
+  (defn tap-finish [count :int] #{Unsafe} :int
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (g_drain_burst_fails == 0) {
+      fprintf(stderr, "# All %lld watch/drain-burst tests passed.\n",
+              (long long)count);
+      return 0;
+    }
+    fprintf(stderr, "# %d/%lld watch/drain-burst tests failed.\n",
+            g_drain_burst_fails, (long long)count);
+    return 1;
+    ```)
+
+  ;; Setup helpers.
+  (defn write-file [path :cstr content :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <stdio.h> */
+    const char *p = (const char *)(intptr_t)path;
+    const char *c = (const char *)(intptr_t)content;
+    FILE *f = fopen(p, "w");
+    if (!f) return -1;
+    if (c) fputs(c, f); fclose(f); return 0;
+    ```)
+
+  (defn delete-file [path :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <unistd.h> */
+    return unlink((const char *)(intptr_t)path);
+    ```)
+
+  ;; Spawn a background pthread that performs three atomic saves at
+  ;; (base + 30 ms), (base + 60 ms), and (base + 90 ms).  Each save
+  ;; writes a sibling temp file and renames it over the target.
+  (defn schedule-burst [path :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <pthread.h> */
+    /* __tur_include__: typedef struct { char *path; } TurWatchBurst; */
+    /* __tur_include__: static void tur_watch_atomic_once(const char *target, const char *content) { char tmp[1024]; snprintf(tmp, sizeof(tmp), "%s.tmpBURST", target); FILE *f = fopen(tmp, "w"); if (f) { fputs(content, f); fclose(f); rename(tmp, target); } } */
+    /* __tur_include__: static void *tur_watch_burst(void *arg) { TurWatchBurst *b = (TurWatchBurst *)arg; usleep(30000); tur_watch_atomic_once(b->path, "save-1"); usleep(30000); tur_watch_atomic_once(b->path, "save-2"); usleep(30000); tur_watch_atomic_once(b->path, "save-3"); free(b->path); free(b); return NULL; } */
+    TurWatchBurst *b = (TurWatchBurst *)calloc(1, sizeof(*b));
+    b->path = strdup((const char *)(intptr_t)path);
+    pthread_t th;
+    pthread_create(&th, NULL, tur_watch_burst, b);
+    pthread_detach(th);
+    return 0;
+    ```)
+
+  (defn sleep-ms [ms :int] #{Unsafe} :void
+    ```c
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  (defn cons-len [c :int] #{Unsafe} :int
+    ```c
+    /* __tur_include__: struct __tur_cons_s; */
+    /* __tur_include__: typedef struct __tur_cons_s __tur_cons_cell; */
+    __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
+    int n = 0;
+    while (p) { n++; p = (__tur_cons_cell *)(intptr_t)p->tail; }
+    return n;
+    ```)
+
+  (defn cons-head [c :int] #{Unsafe} :int
+    ```c
+    __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
+    return p ? p->head : 0;
+    ```)
+
+  (defn cons-free-shallow [c :int] #{Unsafe} :void
+    ```c
+    __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
+    while (p) {
+      __tur_cons_cell *next = (__tur_cons_cell *)(intptr_t)p->tail;
+      free(p);
+      p = next;
+    }
+    ```)
+
+  (defn tmp-path [] #{Unsafe} :cstr
+    ```c
+    /* __tur_include__: #include <unistd.h> */
+    static char buf[256];
+    snprintf(buf, sizeof(buf), "/tmp/tur-watch-drain-burst-%d.txt", (int)getpid());
+    return (const char *)buf;
+    ```)
+
+  (defn main [] #{Unsafe} :int
+    (do
+      (let [p (tmp-path)]
+        (do
+          (write-file p "initial")
+          (let [w (watch-open-one p (default-watch-opts))]
+            (do
+              (tap-record 1 "watcher opened on burst target"
+                          (not (= w 0)))
+              ;; Three atomic-saves within ~100 ms total.
+              (schedule-burst p)
+              ;; watch-drain returns the first batch with debounce applied.
+              (let [batch (watch-drain w 5000 150)]
+                (do
+                  (tap-record 2 "watch-drain returned a non-empty list"
+                              (not (= batch 0)))
+                  (tap-record 3 "burst collapses to one cons cell"
+                              (= (cons-len batch) 1))
+                  (let [ev (cons-head batch)]
+                    (do
+                      (tap-record 4 "batch event kind is rename"
+                                  (= (watch-event-kind ev) (watch-kind-rename)))
+                      (watch-event-free ev)))
+                  (cons-free-shallow batch)))
+              (watch-close w)))
+          ;; Wait for any in-flight burst-thread saves to finish before
+          ;; we tear down.  100 ms covers the 30+60+90 schedule and
+          ;; cleanup work the pthread does after the third save.
+          (sleep-ms 200)
+          (delete-file p)))
+      (tap-finish 4)))
+
+) ;; end defmodule

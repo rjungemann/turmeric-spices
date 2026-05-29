@@ -1,0 +1,207 @@
+;; template/token.tur -- lexer turning a template cstr into a list of tokens.
+;;
+;; Token tags:
+;;   0 = TextChunk  -- literal text outside any tag (verbatim)
+;;   1 = CodeBlock  -- inside <%  ... %> (control flow)
+;;   2 = ExprBlock  -- inside <%= ... %> (emit expression)
+;;   3 = Comment    -- inside <%# ... %> (discarded by parser)
+;;
+;; The escape "<%%" emits a literal "<%" as a TextChunk.
+;; Tokens form a singly-linked list owned by the caller; release the chain
+;; with tokens-free when finished.
+
+(defmodule template/token
+  (export lex token-tag token-text token-len token-next tokens-free)
+
+;;; lex -- tokenize a template source string.
+;;;
+;;; Parameters:
+;;;   src -- NUL-terminated template text
+;;;
+;;; Returns:
+;;;   A handle to the first token cell, or 0 if the template is empty.
+;;;   Walk the chain via token-next; free with tokens-free.
+;;;
+;;; Example:
+;;;   (let [t (lex "Hi <%= name %>!")] (token-tag t))  ; => 0 (TextChunk)
+;;;
+;;; Since: 0.1.0
+(defn lex [src :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __tt_tok { int tag; char *text; int len; void *next; };
+  const char *s = (const char *)src;
+  if (!s) return 0;
+  struct __tt_tok *head = NULL;
+  struct __tt_tok *tail = NULL;
+  size_t i = 0;
+  size_t n = strlen(s);
+  size_t text_start = 0;
+  /* Helpers as macros for brevity. */
+  #define __TT_APPEND(TAG, START, END) do { \
+    struct __tt_tok *t = (struct __tt_tok *)malloc(sizeof(*t)); \
+    size_t __len = (END) - (START); \
+    t->tag = (TAG); \
+    t->len = (int)__len; \
+    t->text = (char *)malloc(__len + 1); \
+    if (__len > 0) memcpy(t->text, s + (START), __len); \
+    t->text[__len] = '\0'; \
+    t->next = NULL; \
+    if (!head) head = t; else tail->next = t; \
+    tail = t; \
+  } while (0)
+  while (i < n) {
+    /* Find the next opening tag. */
+    if (i + 1 < n && s[i] == '<' && s[i+1] == '%') {
+      /* Flush pending text. */
+      if (i > text_start) __TT_APPEND(0, text_start, i);
+      /* Escape: <%% -> literal "<%" */
+      if (i + 2 < n && s[i+2] == '%') {
+        /* Emit a 2-byte TextChunk "<%". */
+        struct __tt_tok *t = (struct __tt_tok *)malloc(sizeof(*t));
+        t->tag = 0;
+        t->len = 2;
+        t->text = (char *)malloc(3);
+        t->text[0] = '<'; t->text[1] = '%'; t->text[2] = '\0';
+        t->next = NULL;
+        if (!head) head = t; else tail->next = t;
+        tail = t;
+        i += 3;
+        text_start = i;
+        continue;
+      }
+      /* Determine tag variant. */
+      int tag = 1; /* CodeBlock */
+      size_t inner_start = i + 2;
+      if (inner_start < n) {
+        if (s[inner_start] == '=') { tag = 2; inner_start++; }
+        else if (s[inner_start] == '#') { tag = 3; inner_start++; }
+      }
+      /* Find closing "%>". */
+      size_t j = inner_start;
+      while (j + 1 < n && !(s[j] == '%' && s[j+1] == '>')) j++;
+      if (j + 1 >= n) {
+        /* Unterminated tag: treat remainder as literal text. */
+        __TT_APPEND(0, i, n);
+        i = n;
+        text_start = n;
+        break;
+      }
+      __TT_APPEND(tag, inner_start, j);
+      i = j + 2;
+      text_start = i;
+    } else {
+      i++;
+    }
+  }
+  if (n > text_start) __TT_APPEND(0, text_start, n);
+  #undef __TT_APPEND
+  return (int64_t)(intptr_t)head;
+  ```)
+
+;;; token-tag -- read the tag of a token.
+;;;
+;;; Parameters:
+;;;   t -- token cell handle
+;;;
+;;; Returns:
+;;;   0 = TextChunk, 1 = CodeBlock, 2 = ExprBlock, 3 = Comment, -1 if t is 0.
+;;;
+;;; Example:
+;;;   (token-tag (lex "<%= x %>"))  ; => 2 (ExprBlock first token? no, here it's the only token)
+;;;
+;;; Since: 0.1.0
+(defn token-tag [t :int] :int
+  ```c
+  struct __tt_tok { int tag; char *text; int len; void *next; };
+  if (!t) return -1;
+  struct __tt_tok *tok = (struct __tt_tok *)(intptr_t)t;
+  return (int64_t)tok->tag;
+  ```)
+
+;;; token-text -- read the NUL-terminated payload of a token.
+;;;
+;;; Parameters:
+;;;   t -- token cell handle
+;;;
+;;; Returns:
+;;;   The token's text content (interior of <% %> for tag tokens,
+;;;   verbatim slice for TextChunk). The empty string if t is 0.
+;;;
+;;; Example:
+;;;   (token-text (lex "<%= x %>"))  ; => " x "
+;;;
+;;; Since: 0.1.0
+(defn token-text [t :int] :cstr
+  ```c
+  struct __tt_tok { int tag; char *text; int len; void *next; };
+  if (!t) return (char *)"";
+  struct __tt_tok *tok = (struct __tt_tok *)(intptr_t)t;
+  return tok->text;
+  ```)
+
+;;; token-len -- payload length in bytes.
+;;;
+;;; Parameters:
+;;;   t -- token cell handle
+;;;
+;;; Returns:
+;;;   Byte length of the token text, 0 if t is 0.
+;;;
+;;; Example:
+;;;   (token-len (lex "hi"))  ; => 2
+;;;
+;;; Since: 0.1.0
+(defn token-len [t :int] :int
+  ```c
+  struct __tt_tok { int tag; char *text; int len; void *next; };
+  if (!t) return 0;
+  struct __tt_tok *tok = (struct __tt_tok *)(intptr_t)t;
+  return (int64_t)tok->len;
+  ```)
+
+;;; token-next -- read the next token in the chain.
+;;;
+;;; Parameters:
+;;;   t -- token cell handle
+;;;
+;;; Returns:
+;;;   The next token handle, or 0 if this was the last cell.
+;;;
+;;; Example:
+;;;   (token-next first-tok)
+;;;
+;;; Since: 0.1.0
+(defn token-next [t :int] :int
+  ```c
+  struct __tt_tok { int tag; char *text; int len; void *next; };
+  if (!t) return 0;
+  struct __tt_tok *tok = (struct __tt_tok *)(intptr_t)t;
+  return (int64_t)(intptr_t)tok->next;
+  ```)
+
+;;; tokens-free -- release every cell in a token chain.
+;;;
+;;; Parameters:
+;;;   t -- head token cell handle (may be 0)
+;;;
+;;; Example:
+;;;   (tokens-free (lex "hello"))
+;;;
+;;; Since: 0.1.0
+(defn tokens-free [t :int] :void
+  ```c
+  #include <stdlib.h>
+  struct __tt_tok { int tag; char *text; int len; void *next; };
+  struct __tt_tok *p = (struct __tt_tok *)(intptr_t)t;
+  while (p) {
+    struct __tt_tok *nx = (struct __tt_tok *)p->next;
+    if (p->text) free(p->text);
+    free(p);
+    p = nx;
+  }
+  ```)
+
+) ;; end defmodule template/token

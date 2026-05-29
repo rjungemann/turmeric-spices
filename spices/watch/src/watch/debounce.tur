@@ -1,0 +1,119 @@
+;;; watch/debounce -- burst-collapse + coalesce helpers for batched events.
+;;
+;; A `debounce-batch` is an ordered, append-only collection of event handles
+;; accumulated across one debounce window.  Coalesce-by-path collapses runs
+;; of events for the same path into the latest one, freeing the displaced
+;; events as it goes.
+;;
+;; For single-file v0.1.0 watching, a batch typically holds 0 or 1 events --
+;; the burst-collapse work is done by watch-next's debounce sleep + post-
+;; sleep drain.  This module gives the primitive shape callers will need
+;; once multi-path / recursive watch (WT6) starts producing real batches.
+
+(defmodule watch/debounce
+  (import watch/event :refer [watch-event-path watch-event-free])
+
+  (export debounce-batch-make debounce-batch-free
+          debounce-batch-push debounce-batch-len
+          debounce-batch-event debounce-batch-coalesce)
+
+  ;;; debounce-batch-make -- allocate a new empty batch.
+  (defn debounce-batch-make [] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <stdlib.h> */
+    /* __tur_include__: #include <string.h> */
+    /* __tur_include__: typedef struct { int64_t *items; int len; int cap; } TurWatchBatch; */
+    TurWatchBatch *b = (TurWatchBatch *)calloc(1, sizeof(*b));
+    return (int64_t)(intptr_t)b;
+    ```)
+
+  ;;; debounce-batch-free -- free batch + all contained event handles.
+  (defn debounce-batch-free [batch :int] #{Unsafe} :void
+    ```c
+    TurWatchBatch *b = (TurWatchBatch *)(intptr_t)batch;
+    if (!b) return;
+    if (b->items) {
+      for (int i = 0; i < b->len; i++) {
+        if (b->items[i]) watch__event__watch_event_free(b->items[i]);
+      }
+      free(b->items);
+    }
+    free(b);
+    ```)
+
+  ;;; debounce-batch-push -- append an event handle to the batch.
+  ;;; The batch takes ownership of the handle.
+  (defn debounce-batch-push [batch :int event :int] #{Unsafe} :int
+    ```c
+    TurWatchBatch *b = (TurWatchBatch *)(intptr_t)batch;
+    if (!b || event == 0) return -1;
+    if (b->len == b->cap) {
+      int new_cap = b->cap ? b->cap * 2 : 8;
+      int64_t *grow = (int64_t *)realloc(b->items, sizeof(int64_t) * (size_t)new_cap);
+      if (!grow) return -1;
+      b->items = grow;
+      b->cap   = new_cap;
+    }
+    b->items[b->len++] = event;
+    return 0;
+    ```)
+
+  ;;; debounce-batch-len -- number of events currently in the batch.
+  (defn debounce-batch-len [batch :int] #{Unsafe} :int
+    ```c
+    TurWatchBatch *b = (TurWatchBatch *)(intptr_t)batch;
+    return b ? (int64_t)b->len : 0;
+    ```)
+
+  ;;; debounce-batch-event -- get the ith event handle.  Borrow, not owned.
+  (defn debounce-batch-event [batch :int idx :int] #{Unsafe} :int
+    ```c
+    TurWatchBatch *b = (TurWatchBatch *)(intptr_t)batch;
+    int i = (int)idx;
+    if (!b || i < 0 || i >= b->len) return 0;
+    return b->items[i];
+    ```)
+
+  ;;; debounce-batch-coalesce -- collapse same-path runs to the latest event.
+  ;;;
+  ;;; Walks the batch and, for each path, keeps the LAST event with that
+  ;;; path while freeing earlier ones.  Stable across non-duplicate items.
+  ;;; Returns the new length.
+  (defn debounce-batch-coalesce [batch :int] #{Unsafe} :int
+    ```c
+    TurWatchBatch *b = (TurWatchBatch *)(intptr_t)batch;
+    if (!b || b->len <= 1) return b ? (int64_t)b->len : 0;
+
+    /* Mark earlier duplicates for release.  O(n^2) is fine here -- batches
+       in practice are tens of items at most. */
+    int n = b->len;
+    int *drop = (int *)calloc((size_t)n, sizeof(int));
+    if (!drop) return n;
+    for (int i = 0; i < n; i++) {
+      if (drop[i]) continue;
+      const char *pi = watch__event__watch_event_path(b->items[i]);
+      const char *si = pi ? pi : "";
+      for (int j = i + 1; j < n; j++) {
+        if (drop[j]) continue;
+        const char *pj = watch__event__watch_event_path(b->items[j]);
+        const char *sj = pj ? pj : "";
+        if (strcmp(si, sj) == 0) {
+          /* j is later -- keep it, drop i, advance to j and continue. */
+          drop[i] = 1;
+          break;
+        }
+      }
+    }
+
+    int w = 0;
+    for (int i = 0; i < n; i++) {
+      if (drop[i]) {
+        watch__event__watch_event_free(b->items[i]);
+      } else {
+        b->items[w++] = b->items[i];
+      }
+    }
+    b->len = w;
+    free(drop);
+    return (int64_t)w;
+    ```))

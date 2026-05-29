@@ -1,0 +1,85 @@
+;; tests/fixtures/if-else/main.tur -- if/else branches.
+
+(defmodule template/tests/fixtures/if-else
+  (import template/env    :refer [env-new env-set env-free])
+  (import template/render :refer [render-file]))
+
+(defn cstr-concat3 [a :cstr b :cstr c :cstr] :cstr
+  ```c
+  #include <string.h>
+  #include <stdlib.h>
+  size_t la = strlen((const char *)a), lb = strlen((const char *)b), lc = strlen((const char *)c);
+  char *out = (char *)malloc(la + lb + lc + 1);
+  memcpy(out, a, la);
+  memcpy(out + la, b, lb);
+  memcpy(out + la + lb, c, lc);
+  out[la + lb + lc] = '\0';
+  return out;
+  ```)
+
+(defn cstr-eq? [a :cstr b :cstr] :bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+(defn cstr-free [p :cstr] :void
+  ```c
+  #include <stdlib.h>
+  if (p) free((void *)(intptr_t)p);
+  ```)
+
+(defn read-file [path :cstr] :cstr
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  FILE *f = fopen((const char *)path, "rb");
+  if (!f) return (char *)"";
+  fseek(f, 0, SEEK_END);
+  long sz = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  char *buf = (char *)malloc((size_t)sz + 1);
+  size_t got = fread(buf, 1, (size_t)sz, f);
+  buf[got] = '\0';
+  fclose(f);
+  return buf;
+  ```)
+
+(defn ok-val-cstr [r :int] :cstr
+  ```c
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *rr = (struct __res *)(intptr_t)r;
+  return (char *)(intptr_t)rr->ok_val;
+  ```)
+
+(defn is-ok? [r :int] :bool
+  ```c
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *rr = (struct __res *)(intptr_t)r;
+  return rr && rr->is_ok;
+  ```)
+
+(defn tap [n :int name :cstr ok :bool] :void
+  ```c
+  #include <stdio.h>
+  printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+         (long long)n, (const char *)name);
+  ```)
+
+(defn render-with [logged :cstr name-v :cstr] :cstr
+  (let [e (env-new)
+        path "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/if-else/template.html.tur"]
+    (do
+      (env-set e "logged-in" logged)
+      (env-set e "name" name-v)
+      (let [r (render-file path e)
+            out (if (is-ok? r) (ok-val-cstr r) "")]
+        out))))
+
+(defn main [] :int
+  (let [a (render-with "1" "Roger")
+        b (render-with "" "")
+        joined (cstr-concat3 a b "")
+        expected (read-file "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/if-else/expected.txt")
+        ok (cstr-eq? joined expected)]
+    (do (tap 1 "if-else" ok) (if ok 0 1))))

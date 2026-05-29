@@ -1,0 +1,324 @@
+;; template/render.tur -- evaluate a parsed AST against an Env.
+;;
+;; render        :: cstr x Env -> cstr           ; lex+parse+render-ast
+;; render-file   :: cstr x Env -> result<cstr>   ; read file, then render
+;; render-ast    :: Node x Env -> cstr           ; render a pre-parsed AST
+;;
+;; Returned cstrs are heap-allocated; callers free with `free` (or the host's
+;; cstr-free equivalent).
+
+(defmodule template/render
+  (import template/token :refer [lex tokens-free])
+  (import template/parse :refer [parse nodes-free])
+  (export render render-file render-ast)
+
+;;; render-ast -- render a pre-parsed node chain against env.
+;;;
+;;; Parameters:
+;;;   root -- node chain head from `parse`
+;;;   env  -- Env handle from `env-new`
+;;;
+;;; Returns:
+;;;   A heap-allocated cstr. Caller frees with `free`.
+;;;
+;;; Example:
+;;;   (render-ast (parse (lex "<%= x %>")) e)
+;;;
+;;; Since: 0.1.0
+(defn render-ast [root :int env :int] :cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __tt_node {
+    int tag; char *name; char *value;
+    struct __tt_node *then_body;
+    struct __tt_node *else_body;
+    struct __tt_node *next;
+  };
+  struct __tt_binding { char *key; char **vals; int n; void *next; };
+  struct __tt_env { struct __tt_binding *head; };
+
+  struct __tt_env *e = (struct __tt_env *)(intptr_t)env;
+
+  /* Output buffer (growable). */
+  size_t cap = 256, len = 0;
+  char *buf = (char *)malloc(cap);
+  buf[0] = '\0';
+
+  /* Frame types:
+       0 = sibling chain (process cur, advance cur=cur->next)
+       1 = for-iter pre-iteration "controller"
+     Each frame also carries pop_after: how many env bindings to pop when the
+     frame is removed from the stack. */
+  struct __tt_frame {
+    struct __tt_node *cur;
+    int kind;
+    int idx;
+    int total;
+    struct __tt_node *for_node;
+    int pop_after;
+  };
+  int fcap = 64, fsp = 0;
+  struct __tt_frame *fst = (struct __tt_frame *)malloc(sizeof(*fst) * fcap);
+  #define __TT_RESERVE() do { \
+    if (fsp >= fcap) { fcap *= 2; fst = (struct __tt_frame *)realloc(fst, sizeof(*fst) * fcap); } \
+  } while (0)
+  #define __TT_PUSH_FRAME(F) do { __TT_RESERVE(); fst[fsp++] = (F); } while (0)
+
+  if (root) {
+    struct __tt_frame f = { (struct __tt_node *)(intptr_t)root, 0, 0, 0, NULL, 0 };
+    fst[0] = f; fsp = 1;
+  }
+
+  #define __TT_APPEND(STR, SLEN) do { \
+    size_t __sl = (SLEN); \
+    if (len + __sl + 1 > cap) { \
+      while (len + __sl + 1 > cap) cap *= 2; \
+      buf = (char *)realloc(buf, cap); \
+    } \
+    if (__sl > 0) memcpy(buf + len, (STR), __sl); \
+    len += __sl; \
+    buf[len] = '\0'; \
+  } while (0)
+
+  #define __TT_LOOKUP(KEY, OUT) do { \
+    struct __tt_binding *__b = e->head; \
+    (OUT) = NULL; \
+    while (__b) { if (strcmp(__b->key, (KEY)) == 0) { (OUT) = __b; break; } __b = (struct __tt_binding *)__b->next; } \
+  } while (0)
+
+  #define __TT_PUSH_SCALAR(KEY, VAL) do { \
+    struct __tt_binding *__nb = (struct __tt_binding *)malloc(sizeof(*__nb)); \
+    size_t __kl = strlen(KEY); \
+    __nb->key = (char *)malloc(__kl + 1); memcpy(__nb->key, (KEY), __kl + 1); \
+    __nb->vals = (char **)malloc(sizeof(char *)); \
+    size_t __vl = strlen(VAL); \
+    __nb->vals[0] = (char *)malloc(__vl + 1); memcpy(__nb->vals[0], (VAL), __vl + 1); \
+    __nb->n = 1; \
+    __nb->next = e->head; \
+    e->head = __nb; \
+  } while (0)
+
+  #define __TT_POP_BINDING() do { \
+    struct __tt_binding *__b = e->head; \
+    if (__b) { \
+      e->head = (struct __tt_binding *)__b->next; \
+      free(__b->key); \
+      for (int __i = 0; __i < __b->n; __i++) free(__b->vals[__i]); \
+      free(__b->vals); \
+      free(__b); \
+    } \
+  } while (0)
+
+  while (fsp > 0) {
+    struct __tt_frame *fr = &fst[fsp - 1];
+    if (fr->kind == 1) {
+      /* For-iter controller: only reached after a child sibling frame
+         (the body) finishes. Pop the loop binding from this iteration. */
+      __TT_POP_BINDING();
+      fr->idx++;
+      if (fr->idx >= fr->total) {
+        /* Loop done. Frame goes away; no extra pops (we already popped the
+           last loop binding above). */
+        fsp--;
+        continue;
+      }
+      /* Push the next iteration: bind loop var and descend into body. */
+      struct __tt_binding *cb;
+      __TT_LOOKUP(fr->for_node->value, cb);
+      const char *vv = (cb && fr->idx < cb->n) ? cb->vals[fr->idx] : "";
+      __TT_PUSH_SCALAR(fr->for_node->name, vv);
+      if (fr->for_node->then_body) {
+        struct __tt_frame nf = { fr->for_node->then_body, 0, 0, 0, NULL, 0 };
+        __TT_PUSH_FRAME(nf);
+      }
+      continue;
+    }
+    /* kind == 0: sibling chain. */
+    struct __tt_node *nd = fr->cur;
+    if (!nd) {
+      /* Sibling chain exhausted. Apply any pop_after, then drop the frame. */
+      int n_pops = fr->pop_after;
+      fsp--;
+      for (int i = 0; i < n_pops; i++) __TT_POP_BINDING();
+      continue;
+    }
+    fr->cur = nd->next;
+    if (nd->tag == 0) {
+      size_t vl = nd->value ? strlen(nd->value) : 0;
+      __TT_APPEND(nd->value, vl);
+    } else if (nd->tag == 1) {
+      struct __tt_binding *b;
+      __TT_LOOKUP(nd->name, b);
+      const char *v = (b && b->n > 0) ? b->vals[0] : "";
+      __TT_APPEND(v, strlen(v));
+    } else if (nd->tag == 2) {
+      /* IfNode: choose branch by truthiness of env-get(name). */
+      struct __tt_binding *b;
+      __TT_LOOKUP(nd->name, b);
+      const char *v = (b && b->n > 0) ? b->vals[0] : "";
+      struct __tt_node *branch = (v && v[0] != '\0') ? nd->then_body : nd->else_body;
+      if (branch) {
+        struct __tt_frame nf = { branch, 0, 0, 0, NULL, 0 };
+        __TT_PUSH_FRAME(nf);
+      }
+    } else if (nd->tag == 3) {
+      /* ForNode: iterate env list `value`. */
+      struct __tt_binding *b;
+      __TT_LOOKUP(nd->value, b);
+      int total = b ? b->n : 0;
+      if (total > 0 && nd->then_body) {
+        /* Push controller frame + body frame. Bind first iter. */
+        struct __tt_frame ctrl = { NULL, 1, 0, total, nd, 0 };
+        __TT_PUSH_FRAME(ctrl);
+        const char *vv = b->vals[0];
+        __TT_PUSH_SCALAR(nd->name, vv);
+        struct __tt_frame body = { nd->then_body, 0, 0, 0, NULL, 0 };
+        __TT_PUSH_FRAME(body);
+      }
+    } else if (nd->tag == 4) {
+      /* LetNode: bind name and descend into body; body frame pops 1 binding. */
+      const char *v;
+      if (nd->value && nd->value[0] == '@') {
+        struct __tt_binding *b;
+        __TT_LOOKUP(nd->value + 1, b);
+        v = (b && b->n > 0) ? b->vals[0] : "";
+      } else {
+        v = nd->value ? nd->value : "";
+      }
+      __TT_PUSH_SCALAR(nd->name, v);
+      if (nd->then_body) {
+        struct __tt_frame body = { nd->then_body, 0, 0, 0, NULL, 1 };
+        __TT_PUSH_FRAME(body);
+      } else {
+        __TT_POP_BINDING();
+      }
+    }
+  }
+  free(fst);
+  #undef __TT_APPEND
+  #undef __TT_LOOKUP
+  #undef __TT_PUSH_SCALAR
+  #undef __TT_POP_BINDING
+  #undef __TT_RESERVE
+  #undef __TT_PUSH_FRAME
+  return buf;
+  ```)
+
+;;; render -- lex+parse+render-ast a template string against env.
+;;;
+;;; Parameters:
+;;;   src -- template source (NUL-terminated cstr)
+;;;   env -- Env handle
+;;;
+;;; Returns:
+;;;   A heap-allocated cstr containing the rendered output. Caller frees.
+;;;
+;;; Example:
+;;;   (render "Hello, <%= name %>!" e)
+;;;
+;;; Since: 0.1.0
+(defn render [src :cstr env :int] :cstr
+  (let [tk (lex src)
+        nd (parse tk)
+        out (render-ast nd env)]
+    (do
+      (nodes-free nd)
+      (tokens-free tk)
+      out)))
+
+;;; __read-file -- read a file's contents into a fresh malloc'd cstr (0 on fail).
+(defn __read-file [path :cstr] :int
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  FILE *f = fopen((const char *)path, "rb");
+  if (!f) return 0;
+  fseek(f, 0, SEEK_END);
+  long sz = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (sz < 0) { fclose(f); return 0; }
+  char *buf = (char *)malloc((size_t)sz + 1);
+  size_t got = fread(buf, 1, (size_t)sz, f);
+  buf[got] = '\0';
+  fclose(f);
+  return (int64_t)(intptr_t)buf;
+  ```)
+
+;;; __free-cstr -- free a heap cstr (used internally for file buffers).
+(defn __free-cstr [p :int] :void
+  ```c
+  #include <stdlib.h>
+  if (p) free((void *)(intptr_t)p);
+  ```)
+
+;;; __cstr-from-int -- coerce an :int pointer back to :cstr for render.
+(defn __cstr-from-int [p :int] :cstr
+  ```c
+  return (char *)(intptr_t)p;
+  ```)
+
+;;; __cstr->int -- coerce a :cstr back to :int (heap pointer).
+(defn __cstr->int [p :cstr] :int
+  ```c
+  return (int64_t)(intptr_t)p;
+  ```)
+
+;;; __err-msg -- allocate a heap cstr containing an error message.
+(defn __err-msg [msg :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  size_t l = strlen((const char *)msg);
+  char *out = (char *)malloc(l + 1);
+  memcpy(out, msg, l + 1);
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;;; __ok-result -- build an ok result wrapping a cstr-pointer payload.
+(defn __ok-result [p :int] :int
+  ```c
+  #include <stdlib.h>
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *r = (struct __res *)malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = p; r->err_val = 0;
+  return (int64_t)(intptr_t)r;
+  ```)
+
+;;; __err-result -- build an err result wrapping a cstr message.
+(defn __err-result [p :int] :int
+  ```c
+  #include <stdlib.h>
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *r = (struct __res *)malloc(sizeof(*r));
+  r->is_ok = false; r->ok_val = 0; r->err_val = p;
+  return (int64_t)(intptr_t)r;
+  ```)
+
+;;; render-file -- read `path`, render the template body against env.
+;;;
+;;; Parameters:
+;;;   path -- path to a template file
+;;;   env  -- Env handle
+;;;
+;;; Returns:
+;;;   result<:cstr> as a tagged struct: ok payload is a heap cstr that the
+;;;   caller frees; err payload is a heap cstr diagnostic.
+;;;
+;;; Example:
+;;;   (let [r (render-file "page.html.tur" e)]
+;;;     (if (ok? r) (println (ok-val r)) (println (err-val r))))
+;;;
+;;; Since: 0.1.0
+(defn render-file [path :cstr env :int] :int
+  (let [raw (__read-file path)]
+    (if (= raw 0)
+      (__err-result (__err-msg "render-file: cannot read file"))
+      (let [src (__cstr-from-int raw)
+            out (render src env)]
+        (do
+          (__free-cstr raw)
+          (__ok-result (__cstr->int out)))))))
+
+) ;; end defmodule template/render

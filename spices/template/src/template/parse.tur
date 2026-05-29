@@ -1,0 +1,409 @@
+;; template/parse.tur -- token list -> AST.
+;;
+;; Node tags:
+;;   0 = Literal  -- emit `value` verbatim
+;;   1 = Emit     -- emit env-get(`name`) coerced to cstr
+;;   2 = IfNode   -- if env-get(`name`) is truthy, render `then`, else `else`
+;;   3 = ForNode  -- for each value in env list `value`, bind `name`; render `then`
+;;   4 = LetNode  -- bind `name` to `value`; render `then`. If `value` is
+;;                   "@<key>" the binding is the env value of <key>; otherwise
+;;                   it is a literal cstr (with surrounding "" stripped if any).
+;;
+;; The DSL inside `<% ... %>` is parsed structurally; nothing is eval'd as
+;; Turmeric code. Unknown forms are silently treated as no-ops.
+
+(defmodule template/parse
+  (export parse node-tag node-name node-value node-then node-else node-next
+          nodes-free)
+
+;;; parse -- consume a token chain and return the root node.
+;;;
+;;; Parameters:
+;;;   tokens -- token chain handle returned by `lex`
+;;;
+;;; Returns:
+;;;   A handle to the first node, or 0 if the template was empty.
+;;;   Walk the chain via node-next; free with nodes-free.
+;;;
+;;; Example:
+;;;   (let [tk (lex "<%= name %>") nd (parse tk)] (node-tag nd))  ; => 1
+;;;
+;;; Since: 0.1.0
+(defn parse [tokens :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __tt_tok { int tag; char *text; int len; void *next; };
+  struct __tt_node {
+    int tag;
+    char *name;
+    char *value;
+    struct __tt_node *then_body;
+    struct __tt_node *else_body;
+    struct __tt_node *next;
+  };
+
+  /* Trim whitespace, returning a fresh malloc'd cstr. */
+  /* (Inlined below where needed to avoid declaring file-scope helpers.) */
+
+  /* Iterative parser with an explicit frame stack so recursion stays in C
+     scope. Each frame represents a body we are currently filling. */
+  struct __tt_frame {
+    struct __tt_node *parent;  /* IfNode/ForNode/LetNode whose body we fill */
+    int filling_else;          /* 1 if appending to parent->else_body */
+    struct __tt_node *head;    /* current body head */
+    struct __tt_node *tail;    /* current body tail */
+  };
+
+  /* Allocate a single root frame; root has parent=NULL. */
+  struct __tt_frame *stack = (struct __tt_frame *)malloc(sizeof(*stack) * 64);
+  int cap = 64;
+  int sp = 0;
+  stack[0].parent = NULL;
+  stack[0].filling_else = 0;
+  stack[0].head = NULL;
+  stack[0].tail = NULL;
+
+  struct __tt_tok *cur = (struct __tt_tok *)(intptr_t)tokens;
+
+  #define __TT_PUSHN(N) do { \
+    struct __tt_frame *fr = &stack[sp]; \
+    if (!fr->head) fr->head = (N); else fr->tail->next = (N); \
+    fr->tail = (N); \
+  } while (0)
+
+  #define __TT_ATTACH_BODY(P, BODY) do { \
+    if ((P)->filling_else) (P)->parent->else_body = (BODY); \
+    else (P)->parent->then_body = (BODY); \
+  } while (0)
+
+  while (cur) {
+    if (cur->tag == 0) {
+      /* Literal */
+      struct __tt_node *n = (struct __tt_node *)malloc(sizeof(*n));
+      n->tag = 0; n->name = NULL;
+      size_t l = (size_t)cur->len;
+      n->value = (char *)malloc(l + 1);
+      memcpy(n->value, cur->text, l + 1);
+      n->then_body = NULL; n->else_body = NULL; n->next = NULL;
+      __TT_PUSHN(n);
+    } else if (cur->tag == 3) {
+      /* Comment: skip. */
+    } else if (cur->tag == 2) {
+      /* ExprBlock: trim, emit Emit(name=trimmed). */
+      const char *p = cur->text;
+      size_t l = (size_t)cur->len;
+      size_t a = 0, b = l;
+      while (a < b && (p[a]==' '||p[a]=='\t'||p[a]=='\n'||p[a]=='\r')) a++;
+      while (b > a && (p[b-1]==' '||p[b-1]=='\t'||p[b-1]=='\n'||p[b-1]=='\r')) b--;
+      struct __tt_node *n = (struct __tt_node *)malloc(sizeof(*n));
+      n->tag = 1; n->value = NULL;
+      size_t nl = b - a;
+      n->name = (char *)malloc(nl + 1);
+      if (nl > 0) memcpy(n->name, p + a, nl);
+      n->name[nl] = '\0';
+      n->then_body = NULL; n->else_body = NULL; n->next = NULL;
+      __TT_PUSHN(n);
+    } else if (cur->tag == 1) {
+      /* CodeBlock: trim and dispatch on first word. */
+      const char *p = cur->text;
+      size_t l = (size_t)cur->len;
+      size_t a = 0;
+      while (a < l && (p[a]==' '||p[a]=='\t'||p[a]=='\n'||p[a]=='\r')) a++;
+      /* Read keyword. */
+      size_t kw = a;
+      while (kw < l && p[kw] != ' ' && p[kw] != '\t' && p[kw] != '['
+             && p[kw] != '\n' && p[kw] != '\r') kw++;
+      size_t kl = kw - a;
+      if (kl == 0) { /* empty code block, skip */ cur = (struct __tt_tok *)cur->next; continue; }
+      const char *kp = p + a;
+      if (kl == 2 && kp[0]=='i' && kp[1]=='f') {
+        /* if NAME */
+        size_t na = kw;
+        while (na < l && (p[na]==' '||p[na]=='\t')) na++;
+        size_t nb = na;
+        while (nb < l && p[nb] != ' ' && p[nb] != '\t'
+               && p[nb] != '\n' && p[nb] != '\r') nb++;
+        struct __tt_node *n = (struct __tt_node *)malloc(sizeof(*n));
+        n->tag = 2;
+        size_t nlen = nb - na;
+        n->name = (char *)malloc(nlen + 1);
+        if (nlen > 0) memcpy(n->name, p + na, nlen);
+        n->name[nlen] = '\0';
+        n->value = NULL;
+        n->then_body = NULL; n->else_body = NULL; n->next = NULL;
+        __TT_PUSHN(n);
+        /* Push a new frame for the then-body. */
+        sp++;
+        if (sp >= cap) { cap *= 2; stack = (struct __tt_frame *)realloc(stack, sizeof(*stack)*cap); }
+        stack[sp].parent = n;
+        stack[sp].filling_else = 0;
+        stack[sp].head = NULL;
+        stack[sp].tail = NULL;
+      } else if (kl == 4 && kp[0]=='e' && kp[1]=='l' && kp[2]=='s' && kp[3]=='e') {
+        /* Close current then-body, switch to else-body of nearest IfNode. */
+        if (sp > 0 && stack[sp].parent && stack[sp].parent->tag == 2 && !stack[sp].filling_else) {
+          stack[sp].parent->then_body = stack[sp].head;
+          stack[sp].filling_else = 1;
+          stack[sp].head = NULL;
+          stack[sp].tail = NULL;
+        }
+        /* else outside an if -- silently ignore */
+      } else if (kl == 3 && kp[0]=='f' && kp[1]=='o' && kp[2]=='r') {
+        /* for [VAR COLL] */
+        size_t bk = kw;
+        while (bk < l && p[bk] != '[') bk++;
+        if (bk < l) bk++;
+        while (bk < l && (p[bk]==' '||p[bk]=='\t')) bk++;
+        size_t va = bk;
+        while (bk < l && p[bk] != ' ' && p[bk] != '\t' && p[bk] != ']') bk++;
+        size_t ve = bk;
+        while (bk < l && (p[bk]==' '||p[bk]=='\t')) bk++;
+        size_t ca = bk;
+        while (bk < l && p[bk] != ' ' && p[bk] != '\t' && p[bk] != ']') bk++;
+        size_t ce = bk;
+        struct __tt_node *n = (struct __tt_node *)malloc(sizeof(*n));
+        n->tag = 3;
+        size_t vl = ve - va;
+        n->name = (char *)malloc(vl + 1);
+        if (vl > 0) memcpy(n->name, p + va, vl);
+        n->name[vl] = '\0';
+        size_t cl = ce - ca;
+        n->value = (char *)malloc(cl + 1);
+        if (cl > 0) memcpy(n->value, p + ca, cl);
+        n->value[cl] = '\0';
+        n->then_body = NULL; n->else_body = NULL; n->next = NULL;
+        __TT_PUSHN(n);
+        sp++;
+        if (sp >= cap) { cap *= 2; stack = (struct __tt_frame *)realloc(stack, sizeof(*stack)*cap); }
+        stack[sp].parent = n;
+        stack[sp].filling_else = 0;
+        stack[sp].head = NULL;
+        stack[sp].tail = NULL;
+      } else if (kl == 3 && kp[0]=='l' && kp[1]=='e' && kp[2]=='t') {
+        /* let [VAR VALUE]  where VALUE is "..." literal, @key, or bare token */
+        size_t bk = kw;
+        while (bk < l && p[bk] != '[') bk++;
+        if (bk < l) bk++;
+        while (bk < l && (p[bk]==' '||p[bk]=='\t')) bk++;
+        size_t va = bk;
+        while (bk < l && p[bk] != ' ' && p[bk] != '\t' && p[bk] != ']') bk++;
+        size_t ve = bk;
+        while (bk < l && (p[bk]==' '||p[bk]=='\t')) bk++;
+        /* value: may be "quoted" or bare or @ref */
+        char *value_buf;
+        size_t value_len;
+        if (bk < l && p[bk] == '"') {
+          size_t qa = bk + 1;
+          size_t qb = qa;
+          while (qb < l && p[qb] != '"') qb++;
+          value_len = qb - qa;
+          value_buf = (char *)malloc(value_len + 1);
+          if (value_len > 0) memcpy(value_buf, p + qa, value_len);
+          value_buf[value_len] = '\0';
+        } else {
+          size_t ba = bk;
+          while (bk < l && p[bk] != ' ' && p[bk] != '\t' && p[bk] != ']') bk++;
+          value_len = bk - ba;
+          value_buf = (char *)malloc(value_len + 1);
+          if (value_len > 0) memcpy(value_buf, p + ba, value_len);
+          value_buf[value_len] = '\0';
+        }
+        struct __tt_node *n = (struct __tt_node *)malloc(sizeof(*n));
+        n->tag = 4;
+        size_t vl = ve - va;
+        n->name = (char *)malloc(vl + 1);
+        if (vl > 0) memcpy(n->name, p + va, vl);
+        n->name[vl] = '\0';
+        n->value = value_buf;
+        n->then_body = NULL; n->else_body = NULL; n->next = NULL;
+        __TT_PUSHN(n);
+        sp++;
+        if (sp >= cap) { cap *= 2; stack = (struct __tt_frame *)realloc(stack, sizeof(*stack)*cap); }
+        stack[sp].parent = n;
+        stack[sp].filling_else = 0;
+        stack[sp].head = NULL;
+        stack[sp].tail = NULL;
+      } else if (kl == 3 && kp[0]=='e' && kp[1]=='n' && kp[2]=='d') {
+        /* Close current body. */
+        if (sp > 0) {
+          __TT_ATTACH_BODY(&stack[sp], stack[sp].head);
+          sp--;
+        }
+      } else {
+        /* Unknown form: ignore. */
+      }
+    }
+    cur = (struct __tt_tok *)cur->next;
+  }
+  /* Implicit-close any unclosed blocks. */
+  while (sp > 0) {
+    __TT_ATTACH_BODY(&stack[sp], stack[sp].head);
+    sp--;
+  }
+  struct __tt_node *root = stack[0].head;
+  free(stack);
+  #undef __TT_PUSHN
+  #undef __TT_ATTACH_BODY
+  return (int64_t)(intptr_t)root;
+  ```)
+
+;;; node-tag -- read a node's tag.
+;;;
+;;; Parameters:
+;;;   n -- node handle
+;;;
+;;; Returns:
+;;;   0 = Literal, 1 = Emit, 2 = IfNode, 3 = ForNode, 4 = LetNode, -1 if n is 0.
+;;;
+;;; Example:
+;;;   (node-tag (parse (lex "<%= x %>")))  ; => 1
+;;;
+;;; Since: 0.1.0
+(defn node-tag [n :int] :int
+  ```c
+  struct __tt_node { int tag; char *name; char *value; void *then_body; void *else_body; void *next; };
+  if (!n) return -1;
+  return (int64_t)((struct __tt_node *)(intptr_t)n)->tag;
+  ```)
+
+;;; node-name -- read a node's name slot.
+;;;
+;;; Parameters:
+;;;   n -- node handle
+;;;
+;;; Returns:
+;;;   The variable name for Emit/If/For/Let nodes; "" for Literal or null nodes.
+;;;
+;;; Example:
+;;;   (node-name (parse (lex "<%= title %>")))  ; => "title"
+;;;
+;;; Since: 0.1.0
+(defn node-name [n :int] :cstr
+  ```c
+  struct __tt_node { int tag; char *name; char *value; void *then_body; void *else_body; void *next; };
+  if (!n) return (char *)"";
+  struct __tt_node *nd = (struct __tt_node *)(intptr_t)n;
+  return nd->name ? nd->name : (char *)"";
+  ```)
+
+;;; node-value -- read a node's value slot.
+;;;
+;;; Parameters:
+;;;   n -- node handle
+;;;
+;;; Returns:
+;;;   For Literal nodes: the emitted text.
+;;;   For ForNode: the collection variable name.
+;;;   For LetNode: the literal value, or "@key" for an env-ref binding.
+;;;   "" for Emit/If or null nodes.
+;;;
+;;; Example:
+;;;   (node-value (parse (lex "hello")))  ; => "hello"
+;;;
+;;; Since: 0.1.0
+(defn node-value [n :int] :cstr
+  ```c
+  struct __tt_node { int tag; char *name; char *value; void *then_body; void *else_body; void *next; };
+  if (!n) return (char *)"";
+  struct __tt_node *nd = (struct __tt_node *)(intptr_t)n;
+  return nd->value ? nd->value : (char *)"";
+  ```)
+
+;;; node-then -- read the then-body of an If/For/Let node.
+;;;
+;;; Parameters:
+;;;   n -- node handle
+;;;
+;;; Returns:
+;;;   The first child node of the then-branch, or 0 if empty/not applicable.
+;;;
+;;; Example:
+;;;   (node-then (parse (lex "<% if x %>y<% end %>")))  ; => Literal "y"
+;;;
+;;; Since: 0.1.0
+(defn node-then [n :int] :int
+  ```c
+  struct __tt_node { int tag; char *name; char *value; void *then_body; void *else_body; void *next; };
+  if (!n) return 0;
+  return (int64_t)(intptr_t)((struct __tt_node *)(intptr_t)n)->then_body;
+  ```)
+
+;;; node-else -- read the else-body of an If node.
+;;;
+;;; Parameters:
+;;;   n -- node handle
+;;;
+;;; Returns:
+;;;   The first child node of the else-branch, or 0 if no else clause.
+;;;
+;;; Example:
+;;;   (node-else (parse (lex "<% if x %>a<% else %>b<% end %>")))  ; => Literal "b"
+;;;
+;;; Since: 0.1.0
+(defn node-else [n :int] :int
+  ```c
+  struct __tt_node { int tag; char *name; char *value; void *then_body; void *else_body; void *next; };
+  if (!n) return 0;
+  return (int64_t)(intptr_t)((struct __tt_node *)(intptr_t)n)->else_body;
+  ```)
+
+;;; node-next -- read the next sibling node in the chain.
+;;;
+;;; Parameters:
+;;;   n -- node handle
+;;;
+;;; Returns:
+;;;   The next sibling node, or 0 if this was the last in its body.
+;;;
+;;; Example:
+;;;   (node-next first-node)
+;;;
+;;; Since: 0.1.0
+(defn node-next [n :int] :int
+  ```c
+  struct __tt_node { int tag; char *name; char *value; void *then_body; void *else_body; void *next; };
+  if (!n) return 0;
+  return (int64_t)(intptr_t)((struct __tt_node *)(intptr_t)n)->next;
+  ```)
+
+;;; nodes-free -- recursively release a node chain and its children.
+;;;
+;;; Parameters:
+;;;   n -- node chain head (may be 0)
+;;;
+;;; Example:
+;;;   (nodes-free (parse (lex "<%= x %>")))
+;;;
+;;; Since: 0.1.0
+(defn nodes-free [n :int] :void
+  ```c
+  #include <stdlib.h>
+  struct __tt_node { int tag; char *name; char *value; void *then_body; void *else_body; void *next; };
+  /* Iterative DFS with explicit stack to avoid recursion limits. */
+  struct __tt_node **st = (struct __tt_node **)malloc(sizeof(void *) * 256);
+  int cap = 256, sp = 0;
+  if (n) st[sp++] = (struct __tt_node *)(intptr_t)n;
+  while (sp > 0) {
+    struct __tt_node *cur = st[--sp];
+    while (cur) {
+      struct __tt_node *nx = (struct __tt_node *)cur->next;
+      if (cur->then_body) {
+        if (sp >= cap) { cap *= 2; st = (struct __tt_node **)realloc(st, sizeof(void *) * cap); }
+        st[sp++] = (struct __tt_node *)cur->then_body;
+      }
+      if (cur->else_body) {
+        if (sp >= cap) { cap *= 2; st = (struct __tt_node **)realloc(st, sizeof(void *) * cap); }
+        st[sp++] = (struct __tt_node *)cur->else_body;
+      }
+      if (cur->name) free(cur->name);
+      if (cur->value) free(cur->value);
+      free(cur);
+      cur = nx;
+    }
+  }
+  free(st);
+  ```)
+
+) ;; end defmodule template/parse

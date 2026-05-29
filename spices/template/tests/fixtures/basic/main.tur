@@ -1,0 +1,67 @@
+;; /Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/basic/main.tur -- basic interpolation fixture.
+
+(defmodule template/tests/fixtures/basic
+  (import template/env    :refer [env-new env-set env-free])
+  (import template/render :refer [render-file]))
+
+(defn cstr-eq? [a :cstr b :cstr] :bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+(defn cstr-free [p :cstr] :void
+  ```c
+  #include <stdlib.h>
+  if (p) free((void *)(intptr_t)p);
+  ```)
+
+(defn read-file [path :cstr] :cstr
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  FILE *f = fopen((const char *)path, "rb");
+  if (!f) return (char *)"";
+  fseek(f, 0, SEEK_END);
+  long sz = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  char *buf = (char *)malloc((size_t)sz + 1);
+  size_t got = fread(buf, 1, (size_t)sz, f);
+  buf[got] = '\0';
+  fclose(f);
+  return buf;
+  ```)
+
+(defn ok-val-cstr [r :int] :cstr
+  ```c
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *rr = (struct __res *)(intptr_t)r;
+  return (char *)(intptr_t)rr->ok_val;
+  ```)
+
+(defn is-ok? [r :int] :bool
+  ```c
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __res *rr = (struct __res *)(intptr_t)r;
+  return rr && rr->is_ok;
+  ```)
+
+(defn tap [n :int name :cstr ok :bool] :void
+  ```c
+  #include <stdio.h>
+  printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+         (long long)n, (const char *)name);
+  ```)
+
+(defn main [] :int
+  (let [e (env-new)]
+    (do
+      (env-set e "title" "Greetings")
+      (env-set e "name"  "Roger")
+      (let [r (render-file "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/basic/template.html.tur" e)]
+        (if (is-ok? r)
+          (let [got (ok-val-cstr r)
+                expected (read-file "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/basic/expected.txt")
+                ok (cstr-eq? got expected)]
+            (do (tap 1 "basic" ok) 0))
+          (do (tap 1 "basic" false) 1))))))
