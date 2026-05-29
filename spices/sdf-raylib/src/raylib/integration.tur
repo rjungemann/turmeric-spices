@@ -18,7 +18,7 @@
 ;; -------------------------------------------------------------------------
 
 (defmodule raylib/integration
-  (export sdf-preview-window csdf-preview-window))
+  (export sdf-preview-window csdf-preview-window)
 
 (import glsl/codegen :refer [csdf->glsl csdf-glsl-free])
 
@@ -64,7 +64,12 @@
 #define CT_SMUNION   13
 #define CT_OFFSET    20
 #define CT_SHELL     21
-#define CT_TRANSLATE 30
+#define CT_TRANSLATE   30
+#define CT_TORUS        4
+#define CT_CAPSULE      5
+#define CT_SMINTERSECT 14
+#define CT_REPEAT_INF  40
+#define CT_REPEAT_FIN  41
 
   /* ---------- Iterative SDF evaluator (no nested C functions) ----------
      EVAL_SDF(result_out, root, px, py, pz) evaluates the tree at (px,py,pz).
@@ -81,14 +86,17 @@
       else if (_tg==CT_BOX){ double _cx=(_n->v0x+_n->v1x)*0.5,_cy=(_n->v0y+_n->v1y)*0.5,_cz=(_n->v0z+_n->v1z)*0.5,_ex=(_n->v1x-_n->v0x)*0.5,_ey=(_n->v1y-_n->v0y)*0.5,_ez=(_n->v1z-_n->v0z)*0.5,_qx=fabs((spx)-_cx)-_ex,_qy=fabs((spy)-_cy)-_ey,_qz=fabs((spz)-_cz)-_ez,_mx=_qx>_qy?(_qx>_qz?_qx:_qz):(_qy>_qz?_qy:_qz),_lq=sqrt((_qx>0?_qx*_qx:0)+(_qy>0?_qy*_qy:0)+(_qz>0?_qz*_qz:0)); _res[_rt++]=_lq+(_mx<0?_mx:0); _st--; } \
       else if (_tg==CT_CYLINDER){ double _dx=(spx)-_n->v0x,_dy=(spy)-_n->v0y; _res[_rt++]=sqrt(_dx*_dx+_dy*_dy)-_n->s0; _st--; } \
       else if (_tg==CT_PLANE){ _res[_rt++]=_n->v0x*(spx)+_n->v0y*(spy)+_n->v0z*(spz)+_n->s0; _st--; } \
-      else if (_tg==CT_UNION||_tg==CT_INTERSECT||_tg==CT_DIFF||_tg==CT_SMUNION){ \
+      else if (_tg==CT_TORUS){ double _tqx=sqrt(((spx)-_n->v0x)*((spx)-_n->v0x)+((spz)-_n->v0z)*((spz)-_n->v0z))-_n->s0,_tqy=(spy)-_n->v0y; _res[_rt++]=sqrt(_tqx*_tqx+_tqy*_tqy)-_n->s1; _st--; } \
+      else if (_tg==CT_CAPSULE){ double _pax=(spx)-_n->v0x,_pay=(spy)-_n->v0y,_paz=(spz)-_n->v0z,_bax=_n->v1x-_n->v0x,_bay=_n->v1y-_n->v0y,_baz=_n->v1z-_n->v0z,_dbb=_bax*_bax+_bay*_bay+_baz*_baz,_ch=(_dbb>1e-15)?(_pax*_bax+_pay*_bay+_paz*_baz)/_dbb:0.0;if(_ch<0)_ch=0;else if(_ch>1)_ch=1;double _cdx=_pax-_bax*_ch,_cdy=_pay-_bay*_ch,_cdz=_paz-_baz*_ch;_res[_rt++]=sqrt(_cdx*_cdx+_cdy*_cdy+_cdz*_cdz)-_n->s0;_st--; } \
+      else if (_tg==CT_UNION||_tg==CT_INTERSECT||_tg==CT_DIFF||_tg==CT_SMUNION||_tg==CT_SMINTERSECT){ \
         if(_ph==0){_stk[_st-1].phase=1;_stk[_st].n=_n->left;_stk[_st].phase=0;_st++;} \
         else if(_ph==1){_stk[_st-1].phase=2;_stk[_st].n=_n->right;_stk[_st].phase=0;_st++;} \
         else{double _r=_res[--_rt],_l=_res[--_rt]; \
-          if(_tg==CT_UNION)_res[_rt++]=_l<_r?_l:_r; \
-          else if(_tg==CT_INTERSECT)_res[_rt++]=_l>_r?_l:_r; \
-          else if(_tg==CT_DIFF){double _nr=-_r;_res[_rt++]=_l>_nr?_l:_nr;} \
-          else{double _k=_n->s0,_h=fmax(_k-fabs(_l-_r),0.0)/_k;_res[_rt++]=fmin(_l,_r)-_h*_h*_k*0.25;} \
+          if(_tg==CT_UNION)           _res[_rt++]=_l<_r?_l:_r; \
+          else if(_tg==CT_INTERSECT)  _res[_rt++]=_l>_r?_l:_r; \
+          else if(_tg==CT_DIFF)       {double _nr=-_r;_res[_rt++]=_l>_nr?_l:_nr;} \
+          else if(_tg==CT_SMINTERSECT){double _k=_n->s0,_h=fmax(_k-fabs(_l-_r),0.0)/_k;_res[_rt++]=fmax(_l,_r)+_h*_h*_k*0.25;} \
+          else                        {double _k=_n->s0,_h=fmax(_k-fabs(_l-_r),0.0)/_k;_res[_rt++]=fmin(_l,_r)-_h*_h*_k*0.25;} \
           _st--;} \
       } else if(_tg==CT_OFFSET){ \
         if(_ph==0){_stk[_st-1].phase=1;_stk[_st].n=_n->left;_stk[_st].phase=0;_st++;} \
@@ -98,10 +106,9 @@
         else{double _d=_res[--_rt];_res[_rt++]=fabs(_d)-_n->s0;_st--;} \
       } else if(_tg==CT_TRANSLATE){ \
         if(_ph==0){ \
-          /* Adjust query point and re-evaluate the child with new coords */ \
           double _tx=_n->v0x,_ty=_n->v0y,_tz=_n->v0z; \
           double _npx=(spx)-_tx,_npy=(spy)-_ty,_npz=(spz)-_tz; \
-          _st--; /* pop translate node before inner eval */ \
+          _st--; \
           struct { sdf_node *n; int phase; } _stk2[64]; double _res2[64]; int _s2=0,_r2=0; \
           _stk2[0].n=_n->left; _stk2[0].phase=0; _s2=1; \
           while(_s2>0){ sdf_node *_m=_stk2[_s2-1].n; int _p2=_stk2[_s2-1].phase; int64_t _t2=_m->tag; \
@@ -109,13 +116,16 @@
             else if(_t2==CT_BOX){double _cx2=(_m->v0x+_m->v1x)*0.5,_cy2=(_m->v0y+_m->v1y)*0.5,_cz2=(_m->v0z+_m->v1z)*0.5,_ex2=(_m->v1x-_m->v0x)*0.5,_ey2=(_m->v1y-_m->v0y)*0.5,_ez2=(_m->v1z-_m->v0z)*0.5,_qx2=fabs(_npx-_cx2)-_ex2,_qy2=fabs(_npy-_cy2)-_ey2,_qz2=fabs(_npz-_cz2)-_ez2,_mx2=_qx2>_qy2?(_qx2>_qz2?_qx2:_qz2):(_qy2>_qz2?_qy2:_qz2),_lq2=sqrt((_qx2>0?_qx2*_qx2:0)+(_qy2>0?_qy2*_qy2:0)+(_qz2>0?_qz2*_qz2:0));_res2[_r2++]=_lq2+(_mx2<0?_mx2:0);_s2--;} \
             else if(_t2==CT_CYLINDER){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y;_res2[_r2++]=sqrt(_dx2*_dx2+_dy2*_dy2)-_m->s0;_s2--;} \
             else if(_t2==CT_PLANE){_res2[_r2++]=_m->v0x*_npx+_m->v0y*_npy+_m->v0z*_npz+_m->s0;_s2--;} \
-            else if(_t2==CT_UNION||_t2==CT_INTERSECT||_t2==CT_DIFF||_t2==CT_SMUNION){ \
+            else if(_t2==CT_TORUS){double _tqx2=sqrt((_npx-_m->v0x)*(_npx-_m->v0x)+(_npz-_m->v0z)*(_npz-_m->v0z))-_m->s0,_tqy2=_npy-_m->v0y;_res2[_r2++]=sqrt(_tqx2*_tqx2+_tqy2*_tqy2)-_m->s1;_s2--;} \
+            else if(_t2==CT_CAPSULE){double _pa2x=_npx-_m->v0x,_pa2y=_npy-_m->v0y,_pa2z=_npz-_m->v0z,_ba2x=_m->v1x-_m->v0x,_ba2y=_m->v1y-_m->v0y,_ba2z=_m->v1z-_m->v0z,_dbb2=_ba2x*_ba2x+_ba2y*_ba2y+_ba2z*_ba2z,_ch2=(_dbb2>1e-15)?(_pa2x*_ba2x+_pa2y*_ba2y+_pa2z*_ba2z)/_dbb2:0.0;if(_ch2<0)_ch2=0;else if(_ch2>1)_ch2=1;double _cdx2=_pa2x-_ba2x*_ch2,_cdy2=_pa2y-_ba2y*_ch2,_cdz2=_pa2z-_ba2z*_ch2;_res2[_r2++]=sqrt(_cdx2*_cdx2+_cdy2*_cdy2+_cdz2*_cdz2)-_m->s0;_s2--;} \
+            else if(_t2==CT_UNION||_t2==CT_INTERSECT||_t2==CT_DIFF||_t2==CT_SMUNION||_t2==CT_SMINTERSECT){ \
               if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;} \
               else if(_p2==1){_stk2[_s2-1].phase=2;_stk2[_s2].n=_m->right;_stk2[_s2].phase=0;_s2++;} \
               else{double _rr=_res2[--_r2],_ll=_res2[--_r2]; \
-                if(_t2==CT_UNION)_res2[_r2++]=_ll<_rr?_ll:_rr; \
-                else if(_t2==CT_INTERSECT)_res2[_r2++]=_ll>_rr?_ll:_rr; \
-                else if(_t2==CT_DIFF){double _nrr=-_rr;_res2[_r2++]=_ll>_nrr?_ll:_nrr;} \
+                if(_t2==CT_UNION)           _res2[_r2++]=_ll<_rr?_ll:_rr; \
+                else if(_t2==CT_INTERSECT)  _res2[_r2++]=_ll>_rr?_ll:_rr; \
+                else if(_t2==CT_DIFF)       {double _nrr=-_rr;_res2[_r2++]=_ll>_nrr?_ll:_nrr;} \
+                else if(_t2==CT_SMINTERSECT){double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_r2++]=fmax(_ll,_rr)+_h2*_h2*_k2*0.25;} \
                 else{double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_r2++]=fmin(_ll,_rr)-_h2*_h2*_k2*0.25;} \
                 _s2--;} \
             } else if(_t2==CT_OFFSET){ \
@@ -125,6 +135,70 @@
               if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;} \
               else{double _d2=_res2[--_r2];_res2[_r2++]=fabs(_d2)-_m->s0;_s2--;} \
             } else{_res2[_r2++]=1e9;_s2--;} \
+          } \
+          _res[_rt++]=_res2[0]; \
+        } \
+      } else if(_tg==CT_REPEAT_INF){ \
+        if(_ph==0){ \
+          double _ppx=(spx),_ppy=(spy),_ppz=(spz); \
+          if(_n->v0x>0){double _px=_n->v0x;_ppx-=_px*round(_ppx/_px);} \
+          if(_n->v0y>0){double _py=_n->v0y;_ppy-=_py*round(_ppy/_py);} \
+          if(_n->v0z>0){double _pz=_n->v0z;_ppz-=_pz*round(_ppz/_pz);} \
+          _st--; \
+          struct { sdf_node *n; int phase; } _stk2[64]; double _res2[64]; int _s2=0,_r2=0; \
+          _stk2[0].n=_n->left; _stk2[0].phase=0; _s2=1; \
+          while(_s2>0){ sdf_node *_m=_stk2[_s2-1].n; int _p2=_stk2[_s2-1].phase; int64_t _t2=_m->tag; \
+            if(_t2==CT_SPHERE){double _dx=_ppx-_m->v0x,_dy=_ppy-_m->v0y,_dz=_ppz-_m->v0z;_res2[_r2++]=sqrt(_dx*_dx+_dy*_dy+_dz*_dz)-_m->s0;_s2--;} \
+            else if(_t2==CT_BOX){double _cx=(_m->v0x+_m->v1x)*0.5,_cy=(_m->v0y+_m->v1y)*0.5,_cz=(_m->v0z+_m->v1z)*0.5,_ex=(_m->v1x-_m->v0x)*0.5,_ey=(_m->v1y-_m->v0y)*0.5,_ez=(_m->v1z-_m->v0z)*0.5,_qx=fabs(_ppx-_cx)-_ex,_qy=fabs(_ppy-_cy)-_ey,_qz=fabs(_ppz-_cz)-_ez,_mx=_qx>_qy?(_qx>_qz?_qx:_qz):(_qy>_qz?_qy:_qz),_lq=sqrt((_qx>0?_qx*_qx:0)+(_qy>0?_qy*_qy:0)+(_qz>0?_qz*_qz:0));_res2[_r2++]=_lq+(_mx<0?_mx:0);_s2--;} \
+            else if(_t2==CT_CYLINDER){double _dx=_ppx-_m->v0x,_dy=_ppy-_m->v0y;_res2[_r2++]=sqrt(_dx*_dx+_dy*_dy)-_m->s0;_s2--;} \
+            else if(_t2==CT_PLANE){_res2[_r2++]=_m->v0x*_ppx+_m->v0y*_ppy+_m->v0z*_ppz+_m->s0;_s2--;} \
+            else if(_t2==CT_TORUS){double _tqx=sqrt((_ppx-_m->v0x)*(_ppx-_m->v0x)+(_ppz-_m->v0z)*(_ppz-_m->v0z))-_m->s0,_tqy=_ppy-_m->v0y;_res2[_r2++]=sqrt(_tqx*_tqx+_tqy*_tqy)-_m->s1;_s2--;} \
+            else if(_t2==CT_CAPSULE){double _pax=_ppx-_m->v0x,_pay=_ppy-_m->v0y,_paz=_ppz-_m->v0z,_bax=_m->v1x-_m->v0x,_bay=_m->v1y-_m->v0y,_baz=_m->v1z-_m->v0z,_dbb=_bax*_bax+_bay*_bay+_baz*_baz,_ch=(_dbb>1e-15)?(_pax*_bax+_pay*_bay+_paz*_baz)/_dbb:0.0;if(_ch<0)_ch=0;else if(_ch>1)_ch=1;double _cdx=_pax-_bax*_ch,_cdy=_pay-_bay*_ch,_cdz=_paz-_baz*_ch;_res2[_r2++]=sqrt(_cdx*_cdx+_cdy*_cdy+_cdz*_cdz)-_m->s0;_s2--;} \
+            else if(_t2==CT_UNION||_t2==CT_INTERSECT||_t2==CT_DIFF||_t2==CT_SMUNION||_t2==CT_SMINTERSECT){ \
+              if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;} \
+              else if(_p2==1){_stk2[_s2-1].phase=2;_stk2[_s2].n=_m->right;_stk2[_s2].phase=0;_s2++;} \
+              else{double _rr=_res2[--_r2],_ll=_res2[--_r2]; \
+                if(_t2==CT_UNION)           _res2[_r2++]=_ll<_rr?_ll:_rr; \
+                else if(_t2==CT_INTERSECT)  _res2[_r2++]=_ll>_rr?_ll:_rr; \
+                else if(_t2==CT_DIFF)       {double _nrr=-_rr;_res2[_r2++]=_ll>_nrr?_ll:_nrr;} \
+                else if(_t2==CT_SMINTERSECT){double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_r2++]=fmax(_ll,_rr)+_h2*_h2*_k2*0.25;} \
+                else{double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_r2++]=fmin(_ll,_rr)-_h2*_h2*_k2*0.25;} \
+                _s2--;} \
+            } else if(_t2==CT_OFFSET){if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;}else{_res2[_r2-1]+=_m->s0;_s2--;}} \
+            else if(_t2==CT_SHELL){if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;}else{double _d2=_res2[--_r2];_res2[_r2++]=fabs(_d2)-_m->s0;_s2--;}} \
+            else{_res2[_r2++]=1e9;_s2--;} \
+          } \
+          _res[_rt++]=_res2[0]; \
+        } \
+      } else if(_tg==CT_REPEAT_FIN){ \
+        if(_ph==0){ \
+          double _ppx=(spx),_ppy=(spy),_ppz=(spz); \
+          if(_n->v0x>0){double _px=_n->v0x,_lx=_n->v1x,_rv=round(_ppx/_px);if(_rv<-_lx)_rv=-_lx;else if(_rv>_lx)_rv=_lx;_ppx-=_px*_rv;} \
+          if(_n->v0y>0){double _py=_n->v0y,_ly=_n->v1y,_rv=round(_ppy/_py);if(_rv<-_ly)_rv=-_ly;else if(_rv>_ly)_rv=_ly;_ppy-=_py*_rv;} \
+          if(_n->v0z>0){double _pz=_n->v0z,_lz=_n->v1z,_rv=round(_ppz/_pz);if(_rv<-_lz)_rv=-_lz;else if(_rv>_lz)_rv=_lz;_ppz-=_pz*_rv;} \
+          _st--; \
+          struct { sdf_node *n; int phase; } _stk2[64]; double _res2[64]; int _s2=0,_r2=0; \
+          _stk2[0].n=_n->left; _stk2[0].phase=0; _s2=1; \
+          while(_s2>0){ sdf_node *_m=_stk2[_s2-1].n; int _p2=_stk2[_s2-1].phase; int64_t _t2=_m->tag; \
+            if(_t2==CT_SPHERE){double _dx=_ppx-_m->v0x,_dy=_ppy-_m->v0y,_dz=_ppz-_m->v0z;_res2[_r2++]=sqrt(_dx*_dx+_dy*_dy+_dz*_dz)-_m->s0;_s2--;} \
+            else if(_t2==CT_BOX){double _cx=(_m->v0x+_m->v1x)*0.5,_cy=(_m->v0y+_m->v1y)*0.5,_cz=(_m->v0z+_m->v1z)*0.5,_ex=(_m->v1x-_m->v0x)*0.5,_ey=(_m->v1y-_m->v0y)*0.5,_ez=(_m->v1z-_m->v0z)*0.5,_qx=fabs(_ppx-_cx)-_ex,_qy=fabs(_ppy-_cy)-_ey,_qz=fabs(_ppz-_cz)-_ez,_mx=_qx>_qy?(_qx>_qz?_qx:_qz):(_qy>_qz?_qy:_qz),_lq=sqrt((_qx>0?_qx*_qx:0)+(_qy>0?_qy*_qy:0)+(_qz>0?_qz*_qz:0));_res2[_r2++]=_lq+(_mx<0?_mx:0);_s2--;} \
+            else if(_t2==CT_CYLINDER){double _dx=_ppx-_m->v0x,_dy=_ppy-_m->v0y;_res2[_r2++]=sqrt(_dx*_dx+_dy*_dy)-_m->s0;_s2--;} \
+            else if(_t2==CT_PLANE){_res2[_r2++]=_m->v0x*_ppx+_m->v0y*_ppy+_m->v0z*_ppz+_m->s0;_s2--;} \
+            else if(_t2==CT_TORUS){double _tqx=sqrt((_ppx-_m->v0x)*(_ppx-_m->v0x)+(_ppz-_m->v0z)*(_ppz-_m->v0z))-_m->s0,_tqy=_ppy-_m->v0y;_res2[_r2++]=sqrt(_tqx*_tqx+_tqy*_tqy)-_m->s1;_s2--;} \
+            else if(_t2==CT_CAPSULE){double _pax=_ppx-_m->v0x,_pay=_ppy-_m->v0y,_paz=_ppz-_m->v0z,_bax=_m->v1x-_m->v0x,_bay=_m->v1y-_m->v0y,_baz=_m->v1z-_m->v0z,_dbb=_bax*_bax+_bay*_bay+_baz*_baz,_ch=(_dbb>1e-15)?(_pax*_bax+_pay*_bay+_paz*_baz)/_dbb:0.0;if(_ch<0)_ch=0;else if(_ch>1)_ch=1;double _cdx=_pax-_bax*_ch,_cdy=_pay-_bay*_ch,_cdz=_paz-_baz*_ch;_res2[_r2++]=sqrt(_cdx*_cdx+_cdy*_cdy+_cdz*_cdz)-_m->s0;_s2--;} \
+            else if(_t2==CT_UNION||_t2==CT_INTERSECT||_t2==CT_DIFF||_t2==CT_SMUNION||_t2==CT_SMINTERSECT){ \
+              if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;} \
+              else if(_p2==1){_stk2[_s2-1].phase=2;_stk2[_s2].n=_m->right;_stk2[_s2].phase=0;_s2++;} \
+              else{double _rr=_res2[--_r2],_ll=_res2[--_r2]; \
+                if(_t2==CT_UNION)           _res2[_r2++]=_ll<_rr?_ll:_rr; \
+                else if(_t2==CT_INTERSECT)  _res2[_r2++]=_ll>_rr?_ll:_rr; \
+                else if(_t2==CT_DIFF)       {double _nrr=-_rr;_res2[_r2++]=_ll>_nrr?_ll:_nrr;} \
+                else if(_t2==CT_SMINTERSECT){double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_r2++]=fmax(_ll,_rr)+_h2*_h2*_k2*0.25;} \
+                else{double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_r2++]=fmin(_ll,_rr)-_h2*_h2*_k2*0.25;} \
+                _s2--;} \
+            } else if(_t2==CT_OFFSET){if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;}else{_res2[_r2-1]+=_m->s0;_s2--;}} \
+            else if(_t2==CT_SHELL){if(_p2==0){_stk2[_s2-1].phase=1;_stk2[_s2].n=_m->left;_stk2[_s2].phase=0;_s2++;}else{double _d2=_res2[--_r2];_res2[_r2++]=fabs(_d2)-_m->s0;_s2--;}} \
+            else{_res2[_r2++]=1e9;_s2--;} \
           } \
           _res[_rt++]=_res2[0]; \
         } \

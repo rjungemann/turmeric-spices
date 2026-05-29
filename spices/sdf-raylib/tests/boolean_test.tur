@@ -1,5 +1,8 @@
 ;; boolean_test.tur -- unit tests for sdf/boolean CSG combinators.
 
+(defmodule boolean_test
+  (export)
+
 (import sdf/primitives :refer [sdf-sphere])
 (import sdf/boolean    :refer [sdf-union sdf-intersection sdf-difference
                                 sdf-smooth-union])
@@ -7,16 +10,17 @@
 (import sdf/eval       :refer [sdf-eval])
 (import sdf/expr       :refer [sdf-free])
 
-(defn approx= [a :float b :float] :int
+(defn approx= [a :float b :float] :bool
   ```c
   double diff = a - b; if (diff < 0) diff = -diff;
-  return diff < 0.02 ? 1 : 0;
+  return diff < 0.02;
   ```)
 
-(defn print-result [label :cstr pass :int total :int] :void
+(defn print-and-check [label :cstr pass :int total :int] :int
   ```c
   #include <stdio.h>
   printf("%s: %d/%d passed\n", (const char*)(intptr_t)label, (int)pass, (int)total);
+  return pass == total ? 0 : 1;
   ```)
 
 ;; ---- union ----
@@ -113,5 +117,6 @@
                                (+ (test-translate)
                                   (+ (test-offset-grow)
                                      (test-smooth-union-between)))))))))]
-    (print-result "boolean" pass 9)
-    (if (= pass 9) 0 1)))
+    (print-and-check "boolean" pass 9)))
+
+) ;; end defmodule boolean_test

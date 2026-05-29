@@ -9,27 +9,32 @@
 ;; -------------------------------------------------------------------------
 
 (defmodule sdf/expr
-  (export SDF_SPHERE SDF_BOX SDF_CYLINDER SDF_PLANE
-          SDF_UNION SDF_INTERSECT SDF_DIFFERENCE SDF_SMOOTH_UNION
-          SDF_OFFSET SDF_SHELL SDF_TRANSLATE
+  (export SDF_SPHERE SDF_BOX SDF_CYLINDER SDF_PLANE SDF_TORUS SDF_CAPSULE
+          SDF_UNION SDF_INTERSECT SDF_DIFFERENCE SDF_SMOOTH_UNION SDF_SMOOTH_INTERSECT
+          SDF_OFFSET SDF_SHELL SDF_TRANSLATE SDF_REPEAT_INF SDF_REPEAT_FIN
           sdf-tag sdf-left sdf-right
           sdf-v0x sdf-v0y sdf-v0z
           sdf-v1x sdf-v1y sdf-v1z
           sdf-s0 sdf-s1 sdf-free
-          sdf--make-leaf sdf--make-node sdf--make-unary))
+          sdf--make-leaf sdf--make-node sdf--make-unary sdf--make-unary-full)
 
-;; Tag constants.  Leaves 0-9, binary 10-19, unary 20-29, transform 30-39.
-(def SDF_SPHERE       0)
-(def SDF_BOX          1)
-(def SDF_CYLINDER     2)
-(def SDF_PLANE        3)
-(def SDF_UNION        10)
-(def SDF_INTERSECT    11)
-(def SDF_DIFFERENCE   12)
-(def SDF_SMOOTH_UNION 13)
-(def SDF_OFFSET       20)
-(def SDF_SHELL        21)
-(def SDF_TRANSLATE    30)
+;; Tag constants.  Leaves 0-9, binary 10-19, unary 20-29, transform 30-39, domain 40-49.
+(def SDF_SPHERE           0)
+(def SDF_BOX              1)
+(def SDF_CYLINDER         2)
+(def SDF_PLANE            3)
+(def SDF_TORUS            4)
+(def SDF_CAPSULE          5)
+(def SDF_UNION            10)
+(def SDF_INTERSECT        11)
+(def SDF_DIFFERENCE       12)
+(def SDF_SMOOTH_UNION     13)
+(def SDF_SMOOTH_INTERSECT 14)
+(def SDF_OFFSET           20)
+(def SDF_SHELL            21)
+(def SDF_TRANSLATE        30)
+(def SDF_REPEAT_INF       40)
+(def SDF_REPEAT_FIN       41)
 
 ;;; sdf--make-leaf -- allocate a leaf SdfExpr (no children).
 ;;;
@@ -204,6 +209,44 @@
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->s1 : 0.0;
+  ```)
+
+;;; sdf--make-unary-full -- allocate a unary node with all geometry fields set.
+;;;
+;;; Like sdf--make-unary but also stores v0 and v1 (needed for repeat nodes
+;;; that carry the period vector in v0 and limit vector in v1).
+;;;
+;;; Parameters:
+;;;   tag            -- SDF_* tag
+;;;   child          -- child SdfExpr handle (stored in left)
+;;;   v0x v0y v0z    -- first vec3 slot (period for repeat ops)
+;;;   v1x v1y v1z    -- second vec3 slot (limits for SDF_REPEAT_FIN)
+;;;   s0 s1          -- optional scalars
+;;;
+;;; Returns:
+;;;   Opaque :int handle to heap-allocated sdf_node.
+;;;
+;;; Since: Phase 5
+(defn sdf--make-unary-full [tag :int child :int
+                             v0x :float v0y :float v0z :float
+                             v1x :float v1y :float v1z :float
+                             s0 :float s1 :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct sdf_node {
+    int64_t tag;
+    double v0x, v0y, v0z, v1x, v1y, v1z, s0, s1;
+    struct sdf_node *left, *right;
+  } sdf_node;
+  sdf_node *n = (sdf_node *)calloc(1, sizeof(sdf_node));
+  if (!n) return 0;
+  n->tag = tag; n->v0x = v0x; n->v0y = v0y; n->v0z = v0z;
+  n->v1x = v1x; n->v1y = v1y; n->v1z = v1z;
+  n->s0 = s0; n->s1 = s1;
+  n->left  = (sdf_node *)(intptr_t)child;
+  n->right = NULL;
+  return (int64_t)(intptr_t)n;
   ```)
 
 ;;; sdf-free -- recursively free an SdfExpr tree.

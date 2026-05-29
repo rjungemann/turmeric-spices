@@ -3,6 +3,9 @@
 ;;; Since: Phase 3
 ;; -------------------------------------------------------------------------
 
+(defmodule glsl_test
+  (export)
+
 (import sdf/colors  :refer [colored-sphere colored-box colored-cylinder
                               colored-union colored-difference colored-translate
                               csdf-free])
@@ -10,10 +13,15 @@
 
 ;; ---- helpers ----
 
-(defn assert! [cond :int msg :cstr] :void
-  (if (= cond 0)
-    (do (println msg) (exit 1))
-    0))
+(defn assert! [cond :bool msg :cstr] :void
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  if (!cond) {
+    fprintf(stderr, "%s\n", (const char *)(intptr_t)msg);
+    exit(1);
+  }
+  ```)
 
 (defn cstr-len [s :cstr] :int
   ```c
@@ -21,12 +29,12 @@
   return s ? (int64_t)strlen((const char *)(intptr_t)s) : 0;
   ```)
 
-(defn cstr-contains [haystack :cstr needle :cstr] :int
+(defn cstr-contains [haystack :cstr needle :cstr] :bool
   ```c
   #include <string.h>
   if (!haystack || !needle) return 0;
   return strstr((const char *)(intptr_t)haystack,
-                (const char *)(intptr_t)needle) ? 1 : 0;
+                (const char *)(intptr_t)needle) != NULL;
   ```)
 
 ;; ---- test 1: single sphere emits sceneSDF with correct content ----
@@ -120,3 +128,5 @@
     (println "test-translate-glsl: PASS")
     (println "All Phase 3 GLSL codegen tests passed.")
     0))
+
+) ;; end defmodule glsl_test

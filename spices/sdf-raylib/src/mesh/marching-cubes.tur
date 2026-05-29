@@ -15,7 +15,7 @@
           mesh-vertex-count mesh-index-count
           mesh-get-vx mesh-get-vy mesh-get-vz
           mesh-get-nx mesh-get-ny mesh-get-nz
-          mesh-get-index mesh-free))
+          mesh-get-index mesh-free)
 
 (import sdf/eval :refer [sdf-eval])
 
@@ -43,7 +43,6 @@
   ```c
   #include <stdlib.h>
   #include <string.h>
-  #include <math.h>
   #include <stdint.h>
 
   /* ---------- SDF node layout (mirrors sdf/expr.tur) ---------- */
@@ -80,17 +79,17 @@
       int64_t _tag = _n->tag; \
       if (_tag==SDF_TAG_SPHERE) { \
         double _dx=(spx)-_n->v0x, _dy=(spy)-_n->v0y, _dz=(spz)-_n->v0z; \
-        _res[_res_top++]=sqrt(_dx*_dx+_dy*_dy+_dz*_dz)-_n->s0; _stk_top--; \
+        _res[_res_top++]=__builtin_sqrt(_dx*_dx+_dy*_dy+_dz*_dz)-_n->s0; _stk_top--; \
       } else if (_tag==SDF_TAG_BOX) { \
         double _cx=(_n->v0x+_n->v1x)*0.5,_cy=(_n->v0y+_n->v1y)*0.5,_cz=(_n->v0z+_n->v1z)*0.5; \
         double _ex=(_n->v1x-_n->v0x)*0.5,_ey=(_n->v1y-_n->v0y)*0.5,_ez=(_n->v1z-_n->v0z)*0.5; \
-        double _qx=fabs((spx)-_cx)-_ex,_qy=fabs((spy)-_cy)-_ey,_qz=fabs((spz)-_cz)-_ez; \
+        double _qx=__builtin_fabs((spx)-_cx)-_ex,_qy=__builtin_fabs((spy)-_cy)-_ey,_qz=__builtin_fabs((spz)-_cz)-_ez; \
         double _mx=_qx>_qy?(_qx>_qz?_qx:_qz):(_qy>_qz?_qy:_qz); \
-        double _lq=sqrt((_qx>0?_qx*_qx:0)+(_qy>0?_qy*_qy:0)+(_qz>0?_qz*_qz:0)); \
+        double _lq=__builtin_sqrt((_qx>0?_qx*_qx:0)+(_qy>0?_qy*_qy:0)+(_qz>0?_qz*_qz:0)); \
         _res[_res_top++]=_lq+(_mx<0?_mx:0); _stk_top--; \
       } else if (_tag==SDF_TAG_CYLINDER) { \
         double _dx=(spx)-_n->v0x,_dy=(spy)-_n->v0y; \
-        _res[_res_top++]=sqrt(_dx*_dx+_dy*_dy)-_n->s0; _stk_top--; \
+        _res[_res_top++]=__builtin_sqrt(_dx*_dx+_dy*_dy)-_n->s0; _stk_top--; \
       } else if (_tag==SDF_TAG_PLANE) { \
         _res[_res_top++]=_n->v0x*(spx)+_n->v0y*(spy)+_n->v0z*(spz)+_n->s0; _stk_top--; \
       } else if (_tag==SDF_TAG_UNION||_tag==SDF_TAG_INTERSECT||_tag==SDF_TAG_DIFF||_tag==SDF_TAG_SMUNION) { \
@@ -100,14 +99,14 @@
           if (_tag==SDF_TAG_UNION)     _res[_res_top++]=_l<_r?_l:_r; \
           else if (_tag==SDF_TAG_INTERSECT) _res[_res_top++]=_l>_r?_l:_r; \
           else if (_tag==SDF_TAG_DIFF) { double _nr=-_r; _res[_res_top++]=_l>_nr?_l:_nr; } \
-          else { double _k=_n->s0,_h=fmax(_k-fabs(_l-_r),0.0)/_k; _res[_res_top++]=fmin(_l,_r)-_h*_h*_k*0.25; } \
+          else { double _k=_n->s0,_h=__builtin_fmax(_k-__builtin_fabs(_l-_r),0.0)/_k; _res[_res_top++]=__builtin_fmin(_l,_r)-_h*_h*_k*0.25; } \
           _stk_top--; } \
       } else if (_tag==SDF_TAG_OFFSET) { \
         if (_ph==0){ _stk[_stk_top-1].phase=1; _stk[_stk_top].n=_n->left; _stk[_stk_top].phase=0; _stk_top++; } \
         else { _res[_res_top-1]+=_n->s0; _stk_top--; } \
       } else if (_tag==SDF_TAG_SHELL) { \
         if (_ph==0){ _stk[_stk_top-1].phase=1; _stk[_stk_top].n=_n->left; _stk[_stk_top].phase=0; _stk_top++; } \
-        else { double _d=_res[--_res_top]; _res[_res_top++]=fabs(_d)-_n->s0; _stk_top--; } \
+        else { double _d=_res[--_res_top]; _res[_res_top++]=__builtin_fabs(_d)-_n->s0; _stk_top--; } \
       } else if (_tag==SDF_TAG_TRANSLATE) { \
         if (_ph==0){ _stk[_stk_top-1].phase=1; \
           _stk[_stk_top].n=_n->left; _stk[_stk_top].phase=0; _stk_top++; \
@@ -129,9 +128,9 @@
             int _st2=0,_rt2=0; \
             _stk2[_st2].n=_n->left; _stk2[_st2].phase=0; _st2++; \
             while (_st2>0){ sdf_node *_m=_stk2[_st2-1].n; int _p2=_stk2[_st2-1].phase; int64_t _t2=_m->tag; \
-              if (_t2==SDF_TAG_SPHERE){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y,_dz2=_npz-_m->v0z; _res2[_rt2++]=sqrt(_dx2*_dx2+_dy2*_dy2+_dz2*_dz2)-_m->s0; _st2--;} \
-              else if (_t2==SDF_TAG_BOX){double _cx2=(_m->v0x+_m->v1x)*0.5,_cy2=(_m->v0y+_m->v1y)*0.5,_cz2=(_m->v0z+_m->v1z)*0.5,_ex2=(_m->v1x-_m->v0x)*0.5,_ey2=(_m->v1y-_m->v0y)*0.5,_ez2=(_m->v1z-_m->v0z)*0.5,_qx2=fabs(_npx-_cx2)-_ex2,_qy2=fabs(_npy-_cy2)-_ey2,_qz2=fabs(_npz-_cz2)-_ez2,_mx2=_qx2>_qy2?(_qx2>_qz2?_qx2:_qz2):(_qy2>_qz2?_qy2:_qz2),_lq2=sqrt((_qx2>0?_qx2*_qx2:0)+(_qy2>0?_qy2*_qy2:0)+(_qz2>0?_qz2*_qz2:0)); _res2[_rt2++]=_lq2+(_mx2<0?_mx2:0); _st2--;} \
-              else if (_t2==SDF_TAG_CYLINDER){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y; _res2[_rt2++]=sqrt(_dx2*_dx2+_dy2*_dy2)-_m->s0; _st2--;} \
+              if (_t2==SDF_TAG_SPHERE){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y,_dz2=_npz-_m->v0z; _res2[_rt2++]=__builtin_sqrt(_dx2*_dx2+_dy2*_dy2+_dz2*_dz2)-_m->s0; _st2--;} \
+              else if (_t2==SDF_TAG_BOX){double _cx2=(_m->v0x+_m->v1x)*0.5,_cy2=(_m->v0y+_m->v1y)*0.5,_cz2=(_m->v0z+_m->v1z)*0.5,_ex2=(_m->v1x-_m->v0x)*0.5,_ey2=(_m->v1y-_m->v0y)*0.5,_ez2=(_m->v1z-_m->v0z)*0.5,_qx2=__builtin_fabs(_npx-_cx2)-_ex2,_qy2=__builtin_fabs(_npy-_cy2)-_ey2,_qz2=__builtin_fabs(_npz-_cz2)-_ez2,_mx2=_qx2>_qy2?(_qx2>_qz2?_qx2:_qz2):(_qy2>_qz2?_qy2:_qz2),_lq2=__builtin_sqrt((_qx2>0?_qx2*_qx2:0)+(_qy2>0?_qy2*_qy2:0)+(_qz2>0?_qz2*_qz2:0)); _res2[_rt2++]=_lq2+(_mx2<0?_mx2:0); _st2--;} \
+              else if (_t2==SDF_TAG_CYLINDER){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y; _res2[_rt2++]=__builtin_sqrt(_dx2*_dx2+_dy2*_dy2)-_m->s0; _st2--;} \
               else if (_t2==SDF_TAG_PLANE){_res2[_rt2++]=_m->v0x*_npx+_m->v0y*_npy+_m->v0z*_npz+_m->s0; _st2--;} \
               else if (_t2==SDF_TAG_UNION||_t2==SDF_TAG_INTERSECT||_t2==SDF_TAG_DIFF||_t2==SDF_TAG_SMUNION){ \
                 if(_p2==0){_stk2[_st2-1].phase=1;_stk2[_st2].n=_m->left;_stk2[_st2].phase=0;_st2++;} \
@@ -140,14 +139,14 @@
                   if(_t2==SDF_TAG_UNION)_res2[_rt2++]=_ll<_rr?_ll:_rr; \
                   else if(_t2==SDF_TAG_INTERSECT)_res2[_rt2++]=_ll>_rr?_ll:_rr; \
                   else if(_t2==SDF_TAG_DIFF){double _nr2=-_rr;_res2[_rt2++]=_ll>_nr2?_ll:_nr2;} \
-                  else{double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_rt2++]=fmin(_ll,_rr)-_h2*_h2*_k2*0.25;} \
+                  else{double _k2=_m->s0,_h2=__builtin_fmax(_k2-__builtin_fabs(_ll-_rr),0.0)/_k2;_res2[_rt2++]=__builtin_fmin(_ll,_rr)-_h2*_h2*_k2*0.25;} \
                   _st2--;} \
               } else if(_t2==SDF_TAG_OFFSET){ \
                 if(_p2==0){_stk2[_st2-1].phase=1;_stk2[_st2].n=_m->left;_stk2[_st2].phase=0;_st2++;} \
                 else{_res2[_rt2-1]+=_m->s0;_st2--;} \
               } else if(_t2==SDF_TAG_SHELL){ \
                 if(_p2==0){_stk2[_st2-1].phase=1;_stk2[_st2].n=_m->left;_stk2[_st2].phase=0;_st2++;} \
-                else{double _d2=_res2[--_rt2];_res2[_rt2++]=fabs(_d2)-_m->s0;_st2--;} \
+                else{double _d2=_res2[--_rt2];_res2[_rt2++]=__builtin_fabs(_d2)-_m->s0;_st2--;} \
               } else { _res2[_rt2++]=1e9; _st2--; } \
             } \
             _res[_res_top++]=_res2[0]; \
@@ -524,7 +523,7 @@
           if (edgeTable[cubeIdx] & (1 << e)) {
             int va = edge_v[e][0], vb = edge_v[e][1];
             double da = cv[va], db = cv[vb];
-            double t = (fabs(da - db) > 1e-9) ? (-da / (db - da)) : 0.5;
+            double t = (__builtin_fabs(da - db) > 1e-9) ? (-da / (db - da)) : 0.5;
             if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
             ex[e] = cx8[va] + t * (cx8[vb] - cx8[va]);
             ey[e] = cy8[va] + t * (cy8[vb] - cy8[va]);
@@ -540,7 +539,7 @@
           double ax=ex[e1]-ex[e0], ay=ey[e1]-ey[e0], az=ez[e1]-ez[e0];
           double bx=ex[e2]-ex[e0], by=ey[e2]-ey[e0], bz=ez[e2]-ez[e0];
           double nx=ay*bz-az*by, ny=az*bx-ax*bz, nz=ax*by-ay*bx;
-          double nl=sqrt(nx*nx+ny*ny+nz*nz);
+          double nl=__builtin_sqrt(nx*nx+ny*ny+nz*nz);
           if (nl > 1e-10) { nx/=nl; ny/=nl; nz/=nl; }
           PUSH_VERT(ex[e0],ey[e0],ez[e0], nx,ny,nz);
           PUSH_VERT(ex[e1],ey[e1],ez[e1], nx,ny,nz);

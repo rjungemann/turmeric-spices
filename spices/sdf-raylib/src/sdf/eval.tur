@@ -1,75 +1,17 @@
 ;;; sdf/eval -- CPU evaluator for SdfExpr trees.
 ;;;
-;;; sdf-eval, sdf-normal-x/y/z, and (Phase 3) sdf->glsl all live here so
-;;; that any drift between the three interpreters is immediately visible
-;;; in code review.
+;;; sdf-eval, sdf-normal-x/y/z live here.  The evaluator uses inline-C with
+;;; hardcoded tag constants so it works correctly even when imported into
+;;; another module (module-level `def` constants are not re-initialized when
+;;; a module is imported, so we avoid relying on them here).
 ;;;
-;;; The evaluator dispatches on the tag returned by sdf-tag and recurses
-;;; via Turmeric function calls.  This is correct but not fast -- use the
-;;; C-level evaluator in raylib/integration.tur for interactive rendering.
+;;; Tag values are duplicated from sdf/expr.tur and must stay in sync.
 ;;;
 ;;; Since: Phase 1
 ;; -------------------------------------------------------------------------
 
 (defmodule sdf/eval
-  (export sdf-eval sdf-normal-x sdf-normal-y sdf-normal-z))
-
-(import sdf/expr :refer [SDF_SPHERE SDF_BOX SDF_CYLINDER SDF_PLANE
-                          SDF_UNION SDF_INTERSECT SDF_DIFFERENCE SDF_SMOOTH_UNION
-                          SDF_OFFSET SDF_SHELL SDF_TRANSLATE
-                          sdf-tag sdf-left sdf-right
-                          sdf-v0x sdf-v0y sdf-v0z
-                          sdf-v1x sdf-v1y sdf-v1z
-                          sdf-s0])
-
-;; ---- private primitive evaluators (inline-C for math) ----
-
-(defn sdf--sphere-eval [cx :float cy :float cz :float r :float
-                        px :float py :float pz :float] :float
-  ```c
-  #include <math.h>
-  double dx=px-cx, dy=py-cy, dz=pz-cz;
-  return sqrt(dx*dx+dy*dy+dz*dz) - r;
-  ```)
-
-(defn sdf--box-eval [lx :float ly :float lz :float
-                     hx :float hy :float hz :float
-                     px :float py :float pz :float] :float
-  ```c
-  #include <math.h>
-  double cx=(lx+hx)*0.5, cy=(ly+hy)*0.5, cz=(lz+hz)*0.5;
-  double ex=(hx-lx)*0.5, ey=(hy-ly)*0.5, ez=(hz-lz)*0.5;
-  double qx=fabs(px-cx)-ex, qy=fabs(py-cy)-ey, qz=fabs(pz-cz)-ez;
-  double mx=qx>qy?(qx>qz?qx:qz):(qy>qz?qy:qz);
-  double lenq=sqrt((qx>0?qx*qx:0)+(qy>0?qy*qy:0)+(qz>0?qz*qz:0));
-  return lenq + (mx<0?mx:0);
-  ```)
-
-(defn sdf--cylinder-eval [cx :float cy :float cz :float r :float
-                           px :float py :float pz :float] :float
-  ```c
-  #include <math.h>
-  double dx=px-cx, dy=py-cy;
-  return sqrt(dx*dx+dy*dy) - r;
-  ```)
-
-(defn sdf--plane-eval [nx :float ny :float nz :float d :float
-                       px :float py :float pz :float] :float
-  ```c
-  return nx*px + ny*py + nz*pz + d;
-  ```)
-
-(defn sdf--smooth-union-eval [l :float r :float k :float] :float
-  ```c
-  #include <math.h>
-  double h = fmax(k - fabs(l-r), 0.0) / k;
-  return fmin(l,r) - h*h*k*0.25;
-  ```)
-
-(defn sdf--fabs [x :float] :float
-  ```c
-  return x < 0.0 ? -x : x;
-  ```)
+  (export sdf-eval sdf-normal-x sdf-normal-y sdf-normal-z)
 
 ;; ---- public API ----
 
@@ -87,49 +29,110 @@
 ;;;
 ;;; Since: Phase 1
 (defn sdf-eval [e :int px :float py :float pz :float] :float
-  (let [tag (sdf-tag e)]
-    (cond
-      (= tag SDF_SPHERE)
-        (sdf--sphere-eval (sdf-v0x e) (sdf-v0y e) (sdf-v0z e)
-                          (sdf-s0 e) px py pz)
-      (= tag SDF_BOX)
-        (sdf--box-eval (sdf-v0x e) (sdf-v0y e) (sdf-v0z e)
-                       (sdf-v1x e) (sdf-v1y e) (sdf-v1z e)
-                       px py pz)
-      (= tag SDF_CYLINDER)
-        (sdf--cylinder-eval (sdf-v0x e) (sdf-v0y e) (sdf-v0z e)
-                            (sdf-s0 e) px py pz)
-      (= tag SDF_PLANE)
-        (sdf--plane-eval (sdf-v0x e) (sdf-v0y e) (sdf-v0z e)
-                         (sdf-s0 e) px py pz)
-      (= tag SDF_UNION)
-        (let [dl (sdf-eval (sdf-left e) px py pz)
-              dr (sdf-eval (sdf-right e) px py pz)]
-          (if (< dl dr) dl dr))
-      (= tag SDF_INTERSECT)
-        (let [dl (sdf-eval (sdf-left e) px py pz)
-              dr (sdf-eval (sdf-right e) px py pz)]
-          (if (> dl dr) dl dr))
-      (= tag SDF_DIFFERENCE)
-        (let [dl  (sdf-eval (sdf-left e) px py pz)
-              dr  (sdf-eval (sdf-right e) px py pz)
-              ndr (- 0.0 dr)]
-          (if (> dl ndr) dl ndr))
-      (= tag SDF_SMOOTH_UNION)
-        (sdf--smooth-union-eval
-          (sdf-eval (sdf-left e)  px py pz)
-          (sdf-eval (sdf-right e) px py pz)
-          (sdf-s0 e))
-      (= tag SDF_OFFSET)
-        (+ (sdf-eval (sdf-left e) px py pz) (sdf-s0 e))
-      (= tag SDF_SHELL)
-        (- (sdf--fabs (sdf-eval (sdf-left e) px py pz)) (sdf-s0 e))
-      (= tag SDF_TRANSLATE)
-        (sdf-eval (sdf-left e)
-                  (- px (sdf-v0x e))
-                  (- py (sdf-v0y e))
-                  (- pz (sdf-v0z e)))
-      :else 1.0e9)))
+  ```c
+  /* Tag constants -- must stay in sync with sdf/expr.tur */
+  typedef struct _sdf_nd {
+    int64_t tag;
+    double v0x, v0y, v0z, v1x, v1y, v1z, s0, s1;
+    struct _sdf_nd *left, *right;
+  } _sdf_nd;
+  enum {
+    ET_SPHERE=0, ET_BOX=1, ET_CYLINDER=2, ET_PLANE=3,
+    ET_TORUS=4, ET_CAPSULE=5,
+    ET_UNION=10, ET_INTERSECT=11, ET_DIFFERENCE=12,
+    ET_SMOOTH_UNION=13, ET_SMOOTH_INTERSECT=14,
+    ET_OFFSET=20, ET_SHELL=21,
+    ET_TRANSLATE=30, ET_REPEAT_INF=40, ET_REPEAT_FIN=41
+  };
+  /* sdf__eval__sdf_eval is our own C name -- use it for recursive calls */
+  #define _EVAL(n,x,y,z) sdf__eval__sdf_eval((int64_t)(intptr_t)(n),(x),(y),(z))
+
+  _sdf_nd *n = (_sdf_nd *)(intptr_t)e;
+  if (!n) return 1.0e9;
+  int64_t tag = n->tag;
+
+  if (tag == ET_SPHERE) {
+    double dx=px-n->v0x, dy=py-n->v0y, dz=pz-n->v0z;
+    return __builtin_sqrt(dx*dx+dy*dy+dz*dz) - n->s0;
+  }
+  if (tag == ET_BOX) {
+    double cx=(n->v0x+n->v1x)*0.5, cy=(n->v0y+n->v1y)*0.5, cz=(n->v0z+n->v1z)*0.5;
+    double ex=(n->v1x-n->v0x)*0.5, ey=(n->v1y-n->v0y)*0.5, ez=(n->v1z-n->v0z)*0.5;
+    double qx=__builtin_fabs(px-cx)-ex, qy=__builtin_fabs(py-cy)-ey, qz=__builtin_fabs(pz-cz)-ez;
+    double mx=qx>qy?(qx>qz?qx:qz):(qy>qz?qy:qz);
+    double lq=__builtin_sqrt((qx>0?qx*qx:0)+(qy>0?qy*qy:0)+(qz>0?qz*qz:0));
+    return lq + (mx<0?mx:0);
+  }
+  if (tag == ET_CYLINDER) {
+    double dx=px-n->v0x, dz=pz-n->v0z;
+    return __builtin_sqrt(dx*dx+dz*dz) - n->s0;
+  }
+  if (tag == ET_PLANE) {
+    return n->v0x*px + n->v0y*py + n->v0z*pz + n->s0;
+  }
+  if (tag == ET_TORUS) {
+    double qx=__builtin_sqrt((px-n->v0x)*(px-n->v0x)+(pz-n->v0z)*(pz-n->v0z))-n->s0;
+    double qy=py-n->v0y;
+    return __builtin_sqrt(qx*qx+qy*qy)-n->s1;
+  }
+  if (tag == ET_CAPSULE) {
+    double pax=px-n->v0x, pay=py-n->v0y, paz=pz-n->v0z;
+    double bax=n->v1x-n->v0x, bay=n->v1y-n->v0y, baz=n->v1z-n->v0z;
+    double dbb=bax*bax+bay*bay+baz*baz, h=0.0;
+    if (dbb>1e-15){h=(pax*bax+pay*bay+paz*baz)/dbb;if(h<0.0)h=0.0;else if(h>1.0)h=1.0;}
+    double dx=pax-bax*h, dy=pay-bay*h, dz=paz-baz*h;
+    return __builtin_sqrt(dx*dx+dy*dy+dz*dz)-n->s0;
+  }
+  if (tag == ET_UNION) {
+    double l=_EVAL(n->left,px,py,pz), r=_EVAL(n->right,px,py,pz);
+    return l<r?l:r;
+  }
+  if (tag == ET_INTERSECT) {
+    double l=_EVAL(n->left,px,py,pz), r=_EVAL(n->right,px,py,pz);
+    return l>r?l:r;
+  }
+  if (tag == ET_DIFFERENCE) {
+    double l=_EVAL(n->left,px,py,pz), r=_EVAL(n->right,px,py,pz);
+    return l>-r?l:-r;
+  }
+  if (tag == ET_SMOOTH_UNION) {
+    double l=_EVAL(n->left,px,py,pz), r=_EVAL(n->right,px,py,pz), k=n->s0;
+    if (k <= 0.0) return l < r ? l : r;
+    double h=__builtin_fmax(k-__builtin_fabs(l-r),0.0)/k;
+    return __builtin_fmin(l,r)-h*h*k*0.25;
+  }
+  if (tag == ET_SMOOTH_INTERSECT) {
+    double l=_EVAL(n->left,px,py,pz), r=_EVAL(n->right,px,py,pz), k=n->s0;
+    if (k <= 0.0) return l > r ? l : r;
+    double h=__builtin_fmax(k-__builtin_fabs(l-r),0.0)/k;
+    return __builtin_fmax(l,r)+h*h*k*0.25;
+  }
+  if (tag == ET_OFFSET) {
+    return _EVAL(n->left,px,py,pz)-n->s0;
+  }
+  if (tag == ET_SHELL) {
+    double d=_EVAL(n->left,px,py,pz);
+    return (d<0?-d:d)-n->s0;
+  }
+  if (tag == ET_TRANSLATE) {
+    return _EVAL(n->left, px-n->v0x, py-n->v0y, pz-n->v0z);
+  }
+  if (tag == ET_REPEAT_INF) {
+    double wpx=n->v0x>0?px-n->v0x*__builtin_round(px/n->v0x):px;
+    double wpy=n->v0y>0?py-n->v0y*__builtin_round(py/n->v0y):py;
+    double wpz=n->v0z>0?pz-n->v0z*__builtin_round(pz/n->v0z):pz;
+    return _EVAL(n->left, wpx, wpy, wpz);
+  }
+  if (tag == ET_REPEAT_FIN) {
+    double wpx,wpy,wpz,rd;
+    if(n->v0x>0){rd=__builtin_round(px/n->v0x);if(rd<-n->v1x)rd=-n->v1x;else if(rd>n->v1x)rd=n->v1x;wpx=px-n->v0x*rd;}else wpx=px;
+    if(n->v0y>0){rd=__builtin_round(py/n->v0y);if(rd<-n->v1y)rd=-n->v1y;else if(rd>n->v1y)rd=n->v1y;wpy=py-n->v0y*rd;}else wpy=py;
+    if(n->v0z>0){rd=__builtin_round(pz/n->v0z);if(rd<-n->v1z)rd=-n->v1z;else if(rd>n->v1z)rd=n->v1z;wpz=pz-n->v0z*rd;}else wpz=pz;
+    return _EVAL(n->left, wpx, wpy, wpz);
+  }
+  #undef _EVAL
+  return 1.0e9;
+  ```)
 
 ;;; sdf-normal-x -- x component of the surface normal at (px,py,pz).
 ;;;

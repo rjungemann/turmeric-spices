@@ -3,20 +3,24 @@
 ;; Tests that the SDF evaluator returns the correct signed distances for
 ;; leaf primitives at known query points.
 
+(defmodule primitives_test
+  (export)
+
 (import sdf/primitives :refer [sdf-sphere sdf-box sdf-cylinder sdf-plane])
 (import sdf/eval       :refer [sdf-eval])
 (import sdf/expr       :refer [sdf-free])
 
-(defn approx= [a :float b :float] :int
+(defn approx= [a :float b :float] :bool
   ```c
   double diff = a - b; if (diff < 0) diff = -diff;
-  return diff < 0.01 ? 1 : 0;
+  return diff < 0.01;
   ```)
 
-(defn print-result [label :cstr pass :int total :int] :void
+(defn print-and-check [label :cstr pass :int total :int] :int
   ```c
   #include <stdio.h>
   printf("%s: %d/%d passed\n", (const char*)(intptr_t)label, (int)pass, (int)total);
+  return pass == total ? 0 : 1;
   ```)
 
 ;; ---- sphere tests ----
@@ -84,5 +88,6 @@
                             (+ (test-box-on-face)
                                (+ (test-plane-above)
                                   (test-plane-below))))))))]
-    (print-result "primitives" pass 8)
-    (if (= pass 8) 0 1)))
+    (print-and-check "primitives" pass 8)))
+
+) ;; end defmodule primitives_test

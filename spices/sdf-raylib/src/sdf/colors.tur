@@ -14,14 +14,19 @@
 
 (defmodule sdf/colors
   (export colored-sphere colored-box colored-cylinder colored-plane
+          colored-torus colored-capsule
           colored-union colored-intersection colored-difference colored-smooth-union
-          colored-translate
+          colored-smooth-intersection
+          colored-translate colored-repeat-inf colored-repeat-fin
           csdf-sdf csdf-left csdf-right
           csdf-r csdf-g csdf-b csdf-object-id
-          csdf-free))
+          csdf-free)
 
-(import sdf/primitives :refer [sdf-sphere sdf-box sdf-cylinder sdf-plane])
+(import sdf/primitives :refer [sdf-sphere sdf-box sdf-cylinder sdf-plane
+                                sdf-torus sdf-capsule])
 (import sdf/boolean    :refer [sdf-union sdf-intersection sdf-difference sdf-smooth-union])
+(import sdf/blend      :refer [sdf-smooth-intersection])
+(import sdf/expr       :refer [SDF_REPEAT_INF SDF_REPEAT_FIN])
 
 ;; ---- private allocators ----
 
@@ -353,6 +358,142 @@
   colored_node *wrap = (colored_node *)calloc(1, sizeof(colored_node));
   if (!wrap) { free(tn); return 0; }
   wrap->sdf = (int64_t)(intptr_t)tn;
+  wrap->object_id = -1;
+  wrap->left_cn  = child;
+  wrap->right_cn = NULL;
+  return (int64_t)(intptr_t)wrap;
+  ```)
+
+;;; colored-torus -- torus with a fixed surface color.
+;;;
+;;; Parameters:
+;;;   cx cy cz    -- centre position
+;;;   big-r       -- ring radius
+;;;   small-r     -- tube radius
+;;;   cr cg cb    -- diffuse RGB color in [0, 1]
+;;;   objid       -- object ID (>= 0)
+;;;
+;;; Example:
+;;;   (colored-torus 0.0 0.0 0.0 1.5 0.3  0.8 0.3 0.1  5)
+;;;
+;;; Since: Phase 5
+(defn colored-torus [cx :float cy :float cz :float
+                     big-r :float small-r :float
+                     cr :float cg :float cb :float objid :int] :int
+  (csdf--make-leaf (sdf-torus cx cy cz big-r small-r) cr cg cb objid))
+
+;;; colored-capsule -- capsule with a fixed surface color.
+;;;
+;;; Parameters:
+;;;   ax ay az    -- endpoint A
+;;;   bx by bz    -- endpoint B
+;;;   r           -- capsule radius
+;;;   cr cg cb    -- diffuse RGB color in [0, 1]
+;;;   objid       -- object ID (>= 0)
+;;;
+;;; Example:
+;;;   (colored-capsule 0.0 -1.0 0.0  0.0 1.0 0.0  0.4  0.2 0.7 0.9  6)
+;;;
+;;; Since: Phase 5
+(defn colored-capsule [ax :float ay :float az :float
+                       bx :float by :float bz :float r :float
+                       cr :float cg :float cb :float objid :int] :int
+  (csdf--make-leaf (sdf-capsule ax ay az bx by bz r) cr cg cb objid))
+
+;;; colored-smooth-intersection -- smooth CSG intersection of two colored SDFs.
+;;;
+;;; The surface color follows the max-winner (same as colored-intersection).
+;;;
+;;; Parameters:
+;;;   a b -- ColoredSDF handles
+;;;   k   -- blend radius (>= 0)
+;;;
+;;; Since: Phase 5
+(defn colored-smooth-intersection [a :int b :int k :float] :int
+  (csdf--make-node (sdf-smooth-intersection (csdf-sdf a) (csdf-sdf b) k) a b))
+
+;;; colored-repeat-inf -- infinite repetition of a colored SDF.
+;;;
+;;; The period on each axis is specified separately; a period of 0 disables
+;;; repetition on that axis.  Color attribution passes through to the child.
+;;;
+;;; Parameters:
+;;;   cn       -- ColoredSDF handle to repeat
+;;;   px py pz -- repetition period per axis (0 = no repetition on that axis)
+;;;
+;;; Example:
+;;;   (colored-repeat-inf (colored-sphere 0.0 0.0 0.0 0.3  1.0 0.0 0.0  1)
+;;;                        1.5 1.5 1.5)
+;;;
+;;; Since: Phase 5
+(defn colored-repeat-inf [cn :int px :float py :float pz :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct colored_node {
+    int64_t sdf; float r,g,b; int32_t object_id;
+    struct colored_node *left_cn, *right_cn;
+  } colored_node;
+  typedef struct sdf_node {
+    int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1;
+    struct sdf_node *left, *right;
+  } sdf_node;
+  colored_node *child = (colored_node *)(intptr_t)cn;
+  if (!child) return 0;
+  sdf_node *child_sdf = (sdf_node *)(intptr_t)child->sdf;
+  sdf_node *rn = (sdf_node *)calloc(1, sizeof(sdf_node));
+  if (!rn) return 0;
+  rn->tag = 40; /* SDF_REPEAT_INF */
+  rn->v0x = px; rn->v0y = py; rn->v0z = pz;
+  rn->left = child_sdf;
+  colored_node *wrap = (colored_node *)calloc(1, sizeof(colored_node));
+  if (!wrap) { free(rn); return 0; }
+  wrap->sdf = (int64_t)(intptr_t)rn;
+  wrap->object_id = -1;
+  wrap->left_cn  = child;
+  wrap->right_cn = NULL;
+  return (int64_t)(intptr_t)wrap;
+  ```)
+
+;;; colored-repeat-fin -- finite repetition of a colored SDF.
+;;;
+;;; Like colored-repeat-inf but clamps to [-lx..lx] x [-ly..ly] x [-lz..lz]
+;;; cell indices.  Color attribution passes through to the child.
+;;;
+;;; Parameters:
+;;;   cn       -- ColoredSDF handle to repeat
+;;;   px py pz -- repetition period per axis (0 = no repetition)
+;;;   lx ly lz -- number of repetitions on each side of the origin
+;;;
+;;; Example:
+;;;   (colored-repeat-fin sphere 2.0 2.0 2.0  3.0 3.0 3.0)
+;;;
+;;; Since: Phase 5
+(defn colored-repeat-fin [cn :int px :float py :float pz :float
+                           lx :float ly :float lz :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct colored_node {
+    int64_t sdf; float r,g,b; int32_t object_id;
+    struct colored_node *left_cn, *right_cn;
+  } colored_node;
+  typedef struct sdf_node {
+    int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1;
+    struct sdf_node *left, *right;
+  } sdf_node;
+  colored_node *child = (colored_node *)(intptr_t)cn;
+  if (!child) return 0;
+  sdf_node *child_sdf = (sdf_node *)(intptr_t)child->sdf;
+  sdf_node *rn = (sdf_node *)calloc(1, sizeof(sdf_node));
+  if (!rn) return 0;
+  rn->tag = 41; /* SDF_REPEAT_FIN */
+  rn->v0x = px; rn->v0y = py; rn->v0z = pz;
+  rn->v1x = lx; rn->v1y = ly; rn->v1z = lz;
+  rn->left = child_sdf;
+  colored_node *wrap = (colored_node *)calloc(1, sizeof(colored_node));
+  if (!wrap) { free(rn); return 0; }
+  wrap->sdf = (int64_t)(intptr_t)rn;
   wrap->object_id = -1;
   wrap->left_cn  = child;
   wrap->right_cn = NULL;

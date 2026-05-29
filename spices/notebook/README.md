@@ -15,6 +15,38 @@ plus an image-hook display system (NB11) and `exec`/`new` CLI subcommands (NB12)
 the docs-site styling changes meaningfully, refresh this file and keep the
 embedded CSS in `src/notebook/render-html.tur` in sync.
 
+## Installation
+
+Install the notebook spice globally with `tur install`:
+
+```sh
+tur install https://github.com/rjungemann/turmeric-spices.git --subdir spices/notebook
+```
+
+This registers the spice so that `nb` is available as a `tur` subcommand.
+Verify the installation:
+
+```sh
+tur nb --help
+```
+
+### Using the spice in a project
+
+To use notebook in an existing Turmeric project, add it as a dependency in
+your `build.tur`:
+
+```turmeric
+(spice notebook "https://github.com/rjungemann/turmeric-spices.git"
+  :subdir "spices/notebook")
+```
+
+Then run `tur fetch` to pull the dependency, and import notebook modules as
+normal:
+
+```turmeric
+(import notebook/image :refer [image-hook-record-path])
+```
+
 ## CLI Subcommands
 
 ```sh

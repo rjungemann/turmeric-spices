@@ -14,13 +14,10 @@
 ;; -------------------------------------------------------------------------
 
 (defmodule glsl/codegen
-  (export csdf->glsl csdf-glsl-free))
+  (export csdf->glsl csdf-glsl-free)
 
-(import sdf/expr   :refer [SDF_SPHERE SDF_BOX SDF_CYLINDER SDF_PLANE
-                             SDF_UNION SDF_INTERSECT SDF_DIFFERENCE SDF_SMOOTH_UNION
-                             SDF_OFFSET SDF_SHELL SDF_TRANSLATE
-                             sdf-tag sdf-v0x sdf-v0y sdf-v0z
-                             sdf-v1x sdf-v1y sdf-v1z sdf-s0])
+(import sdf/expr   :refer [sdf-tag sdf-v0x sdf-v0y sdf-v0z
+                             sdf-v1x sdf-v1y sdf-v1z sdf-s0 sdf-s1])
 (import sdf/colors :refer [csdf-sdf csdf-left csdf-right
                              csdf-r csdf-g csdf-b csdf-object-id])
 
@@ -63,8 +60,8 @@
 (defn sb-str [sb :int] :cstr
   ```c
   typedef struct { char *buf; int len; int cap; } sb_t;
-  if (!sb) return (int64_t)(intptr_t)"";
-  return (int64_t)(intptr_t)((sb_t *)(intptr_t)sb)->buf;
+  if (!sb) return (const char *)(intptr_t)"";
+  return (const char *)(intptr_t)((sb_t *)(intptr_t)sb)->buf;
   ```)
 
 ;;; sb-free -- free the builder and its buffer. Since: Phase 3
@@ -110,7 +107,7 @@
   #include <stdio.h>
   static char _fb[64];
   snprintf(_fb, sizeof(_fb), "%.6f", (double)x);
-  return (int64_t)(intptr_t)_fb;
+  return (const char *)(intptr_t)_fb;
   ```)
 
 ;;; glsl-i -- format an int as a decimal string (static buffer). Since: Phase 3
@@ -119,7 +116,7 @@
   #include <stdio.h>
   static char _ib[32];
   snprintf(_ib, sizeof(_ib), "%d", (int)n);
-  return (int64_t)(intptr_t)_ib;
+  return (const char *)(intptr_t)_ib;
   ```)
 
 ;;; pvar-name -- return "p" for idx 0, "p_N" otherwise (static buffer). Since: Phase 3
@@ -127,9 +124,9 @@
   ```c
   #include <stdio.h>
   static char _pv[32];
-  if ((int)idx == 0) return (int64_t)(intptr_t)"p";
+  if ((int)idx == 0) return (const char *)(intptr_t)"p";
   snprintf(_pv, sizeof(_pv), "p_%d", (int)idx);
-  return (int64_t)(intptr_t)_pv;
+  return (const char *)(intptr_t)_pv;
   ```)
 
 ;; ---- leaf GLSL emission ----
@@ -228,6 +225,61 @@
     (sb-write sb (glsl-f cg)) (sb-write sb ",")
     (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
 
+;;; csdf--emit-torus -- emit GLSL for a torus leaf (ring in XZ plane). Since: Phase 5
+(defn csdf--emit-torus [sdf :int pv-idx :int cr :float cg :float cb :float
+                         objid :int sb :int N :int] :void
+  (let [cx (sdf-v0x sdf) cy (sdf-v0y sdf) cz (sdf-v0z sdf)
+        big-r (sdf-s0 sdf) small-r (sdf-s1 sdf)]
+    (sb-write sb "  vec2 tq_") (sb-write sb (glsl-i N))
+    (sb-write sb " = vec2(length(") (sb-write sb (pvar-name pv-idx))
+    (sb-write sb ".xz - vec2(") (sb-write sb (glsl-f cx)) (sb-write sb ",")
+    (sb-write sb (glsl-f cz)) (sb-write sb ")) - ") (sb-write sb (glsl-f big-r))
+    (sb-write sb ", ") (sb-write sb (pvar-name pv-idx)) (sb-write sb ".y - ")
+    (sb-write sb (glsl-f cy)) (sb-write sb ");\n")
+    (sb-write sb "  float d_") (sb-write sb (glsl-i N))
+    (sb-write sb " = length(tq_") (sb-write sb (glsl-i N))
+    (sb-write sb ") - ") (sb-write sb (glsl-f small-r)) (sb-write sb ";\n")
+    (sb-write sb "  int id_") (sb-write sb (glsl-i N))
+    (sb-write sb " = ") (sb-write sb (glsl-i objid)) (sb-write sb ";\n")
+    (sb-write sb "  vec3 col_") (sb-write sb (glsl-i N))
+    (sb-write sb " = vec3(")
+    (sb-write sb (glsl-f cr)) (sb-write sb ",")
+    (sb-write sb (glsl-f cg)) (sb-write sb ",")
+    (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
+
+;;; csdf--emit-capsule -- emit GLSL for a capsule leaf (A to B with radius r). Since: Phase 5
+(defn csdf--emit-capsule [sdf :int pv-idx :int cr :float cg :float cb :float
+                           objid :int sb :int N :int] :void
+  (let [ax (sdf-v0x sdf) ay (sdf-v0y sdf) az (sdf-v0z sdf)
+        bx (sdf-v1x sdf) by (sdf-v1y sdf) bz (sdf-v1z sdf)
+        r  (sdf-s0 sdf)]
+    (sb-write sb "  vec3 cpa_") (sb-write sb (glsl-i N))
+    (sb-write sb " = ") (sb-write sb (pvar-name pv-idx))
+    (sb-write sb " - vec3(") (sb-write sb (glsl-f ax)) (sb-write sb ",")
+    (sb-write sb (glsl-f ay)) (sb-write sb ",") (sb-write sb (glsl-f az))
+    (sb-write sb ");\n")
+    (sb-write sb "  vec3 cba_") (sb-write sb (glsl-i N))
+    (sb-write sb " = vec3(") (sb-write sb (glsl-f (- bx ax))) (sb-write sb ",")
+    (sb-write sb (glsl-f (- by ay))) (sb-write sb ",")
+    (sb-write sb (glsl-f (- bz az))) (sb-write sb ");\n")
+    (sb-write sb "  float ch_") (sb-write sb (glsl-i N))
+    (sb-write sb " = clamp(dot(cpa_") (sb-write sb (glsl-i N))
+    (sb-write sb ",cba_") (sb-write sb (glsl-i N))
+    (sb-write sb ")/dot(cba_") (sb-write sb (glsl-i N))
+    (sb-write sb ",cba_") (sb-write sb (glsl-i N)) (sb-write sb "),0.0,1.0);\n")
+    (sb-write sb "  float d_") (sb-write sb (glsl-i N))
+    (sb-write sb " = length(cpa_") (sb-write sb (glsl-i N))
+    (sb-write sb " - cba_") (sb-write sb (glsl-i N))
+    (sb-write sb "*ch_") (sb-write sb (glsl-i N))
+    (sb-write sb ") - ") (sb-write sb (glsl-f r)) (sb-write sb ";\n")
+    (sb-write sb "  int id_") (sb-write sb (glsl-i N))
+    (sb-write sb " = ") (sb-write sb (glsl-i objid)) (sb-write sb ";\n")
+    (sb-write sb "  vec3 col_") (sb-write sb (glsl-i N))
+    (sb-write sb " = vec3(")
+    (sb-write sb (glsl-f cr)) (sb-write sb ",")
+    (sb-write sb (glsl-f cg)) (sb-write sb ",")
+    (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
+
 ;; ---- tree walk ----
 
 ;;; csdf--emit-node -- recursively emit GLSL for a ColoredSDF subtree.
@@ -247,27 +299,31 @@
               cr  (csdf-r cn)
               cg  (csdf-g cn)
               cb  (csdf-b cn)]
-          (if (= tag SDF_SPHERE)
+          (if (= tag 0)
             (csdf--emit-sphere sdf pv-idx cr cg cb obj-id sb N)
-            (if (= tag SDF_BOX)
+            (if (= tag 1)
               (csdf--emit-box sdf pv-idx cr cg cb obj-id sb N)
-              (if (= tag SDF_CYLINDER)
+              (if (= tag 2)
                 (csdf--emit-cylinder sdf pv-idx cr cg cb obj-id sb N)
-                (if (= tag SDF_PLANE)
+                (if (= tag 3)
                   (csdf--emit-plane sdf pv-idx cr cg cb obj-id sb N)
-                  ;; Unknown primitive: emit a constant far-field value
-                  (do
-                    (sb-write sb "  float d_") (sb-write sb (glsl-i N))
-                    (sb-write sb " = 1e9;\n")
-                    (sb-write sb "  int id_") (sb-write sb (glsl-i N))
-                    (sb-write sb " = ") (sb-write sb (glsl-i obj-id)) (sb-write sb ";\n")
-                    (sb-write sb "  vec3 col_") (sb-write sb (glsl-i N))
-                    (sb-write sb " = vec3(0.0,0.0,0.0);\n"))))))
+                  (if (= tag 4)
+                    (csdf--emit-torus sdf pv-idx cr cg cb obj-id sb N)
+                    (if (= tag 5)
+                      (csdf--emit-capsule sdf pv-idx cr cg cb obj-id sb N)
+                      ;; Unknown primitive: emit a constant far-field value
+                      (do
+                        (sb-write sb "  float d_") (sb-write sb (glsl-i N))
+                        (sb-write sb " = 1e9;\n")
+                        (sb-write sb "  int id_") (sb-write sb (glsl-i N))
+                        (sb-write sb " = ") (sb-write sb (glsl-i obj-id)) (sb-write sb ";\n")
+                        (sb-write sb "  vec3 col_") (sb-write sb (glsl-i N))
+                        (sb-write sb " = vec3(0.0,0.0,0.0);\n"))))))))
           N)
         ;; Interior node: check the SDF tag to distinguish translate vs binary
         (let [sdf (csdf-sdf cn)
               tag (sdf-tag sdf)]
-          (if (= tag SDF_TRANSLATE)
+          (if (= tag 30)
             ;; Translate: emit new p var, recurse into child with it
             (let [P    (ctr-next ctr)
                   tx   (sdf-v0x sdf)
@@ -280,56 +336,86 @@
               (sb-write sb (glsl-f ty)) (sb-write sb ",")
               (sb-write sb (glsl-f tz)) (sb-write sb ");\n")
               (csdf--emit-node (csdf-left cn) P sb ctr))
-            ;; Binary (union/intersect/diff/smooth-union): recurse both sides
-            (let [L  (csdf--emit-node (csdf-left  cn) pv-idx sb ctr)
-                  R  (csdf--emit-node (csdf-right cn) pv-idx sb ctr)
-                  N  (ctr-next ctr)]
-              (sb-write sb "  float d_") (sb-write sb (glsl-i N))
-              (sb-write sb "; int id_")  (sb-write sb (glsl-i N))
-              (sb-write sb "; vec3 col_") (sb-write sb (glsl-i N)) (sb-write sb ";\n")
-              (if (= tag SDF_UNION)
-                (do
-                  (sb-write sb "  if (d_") (sb-write sb (glsl-i L))
-                  (sb-write sb " < d_")   (sb-write sb (glsl-i R))
-                  (sb-write sb ") { d_")  (sb-write sb (glsl-i N))
-                  (sb-write sb "=d_")     (sb-write sb (glsl-i L))
-                  (sb-write sb "; id_")   (sb-write sb (glsl-i N))
-                  (sb-write sb "=id_")    (sb-write sb (glsl-i L))
-                  (sb-write sb "; col_")  (sb-write sb (glsl-i N))
-                  (sb-write sb "=col_")   (sb-write sb (glsl-i L))
-                  (sb-write sb "; } else { d_") (sb-write sb (glsl-i N))
-                  (sb-write sb "=d_")     (sb-write sb (glsl-i R))
-                  (sb-write sb "; id_")   (sb-write sb (glsl-i N))
-                  (sb-write sb "=id_")    (sb-write sb (glsl-i R))
-                  (sb-write sb "; col_")  (sb-write sb (glsl-i N))
-                  (sb-write sb "=col_")   (sb-write sb (glsl-i R))
-                  (sb-write sb "; }\n"))
-                (if (= tag SDF_SMOOTH_UNION)
-                  (do
-                    ;; Smooth union: blended distance; color follows winner
-                    (sb-write sb "  { float _k=") (sb-write sb (glsl-f (sdf-s0 sdf)))
-                    (sb-write sb "; float _h=max(_k-abs(d_") (sb-write sb (glsl-i L))
-                    (sb-write sb "-d_") (sb-write sb (glsl-i R))
-                    (sb-write sb "),0.0)/_k;\n")
-                    (sb-write sb "    d_") (sb-write sb (glsl-i N))
-                    (sb-write sb "=min(d_") (sb-write sb (glsl-i L))
-                    (sb-write sb ",d_") (sb-write sb (glsl-i R))
-                    (sb-write sb ")-_h*_h*_k*0.25;\n")
-                    (sb-write sb "    if (d_") (sb-write sb (glsl-i L))
-                    (sb-write sb " < d_") (sb-write sb (glsl-i R))
-                    (sb-write sb ") { id_") (sb-write sb (glsl-i N))
-                    (sb-write sb "=id_") (sb-write sb (glsl-i L))
-                    (sb-write sb "; col_") (sb-write sb (glsl-i N))
-                    (sb-write sb "=col_") (sb-write sb (glsl-i L))
-                    (sb-write sb "; } else { id_") (sb-write sb (glsl-i N))
-                    (sb-write sb "=id_") (sb-write sb (glsl-i R))
-                    (sb-write sb "; col_") (sb-write sb (glsl-i N))
-                    (sb-write sb "=col_") (sb-write sb (glsl-i R))
-                    (sb-write sb "; } }\n"))
-                  (if (= tag SDF_INTERSECT)
+            (if (= tag 40)
+              ;; Infinite repetition: modular warp of query point
+              (let [P   (ctr-next ctr)
+                    px  (sdf-v0x sdf)
+                    py  (sdf-v0y sdf)
+                    pz  (sdf-v0z sdf)]
+                (sb-write sb "  vec3 p_") (sb-write sb (glsl-i P))
+                (sb-write sb " = vec3(")
+                (if (> px 0.0)
+                  (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".x - ")
+                      (sb-write sb (glsl-f px)) (sb-write sb "*round(")
+                      (sb-write sb (pvar-name pv-idx)) (sb-write sb ".x/")
+                      (sb-write sb (glsl-f px)) (sb-write sb ")"))
+                  (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".x")))
+                (sb-write sb ",")
+                (if (> py 0.0)
+                  (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".y - ")
+                      (sb-write sb (glsl-f py)) (sb-write sb "*round(")
+                      (sb-write sb (pvar-name pv-idx)) (sb-write sb ".y/")
+                      (sb-write sb (glsl-f py)) (sb-write sb ")"))
+                  (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".y")))
+                (sb-write sb ",")
+                (if (> pz 0.0)
+                  (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".z - ")
+                      (sb-write sb (glsl-f pz)) (sb-write sb "*round(")
+                      (sb-write sb (pvar-name pv-idx)) (sb-write sb ".z/")
+                      (sb-write sb (glsl-f pz)) (sb-write sb ")"))
+                  (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".z")))
+                (sb-write sb ");\n")
+                (csdf--emit-node (csdf-left cn) P sb ctr))
+              (if (= tag 41)
+                ;; Finite repetition: modular warp clamped to limit
+                (let [P   (ctr-next ctr)
+                      px  (sdf-v0x sdf)
+                      py  (sdf-v0y sdf)
+                      pz  (sdf-v0z sdf)
+                      lx  (sdf-v1x sdf)
+                      ly  (sdf-v1y sdf)
+                      lz  (sdf-v1z sdf)]
+                  (sb-write sb "  vec3 p_") (sb-write sb (glsl-i P))
+                  (sb-write sb " = vec3(")
+                  (if (> px 0.0)
+                    (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".x - ")
+                        (sb-write sb (glsl-f px)) (sb-write sb "*clamp(round(")
+                        (sb-write sb (pvar-name pv-idx)) (sb-write sb ".x/")
+                        (sb-write sb (glsl-f px)) (sb-write sb "),")
+                        (sb-write sb (glsl-f (- 0.0 lx))) (sb-write sb ",")
+                        (sb-write sb (glsl-f lx)) (sb-write sb ")"))
+                    (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".x")))
+                  (sb-write sb ",")
+                  (if (> py 0.0)
+                    (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".y - ")
+                        (sb-write sb (glsl-f py)) (sb-write sb "*clamp(round(")
+                        (sb-write sb (pvar-name pv-idx)) (sb-write sb ".y/")
+                        (sb-write sb (glsl-f py)) (sb-write sb "),")
+                        (sb-write sb (glsl-f (- 0.0 ly))) (sb-write sb ",")
+                        (sb-write sb (glsl-f ly)) (sb-write sb ")"))
+                    (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".y")))
+                  (sb-write sb ",")
+                  (if (> pz 0.0)
+                    (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".z - ")
+                        (sb-write sb (glsl-f pz)) (sb-write sb "*clamp(round(")
+                        (sb-write sb (pvar-name pv-idx)) (sb-write sb ".z/")
+                        (sb-write sb (glsl-f pz)) (sb-write sb "),")
+                        (sb-write sb (glsl-f (- 0.0 lz))) (sb-write sb ",")
+                        (sb-write sb (glsl-f lz)) (sb-write sb ")"))
+                    (do (sb-write sb (pvar-name pv-idx)) (sb-write sb ".z")))
+                  (sb-write sb ");\n")
+                  (csdf--emit-node (csdf-left cn) P sb ctr))
+                ;; Binary (union/intersect/diff/smooth-union/smooth-intersect): recurse both sides
+                (let [L  (csdf--emit-node (csdf-left  cn) pv-idx sb ctr)
+                      R  (csdf--emit-node (csdf-right cn) pv-idx sb ctr)
+                      N  (ctr-next ctr)]
+                  (sb-write sb "  float d_") (sb-write sb (glsl-i N))
+                  (sb-write sb "; int id_")  (sb-write sb (glsl-i N))
+                  (sb-write sb "; vec3 col_") (sb-write sb (glsl-i N)) (sb-write sb ";\n")
+                  (if (= tag 10)
                     (do
                       (sb-write sb "  if (d_") (sb-write sb (glsl-i L))
-                      (sb-write sb " >= d_")  (sb-write sb (glsl-i R))
+                      (sb-write sb " < d_")   (sb-write sb (glsl-i R))
                       (sb-write sb ") { d_")  (sb-write sb (glsl-i N))
                       (sb-write sb "=d_")     (sb-write sb (glsl-i L))
                       (sb-write sb "; id_")   (sb-write sb (glsl-i N))
@@ -343,38 +429,98 @@
                       (sb-write sb "; col_")  (sb-write sb (glsl-i N))
                       (sb-write sb "=col_")   (sb-write sb (glsl-i R))
                       (sb-write sb "; }\n"))
-                    ;; SDF_DIFFERENCE: max(dL, -dR)
-                    (do
-                      (sb-write sb "  { float _dRn=-d_") (sb-write sb (glsl-i R))
-                      (sb-write sb ";\n")
-                      (sb-write sb "    if (d_") (sb-write sb (glsl-i L))
-                      (sb-write sb " >= _dRn) { d_") (sb-write sb (glsl-i N))
-                      (sb-write sb "=d_")     (sb-write sb (glsl-i L))
-                      (sb-write sb "; id_")   (sb-write sb (glsl-i N))
-                      (sb-write sb "=id_")    (sb-write sb (glsl-i L))
-                      (sb-write sb "; col_")  (sb-write sb (glsl-i N))
-                      (sb-write sb "=col_")   (sb-write sb (glsl-i L))
-                      (sb-write sb "; } else { d_") (sb-write sb (glsl-i N))
-                      (sb-write sb "=_dRn")
-                      (sb-write sb "; id_")   (sb-write sb (glsl-i N))
-                      (sb-write sb "=id_")    (sb-write sb (glsl-i R))
-                      (sb-write sb "; col_")  (sb-write sb (glsl-i N))
-                      (sb-write sb "=col_")   (sb-write sb (glsl-i R))
-                      (sb-write sb "; } }\n")))))
-              N)))))))
+                    (if (= tag 13)
+                      (do
+                        (sb-write sb "  { float _k=") (sb-write sb (glsl-f (sdf-s0 sdf)))
+                        (sb-write sb "; float _h=max(_k-abs(d_") (sb-write sb (glsl-i L))
+                        (sb-write sb "-d_") (sb-write sb (glsl-i R))
+                        (sb-write sb "),0.0)/_k;\n")
+                        (sb-write sb "    d_") (sb-write sb (glsl-i N))
+                        (sb-write sb "=min(d_") (sb-write sb (glsl-i L))
+                        (sb-write sb ",d_") (sb-write sb (glsl-i R))
+                        (sb-write sb ")-_h*_h*_k*0.25;\n")
+                        (sb-write sb "    if (d_") (sb-write sb (glsl-i L))
+                        (sb-write sb " < d_") (sb-write sb (glsl-i R))
+                        (sb-write sb ") { id_") (sb-write sb (glsl-i N))
+                        (sb-write sb "=id_") (sb-write sb (glsl-i L))
+                        (sb-write sb "; col_") (sb-write sb (glsl-i N))
+                        (sb-write sb "=col_") (sb-write sb (glsl-i L))
+                        (sb-write sb "; } else { id_") (sb-write sb (glsl-i N))
+                        (sb-write sb "=id_") (sb-write sb (glsl-i R))
+                        (sb-write sb "; col_") (sb-write sb (glsl-i N))
+                        (sb-write sb "=col_") (sb-write sb (glsl-i R))
+                        (sb-write sb "; } }\n"))
+                      (if (= tag 11)
+                        (do
+                          (sb-write sb "  if (d_") (sb-write sb (glsl-i L))
+                          (sb-write sb " >= d_")  (sb-write sb (glsl-i R))
+                          (sb-write sb ") { d_")  (sb-write sb (glsl-i N))
+                          (sb-write sb "=d_")     (sb-write sb (glsl-i L))
+                          (sb-write sb "; id_")   (sb-write sb (glsl-i N))
+                          (sb-write sb "=id_")    (sb-write sb (glsl-i L))
+                          (sb-write sb "; col_")  (sb-write sb (glsl-i N))
+                          (sb-write sb "=col_")   (sb-write sb (glsl-i L))
+                          (sb-write sb "; } else { d_") (sb-write sb (glsl-i N))
+                          (sb-write sb "=d_")     (sb-write sb (glsl-i R))
+                          (sb-write sb "; id_")   (sb-write sb (glsl-i N))
+                          (sb-write sb "=id_")    (sb-write sb (glsl-i R))
+                          (sb-write sb "; col_")  (sb-write sb (glsl-i N))
+                          (sb-write sb "=col_")   (sb-write sb (glsl-i R))
+                          (sb-write sb "; }\n"))
+                        (if (= tag 14)
+                          ;; Smooth intersection: smooth max
+                          (do
+                            (sb-write sb "  { float _k=") (sb-write sb (glsl-f (sdf-s0 sdf)))
+                            (sb-write sb "; float _h=max(_k-abs(d_") (sb-write sb (glsl-i L))
+                            (sb-write sb "-d_") (sb-write sb (glsl-i R))
+                            (sb-write sb "),0.0)/_k;\n")
+                            (sb-write sb "    d_") (sb-write sb (glsl-i N))
+                            (sb-write sb "=max(d_") (sb-write sb (glsl-i L))
+                            (sb-write sb ",d_") (sb-write sb (glsl-i R))
+                            (sb-write sb ")+_h*_h*_k*0.25;\n")
+                            (sb-write sb "    if (d_") (sb-write sb (glsl-i L))
+                            (sb-write sb " >= d_") (sb-write sb (glsl-i R))
+                            (sb-write sb ") { id_") (sb-write sb (glsl-i N))
+                            (sb-write sb "=id_") (sb-write sb (glsl-i L))
+                            (sb-write sb "; col_") (sb-write sb (glsl-i N))
+                            (sb-write sb "=col_") (sb-write sb (glsl-i L))
+                            (sb-write sb "; } else { id_") (sb-write sb (glsl-i N))
+                            (sb-write sb "=id_") (sb-write sb (glsl-i R))
+                            (sb-write sb "; col_") (sb-write sb (glsl-i N))
+                            (sb-write sb "=col_") (sb-write sb (glsl-i R))
+                            (sb-write sb "; } }\n"))
+                          ;; 12: max(dL, -dR)
+                          (do
+                            (sb-write sb "  { float _dRn=-d_") (sb-write sb (glsl-i R))
+                            (sb-write sb ";\n")
+                            (sb-write sb "    if (d_") (sb-write sb (glsl-i L))
+                            (sb-write sb " >= _dRn) { d_") (sb-write sb (glsl-i N))
+                            (sb-write sb "=d_")     (sb-write sb (glsl-i L))
+                            (sb-write sb "; id_")   (sb-write sb (glsl-i N))
+                            (sb-write sb "=id_")    (sb-write sb (glsl-i L))
+                            (sb-write sb "; col_")  (sb-write sb (glsl-i N))
+                            (sb-write sb "=col_")   (sb-write sb (glsl-i L))
+                            (sb-write sb "; } else { d_") (sb-write sb (glsl-i N))
+                            (sb-write sb "=_dRn")
+                            (sb-write sb "; id_")   (sb-write sb (glsl-i N))
+                            (sb-write sb "=id_")    (sb-write sb (glsl-i R))
+                            (sb-write sb "; col_")  (sb-write sb (glsl-i N))
+                            (sb-write sb "=col_")   (sb-write sb (glsl-i R))
+                            (sb-write sb "; } }\n"))))))
+                  N)))))))))
 
 ;;; glsl--strdup -- heap-duplicate a C string. Since: Phase 3
 (defn glsl--strdup [s :cstr] :cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
-  if (!s) return (int64_t)(intptr_t)"";
+  if (!s) return (const char *)(intptr_t)"";
   const char *src = (const char *)(intptr_t)s;
   int len = (int)strlen(src);
   char *d = (char *)malloc(len + 1);
-  if (!d) return (int64_t)(intptr_t)"";
+  if (!d) return (const char *)(intptr_t)"";
   memcpy(d, src, len + 1);
-  return (int64_t)(intptr_t)d;
+  return (const char *)(intptr_t)d;
   ```)
 
 ;; ---- public API ----

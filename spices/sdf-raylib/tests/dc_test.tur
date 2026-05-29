@@ -3,6 +3,9 @@
 ;;; Since: Phase 4
 ;; -------------------------------------------------------------------------
 
+(defmodule dc_test
+  (export)
+
 (import sdf/colors :refer [colored-sphere colored-box colored-union
                             colored-translate csdf-free])
 (import mesh/extraction   :refer [dc-extract-colored
@@ -16,14 +19,21 @@
 
 ;; ---- helpers ----
 
-(defn approx= [a :float b :float] :int
-  (let [diff (if (> a b) (- a b) (- b a))]
-    (if (< diff 0.02) 1 0)))
+(defn approx= [a :float b :float] :bool
+  ```c
+  double diff = a - b; if (diff < 0) diff = -diff;
+  return diff < 0.02;
+  ```)
 
-(defn assert! [cond :int msg :cstr] :void
-  (if (= cond 0)
-    (do (println msg) (exit 1))
-    0))
+(defn assert! [cond :bool msg :cstr] :void
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  if (!cond) {
+    fprintf(stderr, "%s\n", (const char *)(intptr_t)msg);
+    exit(1);
+  }
+  ```)
 
 ;; ---- test 1: dc-extract-colored on a single colored sphere ----
 
@@ -58,8 +68,8 @@
     (let [n    (cmesh-vertex-count mesh)
           oi0  (cmesh-get-object-id mesh 0)
           oiM  (cmesh-get-object-id mesh (/ n 2))]
-      (assert! (> (+ (= oi0 1) (= oi0 2)) 0) "dc union: vertex 0 should be obj 1 or 2")
-      (assert! (> (+ (= oiM 1) (= oiM 2)) 0) "dc union: mid vertex should be obj 1 or 2"))
+      (assert! (if (= oi0 1) true (= oi0 2)) "dc union: vertex 0 should be obj 1 or 2")
+      (assert! (if (= oiM 1) true (= oiM 2)) "dc union: mid vertex should be obj 1 or 2"))
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -123,3 +133,5 @@
     (println "test-export-glb: PASS")
     (println "All Phase 4 DC tests passed.")
     0))
+
+) ;; end defmodule dc_test

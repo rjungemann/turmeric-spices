@@ -3,6 +3,9 @@
 ;;; Since: Phase 2
 ;; -------------------------------------------------------------------------
 
+(defmodule color_test
+  (export)
+
 (import sdf/colors :refer [colored-sphere colored-box colored-cylinder
                             colored-union colored-intersection colored-difference
                             colored-translate csdf-sdf csdf-free])
@@ -14,14 +17,21 @@
 
 ;; ---- helpers ----
 
-(defn approx= [a :float b :float] :int
-  (let [diff (if (> a b) (- a b) (- b a))]
-    (if (< diff 0.01) 1 0)))
+(defn approx= [a :float b :float] :bool
+  ```c
+  double diff = a - b; if (diff < 0) diff = -diff;
+  return diff < 0.01;
+  ```)
 
-(defn assert! [cond :int msg :cstr] :void
-  (if (= cond 0)
-    (do (println msg) (exit 1))
-    0))
+(defn assert! [cond :bool msg :cstr] :void
+  ```c
+  #include <stdio.h>
+  #include <stdlib.h>
+  if (!cond) {
+    fprintf(stderr, "%s\n", (const char *)(intptr_t)msg);
+    exit(1);
+  }
+  ```)
 
 ;; ---- test 1: colored-sphere csdf-sdf evaluates correctly ----
 
@@ -107,15 +117,11 @@
     (assert! (> mesh 0) "union mesh should be non-zero")
     (assert! (> (cmesh-vertex-count mesh) 0) "union mesh should have vertices")
     ;; Check that both object IDs appear in the mesh
-    (let [n    (cmesh-vertex-count mesh)
-          saw1 0
-          saw2 0]
-      ;; Walk vertices to find object IDs 1 and 2
-      ;; (simple scan without stdlib, just check a few)
+    (let [n    (cmesh-vertex-count mesh)]
       (let [oi0 (cmesh-get-object-id mesh 0)
             oi1 (cmesh-get-object-id mesh (/ n 2))]
-        (assert! (> (+ (= oi0 1) (= oi0 2)) 0) "vertex 0 should belong to obj 1 or 2")
-        (assert! (> (+ (= oi1 1) (= oi1 2)) 0) "midpoint vertex should belong to obj 1 or 2")))
+        (assert! (if (= oi0 1) true (= oi0 2)) "vertex 0 should belong to obj 1 or 2")
+        (assert! (if (= oi1 1) true (= oi1 2)) "midpoint vertex should belong to obj 1 or 2")))
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -167,3 +173,5 @@
     (println "test-colored-translate: PASS")
     (println "All Phase 2 color tests passed.")
     0))
+
+) ;; end defmodule color_test
