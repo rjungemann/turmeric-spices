@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tur/sdf/eval | Turmeric API</title>
+<title>tur/sdf/blend | Turmeric API</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -111,69 +111,41 @@
   <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
   <h3>Exported</h3>
   <ul>
-    <li><a href="#sdf-eval">sdf-eval</a></li>
-    <li><a href="#sdf-normal-x">sdf-normal-x</a></li>
-    <li><a href="#sdf-normal-y">sdf-normal-y</a></li>
-    <li><a href="#sdf-normal-z">sdf-normal-z</a></li>
+    <li><a href="#sdf-smooth-intersection">sdf-smooth-intersection</a></li>
   </ul>
 </div>
 <div class="content">
   <div class="module-heading">
-    <h1>sdf/eval</h1>
-    <div class="module-path">src/sdf/eval.tur</div>
+    <h1>sdf/blend</h1>
+    <div class="module-path">src/sdf/blend.tur</div>
   </div>
   <div class="module-doc">
-    <p class="module-doc-summary">CPU evaluator for SdfExpr trees.</p>
-    <p class="def-since">Since: Phase 1</p>
+    <p class="module-doc-summary">smooth blending operations on SdfExpr trees.</p>
+    <p class="def-since">Since: Phase 5</p>
   </div>
-<div class="def-card" id="sdf-eval">
+<div class="def-card" id="sdf-smooth-intersection">
   <div class="def-card-header">
     <span class="kind-badge kind-defn">defn</span>
-    <h2>sdf-eval</h2>
+    <h2>sdf-smooth-intersection</h2>
   </div>
-  <pre class="def-signature">(sdf-eval [e :int px :float py :float pz :float] :float)</pre>
-  <p class="def-summary">evaluate an SdfExpr at point (px, py, pz).</p>
+  <pre class="def-signature">(sdf-smooth-intersection [a :int b :int k :float] :int)</pre>
+  <p class="def-summary">smooth CSG intersection (smooth max).</p>
   <div class="def-section">
     <div class="def-section-label">Parameters</div>
     <table class="param-table">
-    <tr><td>e</td><td></td><td>SdfExpr handle</td></tr>
-    <tr><td></td><td></td><td>px py pz -- query point components</td></tr>
+    <tr><td></td><td></td><td>a b -- SdfExpr handles</td></tr>
+    <tr><td>k</td><td></td><td>blend radius (&gt;= 0; 0 = sharp intersection)</td></tr>
     </table>
   </div>
   <div class="def-section">
     <div class="def-section-label">Returns</div>
-    <p class="def-returns">Signed distance: negative inside the surface, zero on it, positive outside.</p>
+    <p class="def-returns">SdfExpr handle for the smoothly intersected shape.</p>
   </div>
   <div class="def-section">
     <div class="def-section-label">Example</div>
-    <pre class="def-example">(sdf-eval (sdf-sphere 0.0 0.0 0.0 1.0) 0.5 0.0 0.0)  ; =&gt; -0.5</pre>
+    <pre class="def-example">(sdf-smooth-intersection sphere box 0.2)</pre>
   </div>
-  <p class="def-since">Since: Phase 1</p>
-</div>
-<div class="def-card" id="sdf-normal-x">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>sdf-normal-x</h2>
-  </div>
-  <pre class="def-signature">(sdf-normal-x [e :int px :float py :float pz :float] :float)</pre>
-  <p class="def-summary">x component of the surface normal at (px,py,pz).</p>
-  <p class="def-since">Since: Phase 1</p>
-</div>
-<div class="def-card" id="sdf-normal-y">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>sdf-normal-y</h2>
-  </div>
-  <pre class="def-signature">(sdf-normal-y [e :int px :float py :float pz :float] :float)</pre>
-  <p class="def-summary">y component of the surface normal at (px,py,pz). Since: Phase 1</p>
-</div>
-<div class="def-card" id="sdf-normal-z">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>sdf-normal-z</h2>
-  </div>
-  <pre class="def-signature">(sdf-normal-z [e :int px :float py :float pz :float] :float)</pre>
-  <p class="def-summary">z component of the surface normal at (px,py,pz). Since: Phase 1</p>
+  <p class="def-since">Since: Phase 5</p>
 </div>
 </div>
 </div>

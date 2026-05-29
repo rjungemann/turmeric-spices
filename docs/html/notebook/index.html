@@ -78,6 +78,8 @@
       <div style="margin-bottom:1.25rem"><a href="api/" style="font-size:0.85rem;color:var(--gold-bright)">API reference &rarr;</a></div>
       <h3>On this page</h3>
       <ul><li style=""><a href="#tur-notebook" style="">tur-notebook</a></li>
+<li style=""><a href="#installation" style="">Installation</a></li>
+<li style="padding-left:0.75rem;"><a href="#using-the-spice-in-a-project" style="color:var(--text-sec);">Using the spice in a project</a></li>
 <li style=""><a href="#cli-subcommands" style="">CLI Subcommands</a></li>
 <li style=""><a href="#image-hook-nb11" style="">Image Hook (NB11)</a></li></ul>
     </div>
@@ -95,6 +97,24 @@ plus an image-hook display system (NB11) and <code>exec</code>/<code>new</code> 
 <p><code>src/notebook/style.css</code> is the vendored notebook HTML stylesheet snapshot. If
 the docs-site styling changes meaningfully, refresh this file and keep the
 embedded CSS in <code>src/notebook/render-html.tur</code> in sync.</p>
+<h2 id="installation">Installation</h2>
+<p>Install the notebook spice globally with <code>tur install</code>:</p>
+<pre><code class="language-sh">tur install https://github.com/rjungemann/turmeric-spices.git --subdir spices/notebook
+</code></pre>
+<p>This registers the spice so that <code>nb</code> is available as a <code>tur</code> subcommand.
+Verify the installation:</p>
+<pre><code class="language-sh">tur nb --help
+</code></pre>
+<h3 id="using-the-spice-in-a-project">Using the spice in a project</h3>
+<p>To use notebook in an existing Turmeric project, add it as a dependency in
+your <code>build.tur</code>:</p>
+<pre><code class="language-turmeric">(spice notebook &quot;https://github.com/rjungemann/turmeric-spices.git&quot;
+  :subdir &quot;spices/notebook&quot;)
+</code></pre>
+<p>Then run <code>tur fetch</code> to pull the dependency, and import notebook modules as
+normal:</p>
+<pre><code class="language-turmeric">(import notebook/image :refer [image-hook-record-path])
+</code></pre>
 <h2 id="cli-subcommands">CLI Subcommands</h2>
 <pre><code class="language-sh"># Render a notebook to terminal markdown
 nb render notebook.tur.md

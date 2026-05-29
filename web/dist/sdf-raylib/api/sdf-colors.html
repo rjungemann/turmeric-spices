@@ -128,6 +128,11 @@
     <li><a href="#colored-difference">colored-difference</a></li>
     <li><a href="#colored-smooth-union">colored-smooth-union</a></li>
     <li><a href="#colored-translate">colored-translate</a></li>
+    <li><a href="#colored-torus">colored-torus</a></li>
+    <li><a href="#colored-capsule">colored-capsule</a></li>
+    <li><a href="#colored-smooth-intersection">colored-smooth-intersection</a></li>
+    <li><a href="#colored-repeat-inf">colored-repeat-inf</a></li>
+    <li><a href="#colored-repeat-fin">colored-repeat-fin</a></li>
   </ul>
   <h3>Internal</h3>
   <ul>
@@ -393,6 +398,110 @@
     <pre class="def-example">(colored-translate my-sphere 0.0 2.0 0.0)</pre>
   </div>
   <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-torus">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-torus</h2>
+  </div>
+  <pre class="def-signature">(colored-torus [cx :float cy :float cz :float big-r :float small-r :float cr :float cg :float cb :float objid :int] :int)</pre>
+  <p class="def-summary">torus with a fixed surface color.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>cx cy cz    -- centre position</td></tr>
+    <tr><td>big-r</td><td></td><td>ring radius</td></tr>
+    <tr><td>small-r</td><td></td><td>tube radius</td></tr>
+    <tr><td></td><td></td><td>cr cg cb    -- diffuse RGB color in [0, 1]</td></tr>
+    <tr><td>objid</td><td></td><td>object ID (&gt;= 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-torus 0.0 0.0 0.0 1.5 0.3  0.8 0.3 0.1  5)</pre>
+  </div>
+  <p class="def-since">Since: Phase 5</p>
+</div>
+<div class="def-card" id="colored-capsule">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-capsule</h2>
+  </div>
+  <pre class="def-signature">(colored-capsule [ax :float ay :float az :float bx :float by :float bz :float r :float cr :float cg :float cb :float objid :int] :int)</pre>
+  <p class="def-summary">capsule with a fixed surface color.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>ax ay az    -- endpoint A</td></tr>
+    <tr><td></td><td></td><td>bx by bz    -- endpoint B</td></tr>
+    <tr><td>r</td><td></td><td>capsule radius</td></tr>
+    <tr><td></td><td></td><td>cr cg cb    -- diffuse RGB color in [0, 1]</td></tr>
+    <tr><td>objid</td><td></td><td>object ID (&gt;= 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-capsule 0.0 -1.0 0.0  0.0 1.0 0.0  0.4  0.2 0.7 0.9  6)</pre>
+  </div>
+  <p class="def-since">Since: Phase 5</p>
+</div>
+<div class="def-card" id="colored-smooth-intersection">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-smooth-intersection</h2>
+  </div>
+  <pre class="def-signature">(colored-smooth-intersection [a :int b :int k :float] :int)</pre>
+  <p class="def-summary">smooth CSG intersection of two colored SDFs.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>a b -- ColoredSDF handles</td></tr>
+    <tr><td>k</td><td></td><td>blend radius (&gt;= 0)</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: Phase 5</p>
+</div>
+<div class="def-card" id="colored-repeat-inf">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-repeat-inf</h2>
+  </div>
+  <pre class="def-signature">(colored-repeat-inf [cn :int px :float py :float pz :float] :int)</pre>
+  <p class="def-summary">infinite repetition of a colored SDF.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>cn</td><td></td><td>ColoredSDF handle to repeat</td></tr>
+    <tr><td></td><td></td><td>px py pz -- repetition period per axis (0 = no repetition on that axis)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-repeat-inf (colored-sphere 0.0 0.0 0.0 0.3  1.0 0.0 0.0  1)
+                       1.5 1.5 1.5)</pre>
+  </div>
+  <p class="def-since">Since: Phase 5</p>
+</div>
+<div class="def-card" id="colored-repeat-fin">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-repeat-fin</h2>
+  </div>
+  <pre class="def-signature">(colored-repeat-fin [cn :int px :float py :float pz :float lx :float ly :float lz :float] :int)</pre>
+  <p class="def-summary">finite repetition of a colored SDF.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>cn</td><td></td><td>ColoredSDF handle to repeat</td></tr>
+    <tr><td></td><td></td><td>px py pz -- repetition period per axis (0 = no repetition)</td></tr>
+    <tr><td></td><td></td><td>lx ly lz -- number of repetitions on each side of the origin</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-repeat-fin sphere 2.0 2.0 2.0  3.0 3.0 3.0)</pre>
+  </div>
+  <p class="def-since">Since: Phase 5</p>
 </div>
 <details class="internal-section">
   <summary>Internal definitions</summary>
