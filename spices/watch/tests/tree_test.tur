@@ -1,0 +1,188 @@
+;; tests/tree_test.tur -- WT6 acceptance for recursive directory watch.
+;;
+;; Lays down a small tree:
+;;   /tmp/tur-watch-tree-<pid>/
+;;     a/
+;;       b/
+;;         leaf.txt
+;;     c/
+;; opens a tree watcher on the root, then fires a write inside a/b/
+;; from a background pthread.  Expects watch-next to return an event
+;; whose path is a or a/b (whichever directory the backend recorded).
+
+(defmodule watch/tests/tree
+  (import watch/event :refer [watch-kind-write watch-kind-overflow
+                              watch-event-kind watch-event-path
+                              watch-event-free])
+  (import watch/opts  :refer [watch-opts-make watch-opts-free
+                              watch-opts-set-recursive])
+  (import watch/watch :refer [watch-open-tree watch-open watch-close
+                              watch-next watch-tree-dir-count
+                              watch-tree-dir-at watch-refresh])
+
+  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_tree_fails = 0; */
+    if (!ok) g_tree_fails++;
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)(intptr_t)name);
+    ```)
+
+  (defn tap-finish [count :int] #{Unsafe} :int
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (g_tree_fails == 0) {
+      fprintf(stderr, "# All %lld watch/tree tests passed.\n", (long long)count);
+      return 0;
+    }
+    fprintf(stderr, "# %d/%lld watch/tree tests failed.\n",
+            g_tree_fails, (long long)count);
+    return 1;
+    ```)
+
+  ;; Filesystem helpers.
+
+  (defn make-dir [path :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <sys/stat.h> */
+    return mkdir((const char *)(intptr_t)path, 0755);
+    ```)
+
+  (defn write-file [path :cstr content :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <stdio.h> */
+    FILE *f = fopen((const char *)(intptr_t)path, "w");
+    if (!f) return -1;
+    fputs((const char *)(intptr_t)content, f);
+    fclose(f);
+    return 0;
+    ```)
+
+  (defn delete-file [path :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <unistd.h> */
+    return unlink((const char *)(intptr_t)path);
+    ```)
+
+  (defn delete-dir [path :cstr] #{Unsafe} :int
+    ```c
+    return rmdir((const char *)(intptr_t)path);
+    ```)
+
+  (defn sleep-ms [ms :int] #{Unsafe} :void
+    ```c
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  (defn schedule-atomic-save [path :cstr content :cstr ms :int] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <pthread.h> */
+    /* __tur_include__: typedef struct { char *path; char *tmp; char *content; int ms; } TurTreeAtomic; */
+    /* __tur_include__: static void *tur_tree_atomic(void *arg) { TurTreeAtomic *a = (TurTreeAtomic *)arg; usleep((useconds_t)a->ms * 1000u); FILE *f = fopen(a->tmp, "w"); if (f) { if (a->content) fputs(a->content, f); fclose(f); rename(a->tmp, a->path); } free(a->path); free(a->tmp); if (a->content) free(a->content); free(a); return NULL; } */
+    const char *p = (const char *)(intptr_t)path;
+    TurTreeAtomic *a = (TurTreeAtomic *)calloc(1, sizeof(*a));
+    a->path    = strdup(p);
+    size_t tlen = strlen(p) + 16;
+    a->tmp = (char *)malloc(tlen);
+    snprintf(a->tmp, tlen, "%s.tmpZZ", p);
+    a->content = strdup((const char *)(intptr_t)content);
+    a->ms      = (int)ms;
+    pthread_t th;
+    pthread_create(&th, NULL, tur_tree_atomic, a);
+    pthread_detach(th);
+    return 0;
+    ```)
+
+  (defn tmp-root [] #{Unsafe} :cstr
+    ```c
+    /* __tur_include__: #include <unistd.h> */
+    static char buf[256];
+    snprintf(buf, sizeof(buf), "/tmp/tur-watch-tree-%d", (int)getpid());
+    return (const char *)buf;
+    ```)
+
+  (defn path-join [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    static char buf[1024];
+    snprintf(buf, sizeof(buf), "%s/%s",
+             (const char *)(intptr_t)a, (const char *)(intptr_t)b);
+    return (const char *)buf;
+    ```)
+
+  ;; Strdup so the static path-join buffer doesn't get clobbered between uses.
+  (defn dup [s :cstr] #{Unsafe} :cstr
+    ```c return (const char *)strdup((const char *)(intptr_t)s); ```)
+
+  (defn free-cstr [s :cstr] #{Unsafe} :void
+    ```c free((char *)(intptr_t)s); ```)
+
+  (defn cstr-contains? [haystack :cstr needle :cstr] #{Unsafe} :bool
+    ```c
+    const char *h = (const char *)(intptr_t)haystack;
+    const char *n = (const char *)(intptr_t)needle;
+    return strstr(h ? h : "", n ? n : "") != NULL;
+    ```)
+
+  (defn main [] #{Unsafe} :int
+    (do
+      (let [root  (dup (tmp-root))
+            a     (dup (path-join root "a"))
+            b     (dup (path-join a    "b"))
+            c     (dup (path-join root "c"))
+            leaf  (dup (path-join b    "leaf.txt"))
+            opts  (watch-opts-make 1 150 1 0 1)]
+        (do
+          ;; Best-effort cleanup of stale state from a prior failed run.
+          (delete-file leaf)
+          (delete-dir b) (delete-dir a) (delete-dir c) (delete-dir root)
+
+          ;; Build the tree.
+          (make-dir root)
+          (make-dir a)
+          (make-dir b)
+          (make-dir c)
+
+          (let [w (watch-open-tree root opts)]
+            (do
+              (tap-record 1 "watch-open-tree returned non-zero"
+                          (not (= w 0)))
+              ;; Expect 4 registered dirs: root, a, a/b, c.
+              (tap-record 2 "tree registered 4 directories"
+                          (= (watch-tree-dir-count w) 4))
+              (tap-record 3 "first registered dir is the root"
+                          (cstr-contains? (watch-tree-dir-at w 0) "tur-watch-tree"))
+
+              ;; Schedule a write inside a/b and wait for the watcher to fire.
+              (schedule-atomic-save leaf "hello" 30)
+              (let [ev (watch-next w 5000)]
+                (do
+                  (tap-record 4 "watch-next returned an event"
+                              (not (= ev 0)))
+                  (tap-record 5 "event kind is write (tree mode)"
+                              (= (watch-event-kind ev) (watch-kind-write)))
+                  ;; The event path is one of the registered directories.
+                  ;; On Linux that's typically a/b (where the rename
+                  ;; landed); on Darwin the kqueue may also wake on the
+                  ;; parent.  Either way it should sit under the root.
+                  (tap-record 6 "event path is under the watched root"
+                              (cstr-contains? (watch-event-path ev) "tur-watch-tree"))
+                  (watch-event-free ev)))
+
+              (watch-close w)))
+
+          ;; watch-refresh on a single-file watcher returns 0.
+          (let [w2 (watch-open root 0)]   ; default opts -> single-file
+            (do
+              (tap-record 7 "single-file watch-refresh returns 0"
+                          (= (watch-refresh w2) 0))
+              (watch-close w2)))
+
+          (watch-opts-free opts)
+          (delete-file leaf)
+          (delete-dir b) (delete-dir a) (delete-dir c) (delete-dir root)
+          (free-cstr root) (free-cstr a) (free-cstr b)
+          (free-cstr c)    (free-cstr leaf)
+          (sleep-ms 100)))
+      (tap-finish 7)))
+
+) ;; end defmodule

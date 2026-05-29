@@ -1,0 +1,147 @@
+;;; httpd/request -- read-only accessors for parsed HTTP requests.
+;;;
+;;; A Request handle is produced by httpd/parse and consumed by the user's
+;;; request handler.  Every accessor takes the bare :int handle.
+;;;
+;;; Public API:
+;;;
+;;;   req-method  -- HTTP method as :cstr ("GET", "POST", ...).
+;;;   req-path    -- target path as :cstr (no query string).
+;;;   req-query   -- raw query string after '?' (or "").
+;;;   req-body    -- request body bytes as :cstr (or "").
+;;;   req-header  -- look up a header by name (case-insensitive); returns
+;;;                  result<:cstr>.
+;;;
+;;; Since: H3
+;; See parse.tur for the struct layout (duplicated verbatim in every
+;; inline-C block here, matching the http/ spice convention).
+
+(defmodule httpd/request
+  (export req-method req-path req-query req-body req-header)
+
+;;; req-method -- HTTP method of a parsed request.
+;;;
+;;; Parameters:
+;;;   req -- :int Request handle
+;;;
+;;; Returns:
+;;;   :cstr -- uppercase method string, e.g. "GET", "POST"
+;;;
+;;; Example:
+;;;   (req-method req)  ; => "POST"
+;;;
+;;; Since: H3
+(defn req-method [req :int] :cstr
+  ```c
+  struct __httpd_req {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+  };
+  return ((struct __httpd_req *)(intptr_t)req)->method;
+  ```)
+
+;;; req-path -- request-target path component (no query string).
+;;;
+;;; Parameters:
+;;;   req -- :int Request handle
+;;;
+;;; Returns:
+;;;   :cstr -- path beginning with '/', e.g. "/foo/bar"
+;;;
+;;; Example:
+;;;   (req-path req)  ; => "/hello"
+;;;
+;;; Since: H3
+(defn req-path [req :int] :cstr
+  ```c
+  struct __httpd_req {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+  };
+  return ((struct __httpd_req *)(intptr_t)req)->path;
+  ```)
+
+;;; req-query -- raw query string after '?', or "" if absent.
+;;;
+;;; Parameters:
+;;;   req -- :int Request handle
+;;;
+;;; Returns:
+;;;   :cstr -- e.g. "name=world&id=1", or "" if the target had no '?'
+;;;
+;;; Example:
+;;;   (req-query req)  ; => "name=world"
+;;;
+;;; Since: H3
+(defn req-query [req :int] :cstr
+  ```c
+  struct __httpd_req {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+  };
+  return ((struct __httpd_req *)(intptr_t)req)->query;
+  ```)
+
+;;; req-body -- request body bytes (NUL-terminated; length = Content-Length).
+;;;
+;;; Parameters:
+;;;   req -- :int Request handle
+;;;
+;;; Returns:
+;;;   :cstr -- body content, or "" if the request had no body
+;;;
+;;; Example:
+;;;   (req-body req)  ; => "hello world"
+;;;
+;;; Since: H3
+(defn req-body [req :int] :cstr
+  ```c
+  struct __httpd_req {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+  };
+  return ((struct __httpd_req *)(intptr_t)req)->body;
+  ```)
+
+;;; req-header -- look up a request header by name (case-insensitive).
+;;;
+;;; Parameters:
+;;;   req  -- :int Request handle
+;;;   name -- header name, e.g. "Content-Type"
+;;;
+;;; Returns:
+;;;   :int -- result<:cstr>: ok(value) if the header is present,
+;;;           err("not found") otherwise.  Unwrap with ok-val / err-val.
+;;;
+;;; Example:
+;;;   (let [h (req-header req "Content-Type")]
+;;;     (when (ok? h) (println (ok-val h))))
+;;;
+;;; Since: H3
+(defn req-header [req :int name :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <strings.h>
+  struct __httpd_req {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+  };
+  struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __httpd_req *r = (struct __httpd_req *)(intptr_t)req;
+  struct __result *res = malloc(sizeof(*res));
+  for (int i = 0; i < r->hdr_count; i++) {
+    if (strcasecmp(r->hdr_keys[i], (const char *)name) == 0) {
+      res->is_ok = true;
+      res->ok_val = (int64_t)(intptr_t)r->hdr_vals[i];
+      res->err_val = 0;
+      return (int64_t)(intptr_t)res;
+    }
+  }
+  res->is_ok = false;
+  res->ok_val = 0;
+  res->err_val = (int64_t)(intptr_t)"not found";
+  return (int64_t)(intptr_t)res;
+  ```)
+
+) ;; end defmodule httpd/request

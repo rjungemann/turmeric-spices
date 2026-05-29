@@ -1,0 +1,105 @@
+;; tests/httpd/echo_test.tur -- H8 echo fixture.
+;;
+;; The server echoes "<METHOD> <PATH>" as the response body with status 200
+;; and Content-Type: text/plain.  The test uses the default dispatcher
+;; (`server-start` -> pool mode) so the round-trip also exercises the H7
+;; thread pool happy path: every assertion in this file goes through the
+;; bounded pool.
+
+(defmodule httpd/tests/echo
+  (import httpd/server   :refer [server-start server-stop])
+  (import httpd/request  :refer [req-method req-path])
+  (import httpd/response :refer [resp-ok])
+  (import http/client    :refer [http-get])
+  (import http/response  :refer [response-status response-body response-header])
+  (import test/suite     :refer [describe it])
+  (import test/assert    :refer [assert-eq assert-true])
+  (import test/runner    :refer [run-all])
+
+  ;; ---------------------------------------------------------------------
+  ;; Helpers: unwrap http/client's result<:int> and compare cstr equality.
+  ;; ---------------------------------------------------------------------
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return 0;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;; Local "<method> <path>" join -- stdlib/str-concat is generic and trips
+  ;; over the elaborator when reached transitively through several spices,
+  ;; so we inline a tiny purpose-built helper here.
+  (defn echo-join [method :cstr path :cstr] :cstr
+    ```c
+    #include <stdlib.h>
+    #include <string.h>
+    const char *m = (const char *)method;
+    const char *p = (const char *)path;
+    size_t ml = strlen(m), pl = strlen(p);
+    char *out = (char *)malloc(ml + 1 + pl + 1);
+    memcpy(out, m, ml);
+    out[ml] = ' ';
+    memcpy(out + ml + 1, p, pl);
+    out[ml + 1 + pl] = '\0';
+    return (int64_t)(intptr_t)out;
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; Handler: echo "<METHOD> <PATH>" with status 200, text/plain.
+  ;; ---------------------------------------------------------------------
+
+  (defn echo-handler [req :int] :int
+    (resp-ok "text/plain" (echo-join (req-method req) (req-path req))))
+
+  ;; ---------------------------------------------------------------------
+  ;; Test driver
+  ;; ---------------------------------------------------------------------
+
+  (defn main [] :int
+    (let [srv (server-start 18081 echo-handler)]
+      (do
+        (sleep-ms 50)
+
+        (describe "httpd echo -- default (pool) dispatch"
+
+          (it "GET / returns 200"
+            (let [r (http-get "http://127.0.0.1:18081/")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+
+          (it "GET / echoes 'GET /'"
+            (let [r (http-get "http://127.0.0.1:18081/")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "GET /" (response-body (__cr-val r))))
+                (assert-true false))))
+
+          (it "GET /hello echoes 'GET /hello'"
+            (let [r (http-get "http://127.0.0.1:18081/hello")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "GET /hello" (response-body (__cr-val r))))
+                (assert-true false))))
+
+          (it "Content-Type is text/plain"
+            (let [r (http-get "http://127.0.0.1:18081/x")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "text/plain"
+                                       (response-header (__cr-val r) "Content-Type")))
+                (assert-true false)))))
+
+        (server-stop srv)
+        (run-all)))
+    0))

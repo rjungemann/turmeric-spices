@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/watch/watch | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#watch-supported_">watch-supported?</a></li>
+    <li><a href="#watch-open-one">watch-open-one</a></li>
+    <li><a href="#watch-tree-dir-count">watch-tree-dir-count</a></li>
+    <li><a href="#watch-tree-dir-at">watch-tree-dir-at</a></li>
+    <li><a href="#watch-close">watch-close</a></li>
+    <li><a href="#watch-open-tree">watch-open-tree</a></li>
+    <li><a href="#watch-open">watch-open</a></li>
+    <li><a href="#watch-add-path">watch-add-path</a></li>
+    <li><a href="#watch-remove-path">watch-remove-path</a></li>
+    <li><a href="#watch-refresh">watch-refresh</a></li>
+    <li><a href="#watch-next">watch-next</a></li>
+    <li><a href="#watch-drain">watch-drain</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__watcher-make" style="color:var(--faint)">__watcher-make</a></li>
+    <li><a href="#__watcher-backend" style="color:var(--faint)">__watcher-backend</a></li>
+    <li><a href="#__watcher-dir" style="color:var(--faint)">__watcher-dir</a></li>
+    <li><a href="#__watcher-full-path" style="color:var(--faint)">__watcher-full-path</a></li>
+    <li><a href="#__watcher-debounce-ms" style="color:var(--faint)">__watcher-debounce-ms</a></li>
+    <li><a href="#__watcher-sleep-ms" style="color:var(--faint)">__watcher-sleep-ms</a></li>
+    <li><a href="#__watcher-reclassify" style="color:var(--faint)">__watcher-reclassify</a></li>
+    <li><a href="#__watcher-split-dir" style="color:var(--faint)">__watcher-split-dir</a></li>
+    <li><a href="#__watcher-split-base" style="color:var(--faint)">__watcher-split-base</a></li>
+    <li><a href="#__watcher-free-cstr" style="color:var(--faint)">__watcher-free-cstr</a></li>
+    <li><a href="#__watcher-path-is-dir?" style="color:var(--faint)">__watcher-path-is-dir?</a></li>
+    <li><a href="#__watcher-release-storage" style="color:var(--faint)">__watcher-release-storage</a></li>
+    <li><a href="#__watcher-mode" style="color:var(--faint)">__watcher-mode</a></li>
+    <li><a href="#__watcher-make-tree" style="color:var(--faint)">__watcher-make-tree</a></li>
+    <li><a href="#__watcher-tree-add-dir" style="color:var(--faint)">__watcher-tree-add-dir</a></li>
+    <li><a href="#__watcher-tree-walk" style="color:var(--faint)">__watcher-tree-walk</a></li>
+    <li><a href="#__watcher-tree-poll-fired" style="color:var(--faint)">__watcher-tree-poll-fired</a></li>
+    <li><a href="#__watcher-tree-dir-backend" style="color:var(--faint)">__watcher-tree-dir-backend</a></li>
+    <li><a href="#__tree-close-backends" style="color:var(--faint)">__tree-close-backends</a></li>
+    <li><a href="#__watcher-tree-root" style="color:var(--faint)">__watcher-tree-root</a></li>
+    <li><a href="#__watch-next-single" style="color:var(--faint)">__watch-next-single</a></li>
+    <li><a href="#__watch-next-tree" style="color:var(--faint)">__watch-next-tree</a></li>
+    <li><a href="#__watch-make-cons" style="color:var(--faint)">__watch-make-cons</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>watch/watch</h1>
+    <div class="module-path">src/watch/watch.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">public watcher API.</p>
+  </div>
+<div class="def-card" id="watch-supported_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-supported?</h2>
+  </div>
+  <pre class="def-signature">(watch-supported?)</pre>
+  <p class="def-summary">1 if a real backend is compiled in.</p>
+</div>
+<div class="def-card" id="watch-open-one">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-open-one</h2>
+  </div>
+  <pre class="def-signature">(watch-open-one [path :cstr opts :int])</pre>
+  <p class="def-summary">open a watcher on a single file path.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>path</td><td></td><td>file path (absolute or relative) to observe</td></tr>
+    <tr><td>opts</td><td></td><td>options handle from watch/opts (may be 0 for defaults)</td></tr>
+    </table>
+  </div>
+</div>
+<div class="def-card" id="watch-tree-dir-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-tree-dir-count</h2>
+  </div>
+  <pre class="def-signature">(watch-tree-dir-count [watcher :int])</pre>
+  <p class="def-summary">number of directories under tree-mode watch.</p>
+</div>
+<div class="def-card" id="watch-tree-dir-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-tree-dir-at</h2>
+  </div>
+  <pre class="def-signature">(watch-tree-dir-at [watcher :int idx :int])</pre>
+  <p class="def-summary">get the i-th registered directory (read-only borrow).</p>
+</div>
+<div class="def-card" id="watch-close">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-close</h2>
+  </div>
+  <pre class="def-signature">(watch-close [watcher :int])</pre>
+  <p class="def-summary">release a watcher.  Safe on 0.</p>
+</div>
+<div class="def-card" id="watch-open-tree">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-open-tree</h2>
+  </div>
+  <pre class="def-signature">(watch-open-tree [root :cstr opts :int])</pre>
+  <p class="def-summary">recursively watch a directory and all subdirs.</p>
+</div>
+<div class="def-card" id="watch-open">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-open</h2>
+  </div>
+  <pre class="def-signature">(watch-open [path :cstr opts :int])</pre>
+  <p class="def-summary">open a watcher on a path with auto-dispatch.</p>
+</div>
+<div class="def-card" id="watch-add-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-add-path</h2>
+  </div>
+  <pre class="def-signature">(watch-add-path [watcher :int path :cstr])</pre>
+  <p class="def-summary">v0.1.0 stub.  Multi-path explicit list lands with v0.2.</p>
+</div>
+<div class="def-card" id="watch-remove-path">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-remove-path</h2>
+  </div>
+  <pre class="def-signature">(watch-remove-path [watcher :int path :cstr])</pre>
+  <p class="def-summary">v0.1.0 stub.  Multi-path explicit list lands with v0.2.</p>
+</div>
+<div class="def-card" id="watch-refresh">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-refresh</h2>
+  </div>
+  <pre class="def-signature">(watch-refresh [watcher :int])</pre>
+  <p class="def-summary">re-walk a tree-mode watcher&#x27;s root and register any</p>
+</div>
+<div class="def-card" id="watch-next">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-next</h2>
+  </div>
+  <pre class="def-signature">(watch-next [watcher :int timeout-ms :int])</pre>
+  <p class="def-summary">block until the next event, return its handle or 0.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>watcher</td><td></td><td>handle from watch-open</td></tr>
+    <tr><td>timeout-ms</td><td></td><td>-1 = forever, 0 = poll, N = bounded wait</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Event handle (free via watch-event-free), or 0 on timeout.
+
+Algorithm:
+  1. backend-wait(timeout-ms)
+  2. drain backend events; record overflow if any
+  3. sleep for debounce-ms (lets atomic-save bursts settle)
+  4. drain again
+  5. re-stat the target and classify the change
+  6. emit a watch-event for the classified kind</p>
+  </div>
+</div>
+<div class="def-card" id="watch-drain">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>watch-drain</h2>
+  </div>
+  <pre class="def-signature">(watch-drain [watcher :int timeout-ms :int debounce-ms :int])</pre>
+  <p class="def-summary">gather a debounced batch (see watch/debounce).</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__watcher-make"><code>__watcher-make</code><span class="internal-item-summary">-- internal: allocate a watcher record around a backend.</span></div>
+  <div class="internal-item" id="__watcher-backend"><code>__watcher-backend</code></div>
+  <div class="internal-item" id="__watcher-dir"><code>__watcher-dir</code></div>
+  <div class="internal-item" id="__watcher-full-path"><code>__watcher-full-path</code></div>
+  <div class="internal-item" id="__watcher-debounce-ms"><code>__watcher-debounce-ms</code></div>
+  <div class="internal-item" id="__watcher-sleep-ms"><code>__watcher-sleep-ms</code><span class="internal-item-summary">-- sleep for ms milliseconds.</span></div>
+  <div class="internal-item" id="__watcher-reclassify"><code>__watcher-reclassify</code><span class="internal-item-summary">-- re-stat the target and return a kind value.</span></div>
+  <div class="internal-item" id="__watcher-split-dir"><code>__watcher-split-dir</code><span class="internal-item-summary">-- return malloc&#x27;d dir component of an absolute or</span></div>
+  <div class="internal-item" id="__watcher-split-base"><code>__watcher-split-base</code><span class="internal-item-summary">-- return malloc&#x27;d basename component.</span></div>
+  <div class="internal-item" id="__watcher-free-cstr"><code>__watcher-free-cstr</code><span class="internal-item-summary">-- release a string returned by the splitters.</span></div>
+  <div class="internal-item" id="__watcher-path-is-dir_"><code>__watcher-path-is-dir?</code><span class="internal-item-summary">-- 1 if `path` exists and is a directory.</span></div>
+  <div class="internal-item" id="__watcher-release-storage"><code>__watcher-release-storage</code><span class="internal-item-summary">-- free strings + struct (without backend).</span></div>
+  <div class="internal-item" id="__watcher-mode"><code>__watcher-mode</code><span class="internal-item-summary">-- 0 for single-file, 1 for tree.</span></div>
+  <div class="internal-item" id="__watcher-make-tree"><code>__watcher-make-tree</code><span class="internal-item-summary">-- allocate an empty tree-mode watcher.</span></div>
+  <div class="internal-item" id="__watcher-tree-add-dir"><code>__watcher-tree-add-dir</code><span class="internal-item-summary">-- register a directory with the tree watcher.</span></div>
+  <div class="internal-item" id="__watcher-tree-walk"><code>__watcher-tree-walk</code><span class="internal-item-summary">-- recursively register all directories under root.</span></div>
+  <div class="internal-item" id="__watcher-tree-poll-fired"><code>__watcher-tree-poll-fired</code><span class="internal-item-summary">-- poll all backend fds for events.</span></div>
+  <div class="internal-item" id="__watcher-tree-dir-backend"><code>__watcher-tree-dir-backend</code><span class="internal-item-summary">-- the backend handle for the i-th dir.</span></div>
+  <div class="internal-item" id="__tree-close-backends"><code>__tree-close-backends</code><span class="internal-item-summary">-- close every backend handle in a tree watcher.</span></div>
+  <div class="internal-item" id="__watcher-tree-root"><code>__watcher-tree-root</code><span class="internal-item-summary">-- tree-mode root path (read-only borrow).</span></div>
+  <div class="internal-item" id="__watch-next-single"><code>__watch-next-single</code><span class="internal-item-summary">-- the single-file case.</span></div>
+  <div class="internal-item" id="__watch-next-tree"><code>__watch-next-tree</code><span class="internal-item-summary">-- the recursive-tree case.</span></div>
+  <div class="internal-item" id="__watch-make-cons"><code>__watch-make-cons</code><span class="internal-item-summary">-- internal: wrap a single event handle in a cons cell.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

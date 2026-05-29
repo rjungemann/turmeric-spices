@@ -1,0 +1,310 @@
+;;; httpd/pool -- bounded worker pool used by httpd/server.
+;;;
+;;; A pool is a Mutex<RingBuffer<fd>> guarded by two condition variables
+;;; (not-empty / not-full).  Workers block on not-empty while idle; the
+;;; listener thread enqueues fds and blocks on not-full when the queue
+;;; is saturated, giving cooperative back-pressure rather than dropping
+;;; connections.
+;;;
+;;; Pool workers dispatch each accepted connection through httpd/server's
+;;; srv-worker-loop, so per-connection servicing logic (parse, handle,
+;;; serialize, write, close) stays in one place.
+;;;
+;;; Public API:
+;;;
+;;;   pool-new      -- spawn the workers and allocate the ring buffer.
+;;;   pool-enqueue  -- hand a client fd off to the pool.
+;;;   pool-stop     -- drain queued fds, join every worker, free the pool.
+;;;
+;;; Since: H7
+;; The pool worker dispatches each connection by constructing a
+;; __httpd_warg and calling httpd/server's srv-worker-loop directly via
+;; extern decl -- the per-connection servicing logic stays in one place.
+;;
+;; Internal struct layout (duplicated verbatim in every inline-C block):
+;;
+;;   struct __httpd_pool {
+;;     pthread_mutex_t mu;
+;;     pthread_cond_t  not_empty;
+;;     pthread_cond_t  not_full;
+;;     int            *fds;
+;;     int             cap;
+;;     int             head;
+;;     int             tail;
+;;     int             count;
+;;     int             stop;
+;;     void           *handler;
+;;     pthread_t      *workers;
+;;     int             nworkers;
+;;   };
+
+(defmodule httpd/pool
+  (export pool-new pool-enqueue pool-stop)
+
+;; =============================================================================
+;; Worker entry -- one long-lived thread per pool slot.
+;; =============================================================================
+
+(defn pool-worker-loop [arg :ptr<void>] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <unistd.h>
+  #include <pthread.h>
+  struct __httpd_pool {
+    pthread_mutex_t mu;
+    pthread_cond_t  not_empty;
+    pthread_cond_t  not_full;
+    int            *fds;
+    int             cap;
+    int             head;
+    int             tail;
+    int             count;
+    int             stop;
+    void           *handler;
+    pthread_t      *workers;
+    int             nworkers;
+  };
+  struct __httpd_warg { int client_fd; void *handler; };
+  extern void *httpd__server__srv_worker_loop(void *);
+
+  struct __httpd_pool *p = (struct __httpd_pool *)arg;
+  for (;;) {
+    pthread_mutex_lock(&p->mu);
+    while (p->count == 0 && !p->stop) {
+      pthread_cond_wait(&p->not_empty, &p->mu);
+    }
+    if (p->count == 0 && p->stop) {
+      pthread_mutex_unlock(&p->mu);
+      break;
+    }
+    int fd = p->fds[p->head];
+    p->head = (p->head + 1) % p->cap;
+    p->count--;
+    pthread_cond_signal(&p->not_full);
+    void *handler = p->handler;
+    pthread_mutex_unlock(&p->mu);
+
+    struct __httpd_warg *wa = (struct __httpd_warg *)malloc(sizeof(*wa));
+    if (!wa) {
+      close(fd);
+      continue;
+    }
+    wa->client_fd = fd;
+    wa->handler   = handler;
+    /* srv-worker-loop reads from the socket, calls the user handler,
+       writes the response, closes the socket, and frees wa.            */
+    httpd__server__srv_worker_loop(wa);
+  }
+  return NULL;
+  ```)
+
+;; =============================================================================
+;; Public API
+;; =============================================================================
+
+;;; pool-new -- allocate a bounded worker pool and spawn `size` threads.
+;;;
+;;; Parameters:
+;;;   size    -- desired number of worker threads (clamped to >= 1).
+;;;   handler -- :ptr<void> request handler; same contract as
+;;;              server-start's handler argument (forwarded verbatim
+;;;              to srv-worker-loop on every dequeued connection).
+;;;
+;;; Returns:
+;;;   :ptr<void> -- opaque pool handle, or NULL if allocation or any
+;;;                 thread creation failed before at least one worker
+;;;                 was running.
+;;;
+;;; Example:
+;;;   (def pool (pool-new 8 my-handler))
+;;;
+;;; Since: H7
+(defn pool-new [size :int handler :ptr<void>] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <pthread.h>
+  struct __httpd_pool {
+    pthread_mutex_t mu;
+    pthread_cond_t  not_empty;
+    pthread_cond_t  not_full;
+    int            *fds;
+    int             cap;
+    int             head;
+    int             tail;
+    int             count;
+    int             stop;
+    void           *handler;
+    pthread_t      *workers;
+    int             nworkers;
+  };
+  extern void *httpd__pool__pool_worker_loop(void *);
+
+  int n = (int)size;
+  if (n < 1) n = 1;
+  int cap = (n * 4 > 64) ? (n * 4) : 64;
+
+  struct __httpd_pool *p = (struct __httpd_pool *)calloc(1, sizeof(*p));
+  if (!p) return NULL;
+  if (pthread_mutex_init(&p->mu, NULL) != 0) { free(p); return NULL; }
+  if (pthread_cond_init(&p->not_empty, NULL) != 0) {
+    pthread_mutex_destroy(&p->mu); free(p); return NULL;
+  }
+  if (pthread_cond_init(&p->not_full, NULL) != 0) {
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu); free(p); return NULL;
+  }
+  p->fds = (int *)malloc(sizeof(int) * (size_t)cap);
+  if (!p->fds) {
+    pthread_cond_destroy(&p->not_full);
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu);
+    free(p);
+    return NULL;
+  }
+  p->cap      = cap;
+  p->handler  = (void *)handler;
+  p->workers  = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)n);
+  if (!p->workers) {
+    free(p->fds);
+    pthread_cond_destroy(&p->not_full);
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu);
+    free(p);
+    return NULL;
+  }
+  int spawned = 0;
+  for (int i = 0; i < n; i++) {
+    if (pthread_create(&p->workers[i], NULL,
+                       httpd__pool__pool_worker_loop, p) != 0) {
+      break;
+    }
+    spawned++;
+  }
+  if (spawned == 0) {
+    free(p->workers);
+    free(p->fds);
+    pthread_cond_destroy(&p->not_full);
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu);
+    free(p);
+    return NULL;
+  }
+  p->nworkers = spawned;
+  return (void *)p;
+  ```)
+
+;;; pool-enqueue -- hand a client fd off to the pool's worker queue.
+;;;
+;;; Blocks if the ring buffer is full (back-pressure on the caller --
+;;; typically the listener thread).  Closes the fd immediately and
+;;; returns if the pool is already shutting down.
+;;;
+;;; Parameters:
+;;;   pool      -- :ptr<void> pool handle (NULL closes the fd and returns).
+;;;   client-fd -- :int connected socket; ownership transferred to the pool.
+;;;
+;;; Returns: :void
+;;;
+;;; Example:
+;;;   (pool-enqueue pool client-fd)
+;;;
+;;; Since: H7
+(defn pool-enqueue [pool :ptr<void> client-fd :int] :void
+  ```c
+  #include <unistd.h>
+  #include <pthread.h>
+  struct __httpd_pool {
+    pthread_mutex_t mu;
+    pthread_cond_t  not_empty;
+    pthread_cond_t  not_full;
+    int            *fds;
+    int             cap;
+    int             head;
+    int             tail;
+    int             count;
+    int             stop;
+    void           *handler;
+    pthread_t      *workers;
+    int             nworkers;
+  };
+  if (!pool) { close((int)client_fd); return; }
+  struct __httpd_pool *p = (struct __httpd_pool *)pool;
+  pthread_mutex_lock(&p->mu);
+  while (p->count == p->cap && !p->stop) {
+    pthread_cond_wait(&p->not_full, &p->mu);
+  }
+  if (p->stop) {
+    pthread_mutex_unlock(&p->mu);
+    close((int)client_fd);
+    return;
+  }
+  p->fds[p->tail] = (int)client_fd;
+  p->tail = (p->tail + 1) % p->cap;
+  p->count++;
+  pthread_cond_signal(&p->not_empty);
+  pthread_mutex_unlock(&p->mu);
+  ```)
+
+;;; pool-stop -- signal shutdown, let workers drain queued connections,
+;;; then join every worker and free the pool.
+;;;
+;;; After this returns, all worker threads have exited and the pool's
+;;; resources have been freed.  Calling pool-enqueue on the same handle
+;;; after pool-stop is a use-after-free; callers (server-stop) must join
+;;; the listener thread before invoking pool-stop.
+;;;
+;;; Parameters:
+;;;   pool -- :ptr<void> pool handle (NULL is a no-op).
+;;;
+;;; Returns: :void
+;;;
+;;; Example:
+;;;   (pool-stop pool)
+;;;
+;;; Since: H7
+(defn pool-stop [pool :ptr<void>] :void
+  ```c
+  #include <stdlib.h>
+  #include <unistd.h>
+  #include <pthread.h>
+  struct __httpd_pool {
+    pthread_mutex_t mu;
+    pthread_cond_t  not_empty;
+    pthread_cond_t  not_full;
+    int            *fds;
+    int             cap;
+    int             head;
+    int             tail;
+    int             count;
+    int             stop;
+    void           *handler;
+    pthread_t      *workers;
+    int             nworkers;
+  };
+  if (!pool) return;
+  struct __httpd_pool *p = (struct __httpd_pool *)pool;
+  pthread_mutex_lock(&p->mu);
+  p->stop = 1;
+  pthread_cond_broadcast(&p->not_empty);
+  pthread_cond_broadcast(&p->not_full);
+  pthread_mutex_unlock(&p->mu);
+  for (int i = 0; i < p->nworkers; i++) {
+    pthread_join(p->workers[i], NULL);
+  }
+  /* Defensive drain: workers should have processed every queued fd
+     before exiting, but if any survived (e.g. pool was stopped before
+     workers ever ran) close them rather than leak the descriptors. */
+  while (p->count > 0) {
+    close(p->fds[p->head]);
+    p->head = (p->head + 1) % p->cap;
+    p->count--;
+  }
+  free(p->workers);
+  free(p->fds);
+  pthread_cond_destroy(&p->not_full);
+  pthread_cond_destroy(&p->not_empty);
+  pthread_mutex_destroy(&p->mu);
+  free(p);
+  ```)
+
+) ;; end defmodule httpd/pool

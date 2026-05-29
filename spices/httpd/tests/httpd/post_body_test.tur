@@ -1,0 +1,96 @@
+;; tests/httpd/post_body_test.tur -- H8 body-read fixture.
+;;
+;; The handler echoes the request body verbatim back to the client.
+;; Exercises:
+;;   - POST method dispatch
+;;   - Content-Length parsing in httpd/parse
+;;   - body buffer round-trip across socket boundary
+
+(defmodule httpd/tests/post-body
+  (import httpd/server   :refer [server-start server-stop])
+  (import httpd/request  :refer [req-method req-body])
+  (import httpd/response :refer [resp-ok])
+  (import http/client    :refer [http-post http-get])
+  (import http/response  :refer [response-status response-body])
+  (import test/suite     :refer [describe it])
+  (import test/assert    :refer [assert-eq assert-true])
+  (import test/runner    :refer [run-all])
+
+  ;; ---------------------------------------------------------------------
+  ;; Helpers
+  ;; ---------------------------------------------------------------------
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return 0;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; Handler: 200 OK; body = request body (or "<empty>" if there was none).
+  ;; ---------------------------------------------------------------------
+
+  (defn empty-or [s :cstr fallback :cstr] :cstr
+    ```c
+    #include <string.h>
+    const char *p = (const char *)s;
+    if (!p || p[0] == '\0') return (const char *)fallback;
+    return p;
+    ```)
+
+  (defn body-echo-handler [req :int] :int
+    (resp-ok "text/plain" (empty-or (req-body req) "<empty>")))
+
+  ;; ---------------------------------------------------------------------
+  ;; Test driver
+  ;; ---------------------------------------------------------------------
+
+  (defn main [] :int
+    (let [srv (server-start 18083 body-echo-handler)]
+      (do
+        (sleep-ms 50)
+
+        (describe "httpd post-body -- request body round-trip"
+
+          (it "POST short body echoes verbatim"
+            (let [r (http-post "http://127.0.0.1:18083/echo" "hello, world")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "hello, world" (response-body (__cr-val r))))
+                (assert-true false))))
+
+          (it "POST short body returns 200"
+            (let [r (http-post "http://127.0.0.1:18083/echo" "x")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+
+          (it "POST JSON-shaped body echoes verbatim"
+            (let [r (http-post "http://127.0.0.1:18083/echo"
+                               "{\"key\":\"value\",\"n\":42}")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "{\"key\":\"value\",\"n\":42}"
+                                       (response-body (__cr-val r))))
+                (assert-true false))))
+
+          (it "GET with no body returns '<empty>'"
+            (let [r (http-get "http://127.0.0.1:18083/no-body")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "<empty>" (response-body (__cr-val r))))
+                (assert-true false)))))
+
+        (server-stop srv)
+        (run-all)))
+    0))

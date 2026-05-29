@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/template/env | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#env-new">env-new</a></li>
+    <li><a href="#env-set">env-set</a></li>
+    <li><a href="#env-set-list">env-set-list</a></li>
+    <li><a href="#env-get">env-get</a></li>
+    <li><a href="#env-has_">env-has?</a></li>
+    <li><a href="#env-get-list-len">env-get-list-len</a></li>
+    <li><a href="#env-get-list-at">env-get-list-at</a></li>
+    <li><a href="#env-push-scalar">env-push-scalar</a></li>
+    <li><a href="#env-push-list">env-push-list</a></li>
+    <li><a href="#env-pop">env-pop</a></li>
+    <li><a href="#env-free">env-free</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>template/env</h1>
+    <div class="module-path">src/template/env.tur</div>
+  </div>
+<div class="def-card" id="env-new">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-new</h2>
+  </div>
+  <pre class="def-signature">(env-new :int)</pre>
+  <p class="def-summary">create a new empty Env handle.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">An Env handle to be freed by env-free.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [e (env-new)] (env-free e))</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+<div class="def-card" id="env-set">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-set</h2>
+  </div>
+  <pre class="def-signature">(env-set [env :int key :cstr val :cstr] :void)</pre>
+  <p class="def-summary">set or shadow a scalar string binding in the env.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>env</td><td></td><td>Env handle from env-new</td></tr>
+    <tr><td>key</td><td></td><td>variable name (NUL-terminated)</td></tr>
+    <tr><td>val</td><td></td><td>string value (NUL-terminated)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(env-set e &quot;title&quot; &quot;Hello&quot;)</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+<div class="def-card" id="env-set-list">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-set-list</h2>
+  </div>
+  <pre class="def-signature">(env-set-list [env :int key :cstr vals :int] :void)</pre>
+  <p class="def-summary">set or shadow a list-valued binding in the env.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>env</td><td></td><td>Env handle from env-new</td></tr>
+    <tr><td>key</td><td></td><td>variable name (NUL-terminated)</td></tr>
+    <tr><td>vals</td><td></td><td>cons list of cstr values (0 for nil)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(env-set-list e &quot;items&quot; (cons &quot;a&quot; (cons &quot;b&quot; 0)))</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+<div class="def-card" id="env-get">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-get</h2>
+  </div>
+  <pre class="def-signature">(env-get [env :int key :cstr] :cstr)</pre>
+  <p class="def-summary">look up a key, returning the first (scalar) value.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>env</td><td></td><td>Env handle</td></tr>
+    <tr><td>key</td><td></td><td>variable name</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">The bound cstr, or the empty string if no binding exists.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(env-get e &quot;title&quot;)  ; =&gt; &quot;Hello&quot;</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+<div class="def-card" id="env-has_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-has?</h2>
+  </div>
+  <pre class="def-signature">(env-has? [env :int key :cstr] :bool)</pre>
+  <p class="def-summary">check whether a binding exists for `key`.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>env</td><td></td><td>Env handle</td></tr>
+    <tr><td>key</td><td></td><td>variable name</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">true if some binding is present, false otherwise.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(env-has? e &quot;title&quot;)  ; =&gt; true</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+<div class="def-card" id="env-get-list-len">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-get-list-len</h2>
+  </div>
+  <pre class="def-signature">(env-get-list-len [env :int key :cstr] :int)</pre>
+  <p class="def-summary">number of values bound to `key`.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>env</td><td></td><td>Env handle</td></tr>
+    <tr><td>key</td><td></td><td>variable name</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Length of the bound list (1 for scalar, 0 if missing).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(env-get-list-len e &quot;items&quot;)  ; =&gt; 3</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+<div class="def-card" id="env-get-list-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-get-list-at</h2>
+  </div>
+  <pre class="def-signature">(env-get-list-at [env :int key :cstr i :int] :cstr)</pre>
+  <p class="def-summary">fetch the i-th value bound to `key`.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>env</td><td></td><td>Env handle</td></tr>
+    <tr><td>key</td><td></td><td>variable name</td></tr>
+    <tr><td>i</td><td></td><td>zero-based index</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">The i-th value, or &quot;&quot; if out of range.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(env-get-list-at e &quot;items&quot; 1)  ; =&gt; &quot;b&quot;</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+<div class="def-card" id="env-push-scalar">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-push-scalar</h2>
+  </div>
+  <pre class="def-signature">(env-push-scalar [env :int key :cstr val :cstr] :void)</pre>
+  <p class="def-summary">push a single scalar binding (for renderer scopes).</p>
+</div>
+<div class="def-card" id="env-push-list">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-push-list</h2>
+  </div>
+  <pre class="def-signature">(env-push-list [env :int key :cstr vals :int] :void)</pre>
+  <p class="def-summary">push a list binding (for renderer scopes).</p>
+</div>
+<div class="def-card" id="env-pop">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-pop</h2>
+  </div>
+  <pre class="def-signature">(env-pop [env :int] :void)</pre>
+  <p class="def-summary">remove the top binding from the env stack.</p>
+</div>
+<div class="def-card" id="env-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>env-free</h2>
+  </div>
+  <pre class="def-signature">(env-free [env :int] :void)</pre>
+  <p class="def-summary">release all storage associated with an Env handle.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>env</td><td></td><td>Env handle returned by env-new</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(env-free e)</pre>
+  </div>
+  <p class="def-since">Since: 0.1.0</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

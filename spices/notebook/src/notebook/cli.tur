@@ -13,19 +13,13 @@
                                    output-status-ok output-status-error output-status-skipped])
   (import notebook/eval :refer [eval-all eval-from])
   (import notebook/cell :refer [cell-id cells-assign-ids])
+  (import watch/watch :refer [watch-open-one watch-close watch-next])
+  (import watch/event :refer [watch-event-free])
   (export cli-main)
 
-  (defn __cli-build-hint [] :int
-    ```c
-    /* __tur_include__: #ifdef __APPLE__ */
-    /* __tur_include__: #include <sys/event.h> */
-    /* __tur_include__: #endif */
-    /* __tur_include__: #ifdef __linux__ */
-    /* __tur_include__: #include <poll.h> */
-    /* __tur_include__: #include <sys/inotify.h> */
-    /* __tur_include__: #endif */
-    return 0;
-    ```)
+  ;; (The former __cli-build-hint, which hoisted sys/event.h + sys/inotify.h
+  ;; to file scope for the inline-C watcher, has been removed.  Watching is
+  ;; now provided by the tur-watch spice and the headers travel with it.)
 
   (defn __cli-nil-value [] #{Unsafe} :int
     ```c
@@ -785,248 +779,37 @@
           (__cli-eputs (__cli-result-err-cstr result))
           1))))
 
-  (defn __cli-watch-open [path :cstr] #{Unsafe} :int
-    ```c
-    #include <sys/stat.h>
-    #include <fcntl.h>
-    #include <unistd.h>
-    #include <limits.h>
-    #ifdef __linux__
-    #include <poll.h>
-    #include <sys/inotify.h>
-    #endif
-    #ifdef __APPLE__
-    #include <sys/event.h>
-    #endif
+  ;; --------------------------------------------------------------------
+  ;; Watch mode.
+  ;;
+  ;; The notebook-private inotify/kqueue watcher was extracted to the
+  ;; `tur-watch` spice (watch-v0.1.0).  This file now drives the public
+  ;; watch-open-one + watch-next + watch-close API, which preserves the
+  ;; exact semantics documented in
+  ;; turmeric-spices/docs/notebook-watch-semantics.md:
+  ;;
+  ;;   - the parent directory of the target is registered (atomic-save
+  ;;     survives without losing the watch),
+  ;;   - the 150 ms debounce window is the default in tur-watch, so the
+  ;;     burst-collapse behavior is identical.
+  ;; --------------------------------------------------------------------
 
-    typedef struct {
-      char *path;
-      char *dir;
-      char *base;
-      int exists;
-      long long mtime_sec;
-      long long mtime_nsec;
-      long long size;
-      long long ino;
-    #ifdef __linux__
-      int fd;
-      int wd;
-    #endif
-    #ifdef __APPLE__
-      int kq;
-      int dir_fd;
-    #endif
-    } NotebookWatcher;
-
-    const char *src = path ? (const char *)(intptr_t)path : "";
-    if (!src[0]) return 0;
-
-    NotebookWatcher *w = calloc(1, sizeof(*w));
-    w->path = strdup(src);
-
-    const char *slash = strrchr(src, '/');
-    if (slash) {
-      size_t dir_len = (size_t)(slash - src);
-      w->dir = malloc(dir_len + 1);
-      memcpy(w->dir, src, dir_len);
-      w->dir[dir_len] = '\0';
-      w->base = strdup(slash + 1);
-    } else {
-      w->dir = strdup(".");
-      w->base = strdup(src);
-    }
-
-    struct stat st;
-    if (stat(src, &st) == 0) {
-      w->exists = 1;
-      w->mtime_sec = (long long)st.st_mtimespec.tv_sec;
-      w->mtime_nsec = (long long)st.st_mtimespec.tv_nsec;
-      w->size = (long long)st.st_size;
-      w->ino = (long long)st.st_ino;
-    }
-
-    #ifdef __linux__
-    w->fd = inotify_init1(IN_NONBLOCK);
-    if (w->fd < 0) {
-      free(w->path); free(w->dir); free(w->base); free(w);
-      return 0;
-    }
-    w->wd = inotify_add_watch(w->fd, w->dir,
-      IN_CLOSE_WRITE | IN_CREATE | IN_MODIFY | IN_MOVED_TO |
-      IN_ATTRIB | IN_DELETE | IN_MOVE_SELF | IN_DELETE_SELF);
-    if (w->wd < 0) {
-      close(w->fd);
-      free(w->path); free(w->dir); free(w->base); free(w);
-      return 0;
-    }
-    #elif defined(__APPLE__)
-    w->dir_fd = open(w->dir, O_RDONLY);
-    if (w->dir_fd < 0) {
-      free(w->path); free(w->dir); free(w->base); free(w);
-      return 0;
-    }
-    w->kq = kqueue();
-    if (w->kq < 0) {
-      close(w->dir_fd);
-      free(w->path); free(w->dir); free(w->base); free(w);
-      return 0;
-    }
-    struct kevent ev;
-    EV_SET(&ev, w->dir_fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR,
-           NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB | NOTE_LINK |
-           NOTE_RENAME | NOTE_DELETE | NOTE_REVOKE, 0, NULL);
-    if (kevent(w->kq, &ev, 1, NULL, 0, NULL) != 0) {
-      close(w->kq);
-      close(w->dir_fd);
-      free(w->path); free(w->dir); free(w->base); free(w);
-      return 0;
-    }
-    #else
-    free(w->path); free(w->dir); free(w->base); free(w);
-    return 0;
-    #endif
-
-    return (int64_t)(intptr_t)w;
-    ```)
-
-  (defn __cli-watch-close [watcher :int] #{Unsafe} :int
-    ```c
-    typedef struct {
-      char *path;
-      char *dir;
-      char *base;
-      int exists;
-      long long mtime_sec;
-      long long mtime_nsec;
-      long long size;
-      long long ino;
-    #ifdef __linux__
-      int fd;
-      int wd;
-    #endif
-    #ifdef __APPLE__
-      int kq;
-      int dir_fd;
-    #endif
-    } NotebookWatcher;
-    NotebookWatcher *w = (NotebookWatcher *)(intptr_t)watcher;
-    if (!w) return 0;
-    #ifdef __linux__
-    if (w->wd >= 0 && w->fd >= 0) inotify_rm_watch(w->fd, w->wd);
-    if (w->fd >= 0) close(w->fd);
-    #endif
-    #ifdef __APPLE__
-    if (w->kq >= 0) close(w->kq);
-    if (w->dir_fd >= 0) close(w->dir_fd);
-    #endif
-    if (w->path) free(w->path);
-    if (w->dir) free(w->dir);
-    if (w->base) free(w->base);
-    free(w);
-    return 0;
-    ```)
-
-  (defn __cli-watch-wait [watcher :int debounce-ms :int] #{Unsafe} :int
-    ```c
-    #include <sys/stat.h>
-    #include <unistd.h>
-    #ifdef __linux__
-    #include <poll.h>
-    #include <sys/inotify.h>
-    #endif
-    #ifdef __APPLE__
-    #include <sys/event.h>
-    #endif
-
-    typedef struct {
-      char *path;
-      char *dir;
-      char *base;
-      int exists;
-      long long mtime_sec;
-      long long mtime_nsec;
-      long long size;
-      long long ino;
-    #ifdef __linux__
-      int fd;
-      int wd;
-    #endif
-    #ifdef __APPLE__
-      int kq;
-      int dir_fd;
-    #endif
-    } NotebookWatcher;
-
-    NotebookWatcher *w = (NotebookWatcher *)(intptr_t)watcher;
-    if (!w) return 0;
-
-    for (;;) {
-      int matched = 0;
-
-      #ifdef __linux__
-      struct pollfd pfd;
-      pfd.fd = w->fd;
-      pfd.events = POLLIN;
-      if (poll(&pfd, 1, -1) <= 0) return 0;
-      for (;;) {
-        char buf[4096];
-        ssize_t n = read(w->fd, buf, sizeof(buf));
-        if (n <= 0) break;
-        ssize_t off = 0;
-        while (off < n) {
-          struct inotify_event *ev = (struct inotify_event *)(buf + off);
-          if (ev->len > 0) {
-            if (strcmp(ev->name, w->base) == 0) matched = 1;
-          } else {
-            matched = 1;
-          }
-          off += sizeof(struct inotify_event) + ev->len;
-        }
-      }
-      #elif defined(__APPLE__)
-      struct kevent ev;
-      if (kevent(w->kq, NULL, 0, &ev, 1, NULL) <= 0) return 0;
-      matched = 1;
-      #else
-      return 0;
-      #endif
-
-      if (!matched) continue;
-      if (debounce_ms > 0) usleep((useconds_t)(debounce_ms * 1000));
-
-      struct stat st;
-      int exists = stat(w->path, &st) == 0;
-      long long mtime_sec = exists ? (long long)st.st_mtimespec.tv_sec : 0;
-      long long mtime_nsec = exists ? (long long)st.st_mtimespec.tv_nsec : 0;
-      long long size = exists ? (long long)st.st_size : 0;
-      long long ino = exists ? (long long)st.st_ino : 0;
-
-      if (exists != w->exists ||
-          mtime_sec != w->mtime_sec ||
-          mtime_nsec != w->mtime_nsec ||
-          size != w->size ||
-          ino != w->ino) {
-        w->exists = exists;
-        w->mtime_sec = mtime_sec;
-        w->mtime_nsec = mtime_nsec;
-        w->size = size;
-        w->ino = ino;
-        return 1;
-      }
-    }
-    ```)
-
+  ;;; __cli-watch-loop -- block until the target changes, rerender, repeat.
   (defn __cli-watch-loop [watcher :int path :cstr target :cstr opts :int] #{Unsafe} :int
-    (if (= (__cli-watch-wait watcher 150) 1)
-      (let [code (__cli-render-once path target opts)]
-        (if (= code 0)
-          (__cli-watch-loop watcher path target opts)
-          code))
-      1))
+    (let [ev (watch-next watcher -1)]
+      (if (= ev 0)
+        1
+        (do
+          (watch-event-free ev)
+          (let [code (__cli-render-once path target opts)]
+            (if (= code 0)
+              (__cli-watch-loop watcher path target opts)
+              code))))))
 
+  ;;; __cli-render-or-watch -- one-shot render, or render + watch + rerender.
   (defn __cli-render-or-watch [path :cstr target :cstr opts :int watch? :bool] #{Unsafe} :int
     (if watch?
-      (let [watcher (__cli-watch-open path)]
+      (let [watcher (watch-open-one path 0)]
         (if (= watcher 0)
           (do
             (__cli-eputs "failed to initialize watch mode")
@@ -1035,10 +818,10 @@
             (if (= code 0)
               (let [loop-code (__cli-watch-loop watcher path target opts)]
                 (do
-                  (__cli-watch-close watcher)
+                  (watch-close watcher)
                   loop-code))
               (do
-                (__cli-watch-close watcher)
+                (watch-close watcher)
                 code)))))
       (__cli-render-once path target opts)))
 

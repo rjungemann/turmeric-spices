@@ -104,6 +104,22 @@ on the wrong OS. Same outward contract.
 | macOS FSEvents backend | no | v0.2 |
 | Windows backend | no | future |
 
+## Examples
+
+| Example | What it does |
+|---|---|
+| `examples/tail-events.tur`    | Print every event as it arrives (single file or recursive dir) |
+| `examples/rerun-command.tur`  | Run a shell command on each debounced change |
+| `examples/watch-tree.tur`     | Recursive directory watcher with a registered-dirs roster |
+
+Run any of them with `tur run examples/<name>.tur -- <path>`.
+
+## Guide
+
+[`docs/guides/watch-guide.md`](../../docs/guides/watch-guide.md) walks
+through single-file watch, recursive watch, debounce, the kind constants,
+and the adopter contract.
+
 ## Testing
 
 ```sh
@@ -113,4 +129,5 @@ tur run tests/backend_smoke_test.tur
 tur run tests/debounce_test.tur
 tur run tests/watch_test.tur          # spawns background pthreads
 tur run tests/drain_burst_test.tur    # WT5 acceptance
+tur run tests/tree_test.tur           # WT6 acceptance
 ```

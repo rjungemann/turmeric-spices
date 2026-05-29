@@ -1,0 +1,265 @@
+;;; httpd/response -- Response struct, constructors, and mutators.
+;;;
+;;; A Response is a heap-allocated struct shared with httpd/write.  The
+;;; user's request handler returns a Response that the server then
+;;; serializes onto the client socket and frees.
+;;;
+;;; Public API:
+;;;
+;;;   response       -- status, content-type, body -> Response (any status).
+;;;   resp-ok        -- 200 OK shortcut (named resp-ok because stdlib/result
+;;;                     already binds `ok`).
+;;;   not-found      -- 404 Not Found shortcut.
+;;;   bad-request    -- 400 Bad Request shortcut.
+;;;   with-header    -- append a header (mutates in place; returns the
+;;;                     same handle for chaining).
+;;;   with-body      -- replace the body.
+;;;   with-status    -- replace the status code.
+;;;   free-response  -- release the handle and all owned storage.
+;;;
+;;; Since: H4
+;; The layout is duplicated verbatim in every inline-C block here:
+;;
+;;   struct __httpd_resp {
+;;     int    status;       /* HTTP status code (e.g. 200, 404)  */
+;;     char  *body;         /* response body bytes (owned)        */
+;;     int    body_len;     /* length of body in bytes            */
+;;     char **hdr_keys;     /* malloc'd k/v arrays (owned)        */
+;;     char **hdr_vals;
+;;     int    hdr_count;
+;;     int    hdr_cap;      /* capacity of hdr_keys / hdr_vals    */
+;;   };
+;;
+;; with-header / with-body / with-status mutate the struct in place and
+;; return the same handle.  The chainable form is purely a convenience --
+;; there is no copy-on-write semantics.
+
+(defmodule httpd/response
+  (export response resp-ok not-found bad-request
+          with-header with-body with-status
+          free-response)
+
+;; -- Internal: allocate an empty Response with a given status -----------
+
+(defn __resp-new [status :int body :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __httpd_resp {
+    int    status; char  *body; int body_len;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
+  };
+  struct __httpd_resp *r = malloc(sizeof(*r));
+  r->status   = (int)status;
+  size_t bl   = body ? strlen((const char *)body) : 0;
+  r->body     = malloc(bl + 1);
+  if (bl > 0) memcpy(r->body, (const char *)body, bl);
+  r->body[bl] = '\0';
+  r->body_len = (int)bl;
+  r->hdr_cap   = 8;
+  r->hdr_count = 0;
+  r->hdr_keys  = malloc(sizeof(char *) * (size_t)r->hdr_cap);
+  r->hdr_vals  = malloc(sizeof(char *) * (size_t)r->hdr_cap);
+  return (int64_t)(intptr_t)r;
+  ```)
+
+;; -- Modifiers (return the same handle for chaining) --------------------
+
+;;; with-header -- append a header to a Response (mutates in place).
+;;;
+;;; Parameters:
+;;;   resp -- :int Response handle
+;;;   key  -- header name
+;;;   val  -- header value
+;;;
+;;; Returns:
+;;;   :int -- the same Response handle (for chaining)
+;;;
+;;; Example:
+;;;   (-> (ok "text/plain" "hi")
+;;;       (with-header "X-Hello" "world"))
+;;;
+;;; Since: H4
+(defn with-header [resp :int key :cstr val :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __httpd_resp {
+    int    status; char  *body; int body_len;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
+  };
+  struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
+  if (r->hdr_count >= r->hdr_cap) {
+    int new_cap = r->hdr_cap * 2;
+    r->hdr_keys = realloc(r->hdr_keys, sizeof(char *) * (size_t)new_cap);
+    r->hdr_vals = realloc(r->hdr_vals, sizeof(char *) * (size_t)new_cap);
+    r->hdr_cap  = new_cap;
+  }
+  const char *k = (const char *)key;
+  const char *v = (const char *)val;
+  size_t kl = strlen(k); size_t vl = strlen(v);
+  char *kc = malloc(kl + 1); memcpy(kc, k, kl + 1);
+  char *vc = malloc(vl + 1); memcpy(vc, v, vl + 1);
+  r->hdr_keys[r->hdr_count] = kc;
+  r->hdr_vals[r->hdr_count] = vc;
+  r->hdr_count++;
+  return resp;
+  ```)
+
+;;; with-body -- replace the body of a Response (mutates in place).
+;;;
+;;; Parameters:
+;;;   resp -- :int Response handle
+;;;   body -- new body string
+;;;
+;;; Returns:
+;;;   :int -- the same Response handle
+;;;
+;;; Example:
+;;;   (-> (ok "text/plain" "") (with-body "later"))
+;;;
+;;; Since: H4
+(defn with-body [resp :int body :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __httpd_resp {
+    int    status; char  *body; int body_len;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
+  };
+  struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
+  free(r->body);
+  const char *b = (const char *)body;
+  size_t bl = b ? strlen(b) : 0;
+  r->body = malloc(bl + 1);
+  if (bl > 0) memcpy(r->body, b, bl);
+  r->body[bl] = '\0';
+  r->body_len = (int)bl;
+  return resp;
+  ```)
+
+;;; with-status -- replace the status code of a Response (mutates in place).
+;;;
+;;; Parameters:
+;;;   resp   -- :int Response handle
+;;;   status -- new HTTP status code
+;;;
+;;; Returns:
+;;;   :int -- the same Response handle
+;;;
+;;; Example:
+;;;   (-> (ok "text/plain" "no") (with-status 503))
+;;;
+;;; Since: H4
+(defn with-status [resp :int status :int] :int
+  ```c
+  struct __httpd_resp {
+    int    status; char  *body; int body_len;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
+  };
+  struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
+  r->status = (int)status;
+  return resp;
+  ```)
+
+;;; free-response -- release a Response handle and all owned storage.
+;;;
+;;; Parameters:
+;;;   resp -- :int Response handle, or 0 (no-op)
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (free-response r)
+;;;
+;;; Since: H4
+(defn free-response [resp :int] :void
+  ```c
+  #include <stdlib.h>
+  struct __httpd_resp {
+    int    status; char  *body; int body_len;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
+  };
+  if (resp == 0) return;
+  struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
+  free(r->body);
+  for (int i = 0; i < r->hdr_count; i++) {
+    free(r->hdr_keys[i]);
+    free(r->hdr_vals[i]);
+  }
+  free(r->hdr_keys);
+  free(r->hdr_vals);
+  free(r);
+  ```)
+
+;; -- Constructors --------------------------------------------------------
+
+;;; response -- build an HTTP response with an arbitrary status code.
+;;;
+;;; Parameters:
+;;;   status       -- HTTP status code, e.g. 200, 201, 500
+;;;   content-type -- value for the Content-Type header, e.g. "text/html"
+;;;   body         -- response body string ("" for no body)
+;;;
+;;; Returns:
+;;;   :int -- Response handle.  Free with free-response, or hand to the
+;;;           server which takes ownership on send.
+;;;
+;;; Example:
+;;;   (response 201 "application/json" "{\"id\":1}")
+;;;
+;;; Since: H4
+(defn response [status :int content-type :cstr body :cstr] :int
+  (with-header (__resp-new status body) "Content-Type" content-type))
+
+;;; resp-ok -- build a 200 OK response.
+;;;
+;;; Named resp-ok rather than ok because stdlib/result already binds ok
+;;; (the Result success constructor) as an auto-loaded top-level definition.
+;;;
+;;; Parameters:
+;;;   content-type -- value for the Content-Type header
+;;;   body         -- response body string
+;;;
+;;; Returns:
+;;;   :int -- Response handle with status 200
+;;;
+;;; Example:
+;;;   (resp-ok "text/plain" "Hello, world!")
+;;;
+;;; Since: H4
+(defn resp-ok [content-type :cstr body :cstr] :int
+  (response 200 content-type body))
+
+;;; not-found -- build a 404 Not Found response with a text/plain body.
+;;;
+;;; Parameters:
+;;;   body -- body string (typically a short message)
+;;;
+;;; Returns:
+;;;   :int -- Response handle with status 404
+;;;
+;;; Example:
+;;;   (not-found "no such resource")
+;;;
+;;; Since: H4
+(defn not-found [body :cstr] :int
+  (response 404 "text/plain" body))
+
+;;; bad-request -- build a 400 Bad Request response with a text/plain body.
+;;;
+;;; Parameters:
+;;;   body -- body string (typically a short error message)
+;;;
+;;; Returns:
+;;;   :int -- Response handle with status 400
+;;;
+;;; Example:
+;;;   (bad-request "missing id parameter")
+;;;
+;;; Since: H4
+(defn bad-request [body :cstr] :int
+  (response 400 "text/plain" body))
+
+) ;; end defmodule httpd/response

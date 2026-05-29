@@ -1,0 +1,124 @@
+;; tests/httpd/headers_test.tur -- H8 header round-trip fixture.
+;;
+;; The handler reads the request header "X-Echo" and copies its value into
+;; the response header "X-Echo-Reply"; the response body is a fixed string
+;; so the test focuses on header round-tripping in both directions.
+
+(defmodule httpd/tests/headers
+  (import httpd/server   :refer [server-start server-stop])
+  (import httpd/request  :refer [req-header])
+  (import httpd/response :refer [resp-ok with-header])
+  (import http/client    :refer [http-request])
+  (import http/request   :refer [request])
+  (import http/response  :refer [response-status response-header])
+  (import test/suite     :refer [describe it])
+  (import test/assert    :refer [assert-eq assert-true])
+  (import test/runner    :refer [run-all])
+
+  ;; ---------------------------------------------------------------------
+  ;; Helpers
+  ;; ---------------------------------------------------------------------
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return 0;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;; ok? / ok-val on the result<:cstr> that req-header returns.  We can't
+  ;; rely on stdlib/result here because the request handle's result struct
+  ;; layout is shared (bool/int64/int64) but the type elaborator gets
+  ;; confused when stdlib's polymorphic ok? meets a bare :int handle.
+  (defn __hdr-ok? [r :int] :bool
+    ```c
+    if (!r) return 0;
+    struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __r *)(intptr_t)r)->is_ok;
+    ```)
+
+  (defn __hdr-val [r :int] :cstr
+    ```c
+    struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (const char *)(intptr_t)((struct __r *)(intptr_t)r)->ok_val;
+    ```)
+
+  (defn nil-cons [] :int
+    ```c
+    return (int64_t)0;
+    ```)
+
+  (defn cons-pair [k :cstr v :cstr next :int] :int
+    ```c
+    #include <stdlib.h>
+    struct __cons { int64_t value; int64_t next; };
+    struct __cons *vc = (struct __cons *)malloc(sizeof(*vc));
+    vc->value = (int64_t)(intptr_t)v;
+    vc->next  = (int64_t)next;
+    struct __cons *kc = (struct __cons *)malloc(sizeof(*kc));
+    kc->value = (int64_t)(intptr_t)k;
+    kc->next  = (int64_t)(intptr_t)vc;
+    return (int64_t)(intptr_t)kc;
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; Handler: copy X-Echo from request -> X-Echo-Reply on response.
+  ;; ---------------------------------------------------------------------
+
+  (defn headers-handler [req :int] :int
+    (let [h (req-header req "X-Echo")]
+      (if (__hdr-ok? h)
+        (with-header (resp-ok "text/plain" "ok") "X-Echo-Reply" (__hdr-val h))
+        (with-header (resp-ok "text/plain" "no-hdr") "X-Echo-Reply" "absent"))))
+
+  ;; ---------------------------------------------------------------------
+  ;; Test driver
+  ;; ---------------------------------------------------------------------
+
+  (defn main [] :int
+    (let [srv (server-start 18082 headers-handler)]
+      (do
+        (sleep-ms 50)
+
+        (describe "httpd headers -- request/response round-trip"
+
+          (it "echoes X-Echo back as X-Echo-Reply"
+            (let [hdrs (cons-pair "X-Echo" "ping-pong" (nil-cons))
+                  req  (request "GET" "http://127.0.0.1:18082/" "" hdrs)
+                  r    (http-request req)]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "ping-pong"
+                                       (response-header (__cr-val r) "X-Echo-Reply")))
+                (assert-true false))))
+
+          (it "request without X-Echo gets 'absent'"
+            (let [req (request "GET" "http://127.0.0.1:18082/" "" (nil-cons))
+                  r   (http-request req)]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "absent"
+                                       (response-header (__cr-val r) "X-Echo-Reply")))
+                (assert-true false))))
+
+          (it "round-trip returns 200"
+            (let [hdrs (cons-pair "X-Echo" "x" (nil-cons))
+                  req  (request "GET" "http://127.0.0.1:18082/" "" hdrs)
+                  r    (http-request req)]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false)))))
+
+        (server-stop srv)
+        (run-all)))
+    0))

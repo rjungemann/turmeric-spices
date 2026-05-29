@@ -1,0 +1,120 @@
+;; tests/httpd/concurrent_test.tur -- H8 pool-saturation fixture.
+;;
+;; Eight client threads fire HTTP GETs concurrently against a server
+;; running with a pool size of 4.  This intentionally over-subscribes
+;; the pool: the listener thread back-pressures into the bounded
+;; ring buffer (`not_full` cond var), and queued connections are
+;; drained as workers finish.  The handler sleeps briefly so the
+;; queue actually fills (otherwise each worker would finish before
+;; the next client gets accepted).
+;;
+;; If pool dispatch / drain / join is broken, the assertion at the
+;; end (8 successful responses) will fail or the test will hang
+;; on server-stop.
+
+(defmodule httpd/tests/concurrent
+  (import httpd/server   :refer [server-start-pool server-stop])
+  (import httpd/response :refer [resp-ok])
+  (import http/client    :refer [http-get])
+  (import http/response  :refer [response-status])
+  (import test/suite     :refer [describe it])
+  (import test/assert    :refer [assert-eq])
+  (import test/runner    :refer [run-all])
+
+  ;; ---------------------------------------------------------------------
+  ;; Helpers
+  ;; ---------------------------------------------------------------------
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return 0;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  ;; Atomic counter: opcode 0 reset, 1 increment-and-return-new, 2 read.
+  ;; Static state shared across calls -- same pattern as test/suite's __ts.
+  (defn __cnt [op :int] :int
+    ```c
+    static int counter = 0;
+    switch ((int)op) {
+      case 0: __atomic_store_n(&counter, 0, __ATOMIC_SEQ_CST); return 0;
+      case 1: return (int64_t)(__atomic_add_fetch(&counter, 1, __ATOMIC_SEQ_CST));
+      case 2: return (int64_t)__atomic_load_n(&counter, __ATOMIC_SEQ_CST);
+      default: return 0;
+    }
+    ```)
+
+  (defn null-ptr [] :ptr<void>
+    ```c
+    return NULL;
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; Server-side: 200 OK after a short sleep so the pool actually saturates.
+  ;; ---------------------------------------------------------------------
+
+  (defn slow-handler [req :int] :int
+    (do
+      (sleep-ms 40)
+      (resp-ok "text/plain" "ok")))
+
+  ;; ---------------------------------------------------------------------
+  ;; Client-side: issue one GET; on 200 OK, bump the shared counter.
+  ;; Signature matches pthread entry: void *(*)(void *).
+  ;; ---------------------------------------------------------------------
+
+  (defn client-task [arg :ptr<void>] :ptr<void>
+    (let [r (http-get "http://127.0.0.1:18084/work")]
+      (if (__cr-ok? r)
+        (if (= 200 (response-status (__cr-val r)))
+          (__cnt 1)
+          0)
+        0))
+    (null-ptr))
+
+  ;; ---------------------------------------------------------------------
+  ;; Test driver
+  ;; ---------------------------------------------------------------------
+
+  (defn main [] :int
+    (let [srv (server-start-pool 18084 slow-handler 4)]
+      (do
+        (sleep-ms 50)
+        (__cnt 0)
+
+        ;; Spawn 8 client threads -- 2x the pool size, so the listener
+        ;; must back-pressure into the ring buffer.
+        (let [t1 (thread-spawn-fn client-task (null-ptr))
+              t2 (thread-spawn-fn client-task (null-ptr))
+              t3 (thread-spawn-fn client-task (null-ptr))
+              t4 (thread-spawn-fn client-task (null-ptr))
+              t5 (thread-spawn-fn client-task (null-ptr))
+              t6 (thread-spawn-fn client-task (null-ptr))
+              t7 (thread-spawn-fn client-task (null-ptr))
+              t8 (thread-spawn-fn client-task (null-ptr))]
+          (do
+            (thread-join t1)
+            (thread-join t2)
+            (thread-join t3)
+            (thread-join t4)
+            (thread-join t5)
+            (thread-join t6)
+            (thread-join t7)
+            (thread-join t8)))
+
+        (describe "httpd concurrent -- pool saturation"
+          (it "all 8 concurrent clients receive 200 OK"
+            (assert-eq 8 (__cnt 2))))
+
+        ;; server-stop must drain the (now-idle) pool and join every
+        ;; worker.  If the join hangs, the test process will time out.
+        (server-stop srv)
+        (run-all)))
+    0))

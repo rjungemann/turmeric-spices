@@ -25,7 +25,8 @@
           backend-open backend-close
           backend-wait backend-drain
           backend-last-overflow?
-          backend-dir backend-base)
+          backend-dir backend-base
+          backend-fd)
 
   ;;; backend-supported? -- 1 if the current build target has a real
   ;;; backend (Linux/inotify or Darwin/kqueue), 0 otherwise.
@@ -257,4 +258,20 @@
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     return (const char *)(w ? w->base : "");
+    ```)
+
+  ;;; backend-fd -- the OS file descriptor underlying the backend, suitable
+  ;;; for passing to poll(2) when combining multiple watchers.  Returns -1
+  ;;; when the handle is null or the platform has no backend.
+  (defn backend-fd [handle :int] #{Unsafe} :int
+    ```c
+    TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
+    if (!w) return -1;
+    #if defined(__linux__)
+    return (int64_t)w->fd;
+    #elif defined(__APPLE__)
+    return (int64_t)w->kq;
+    #else
+    return -1;
+    #endif
     ```))
