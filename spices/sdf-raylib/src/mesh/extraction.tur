@@ -14,6 +14,7 @@
 
 (defmodule mesh/extraction
   (export mc-extract-colored
+          dc-extract-colored
           cmesh-vertex-count
           cmesh-get-vx cmesh-get-vy cmesh-get-vz
           cmesh-get-nx cmesh-get-ny cmesh-get-nz
@@ -693,6 +694,513 @@
   typedef struct { float *v,*n,*c; int32_t *oi; int count,cap; } cmesh;
   cmesh *ms=(cmesh*)(intptr_t)m;
   return (ms&&i>=0&&i<ms->count)?(int64_t)ms->object_ids[i]:-1;
+  ```)
+
+;;; dc-extract-colored -- run Dual Contouring (Ju et al. 2002) on a ColoredSDF tree.
+;;;
+;;; Produces sharper feature preservation than Marching Cubes by solving a
+;;; Quadratic Error Function (QEF) per voxel to place the output vertex at the
+;;; best-fit position for all sign-changing edge intersections within that cell.
+;;; Each vertex receives the color and objectId of the closest SDF leaf.
+;;;
+;;; Parameters:
+;;;   csdf         -- ColoredSDF handle
+;;;   res          -- voxel resolution per axis (e.g. 32, 64)
+;;;   bx0 by0 bz0  -- bounding-box minimum
+;;;   bx1 by1 bz1  -- bounding-box maximum
+;;;
+;;; Returns:
+;;;   Opaque cmesh handle (triangle soup), or 0 on failure.  Free with cmesh-free.
+;;;
+;;; Example:
+;;;   (dc-extract-colored scene 32  -2.0 -2.0 -2.0  2.0 2.0 2.0)
+;;;
+;;; Since: Phase 4
+(defn dc-extract-colored [csdf :int res :int
+                           bx0 :float by0 :float bz0 :float
+                           bx1 :float by1 :float bz1 :float] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+  #include <stdint.h>
+
+  /* ---------- SDF node layout (mirrors sdf/expr.tur) ---------- */
+  typedef struct sdf_node {
+    int64_t tag;
+    double v0x,v0y,v0z, v1x,v1y,v1z, s0,s1;
+    struct sdf_node *left, *right;
+  } sdf_node;
+
+  /* ---------- Colored node layout (mirrors sdf/colors.tur) ---------- */
+  typedef struct colored_node {
+    int64_t sdf;
+    float r, g, b;
+    int32_t object_id;
+    struct colored_node *left_cn, *right_cn;
+  } colored_node;
+
+  /* ---------- Colored mesh output ---------- */
+  typedef struct {
+    float   *vertices;
+    float   *normals;
+    float   *colors;
+    int32_t *object_ids;
+    int      count;
+    int      capacity;
+  } cmesh;
+
+  /* ---------- SDF tag constants ---------- */
+#define DC_TAG_SPHERE    0
+#define DC_TAG_BOX       1
+#define DC_TAG_CYLINDER  2
+#define DC_TAG_PLANE     3
+#define DC_TAG_UNION     10
+#define DC_TAG_INTERSECT 11
+#define DC_TAG_DIFF      12
+#define DC_TAG_SMUNION   13
+#define DC_TAG_OFFSET    20
+#define DC_TAG_SHELL     21
+#define DC_TAG_TRANSLATE 30
+
+  /* ---------- Iterative SDF evaluator ---------- */
+#define EVAL_SDF(result_out, root_ptr, spx, spy, spz) \
+  do { \
+    struct { sdf_node *n; int phase; } _stk[64]; \
+    double _res[64]; \
+    int _stk_top=0, _res_top=0; \
+    _stk[_stk_top].n=(sdf_node*)(intptr_t)(root_ptr); _stk[_stk_top].phase=0; _stk_top++; \
+    while (_stk_top > 0) { \
+      sdf_node *_n = _stk[_stk_top-1].n; \
+      int _ph = _stk[_stk_top-1].phase; \
+      int64_t _tag = _n->tag; \
+      if (_tag==DC_TAG_SPHERE) { \
+        double _dx=(spx)-_n->v0x, _dy=(spy)-_n->v0y, _dz=(spz)-_n->v0z; \
+        _res[_res_top++]=sqrt(_dx*_dx+_dy*_dy+_dz*_dz)-_n->s0; _stk_top--; \
+      } else if (_tag==DC_TAG_BOX) { \
+        double _cx=(_n->v0x+_n->v1x)*0.5,_cy=(_n->v0y+_n->v1y)*0.5,_cz=(_n->v0z+_n->v1z)*0.5; \
+        double _ex=(_n->v1x-_n->v0x)*0.5,_ey=(_n->v1y-_n->v0y)*0.5,_ez=(_n->v1z-_n->v0z)*0.5; \
+        double _qx=fabs((spx)-_cx)-_ex,_qy=fabs((spy)-_cy)-_ey,_qz=fabs((spz)-_cz)-_ez; \
+        double _mx=_qx>_qy?(_qx>_qz?_qx:_qz):(_qy>_qz?_qy:_qz); \
+        double _lq=sqrt((_qx>0?_qx*_qx:0)+(_qy>0?_qy*_qy:0)+(_qz>0?_qz*_qz:0)); \
+        _res[_res_top++]=_lq+(_mx<0?_mx:0); _stk_top--; \
+      } else if (_tag==DC_TAG_CYLINDER) { \
+        double _dx=(spx)-_n->v0x,_dy=(spy)-_n->v0y; \
+        _res[_res_top++]=sqrt(_dx*_dx+_dy*_dy)-_n->s0; _stk_top--; \
+      } else if (_tag==DC_TAG_PLANE) { \
+        _res[_res_top++]=_n->v0x*(spx)+_n->v0y*(spy)+_n->v0z*(spz)+_n->s0; _stk_top--; \
+      } else if (_tag==DC_TAG_UNION||_tag==DC_TAG_INTERSECT||_tag==DC_TAG_DIFF||_tag==DC_TAG_SMUNION) { \
+        if (_ph==0){ _stk[_stk_top-1].phase=1; _stk[_stk_top].n=_n->left; _stk[_stk_top].phase=0; _stk_top++; } \
+        else if (_ph==1){ _stk[_stk_top-1].phase=2; _stk[_stk_top].n=_n->right; _stk[_stk_top].phase=0; _stk_top++; } \
+        else { double _r=_res[--_res_top],_l=_res[--_res_top]; \
+          if (_tag==DC_TAG_UNION)          _res[_res_top++]=_l<_r?_l:_r; \
+          else if (_tag==DC_TAG_INTERSECT) _res[_res_top++]=_l>_r?_l:_r; \
+          else if (_tag==DC_TAG_DIFF)      { double _nr=-_r; _res[_res_top++]=_l>_nr?_l:_nr; } \
+          else { double _k=_n->s0,_h=fmax(_k-fabs(_l-_r),0.0)/_k; _res[_res_top++]=fmin(_l,_r)-_h*_h*_k*0.25; } \
+          _stk_top--; } \
+      } else if (_tag==DC_TAG_OFFSET) { \
+        if (_ph==0){ _stk[_stk_top-1].phase=1; _stk[_stk_top].n=_n->left; _stk[_stk_top].phase=0; _stk_top++; } \
+        else { _res[_res_top-1]+=_n->s0; _stk_top--; } \
+      } else if (_tag==DC_TAG_SHELL) { \
+        if (_ph==0){ _stk[_stk_top-1].phase=1; _stk[_stk_top].n=_n->left; _stk[_stk_top].phase=0; _stk_top++; } \
+        else { double _d=_res[--_res_top]; _res[_res_top++]=fabs(_d)-_n->s0; _stk_top--; } \
+      } else if (_tag==DC_TAG_TRANSLATE) { \
+        if (_ph==0){ _stk_top--; \
+          double _tx=_n->v0x,_ty=_n->v0y,_tz=_n->v0z; \
+          double _npx=(spx)-_tx,_npy=(spy)-_ty,_npz=(spz)-_tz; \
+          { \
+            struct { sdf_node *n; int phase; } _stk2[64]; double _res2[64]; \
+            int _st2=0,_rt2=0; \
+            _stk2[_st2].n=_n->left; _stk2[_st2].phase=0; _st2++; \
+            while (_st2>0){ sdf_node *_m=_stk2[_st2-1].n; int _p2=_stk2[_st2-1].phase; int64_t _t2=_m->tag; \
+              if (_t2==DC_TAG_SPHERE){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y,_dz2=_npz-_m->v0z; _res2[_rt2++]=sqrt(_dx2*_dx2+_dy2*_dy2+_dz2*_dz2)-_m->s0; _st2--;} \
+              else if (_t2==DC_TAG_BOX){double _cx2=(_m->v0x+_m->v1x)*0.5,_cy2=(_m->v0y+_m->v1y)*0.5,_cz2=(_m->v0z+_m->v1z)*0.5,_ex2=(_m->v1x-_m->v0x)*0.5,_ey2=(_m->v1y-_m->v0y)*0.5,_ez2=(_m->v1z-_m->v0z)*0.5,_qx2=fabs(_npx-_cx2)-_ex2,_qy2=fabs(_npy-_cy2)-_ey2,_qz2=fabs(_npz-_cz2)-_ez2,_mx2=_qx2>_qy2?(_qx2>_qz2?_qx2:_qz2):(_qy2>_qz2?_qy2:_qz2),_lq2=sqrt((_qx2>0?_qx2*_qx2:0)+(_qy2>0?_qy2*_qy2:0)+(_qz2>0?_qz2*_qz2:0)); _res2[_rt2++]=_lq2+(_mx2<0?_mx2:0); _st2--;} \
+              else if (_t2==DC_TAG_CYLINDER){double _dx2=_npx-_m->v0x,_dy2=_npy-_m->v0y; _res2[_rt2++]=sqrt(_dx2*_dx2+_dy2*_dy2)-_m->s0; _st2--;} \
+              else if (_t2==DC_TAG_PLANE){_res2[_rt2++]=_m->v0x*_npx+_m->v0y*_npy+_m->v0z*_npz+_m->s0; _st2--;} \
+              else if (_t2==DC_TAG_UNION||_t2==DC_TAG_INTERSECT||_t2==DC_TAG_DIFF||_t2==DC_TAG_SMUNION){ \
+                if(_p2==0){_stk2[_st2-1].phase=1;_stk2[_st2].n=_m->left;_stk2[_st2].phase=0;_st2++;} \
+                else if(_p2==1){_stk2[_st2-1].phase=2;_stk2[_st2].n=_m->right;_stk2[_st2].phase=0;_st2++;} \
+                else{double _rr=_res2[--_rt2],_ll=_res2[--_rt2]; \
+                  if(_t2==DC_TAG_UNION)_res2[_rt2++]=_ll<_rr?_ll:_rr; \
+                  else if(_t2==DC_TAG_INTERSECT)_res2[_rt2++]=_ll>_rr?_ll:_rr; \
+                  else if(_t2==DC_TAG_DIFF){double _nr2=-_rr;_res2[_rt2++]=_ll>_nr2?_ll:_nr2;} \
+                  else{double _k2=_m->s0,_h2=fmax(_k2-fabs(_ll-_rr),0.0)/_k2;_res2[_rt2++]=fmin(_ll,_rr)-_h2*_h2*_k2*0.25;} \
+                  _st2--;} \
+              } else if(_t2==DC_TAG_OFFSET){ \
+                if(_p2==0){_stk2[_st2-1].phase=1;_stk2[_st2].n=_m->left;_stk2[_st2].phase=0;_st2++;} \
+                else{_res2[_rt2-1]+=_m->s0;_st2--;} \
+              } else if(_t2==DC_TAG_SHELL){ \
+                if(_p2==0){_stk2[_st2-1].phase=1;_stk2[_st2].n=_m->left;_stk2[_st2].phase=0;_st2++;} \
+                else{double _d2=_res2[--_rt2];_res2[_rt2++]=fabs(_d2)-_m->s0;_st2--;} \
+              } else { _res2[_rt2++]=1e9; _st2--; } \
+            } \
+            _res[_res_top++]=_res2[0]; \
+          } \
+        } \
+      } else { _res[_res_top++]=1e9; _stk_top--; } \
+    } \
+    (result_out) = _res[0]; \
+  } while(0)
+
+  /* ---------- Attribute walker ---------- */
+#define ATTR_WALK(_or, _og, _ob, _oo, _cn_arg, _wpx, _wpy, _wpz) \
+  do { \
+    colored_node *_acn = (colored_node *)(intptr_t)(int64_t)(_cn_arg); \
+    double _apx=(double)(_wpx),_apy=(double)(_wpy),_apz=(double)(_wpz); \
+    while (1) { \
+      if (!_acn) { *(_or)=*(_og)=*(_ob)=0.5f; *(_oo)=-1; break; } \
+      if (_acn->object_id >= 0) { \
+        *(_or)=(float)_acn->r; *(_og)=(float)_acn->g; *(_ob)=(float)_acn->b; \
+        *(_oo)=(int)_acn->object_id; break; \
+      } \
+      sdf_node *_an=(sdf_node *)(intptr_t)_acn->sdf; \
+      if (!_an) { *(_or)=*(_og)=*(_ob)=0.5f; *(_oo)=-1; break; } \
+      int64_t _at=_an->tag; \
+      if (_at==DC_TAG_TRANSLATE) { \
+        _apx-=_an->v0x; _apy-=_an->v0y; _apz-=_an->v0z; \
+        _acn=_acn->left_cn; continue; \
+      } \
+      if (_at==DC_TAG_OFFSET||_at==DC_TAG_SHELL) { \
+        _acn=_acn->left_cn; continue; \
+      } \
+      sdf_node *_als=_an->left, *_ars=_an->right; \
+      if (!_als||!_acn->left_cn)  { _acn=_acn->right_cn; continue; } \
+      if (!_ars||!_acn->right_cn) { _acn=_acn->left_cn;  continue; } \
+      double _adl,_adr; \
+      EVAL_SDF(_adl,_als,_apx,_apy,_apz); \
+      EVAL_SDF(_adr,_ars,_apx,_apy,_apz); \
+      if (_at==DC_TAG_UNION||_at==DC_TAG_SMUNION) { \
+        _acn=(_adl<=_adr)?_acn->left_cn:_acn->right_cn; \
+      } else if (_at==DC_TAG_INTERSECT) { \
+        _acn=(_adl>=_adr)?_acn->left_cn:_acn->right_cn; \
+      } else if (_at==DC_TAG_DIFF) { \
+        double _andr=-_adr; \
+        _acn=(_adl>=_andr)?_acn->left_cn:_acn->right_cn; \
+      } else { _acn=_acn->left_cn; } \
+    } \
+  } while(0)
+
+  /* ---------- Vertex push macro ---------- */
+#define PUSH_VERT_DC(vx,vy,vz,nx_,ny_,nz_,cr,cg,cb,oid) do { \
+  if (mesh->count >= mesh->capacity) { \
+    mesh->capacity *= 2; \
+    mesh->vertices   = (float   *)realloc(mesh->vertices,   mesh->capacity*3*sizeof(float)); \
+    mesh->normals    = (float   *)realloc(mesh->normals,    mesh->capacity*3*sizeof(float)); \
+    mesh->colors     = (float   *)realloc(mesh->colors,     mesh->capacity*3*sizeof(float)); \
+    mesh->object_ids = (int32_t *)realloc(mesh->object_ids, mesh->capacity*sizeof(int32_t)); \
+  } \
+  int _vi = mesh->count * 3; \
+  mesh->vertices[_vi]=(float)(vx);  mesh->vertices[_vi+1]=(float)(vy);  mesh->vertices[_vi+2]=(float)(vz); \
+  mesh->normals [_vi]=(float)(nx_); mesh->normals [_vi+1]=(float)(ny_); mesh->normals [_vi+2]=(float)(nz_); \
+  mesh->colors  [_vi]=(float)(cr);  mesh->colors  [_vi+1]=(float)(cg);  mesh->colors  [_vi+2]=(float)(cb); \
+  mesh->object_ids[mesh->count]=(int32_t)(oid); \
+  mesh->count++; \
+} while(0)
+
+  /* ---------- Per-voxel vertex record ---------- */
+  typedef struct {
+    float vx, vy, vz;
+    float nx, ny, nz;
+    float cr, cg, cb;
+    int32_t oid;
+    int valid;
+  } dc_vert;
+
+  /* ---------- DC edge table: same 12 edges as MC ---------- */
+  static const int dc_edge_v[12][2] = {
+    {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}
+  };
+  static const int dc_voff[8][3] = {
+    {0,0,0},{1,0,0},{1,1,0},{0,1,0},
+    {0,0,1},{1,0,1},{1,1,1},{0,1,1}
+  };
+
+  colored_node *cn_root = (colored_node *)(intptr_t)csdf;
+  sdf_node     *sdf_root = cn_root ? (sdf_node *)(intptr_t)cn_root->sdf : NULL;
+  if (!cn_root || !sdf_root) return 0;
+
+  int R = (int)res;
+  int N = R + 1;
+  double sx = (bx1 - bx0) / R;
+  double sy = (by1 - by0) / R;
+  double sz = (bz1 - bz0) / R;
+
+  /* Phase A: evaluate SDF on N^3 grid */
+  float *sdf_grid = (float *)malloc((size_t)N * N * N * sizeof(float));
+  if (!sdf_grid) return 0;
+
+  for (int gz = 0; gz < N; gz++) {
+    for (int gy = 0; gy < N; gy++) {
+      for (int gx = 0; gx < N; gx++) {
+        double px = bx0 + gx * sx;
+        double py = by0 + gy * sy;
+        double pz = bz0 + gz * sz;
+        double d;
+        EVAL_SDF(d, sdf_root, px, py, pz);
+        sdf_grid[gz * N * N + gy * N + gx] = (float)d;
+      }
+    }
+  }
+
+  /* Phase B: compute one QEF vertex per voxel */
+  dc_vert *vv = (dc_vert *)calloc((size_t)R * R * R, sizeof(dc_vert));
+  if (!vv) { free(sdf_grid); return 0; }
+
+  double eps_grad = 1e-3 * (sx < sy ? (sx < sz ? sx : sz) : (sy < sz ? sy : sz));
+
+  for (int iz = 0; iz < R; iz++) {
+    for (int iy = 0; iy < R; iy++) {
+      for (int ix = 0; ix < R; ix++) {
+        /* 8 corners */
+        double cv[8];
+        double cx8[8], cy8[8], cz8[8];
+        for (int v = 0; v < 8; v++) {
+          cx8[v] = bx0 + (ix + dc_voff[v][0]) * sx;
+          cy8[v] = by0 + (iy + dc_voff[v][1]) * sy;
+          cz8[v] = bz0 + (iz + dc_voff[v][2]) * sz;
+          cv[v] = (double)sdf_grid[(iz+dc_voff[v][2])*N*N + (iy+dc_voff[v][1])*N + (ix+dc_voff[v][0])];
+        }
+
+        /* QEF accumulators */
+        double ATA[9] = {0}; /* 3x3 row-major */
+        double ATb[3] = {0};
+        double centroid[3] = {0};
+        int n_crossings = 0;
+
+        for (int e = 0; e < 12; e++) {
+          int va = dc_edge_v[e][0], vb = dc_edge_v[e][1];
+          double da = cv[va], db = cv[vb];
+          int sign_a = (da < 0.0), sign_b = (db < 0.0);
+          if (sign_a == sign_b) continue;
+
+          double denom = db - da;
+          double t = (fabs(denom) > 1e-12) ? (-da / denom) : 0.5;
+          if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
+
+          double xi = cx8[va] + t * (cx8[vb] - cx8[va]);
+          double yi = cy8[va] + t * (cy8[vb] - cy8[va]);
+          double zi = cz8[va] + t * (cz8[vb] - cz8[va]);
+
+          /* Central-difference gradient */
+          double dp, dm2;
+          EVAL_SDF(dp, sdf_root, xi+eps_grad, yi, zi);
+          EVAL_SDF(dm2, sdf_root, xi-eps_grad, yi, zi);
+          double ni0 = (dp - dm2) / (2.0 * eps_grad);
+          EVAL_SDF(dp, sdf_root, xi, yi+eps_grad, zi);
+          EVAL_SDF(dm2, sdf_root, xi, yi-eps_grad, zi);
+          double ni1 = (dp - dm2) / (2.0 * eps_grad);
+          EVAL_SDF(dp, sdf_root, xi, yi, zi+eps_grad);
+          EVAL_SDF(dm2, sdf_root, xi, yi, zi-eps_grad);
+          double ni2 = (dp - dm2) / (2.0 * eps_grad);
+          double nlen = sqrt(ni0*ni0 + ni1*ni1 + ni2*ni2);
+          if (nlen > 1e-10) { ni0/=nlen; ni1/=nlen; ni2/=nlen; }
+
+          /* Accumulate ATA += n*nT */
+          ATA[0]+=ni0*ni0; ATA[1]+=ni0*ni1; ATA[2]+=ni0*ni2;
+          ATA[3]+=ni1*ni0; ATA[4]+=ni1*ni1; ATA[5]+=ni1*ni2;
+          ATA[6]+=ni2*ni0; ATA[7]+=ni2*ni1; ATA[8]+=ni2*ni2;
+          /* Accumulate ATb += n*(n.xi) */
+          double dot = ni0*xi + ni1*yi + ni2*zi;
+          ATb[0]+=ni0*dot; ATb[1]+=ni1*dot; ATb[2]+=ni2*dot;
+
+          centroid[0]+=xi; centroid[1]+=yi; centroid[2]+=zi;
+          n_crossings++;
+        }
+
+        if (n_crossings == 0) { vv[iz*R*R+iy*R+ix].valid=0; continue; }
+
+        centroid[0]/=n_crossings; centroid[1]/=n_crossings; centroid[2]/=n_crossings;
+
+        /* Regularize */
+        double lambda = 1e-4;
+        ATA[0]+=lambda; ATA[4]+=lambda; ATA[8]+=lambda;
+        ATb[0]+=lambda*centroid[0]; ATb[1]+=lambda*centroid[1]; ATb[2]+=lambda*centroid[2];
+
+        /* Gauss-Jordan solve: augmented [ATA | ATb] */
+        double aug[3][4];
+        for (int r = 0; r < 3; r++) {
+          for (int c = 0; c < 3; c++) aug[r][c] = ATA[r*3+c];
+          aug[r][3] = ATb[r];
+        }
+
+        int degenerate = 0;
+        for (int col = 0; col < 3 && !degenerate; col++) {
+          /* Find max pivot */
+          int pivot_row = col;
+          double max_val = fabs(aug[col][col]);
+          for (int row2 = col+1; row2 < 3; row2++) {
+            if (fabs(aug[row2][col]) > max_val) {
+              max_val = fabs(aug[row2][col]);
+              pivot_row = row2;
+            }
+          }
+          if (max_val < 1e-10) { degenerate = 1; break; }
+          if (pivot_row != col) {
+            for (int c2 = 0; c2 < 4; c2++) {
+              double tmp = aug[col][c2]; aug[col][c2]=aug[pivot_row][c2]; aug[pivot_row][c2]=tmp;
+            }
+          }
+          double piv = aug[col][col];
+          for (int c2 = 0; c2 < 4; c2++) aug[col][c2] /= piv;
+          for (int row2 = 0; row2 < 3; row2++) {
+            if (row2 == col) continue;
+            double fac = aug[row2][col];
+            for (int c2 = 0; c2 < 4; c2++) aug[row2][c2] -= fac * aug[col][c2];
+          }
+        }
+
+        double vx_d, vy_d, vz_d;
+        if (degenerate) {
+          vx_d = centroid[0]; vy_d = centroid[1]; vz_d = centroid[2];
+        } else {
+          vx_d = aug[0][3]; vy_d = aug[1][3]; vz_d = aug[2][3];
+        }
+
+        /* Clamp to cell bounds */
+        double cell_x0 = bx0 + ix*sx, cell_x1 = cell_x0+sx;
+        double cell_y0 = by0 + iy*sy, cell_y1 = cell_y0+sy;
+        double cell_z0 = bz0 + iz*sz, cell_z1 = cell_z0+sz;
+        if (vx_d < cell_x0) vx_d=cell_x0; if (vx_d > cell_x1) vx_d=cell_x1;
+        if (vy_d < cell_y0) vy_d=cell_y0; if (vy_d > cell_y1) vy_d=cell_y1;
+        if (vz_d < cell_z0) vz_d=cell_z0; if (vz_d > cell_z1) vz_d=cell_z1;
+
+        /* Final normal via gradient at v */
+        double gp, gm;
+        EVAL_SDF(gp, sdf_root, vx_d+eps_grad, vy_d, vz_d);
+        EVAL_SDF(gm, sdf_root, vx_d-eps_grad, vy_d, vz_d);
+        double fnx = (gp-gm)/(2.0*eps_grad);
+        EVAL_SDF(gp, sdf_root, vx_d, vy_d+eps_grad, vz_d);
+        EVAL_SDF(gm, sdf_root, vx_d, vy_d-eps_grad, vz_d);
+        double fny = (gp-gm)/(2.0*eps_grad);
+        EVAL_SDF(gp, sdf_root, vx_d, vy_d, vz_d+eps_grad);
+        EVAL_SDF(gm, sdf_root, vx_d, vy_d, vz_d-eps_grad);
+        double fnz = (gp-gm)/(2.0*eps_grad);
+        double nl = sqrt(fnx*fnx+fny*fny+fnz*fnz);
+        if (nl > 1e-10) { fnx/=nl; fny/=nl; fnz/=nl; }
+
+        float vcr, vcg, vcb; int void_ = 0;
+        ATTR_WALK(&vcr,&vcg,&vcb,&void_, cn_root, vx_d, vy_d, vz_d);
+
+        dc_vert *vp = &vv[iz*R*R+iy*R+ix];
+        vp->vx=(float)vx_d; vp->vy=(float)vy_d; vp->vz=(float)vz_d;
+        vp->nx=(float)fnx;  vp->ny=(float)fny;  vp->nz=(float)fnz;
+        vp->cr=vcr; vp->cg=vcg; vp->cb=vcb;
+        vp->oid=void_;
+        vp->valid=1;
+      }
+    }
+  }
+
+  /* Phase C: output mesh */
+  cmesh *mesh = (cmesh *)calloc(1, sizeof(cmesh));
+  if (!mesh) { free(sdf_grid); free(vv); return 0; }
+  mesh->capacity = 4096;
+  mesh->vertices   = (float   *)malloc(mesh->capacity * 3 * sizeof(float));
+  mesh->normals    = (float   *)malloc(mesh->capacity * 3 * sizeof(float));
+  mesh->colors     = (float   *)malloc(mesh->capacity * 3 * sizeof(float));
+  mesh->object_ids = (int32_t *)malloc(mesh->capacity     * sizeof(int32_t));
+  if (!mesh->vertices || !mesh->normals || !mesh->colors || !mesh->object_ids) {
+    free(mesh->vertices); free(mesh->normals); free(mesh->colors);
+    free(mesh->object_ids); free(mesh); free(sdf_grid); free(vv);
+    return 0;
+  }
+
+#define EMIT_QUAD(c0x,c0y,c0z, c1x,c1y,c1z, c2x,c2y,c2z, c3x,c3y,c3z) do { \
+  dc_vert *_v0=&vv[(c0z)*R*R+(c0y)*R+(c0x)]; \
+  dc_vert *_v1=&vv[(c1z)*R*R+(c1y)*R+(c1x)]; \
+  dc_vert *_v2=&vv[(c2z)*R*R+(c2y)*R+(c2x)]; \
+  dc_vert *_v3=&vv[(c3z)*R*R+(c3y)*R+(c3x)]; \
+  if (!_v0->valid||!_v1->valid||!_v2->valid||!_v3->valid) break; \
+  PUSH_VERT_DC(_v0->vx,_v0->vy,_v0->vz, _v0->nx,_v0->ny,_v0->nz, _v0->cr,_v0->cg,_v0->cb,_v0->oid); \
+  PUSH_VERT_DC(_v2->vx,_v2->vy,_v2->vz, _v2->nx,_v2->ny,_v2->nz, _v2->cr,_v2->cg,_v2->cb,_v2->oid); \
+  PUSH_VERT_DC(_v3->vx,_v3->vy,_v3->vz, _v3->nx,_v3->ny,_v3->nz, _v3->cr,_v3->cg,_v3->cb,_v3->oid); \
+  PUSH_VERT_DC(_v0->vx,_v0->vy,_v0->vz, _v0->nx,_v0->ny,_v0->nz, _v0->cr,_v0->cg,_v0->cb,_v0->oid); \
+  PUSH_VERT_DC(_v1->vx,_v1->vy,_v1->vz, _v1->nx,_v1->ny,_v1->nz, _v1->cr,_v1->cg,_v1->cb,_v1->oid); \
+  PUSH_VERT_DC(_v2->vx,_v2->vy,_v2->vz, _v2->nx,_v2->ny,_v2->nz, _v2->cr,_v2->cg,_v2->cb,_v2->oid); \
+} while(0)
+
+#define EMIT_QUAD_FLIP(c0x,c0y,c0z, c1x,c1y,c1z, c2x,c2y,c2z, c3x,c3y,c3z) do { \
+  dc_vert *_v0=&vv[(c0z)*R*R+(c0y)*R+(c0x)]; \
+  dc_vert *_v1=&vv[(c1z)*R*R+(c1y)*R+(c1x)]; \
+  dc_vert *_v2=&vv[(c2z)*R*R+(c2y)*R+(c2x)]; \
+  dc_vert *_v3=&vv[(c3z)*R*R+(c3y)*R+(c3x)]; \
+  if (!_v0->valid||!_v1->valid||!_v2->valid||!_v3->valid) break; \
+  PUSH_VERT_DC(_v0->vx,_v0->vy,_v0->vz, _v0->nx,_v0->ny,_v0->nz, _v0->cr,_v0->cg,_v0->cb,_v0->oid); \
+  PUSH_VERT_DC(_v3->vx,_v3->vy,_v3->vz, _v3->nx,_v3->ny,_v3->nz, _v3->cr,_v3->cg,_v3->cb,_v3->oid); \
+  PUSH_VERT_DC(_v2->vx,_v2->vy,_v2->vz, _v2->nx,_v2->ny,_v2->nz, _v2->cr,_v2->cg,_v2->cb,_v2->oid); \
+  PUSH_VERT_DC(_v0->vx,_v0->vy,_v0->vz, _v0->nx,_v0->ny,_v0->nz, _v0->cr,_v0->cg,_v0->cb,_v0->oid); \
+  PUSH_VERT_DC(_v2->vx,_v2->vy,_v2->vz, _v2->nx,_v2->ny,_v2->nz, _v2->cr,_v2->cg,_v2->cb,_v2->oid); \
+  PUSH_VERT_DC(_v1->vx,_v1->vy,_v1->vz, _v1->nx,_v1->ny,_v1->nz, _v1->cr,_v1->cg,_v1->cb,_v1->oid); \
+} while(0)
+
+  /* X-edges */
+  for (int gx = 0; gx < R; gx++) {
+    for (int gy = 1; gy < R; gy++) {
+      for (int gz = 1; gz < R; gz++) {
+        float da = sdf_grid[gz*N*N + gy*N + gx];
+        float db = sdf_grid[gz*N*N + gy*N + (gx+1)];
+        if ((da < 0.0f) == (db < 0.0f)) continue;
+        if (da < 0.0f) {
+          EMIT_QUAD_FLIP(gx,gy,gz, gx,gy-1,gz, gx,gy-1,gz-1, gx,gy,gz-1);
+        } else {
+          EMIT_QUAD(gx,gy,gz, gx,gy-1,gz, gx,gy-1,gz-1, gx,gy,gz-1);
+        }
+      }
+    }
+  }
+
+  /* Y-edges */
+  for (int gy = 0; gy < R; gy++) {
+    for (int gx = 1; gx < R; gx++) {
+      for (int gz = 1; gz < R; gz++) {
+        float da = sdf_grid[gz*N*N + gy*N + gx];
+        float db = sdf_grid[(gz)*N*N + (gy+1)*N + gx];
+        if ((da < 0.0f) == (db < 0.0f)) continue;
+        if (da < 0.0f) {
+          EMIT_QUAD(gx,gy,gz, gx-1,gy,gz, gx-1,gy,gz-1, gx,gy,gz-1);
+        } else {
+          EMIT_QUAD_FLIP(gx,gy,gz, gx-1,gy,gz, gx-1,gy,gz-1, gx,gy,gz-1);
+        }
+      }
+    }
+  }
+
+  /* Z-edges */
+  for (int gz = 0; gz < R; gz++) {
+    for (int gx = 1; gx < R; gx++) {
+      for (int gy = 1; gy < R; gy++) {
+        float da = sdf_grid[gz*N*N + gy*N + gx];
+        float db = sdf_grid[(gz+1)*N*N + gy*N + gx];
+        if ((da < 0.0f) == (db < 0.0f)) continue;
+        if (da < 0.0f) {
+          EMIT_QUAD_FLIP(gx,gy,gz, gx-1,gy,gz, gx-1,gy-1,gz, gx,gy-1,gz);
+        } else {
+          EMIT_QUAD(gx,gy,gz, gx-1,gy,gz, gx-1,gy-1,gz, gx,gy-1,gz);
+        }
+      }
+    }
+  }
+
+#undef EMIT_QUAD
+#undef EMIT_QUAD_FLIP
+#undef PUSH_VERT_DC
+#undef ATTR_WALK
+#undef EVAL_SDF
+#undef DC_TAG_SPHERE
+#undef DC_TAG_BOX
+#undef DC_TAG_CYLINDER
+#undef DC_TAG_PLANE
+#undef DC_TAG_UNION
+#undef DC_TAG_INTERSECT
+#undef DC_TAG_DIFF
+#undef DC_TAG_SMUNION
+#undef DC_TAG_OFFSET
+#undef DC_TAG_SHELL
+#undef DC_TAG_TRANSLATE
+
+  free(sdf_grid);
+  free(vv);
+  return (int64_t)(intptr_t)mesh;
   ```)
 
 ;;; cmesh-free -- free a colored mesh returned by mc-extract-colored. Since: Phase 2

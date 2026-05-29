@@ -87,7 +87,9 @@
 <li style="padding-left:0.75rem;"><a href="#user-defined-macros" style="color:var(--text-sec);">User-defined macros</a></li>
 <li style=""><a href="#api" style="">API</a></li>
 <li style="padding-left:0.75rem;"><a href="#scscmlexer" style="color:var(--text-sec);">scscm/lexer</a></li>
+<li style="padding-left:0.75rem;"><a href="#scscmparser" style="color:var(--text-sec);">scscm/parser</a></li>
 <li style="padding-left:0.75rem;"><a href="#scscmexpander" style="color:var(--text-sec);">scscm/expander</a></li>
+<li style="padding-left:0.75rem;"><a href="#scscmcodegen" style="color:var(--text-sec);">scscm/codegen</a></li>
 <li style="padding-left:0.75rem;"><a href="#scscmcompile" style="color:var(--text-sec);">scscm/compile</a></li>
 <li style=""><a href="#implementation-notes" style="">Implementation notes</a></li>
 <li style=""><a href="#roadmap" style="">Roadmap</a></li></ul>
@@ -321,18 +323,15 @@ let [res compile-text(&quot;(+ 1 2)&quot;)]
 argument), <code>`(...)</code> is <code>quasiquote</code>.</p>
 <h2 id="api">API</h2>
 <h3 id="scscmlexer">scscm/lexer</h3>
-<p>```turmeric no-check
-(tokenize source :cstr)              ;; =&gt; result<tokens :int>
-(token-type tok :int) :cstr          ;; =&gt; ":symbol" ":keyword" etc.
+<pre><code class="language-turmeric">(tokenize source :cstr)              ;; =&gt; result&lt;tokens :int&gt;
+(token-type tok :int) :cstr          ;; =&gt; &quot;:symbol&quot; &quot;:keyword&quot; etc.
 (token-value tok :int) :cstr
 (token-line tok :int) :int
 (token-col tok :int) :int
-(tokens-free ts :int) :void</p>
-<pre><code>
-### scscm/parser
-
-```turmeric no-check
-(parse tokens :int)                  ;; =&gt; result&lt;ast-list :int&gt;
+(tokens-free ts :int) :void
+</code></pre>
+<h3 id="scscmparser">scscm/parser</h3>
+<pre><code class="language-turmeric">(parse tokens :int)                  ;; =&gt; result&lt;ast-list :int&gt;
 (ast-kind node :int) :cstr           ;; =&gt; &quot;:list&quot; &quot;:symbol&quot; etc.
 (ast-symbol-name node :int) :cstr
 (ast-number-value node :int) :cstr
@@ -343,20 +342,17 @@ argument), <code>`(...)</code> is <code>quasiquote</code>.</p>
 (ast-free-all nodes :int) :void
 </code></pre>
 <h3 id="scscmexpander">scscm/expander</h3>
-<p>```turmeric no-check
-(expand ast :int) :int               ;; expand one node
-(expand-all asts :int) :int          ;; expand a cons list</p>
-<pre><code>
-### scscm/codegen
-
-```turmeric no-check
-(generate ast :int) :cstr            ;; sclang text for one node
+<pre><code class="language-turmeric">(expand ast :int) :int               ;; expand one node
+(expand-all asts :int) :int          ;; expand a cons list
+</code></pre>
+<h3 id="scscmcodegen">scscm/codegen</h3>
+<pre><code class="language-turmeric">(generate ast :int) :cstr            ;; sclang text for one node
 (generate-all asts :int) :cstr       ;; joined with &quot;;\n&quot;
 </code></pre>
 <h3 id="scscmcompile">scscm/compile</h3>
-<p><code>turmeric no-check
-(compile-text source :cstr)          ;; =&gt; result&lt;sclang :cstr&gt;
-(compile-file path :cstr)            ;; =&gt; result&lt;sclang :cstr&gt;</code></p>
+<pre><code class="language-turmeric">(compile-text source :cstr)          ;; =&gt; result&lt;sclang :cstr&gt;
+(compile-file path :cstr)            ;; =&gt; result&lt;sclang :cstr&gt;
+</code></pre>
 <h2 id="implementation-notes">Implementation notes</h2>
 <ul>
 <li>The lexer (<code>scscm/lexer</code>) uses a single inline-C block for character-level

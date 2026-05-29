@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tur/raylib/integration | Turmeric API</title>
+<title>tur/glsl/codegen | Turmeric API</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -111,72 +111,90 @@
   <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
   <h3>Exported</h3>
   <ul>
-    <li><a href="#sdf-preview-window">sdf-preview-window</a></li>
-    <li><a href="#csdf-preview-window">csdf-preview-window</a></li>
+    <li><a href="#csdf-_glsl">csdf-&gt;glsl</a></li>
+    <li><a href="#csdf-glsl-free">csdf-glsl-free</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#sb-new" style="color:var(--faint)">sb-new</a></li>
+    <li><a href="#sb-write" style="color:var(--faint)">sb-write</a></li>
+    <li><a href="#sb-str" style="color:var(--faint)">sb-str</a></li>
+    <li><a href="#sb-free" style="color:var(--faint)">sb-free</a></li>
+    <li><a href="#ctr-new" style="color:var(--faint)">ctr-new</a></li>
+    <li><a href="#ctr-next" style="color:var(--faint)">ctr-next</a></li>
+    <li><a href="#ctr-free" style="color:var(--faint)">ctr-free</a></li>
+    <li><a href="#glsl-f" style="color:var(--faint)">glsl-f</a></li>
+    <li><a href="#glsl-i" style="color:var(--faint)">glsl-i</a></li>
+    <li><a href="#pvar-name" style="color:var(--faint)">pvar-name</a></li>
+    <li><a href="#csdf--emit-sphere" style="color:var(--faint)">csdf--emit-sphere</a></li>
+    <li><a href="#csdf--emit-box" style="color:var(--faint)">csdf--emit-box</a></li>
+    <li><a href="#csdf--emit-cylinder" style="color:var(--faint)">csdf--emit-cylinder</a></li>
+    <li><a href="#csdf--emit-plane" style="color:var(--faint)">csdf--emit-plane</a></li>
+    <li><a href="#csdf--emit-node" style="color:var(--faint)">csdf--emit-node</a></li>
+    <li><a href="#glsl--strdup" style="color:var(--faint)">glsl--strdup</a></li>
   </ul>
 </div>
 <div class="content">
   <div class="module-heading">
-    <h1>raylib/integration</h1>
-    <div class="module-path">src/raylib/integration.tur</div>
+    <h1>glsl/codegen</h1>
+    <div class="module-path">src/glsl/codegen.tur</div>
   </div>
   <div class="module-doc">
-    <p class="module-doc-summary">CPU ray-marching preview window using raylib.</p>
-    <p class="def-since">Since: Phase 1</p>
+    <p class="module-doc-summary">GLSL code generation from a ColoredSDF tree.</p>
+    <p class="def-since">Since: Phase 3</p>
   </div>
-<div class="def-card" id="sdf-preview-window">
+<div class="def-card" id="csdf-_glsl">
   <div class="def-card-header">
     <span class="kind-badge kind-defn">defn</span>
-    <h2>sdf-preview-window</h2>
+    <h2>csdf-&gt;glsl</h2>
   </div>
-  <pre class="def-signature">(sdf-preview-window [sdf :int width :int height :int scale :int title :cstr] :void)</pre>
-  <p class="def-summary">open a window and live-preview an SdfExpr scene.</p>
-  <div class="def-section">
-    <div class="def-section-label">Parameters</div>
-    <table class="param-table">
-    <tr><td>sdf</td><td></td><td>SdfExpr handle to render</td></tr>
-    <tr><td>width</td><td></td><td>window width in pixels</td></tr>
-    <tr><td>height</td><td></td><td>window height in pixels</td></tr>
-    <tr><td>scale</td><td></td><td>render divisor (1 = full res, 4 = quarter res recommended)</td></tr>
-    <tr><td>title</td><td></td><td>window title string</td></tr>
-    </table>
-  </div>
-  <div class="def-section">
-    <div class="def-section-label">Returns</div>
-    <p class="def-returns">:void  Blocks until the window is closed.</p>
-  </div>
-  <div class="def-section">
-    <div class="def-section-label">Example</div>
-    <pre class="def-example">(sdf-preview-window (sdf-sphere 0.0 0.0 0.0 1.0) 800 600 4 &quot;Preview&quot;)</pre>
-  </div>
-  <p class="def-since">Since: Phase 1</p>
-</div>
-<div class="def-card" id="csdf-preview-window">
-  <div class="def-card-header">
-    <span class="kind-badge kind-defn">defn</span>
-    <h2>csdf-preview-window</h2>
-  </div>
-  <pre class="def-signature">(csdf-preview-window [csdf :int width :int height :int title :cstr] :void)</pre>
-  <p class="def-summary">open a window and GPU-raytrace a ColoredSDF scene.</p>
+  <pre class="def-signature">(csdf-&gt;glsl [csdf :int] :cstr)</pre>
+  <p class="def-summary">generate a GLSL sceneSDF function from a ColoredSDF tree.</p>
   <div class="def-section">
     <div class="def-section-label">Parameters</div>
     <table class="param-table">
     <tr><td>csdf</td><td></td><td>ColoredSDF handle</td></tr>
-    <tr><td>width</td><td></td><td>window width in pixels</td></tr>
-    <tr><td>height</td><td></td><td>window height in pixels</td></tr>
-    <tr><td>title</td><td></td><td>window title string</td></tr>
     </table>
   </div>
   <div class="def-section">
     <div class="def-section-label">Returns</div>
-    <p class="def-returns">:void  Blocks until the window is closed.</p>
+    <p class="def-returns">Heap-allocated GLSL source string, or &quot;&quot; on failure.</p>
   </div>
   <div class="def-section">
     <div class="def-section-label">Example</div>
-    <pre class="def-example">(csdf-preview-window scene 800 600 &quot;GPU Preview&quot;)</pre>
+    <pre class="def-example">(let [src (csdf-&gt;glsl scene)] (println src) (csdf-glsl-free src))</pre>
   </div>
   <p class="def-since">Since: Phase 3</p>
 </div>
+<div class="def-card" id="csdf-glsl-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-glsl-free</h2>
+  </div>
+  <pre class="def-signature">(csdf-glsl-free [s :cstr] :void)</pre>
+  <p class="def-summary">free a GLSL source string returned by csdf-&gt;glsl. Since: Phase 3</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="sb-new"><code>sb-new</code><span class="internal-item-summary">-- allocate a fresh string builder. Since: Phase 3</span></div>
+  <div class="internal-item" id="sb-write"><code>sb-write</code><span class="internal-item-summary">-- append a C string to the builder. Since: Phase 3</span></div>
+  <div class="internal-item" id="sb-str"><code>sb-str</code><span class="internal-item-summary">-- return a pointer into the builder&#x27;s buffer. Since: Phase 3</span></div>
+  <div class="internal-item" id="sb-free"><code>sb-free</code><span class="internal-item-summary">-- free the builder and its buffer. Since: Phase 3</span></div>
+  <div class="internal-item" id="ctr-new"><code>ctr-new</code><span class="internal-item-summary">-- allocate an integer counter starting at 0. Since: Phase 3</span></div>
+  <div class="internal-item" id="ctr-next"><code>ctr-next</code><span class="internal-item-summary">-- post-increment: returns current value then advances. Since: Phase 3</span></div>
+  <div class="internal-item" id="ctr-free"><code>ctr-free</code><span class="internal-item-summary">-- free a counter. Since: Phase 3</span></div>
+  <div class="internal-item" id="glsl-f"><code>glsl-f</code><span class="internal-item-summary">-- format a float as a GLSL literal (static buffer). Since: Phase 3</span></div>
+  <div class="internal-item" id="glsl-i"><code>glsl-i</code><span class="internal-item-summary">-- format an int as a decimal string (static buffer). Since: Phase 3</span></div>
+  <div class="internal-item" id="pvar-name"><code>pvar-name</code><span class="internal-item-summary">-- return &quot;p&quot; for idx 0, &quot;p_N&quot; otherwise (static buffer). Since: Phase 3</span></div>
+  <div class="internal-item" id="csdf--emit-sphere"><code>csdf--emit-sphere</code><span class="internal-item-summary">-- emit GLSL for a sphere leaf. Since: Phase 3</span></div>
+  <div class="internal-item" id="csdf--emit-box"><code>csdf--emit-box</code><span class="internal-item-summary">-- emit GLSL for a box leaf. Since: Phase 3</span></div>
+  <div class="internal-item" id="csdf--emit-cylinder"><code>csdf--emit-cylinder</code><span class="internal-item-summary">-- emit GLSL for an infinite XY-plane cylinder. Since: Phase 3</span></div>
+  <div class="internal-item" id="csdf--emit-plane"><code>csdf--emit-plane</code><span class="internal-item-summary">-- emit GLSL for an infinite plane. Since: Phase 3</span></div>
+  <div class="internal-item" id="csdf--emit-node"><code>csdf--emit-node</code><span class="internal-item-summary">-- recursively emit GLSL for a ColoredSDF subtree.</span></div>
+  <div class="internal-item" id="glsl--strdup"><code>glsl--strdup</code><span class="internal-item-summary">-- heap-duplicate a C string. Since: Phase 3</span></div>
+  </div>
+</details>
 </div>
 </div>
 <footer class="site-footer">

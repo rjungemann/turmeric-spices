@@ -1,0 +1,125 @@
+;;; dc_test -- Phase 4 tests: Dual Contouring, vertex welding, and glTF export.
+;;;
+;;; Since: Phase 4
+;; -------------------------------------------------------------------------
+
+(import sdf/colors :refer [colored-sphere colored-box colored-union
+                            colored-translate csdf-free])
+(import mesh/extraction   :refer [dc-extract-colored
+                                   cmesh-vertex-count cmesh-free
+                                   cmesh-get-cr cmesh-get-cg cmesh-get-cb
+                                   cmesh-get-object-id])
+(import mesh/optimization :refer [cmesh-weld
+                                   imesh-vertex-count imesh-triangle-count
+                                   imesh-free])
+(import export/gltf       :refer [export-glb])
+
+;; ---- helpers ----
+
+(defn approx= [a :float b :float] :int
+  (let [diff (if (> a b) (- a b) (- b a))]
+    (if (< diff 0.02) 1 0)))
+
+(defn assert! [cond :int msg :cstr] :void
+  (if (= cond 0)
+    (do (println msg) (exit 1))
+    0))
+
+;; ---- test 1: dc-extract-colored on a single colored sphere ----
+
+(defn test-dc-sphere [] :void
+  (let [scene (colored-sphere 0.0 0.0 0.0 1.0  1.0 0.5 0.0  1)
+        mesh  (dc-extract-colored scene 24
+                                  -2.0 -2.0 -2.0
+                                   2.0  2.0  2.0)]
+    (assert! (> mesh 0) "dc-extract-colored sphere: handle should be non-zero")
+    (let [n (cmesh-vertex-count mesh)]
+      (assert! (> n 0) "dc-extract-colored sphere: should produce vertices")
+      (let [cr (cmesh-get-cr mesh 0)
+            cg (cmesh-get-cg mesh 0)
+            oi (cmesh-get-object-id mesh 0)]
+        (assert! (approx= cr 1.0) "dc sphere: first vertex red should be ~1.0")
+        (assert! (approx= cg 0.5) "dc sphere: first vertex green should be ~0.5")
+        (assert! (= oi 1) "dc sphere: first vertex object ID should be 1")))
+    (cmesh-free mesh)
+    (csdf-free scene)))
+
+;; ---- test 2: dc-extract-colored on a two-sphere colored union ----
+
+(defn test-dc-union [] :void
+  (let [red  (colored-sphere -1.5 0.0 0.0 0.8  1.0 0.0 0.0  1)
+        blue (colored-sphere  1.5 0.0 0.0 0.8  0.0 0.0 1.0  2)
+        scene (colored-union red blue)
+        mesh  (dc-extract-colored scene 24
+                                  -3.0 -2.0 -2.0
+                                   3.0  2.0  2.0)]
+    (assert! (> mesh 0) "dc union: handle should be non-zero")
+    (assert! (> (cmesh-vertex-count mesh) 0) "dc union: should produce vertices")
+    (let [n    (cmesh-vertex-count mesh)
+          oi0  (cmesh-get-object-id mesh 0)
+          oiM  (cmesh-get-object-id mesh (/ n 2))]
+      (assert! (> (+ (= oi0 1) (= oi0 2)) 0) "dc union: vertex 0 should be obj 1 or 2")
+      (assert! (> (+ (= oiM 1) (= oiM 2)) 0) "dc union: mid vertex should be obj 1 or 2"))
+    (cmesh-free mesh)
+    (csdf-free scene)))
+
+;; ---- test 3: dc produces non-zero vertices for a box (feature preservation) ----
+
+(defn test-dc-vs-mc-sharpness [] :void
+  (let [scene (colored-box -1.0 -1.0 -1.0  1.0 1.0 1.0  0.8 0.8 0.2  1)
+        mesh  (dc-extract-colored scene 24
+                                  -2.0 -2.0 -2.0
+                                   2.0  2.0  2.0)]
+    (assert! (> mesh 0) "dc box: handle should be non-zero")
+    (assert! (> (cmesh-vertex-count mesh) 0) "dc box: should produce vertices")
+    (cmesh-free mesh)
+    (csdf-free scene)))
+
+;; ---- test 4: cmesh-weld reduces vertex count ----
+
+(defn test-cmesh-weld [] :void
+  (let [scene  (colored-sphere 0.0 0.0 0.0 1.0  0.0 1.0 0.0  1)
+        raw    (dc-extract-colored scene 20
+                                   -2.0 -2.0 -2.0
+                                    2.0  2.0  2.0)
+        n-raw  (cmesh-vertex-count raw)
+        welded (cmesh-weld raw 1.0e-4)
+        n-weld (imesh-vertex-count welded)]
+    (assert! (> welded 0) "weld: imesh handle should be non-zero")
+    (assert! (> n-weld 0) "weld: should have unique vertices")
+    (assert! (< n-weld n-raw) "weld: unique vertex count should be less than raw count")
+    (assert! (> (imesh-triangle-count welded) 0) "weld: should have triangles")
+    (imesh-free welded)
+    (cmesh-free raw)
+    (csdf-free scene)))
+
+;; ---- test 5: export-glb smoke test ----
+
+(defn test-export-glb [] :void
+  (let [scene  (colored-sphere 0.0 0.0 0.0 1.0  0.3 0.6 1.0  1)
+        raw    (dc-extract-colored scene 20
+                                   -2.0 -2.0 -2.0
+                                    2.0  2.0  2.0)
+        welded (cmesh-weld raw 1.0e-4)
+        ret    (export-glb welded "/tmp/tur_dc_test")]
+    (assert! (= ret 0) "export-glb: should return 0 on success")
+    (imesh-free welded)
+    (cmesh-free raw)
+    (csdf-free scene)))
+
+;; ---- main ----
+
+(defn main [] :int
+  (do
+    (test-dc-sphere)
+    (println "test-dc-sphere: PASS")
+    (test-dc-union)
+    (println "test-dc-union: PASS")
+    (test-dc-vs-mc-sharpness)
+    (println "test-dc-vs-mc-sharpness: PASS")
+    (test-cmesh-weld)
+    (println "test-cmesh-weld: PASS")
+    (test-export-glb)
+    (println "test-export-glb: PASS")
+    (println "All Phase 4 DC tests passed.")
+    0))

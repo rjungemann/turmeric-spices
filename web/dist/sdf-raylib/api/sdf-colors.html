@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/sdf/colors | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#csdf-sdf">csdf-sdf</a></li>
+    <li><a href="#csdf-left">csdf-left</a></li>
+    <li><a href="#csdf-right">csdf-right</a></li>
+    <li><a href="#csdf-r">csdf-r</a></li>
+    <li><a href="#csdf-g">csdf-g</a></li>
+    <li><a href="#csdf-b">csdf-b</a></li>
+    <li><a href="#csdf-object-id">csdf-object-id</a></li>
+    <li><a href="#csdf-free">csdf-free</a></li>
+    <li><a href="#colored-sphere">colored-sphere</a></li>
+    <li><a href="#colored-box">colored-box</a></li>
+    <li><a href="#colored-cylinder">colored-cylinder</a></li>
+    <li><a href="#colored-plane">colored-plane</a></li>
+    <li><a href="#colored-union">colored-union</a></li>
+    <li><a href="#colored-intersection">colored-intersection</a></li>
+    <li><a href="#colored-difference">colored-difference</a></li>
+    <li><a href="#colored-smooth-union">colored-smooth-union</a></li>
+    <li><a href="#colored-translate">colored-translate</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#csdf--make-leaf" style="color:var(--faint)">csdf--make-leaf</a></li>
+    <li><a href="#csdf--make-node" style="color:var(--faint)">csdf--make-node</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>sdf/colors</h1>
+    <div class="module-path">src/sdf/colors.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">ColoredSDF: SdfExpr paired with per-leaf color and object ID.</p>
+    <p class="def-since">Since: Phase 2</p>
+  </div>
+<div class="def-card" id="csdf-sdf">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-sdf</h2>
+  </div>
+  <pre class="def-signature">(csdf-sdf [cn :int] :int)</pre>
+  <p class="def-summary">the combined SdfExpr handle for this colored subtree.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>cn</td><td></td><td>ColoredSDF handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">SdfExpr handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(sdf-eval (csdf-sdf scene) 0.0 0.0 0.0)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="csdf-left">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-left</h2>
+  </div>
+  <pre class="def-signature">(csdf-left [cn :int] :int)</pre>
+  <p class="def-summary">left colored child handle (0 for leaves). Since: Phase 3</p>
+</div>
+<div class="def-card" id="csdf-right">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-right</h2>
+  </div>
+  <pre class="def-signature">(csdf-right [cn :int] :int)</pre>
+  <p class="def-summary">right colored child handle (0 for leaves and unaries). Since: Phase 3</p>
+</div>
+<div class="def-card" id="csdf-r">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-r</h2>
+  </div>
+  <pre class="def-signature">(csdf-r [cn :int] :float)</pre>
+  <p class="def-summary">red color component of a leaf node. Since: Phase 3</p>
+</div>
+<div class="def-card" id="csdf-g">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-g</h2>
+  </div>
+  <pre class="def-signature">(csdf-g [cn :int] :float)</pre>
+  <p class="def-summary">green color component of a leaf node. Since: Phase 3</p>
+</div>
+<div class="def-card" id="csdf-b">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-b</h2>
+  </div>
+  <pre class="def-signature">(csdf-b [cn :int] :float)</pre>
+  <p class="def-summary">blue color component of a leaf node. Since: Phase 3</p>
+</div>
+<div class="def-card" id="csdf-object-id">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-object-id</h2>
+  </div>
+  <pre class="def-signature">(csdf-object-id [cn :int] :int)</pre>
+  <p class="def-summary">object ID of a colored node (-1 for interior). Since: Phase 3</p>
+</div>
+<div class="def-card" id="csdf-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>csdf-free</h2>
+  </div>
+  <pre class="def-signature">(csdf-free [cn :int] :void)</pre>
+  <p class="def-summary">free a ColoredSDF tree and its associated SdfExpr tree.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>cn</td><td></td><td>ColoredSDF handle; safe to call with 0.</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(csdf-free scene)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-sphere">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-sphere</h2>
+  </div>
+  <pre class="def-signature">(colored-sphere [cx :float cy :float cz :float r :float cr :float cg :float cb :float objid :int] :int)</pre>
+  <p class="def-summary">sphere centred at (cx,cy,cz) with radius r and RGB color.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>cx cy cz -- centre position</td></tr>
+    <tr><td>r</td><td></td><td>radius (&gt; 0)</td></tr>
+    <tr><td></td><td></td><td>cr cg cb -- diffuse RGB color in [0, 1]</td></tr>
+    <tr><td>objid</td><td></td><td>object ID (&gt;= 0; unique per colored leaf in the scene)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">ColoredSDF handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-sphere 0.0 0.0 0.0 1.5  1.0 0.0 0.0  1)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-box">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-box</h2>
+  </div>
+  <pre class="def-signature">(colored-box [lx :float ly :float lz :float hx :float hy :float hz :float cr :float cg :float cb :float objid :int] :int)</pre>
+  <p class="def-summary">AABB from (lx,ly,lz) to (hx,hy,hz) with RGB color.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>lx ly lz -- minimum corner</td></tr>
+    <tr><td></td><td></td><td>hx hy hz -- maximum corner</td></tr>
+    <tr><td></td><td></td><td>cr cg cb -- diffuse RGB color in [0, 1]</td></tr>
+    <tr><td>objid</td><td></td><td>object ID (&gt;= 0)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">ColoredSDF handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-box -1.0 -1.0 -1.0  1.0 1.0 1.0  0.0 1.0 0.0  2)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-cylinder">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-cylinder</h2>
+  </div>
+  <pre class="def-signature">(colored-cylinder [cx :float cy :float cz :float r :float cr :float cg :float cb :float objid :int] :int)</pre>
+  <p class="def-summary">infinite cylinder through (cx,cy,*) radius r with color.</p>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-plane">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-plane</h2>
+  </div>
+  <pre class="def-signature">(colored-plane [nx :float ny :float nz :float d :float cr :float cg :float cb :float objid :int] :int)</pre>
+  <p class="def-summary">infinite plane n.p + d = 0 with given color.</p>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-union">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-union</h2>
+  </div>
+  <pre class="def-signature">(colored-union [a :int b :int] :int)</pre>
+  <p class="def-summary">CSG union of two colored SDFs.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>a b -- ColoredSDF handles</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Combined ColoredSDF handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-union
+    (colored-sphere -1.0 0.0 0.0 0.8  1.0 0.0 0.0  1)
+    (colored-sphere  1.0 0.0 0.0 0.8  0.0 1.0 0.0  2))</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-intersection">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-intersection</h2>
+  </div>
+  <pre class="def-signature">(colored-intersection [a :int b :int] :int)</pre>
+  <p class="def-summary">CSG intersection of two colored SDFs.</p>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-difference">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-difference</h2>
+  </div>
+  <pre class="def-signature">(colored-difference [a :int b :int] :int)</pre>
+  <p class="def-summary">CSG difference: a minus b.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>a</td><td></td><td>base shape</td></tr>
+    <tr><td>b</td><td></td><td>shape to subtract</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-smooth-union">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-smooth-union</h2>
+  </div>
+  <pre class="def-signature">(colored-smooth-union [a :int b :int k :float] :int)</pre>
+  <p class="def-summary">smooth union of two colored SDFs (Quilez blend).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td></td><td></td><td>a b -- ColoredSDF handles</td></tr>
+    <tr><td>k</td><td></td><td>blend radius (&gt;= 0)</td></tr>
+    </table>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="colored-translate">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>colored-translate</h2>
+  </div>
+  <pre class="def-signature">(colored-translate [cn :int tx :float ty :float tz :float] :int)</pre>
+  <p class="def-summary">translate a colored SDF by (tx, ty, tz).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>cn</td><td></td><td>ColoredSDF handle</td></tr>
+    <tr><td></td><td></td><td>tx ty tz -- translation vector</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Translated ColoredSDF handle.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(colored-translate my-sphere 0.0 2.0 0.0)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="csdf--make-leaf"><code>csdf--make-leaf</code><span class="internal-item-summary">-- allocate a ColoredSDF leaf.</span></div>
+  <div class="internal-item" id="csdf--make-node"><code>csdf--make-node</code><span class="internal-item-summary">-- allocate a ColoredSDF interior node.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>
