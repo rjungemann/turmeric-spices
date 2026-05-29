@@ -123,7 +123,9 @@
     if (tcgetattr(STDIN_FILENO, &g_ansi_saved_termios) != 0) return;
     struct termios raw = g_ansi_saved_termios;
     raw.c_iflag &= (tcflag_t)~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    raw.c_oflag &= (tcflag_t)~(OPOST);
+    /* Leave OPOST enabled so the kernel still maps \n -> \r\n on output.
+       Disabling it (the classic Kilo recipe) requires every consumer to
+       emit \r\n by hand, which the notebook TUI did not. */
     raw.c_cflag |= (tcflag_t)(CS8);
     raw.c_lflag &= (tcflag_t)~(ECHO | ICANON | IEXTEN | ISIG);
     raw.c_cc[VMIN] = 1;
