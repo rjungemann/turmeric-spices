@@ -24,46 +24,12 @@
           ast-list-len ast-list-get ast-free ast-free-all
           scscm-ast-leaf scscm-ast-list-node scscm-ast-add-child
           scscm-ast-value)
+  (import scscm/lexer :refer [cons head tail nil-value list-nil?
+                               scscm-list-rev scscm-cstr-eq?
+                               lex-ok lex-err lex-ok? lex-err? lex-ok-val
+                               token-type token-value])
 
 ;; ---- AST node allocators (inline-C) ----
-
-;; ---- cross-file type stubs (from scscm/lexer) ----
-;; These stubs provide type information for per-file tur check.
-;; The real implementations live in lexer.tur.
-(defn scscm-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
-  ```c
-  return strcmp((const char *)a, (const char *)b) == 0;
-  ```)
-(defn lex-err? [r :ptr<void>] #{Unsafe} :bool
-  ```c
-  struct { bool is_ok; } *res = (void*)r;
-  return res == NULL || !res->is_ok;
-  ```)
-(defn lex-ok-val [r :ptr<void>] #{Unsafe} :int
-  ```c
-  struct { bool is_ok; int64_t ok_val; } *res = (void*)r;
-  return res->ok_val;
-  ```)
-(defn lex-err [e :int] #{Unsafe} :ptr<void>
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return (void*)r;
-  ```)
-(defn lex-ok [x :int] #{Unsafe} :ptr<void>
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = x; r->err_val = 0; return (void*)r;
-  ```)
-(defn token-type [tok :int] #{Unsafe} :cstr
-  ```c
-  typedef struct { char *type; char *value; int line; int col; char *error; } STok;
-  return (const char *)((STok*)(intptr_t)tok)->type;
-  ```)
-(defn token-value [tok :int] #{Unsafe} :cstr
-  ```c
-  typedef struct { char *type; char *value; int line; int col; char *error; } STok;
-  return (const char *)((STok*)(intptr_t)tok)->value;
-  ```)
 
 ;;; scscm-ast-leaf -- allocate a leaf AST node with a value string.
 (defn scscm-ast-leaf [kind :int value :cstr] #{Unsafe} :int
@@ -307,7 +273,7 @@
 ;; Returns lex-ok(cons(node remaining)) or lex-err.
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
 (defn scscm-parse-list-body [tokens :int node :int close-ttyp :cstr] #{Unsafe} :ptr<void>
-  (if (tnil? tokens)
+  (if (list-nil? tokens)
     (lex-err 2)
     (let [tok   (head tokens)
           ttyp  (token-type tok)]
@@ -326,7 +292,7 @@
 ;; kind is the AST node kind; wraps the next parsed form.
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
 (defn scscm-parse-wrapper [kind :int tokens :int] #{Unsafe} :ptr<void>
-  (if (tnil? tokens)
+  (if (list-nil? tokens)
     (lex-err 3)
     (let [res (scscm-parse-form tokens)]
       (if (lex-err? res)
@@ -341,7 +307,7 @@
 ;; Parse all top-level forms, collecting into a cons list (in order).
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
 (defn scscm-parse-all [tokens :int acc :int] #{Unsafe} :ptr<void>
-  (if (tnil? tokens)
+  (if (list-nil? tokens)
     (lex-ok (scscm-list-rev acc (nil-value)))
     (let [res (scscm-parse-form tokens)]
       (if (lex-err? res)
@@ -355,7 +321,7 @@
 ;; Returns lex-ok(cons(node remaining-tokens)) or lex-err(cstr-msg).
 ;; scscm-parse-list-body and scscm-parse-wrapper are defined above.
 (defn scscm-parse-form [tokens :int] #{Unsafe} :ptr<void>
-  (if (tnil? tokens)
+  (if (list-nil? tokens)
     (lex-err 0)
     (let [tok  (head tokens)
           ttyp (token-type tok)

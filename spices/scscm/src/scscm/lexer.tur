@@ -425,9 +425,16 @@
 ;;;
 ;;; Since: SC0
 (defn tokens-free [ts :int] #{Unsafe} :void
-  (when (not (list-nil? ts))
+  (if (list-nil? ts)
+    (scscm-void-noop)
     (do
       (scscm-token-free-one (head ts))
       (tokens-free (tail ts)))))
+
+;; Helper for the nil branch of tokens-free (if both branches must be :void).
+(defn scscm-void-noop [] #{Unsafe} :void
+  ```c
+  (void)0;
+  ```)
 
 ) ;; end defmodule scscm/lexer
