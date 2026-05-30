@@ -1,0 +1,300 @@
+;;; tourist/param -- query-string parser and path-capture helpers.
+;;;
+;;; param   -- look up a query parameter by key; returns result<:cstr>.
+;;; capture -- look up a path-segment capture by name; returns result<:cstr>.
+;;;
+;;; Both return err("missing") when the key is absent.
+;;;
+;;; This module also owns the tourist request context type (__tourist_ctx).
+;;; The first 8 fields of __tourist_ctx are identical to __httpd_req so that
+;;; httpd/request accessors (req-method, req-path, req-body, req-header, ...)
+;;; work transparently on a ctx handle.
+;;;
+;;; tourist-ctx-new and tourist-ctx-free are exported for tourist/app (S7).
+;;;
+;;; Since: v0.1.0
+;;
+;; C struct layout shared across all inline-C blocks in this module:
+;;
+;;   struct __tourist_ctx {
+;;     // first 8 fields MUST match __httpd_req exactly (same offsets)
+;;     char  *method;
+;;     char  *path;
+;;     char  *query;      // raw query string (borrowed from httpd req)
+;;     char  *body;
+;;     char **hdr_keys;
+;;     char **hdr_vals;
+;;     int    hdr_count;
+;;     int    body_len;
+;;     // tourist extras
+;;     int64_t caps;      // __tourist_caps handle from router-match (owned)
+;;     char  **qp_keys;   // parsed query-param keys (owned)
+;;     char  **qp_vals;   // parsed query-param values (owned)
+;;     int     qp_count;
+;;     int     qp_cap;
+;;   };
+
+(defmodule tourist/param
+  (import tourist/router :refer [captures-get captures-free])
+  (export param capture
+          tourist-ctx-new tourist-ctx-free
+          tourist-ctx-caps)
+
+;; -- Internal: query-string parser ----------------------------------------
+
+;;; __parse-qp -- parse a raw query string into parallel key/value arrays.
+;;;
+;;; Parses "k1=v1&k2=v2" in place; writes malloc'd copies of keys and
+;;; values into the ctx's qp_keys / qp_vals fields.
+(defn __parse-qp [ctx :int] :void
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+  };
+
+  struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
+  const char *q = c->query;
+
+  while (q && *q) {
+    /* find segment end (next '&' or EOS) */
+    const char *amp = strchr(q, '&');
+    size_t seg_len = amp ? (size_t)(amp - q) : strlen(q);
+
+    const char *eq = memchr(q, '=', seg_len);
+    size_t klen = eq ? (size_t)(eq - q) : seg_len;
+    size_t vlen = eq ? (seg_len - klen - 1) : 0;
+
+    if (klen > 0) {
+      if (c->qp_count >= c->qp_cap) {
+        c->qp_cap *= 2;
+        c->qp_keys = realloc(c->qp_keys, sizeof(char *) * (size_t)c->qp_cap);
+        c->qp_vals = realloc(c->qp_vals, sizeof(char *) * (size_t)c->qp_cap);
+      }
+      char *k = malloc(klen + 1);
+      memcpy(k, q, klen);
+      k[klen] = '\0';
+
+      char *v = malloc(vlen + 1);
+      if (vlen > 0 && eq) memcpy(v, eq + 1, vlen);
+      v[vlen] = '\0';
+
+      c->qp_keys[c->qp_count] = k;
+      c->qp_vals[c->qp_count] = v;
+      c->qp_count++;
+    }
+
+    if (!amp) break;
+    q = amp + 1;
+  }
+  ```)
+
+;; -- Internal: raw caps handle accessor (used by tourist-ctx-free) ---------
+
+;;; tourist-ctx-caps -- raw __tourist_caps handle stored in a ctx.
+;;;
+;;; Parameters:
+;;;   ctx -- :int tourist context handle
+;;;
+;;; Returns:
+;;;   :int -- captures handle (may be 0)
+;;;
+;;; Since: v0.1.0
+(defn tourist-ctx-caps [ctx :int] :int
+  ```c
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+  };
+  return ((struct __tourist_ctx *)(intptr_t)ctx)->caps;
+  ```)
+
+;; -- Context lifecycle -----------------------------------------------------
+
+;;; tourist-ctx-new -- wrap an httpd request + captures into a tourist ctx.
+;;;
+;;; The ctx borrows the httpd req's string fields (method, path, etc.) --
+;;; it does NOT copy them; they remain valid as long as the original req
+;;; handle is alive. The ctx takes ownership of the caps handle and frees
+;;; it in tourist-ctx-free.
+;;;
+;;; Query params are pre-parsed from req->query into qp_keys/qp_vals so
+;;; that param lookups are O(n) without re-parsing on each call.
+;;;
+;;; Parameters:
+;;;   req  -- :int httpd request handle (caller retains ownership)
+;;;   caps -- :int captures handle from router-match (ctx takes ownership)
+;;;
+;;; Returns:
+;;;   :int -- tourist ctx handle; free with tourist-ctx-free
+;;;
+;;; Example:
+;;;   (let [ctx (tourist-ctx-new req caps)]
+;;;     ...)
+;;;
+;;; Since: v0.1.0
+(defn tourist-ctx-new [req :int caps :int] :int
+  (let [ctx (__tourist-ctx-alloc req caps)]
+    (__parse-qp ctx)
+    ctx))
+
+(defn __tourist-ctx-alloc [req :int caps :int] :int
+  ```c
+  #include <stdlib.h>
+
+  struct __httpd_req {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+  };
+
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+  };
+
+  struct __httpd_req  *r = (struct __httpd_req  *)(intptr_t)req;
+  struct __tourist_ctx *c = malloc(sizeof(*c));
+
+  c->method    = r->method;
+  c->path      = r->path;
+  c->query     = r->query;
+  c->body      = r->body;
+  c->hdr_keys  = r->hdr_keys;
+  c->hdr_vals  = r->hdr_vals;
+  c->hdr_count = r->hdr_count;
+  c->body_len  = r->body_len;
+  c->caps      = (int64_t)caps;
+  c->qp_cap    = 8;
+  c->qp_count  = 0;
+  c->qp_keys   = malloc(sizeof(char *) * (size_t)c->qp_cap);
+  c->qp_vals   = malloc(sizeof(char *) * (size_t)c->qp_cap);
+
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;;; tourist-ctx-free -- release a tourist ctx and its owned resources.
+;;;
+;;; Frees the ctx struct, the captures handle (via captures-free), and
+;;; the parsed query-param key/value arrays. Does NOT free the original
+;;; httpd req string fields (those belong to the httpd req handle).
+;;;
+;;; Parameters:
+;;;   ctx -- :int tourist ctx handle, or 0 (no-op)
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (tourist-ctx-free ctx)
+;;;
+;;; Since: v0.1.0
+(defn tourist-ctx-free [ctx :int] :void
+  (when (not= ctx 0)
+    (do
+      (captures-free (tourist-ctx-caps ctx))
+      (__ctx-free-qp ctx)
+      (__ctx-free-struct ctx))))
+
+(defn __ctx-free-qp [ctx :int] :void
+  ```c
+  #include <stdlib.h>
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+  };
+  if (ctx == 0) return;
+  struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
+  for (int i = 0; i < c->qp_count; i++) {
+    free(c->qp_keys[i]);
+    free(c->qp_vals[i]);
+  }
+  free(c->qp_keys);
+  free(c->qp_vals);
+  ```)
+
+(defn __ctx-free-struct [ctx :int] :void
+  ```c
+  #include <stdlib.h>
+  if (ctx != 0) free((void *)(intptr_t)ctx);
+  ```)
+
+;; -- Public API ------------------------------------------------------------
+
+;;; param -- look up a query parameter by key.
+;;;
+;;; Reads from the pre-parsed query-param table in the tourist ctx.
+;;; The returned ok_val string is owned by the ctx; do not free it
+;;; independently.
+;;;
+;;; Parameters:
+;;;   ctx -- :int tourist ctx handle (from tourist-ctx-new or passed by app)
+;;;   key -- query parameter name, e.g. "q" for ?q=hello
+;;;
+;;; Returns:
+;;;   :int -- result<:cstr>: ok(value) if found, err("missing") otherwise
+;;;
+;;; Example:
+;;;   (let [r (param req "q")]
+;;;     (when (ok? r) (ok-val r)))
+;;;
+;;; Since: v0.1.0
+(defn param [ctx :int key :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+  };
+  struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __tourist_ctx *c   = (struct __tourist_ctx *)(intptr_t)ctx;
+  struct __result      *res = malloc(sizeof(*res));
+  const char *k = (const char *)key;
+  for (int i = 0; i < c->qp_count; i++) {
+    if (strcmp(c->qp_keys[i], k) == 0) {
+      res->is_ok   = true;
+      res->ok_val  = (int64_t)(intptr_t)c->qp_vals[i];
+      res->err_val = 0;
+      return (int64_t)(intptr_t)res;
+    }
+  }
+  res->is_ok   = false;
+  res->ok_val  = 0;
+  res->err_val = (int64_t)(intptr_t)"missing";
+  return (int64_t)(intptr_t)res;
+  ```)
+
+;;; capture -- look up a path-segment capture by name.
+;;;
+;;; Delegates to captures-get on the ctx's captures handle. The returned
+;;; ok_val string is owned by the ctx; do not free it independently.
+;;;
+;;; Parameters:
+;;;   ctx  -- :int tourist ctx handle
+;;;   name -- capture name, e.g. "id" for ":id", or "*" for wildcard
+;;;
+;;; Returns:
+;;;   :int -- result<:cstr>: ok(value) if found, err("missing") otherwise
+;;;
+;;; Example:
+;;;   (let [r (capture req "name")]
+;;;     (when (ok? r) (ok-val r)))
+;;;
+;;; Since: v0.1.0
+(defn capture [ctx :int name :cstr] :int
+  (captures-get (tourist-ctx-caps ctx) name))
+
+) ;; end defmodule tourist/param

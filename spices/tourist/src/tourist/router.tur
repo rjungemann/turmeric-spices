@@ -1,0 +1,314 @@
+;;; tourist/router -- route pattern compilation and request dispatch.
+;;;
+;;; Internal module. Compiles route patterns into compiled pattern handles
+;;; and matches incoming request paths against them, producing a captures
+;;; handle on match.
+;;;
+;;; Pattern syntax:
+;;;   "/hello"      -- exact literal match
+;;;   "/user/:id"   -- :id captures one path segment
+;;;   "/files/*"    -- * captures the rest of the path (greedy)
+;;;
+;;; Patterns are matched segment-by-segment. First match wins (enforced by
+;;; the caller; router-match tests one pattern at a time).
+;;;
+;;; Since: v0.1.0
+;;
+;; C struct layout (shared across all inline-C blocks in this module):
+;;
+;;   #define __TUR_SEG_LITERAL  0
+;;   #define __TUR_SEG_CAPTURE  1
+;;   #define __TUR_SEG_WILDCARD 2
+;;
+;;   struct __tourist_seg     { int type; char *text; };
+;;   struct __tourist_pattern { struct __tourist_seg *segs; int nseg; int cap; };
+;;   struct __tourist_caps    { char **keys; char **vals; int count; int cap; };
+
+(defmodule tourist/router
+  (export router-compile router-free
+          router-match
+          captures-get captures-count captures-free)
+
+;;; router-compile -- compile a route pattern string into a match handle.
+;;;
+;;; Parameters:
+;;;   pattern -- route pattern string, e.g. "/user/:id" or "/files/*"
+;;;
+;;; Returns:
+;;;   :int -- compiled pattern handle; free with router-free
+;;;
+;;; Example:
+;;;   (let [p (router-compile "/hello/:name")]
+;;;     (router-free p))
+;;;
+;;; Since: v0.1.0
+(defn router-compile [pattern :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+
+  #define __TUR_SEG_LITERAL  0
+  #define __TUR_SEG_CAPTURE  1
+  #define __TUR_SEG_WILDCARD 2
+
+  struct __tourist_seg     { int type; char *text; };
+  struct __tourist_pattern { struct __tourist_seg *segs; int nseg; int cap; };
+
+  const char *p = (const char *)pattern;
+  if (!p) p = "/";
+
+  struct __tourist_pattern *pat = malloc(sizeof(*pat));
+  pat->cap  = 8;
+  pat->nseg = 0;
+  pat->segs = malloc(sizeof(*pat->segs) * (size_t)pat->cap);
+
+  const char *cur = p;
+  while (*cur) {
+    if (*cur == '/') { cur++; continue; }
+
+    const char *end = cur;
+    while (*end && *end != '/') end++;
+    size_t len = (size_t)(end - cur);
+
+    if (pat->nseg >= pat->cap) {
+      pat->cap *= 2;
+      pat->segs = realloc(pat->segs, sizeof(*pat->segs) * (size_t)pat->cap);
+    }
+
+    struct __tourist_seg *seg = &pat->segs[pat->nseg++];
+    if (cur[0] == ':') {
+      seg->type = __TUR_SEG_CAPTURE;
+      size_t nl = len - 1;
+      seg->text = malloc(nl + 1);
+      memcpy(seg->text, cur + 1, nl);
+      seg->text[nl] = '\0';
+    } else if (len == 1 && cur[0] == '*') {
+      seg->type = __TUR_SEG_WILDCARD;
+      seg->text = malloc(2);
+      seg->text[0] = '*'; seg->text[1] = '\0';
+    } else {
+      seg->type = __TUR_SEG_LITERAL;
+      seg->text = malloc(len + 1);
+      memcpy(seg->text, cur, len);
+      seg->text[len] = '\0';
+    }
+    cur = end;
+  }
+  return (int64_t)(intptr_t)pat;
+  ```)
+
+;;; router-free -- release a compiled pattern handle.
+;;;
+;;; Parameters:
+;;;   pat -- :int handle from router-compile, or 0 (no-op)
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (router-free p)
+;;;
+;;; Since: v0.1.0
+(defn router-free [pat :int] :void
+  ```c
+  #include <stdlib.h>
+  struct __tourist_seg     { int type; char *text; };
+  struct __tourist_pattern { struct __tourist_seg *segs; int nseg; int cap; };
+  if (pat == 0) return;
+  struct __tourist_pattern *p = (struct __tourist_pattern *)(intptr_t)pat;
+  for (int i = 0; i < p->nseg; i++) free(p->segs[i].text);
+  free(p->segs);
+  free(p);
+  ```)
+
+;;; router-match -- test a compiled pattern against a request path.
+;;;
+;;; Returns a captures handle (non-zero) on match, 0 on no-match.
+;;; The captures handle may have zero entries for patterns with no named
+;;; segments. Free with captures-free.
+;;;
+;;; Parameters:
+;;;   pat  -- :int compiled pattern from router-compile
+;;;   path -- request path string, e.g. "/user/42"
+;;;
+;;; Returns:
+;;;   :int -- captures handle on match (free with captures-free), 0 on no-match
+;;;
+;;; Example:
+;;;   (let [caps (router-match p "/user/42")]
+;;;     (when (!= caps 0)
+;;;       (captures-get caps "id")))
+;;;
+;;; Since: v0.1.0
+(defn router-match [pat :int path :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+
+  #define __TUR_SEG_LITERAL  0
+  #define __TUR_SEG_CAPTURE  1
+  #define __TUR_SEG_WILDCARD 2
+
+  struct __tourist_seg     { int type; char *text; };
+  struct __tourist_pattern { struct __tourist_seg *segs; int nseg; int cap_; };
+  struct __tourist_caps    { char **keys; char **vals; int count; int cap; };
+
+  struct __tourist_pattern *p  = (struct __tourist_pattern *)(intptr_t)pat;
+  const char               *pp = (const char *)path;
+  if (!p || !pp) return 0;
+
+  struct __tourist_caps *caps = malloc(sizeof(*caps));
+  caps->cap   = 4;
+  caps->count = 0;
+  caps->keys  = malloc(sizeof(char *) * (size_t)caps->cap);
+  caps->vals  = malloc(sizeof(char *) * (size_t)caps->cap);
+
+  const char *cur = pp;
+  for (int i = 0; i < p->nseg; i++) {
+    if (*cur == '/') cur++;
+
+    struct __tourist_seg *seg = &p->segs[i];
+
+    if (seg->type == __TUR_SEG_WILDCARD) {
+      /* * matches the rest of the path (greedy) */
+      size_t rest_len = strlen(cur);
+      if (caps->count >= caps->cap) {
+        caps->cap *= 2;
+        caps->keys = realloc(caps->keys, sizeof(char *) * (size_t)caps->cap);
+        caps->vals = realloc(caps->vals, sizeof(char *) * (size_t)caps->cap);
+      }
+      caps->keys[caps->count] = malloc(2);
+      caps->keys[caps->count][0] = '*';
+      caps->keys[caps->count][1] = '\0';
+      caps->vals[caps->count] = malloc(rest_len + 1);
+      memcpy(caps->vals[caps->count], cur, rest_len);
+      caps->vals[caps->count][rest_len] = '\0';
+      caps->count++;
+      return (int64_t)(intptr_t)caps;
+    }
+
+    const char *seg_end = cur;
+    while (*seg_end && *seg_end != '/') seg_end++;
+    size_t seg_len = (size_t)(seg_end - cur);
+
+    if (seg->type == __TUR_SEG_CAPTURE) {
+      if (seg_len == 0) goto no_match;
+      if (caps->count >= caps->cap) {
+        caps->cap *= 2;
+        caps->keys = realloc(caps->keys, sizeof(char *) * (size_t)caps->cap);
+        caps->vals = realloc(caps->vals, sizeof(char *) * (size_t)caps->cap);
+      }
+      size_t name_len = strlen(seg->text);
+      caps->keys[caps->count] = malloc(name_len + 1);
+      memcpy(caps->keys[caps->count], seg->text, name_len + 1);
+      caps->vals[caps->count] = malloc(seg_len + 1);
+      memcpy(caps->vals[caps->count], cur, seg_len);
+      caps->vals[caps->count][seg_len] = '\0';
+      caps->count++;
+    } else {
+      size_t lit_len = strlen(seg->text);
+      if (seg_len != lit_len || memcmp(cur, seg->text, lit_len) != 0)
+        goto no_match;
+    }
+    cur = seg_end;
+  }
+  /* path must be fully consumed (allow trailing slash) */
+  if (*cur != '\0' && !(*cur == '/' && cur[1] == '\0')) goto no_match;
+  return (int64_t)(intptr_t)caps;
+
+no_match:
+  for (int i = 0; i < caps->count; i++) {
+    free(caps->keys[i]);
+    free(caps->vals[i]);
+  }
+  free(caps->keys);
+  free(caps->vals);
+  free(caps);
+  return 0;
+  ```)
+
+;;; captures-get -- look up a capture by name.
+;;;
+;;; Parameters:
+;;;   caps -- :int captures handle from router-match
+;;;   key  -- capture name, e.g. "id" for :id, or "*" for wildcard
+;;;
+;;; Returns:
+;;;   :int -- result<:cstr>: ok(value) if found, err("missing") otherwise
+;;;
+;;; Example:
+;;;   (let [r (captures-get caps "id")]
+;;;     (when (ok? r) (ok-val r)))
+;;;
+;;; Since: v0.1.0
+(defn captures-get [caps :int key :cstr] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __tourist_caps { char **keys; char **vals; int count; int cap; };
+  struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __tourist_caps *c   = (struct __tourist_caps *)(intptr_t)caps;
+  struct __result       *res = malloc(sizeof(*res));
+  if (c) {
+    for (int i = 0; i < c->count; i++) {
+      if (strcmp(c->keys[i], (const char *)key) == 0) {
+        res->is_ok   = true;
+        res->ok_val  = (int64_t)(intptr_t)c->vals[i];
+        res->err_val = 0;
+        return (int64_t)(intptr_t)res;
+      }
+    }
+  }
+  res->is_ok   = false;
+  res->ok_val  = 0;
+  res->err_val = (int64_t)(intptr_t)"missing";
+  return (int64_t)(intptr_t)res;
+  ```)
+
+;;; captures-count -- number of captures in a captures handle.
+;;;
+;;; Parameters:
+;;;   caps -- :int captures handle from router-match
+;;;
+;;; Returns:
+;;;   :int -- number of captured segments (0 for empty or null handle)
+;;;
+;;; Example:
+;;;   (captures-count caps)  ; => 1
+;;;
+;;; Since: v0.1.0
+(defn captures-count [caps :int] :int
+  ```c
+  struct __tourist_caps { char **keys; char **vals; int count; int cap; };
+  if (caps == 0) return 0;
+  return ((struct __tourist_caps *)(intptr_t)caps)->count;
+  ```)
+
+;;; captures-free -- release a captures handle.
+;;;
+;;; Parameters:
+;;;   caps -- :int handle from router-match, or 0 (no-op)
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (captures-free caps)
+;;;
+;;; Since: v0.1.0
+(defn captures-free [caps :int] :void
+  ```c
+  #include <stdlib.h>
+  struct __tourist_caps { char **keys; char **vals; int count; int cap; };
+  if (caps == 0) return;
+  struct __tourist_caps *c = (struct __tourist_caps *)(intptr_t)caps;
+  for (int i = 0; i < c->count; i++) {
+    free(c->keys[i]);
+    free(c->vals[i]);
+  }
+  free(c->keys);
+  free(c->vals);
+  free(c);
+  ```)
+
+) ;; end defmodule tourist/router

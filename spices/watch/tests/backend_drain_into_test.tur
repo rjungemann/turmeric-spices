@@ -1,0 +1,171 @@
+;; tests/backend_drain_into_test.tur -- WTNF1: verify backend-drain-into fills
+;; the evbuf with per-file names and masks.
+;;
+;; Opens a backend on a fresh tmp directory with an empty base (watch all
+;; entries), writes a file inside it from a background pthread, then calls
+;; backend-drain-into and asserts:
+;;   - event count > 0
+;;   - on Linux: at least one event name matches the written filename
+;;   - on Darwin: count > 0 (kqueue does not provide names; snapshot diff
+;;                            handles name recovery in the tree layer)
+
+(defmodule watch/tests/backend-drain-into
+  (import watch/backend :refer [backend-supported? backend-open backend-close
+                                backend-wait backend-drain-into
+                                backend-event-count backend-event-name-at
+                                backend-event-mask-at backend-last-overflow?])
+
+  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+    ```c
+    /* __tur_include__: static int g_bdi_fails = 0; */
+    if (!ok) g_bdi_fails++;
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)(intptr_t)name);
+    ```)
+
+  (defn tap-finish [count :int] #{Unsafe} :int
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (g_bdi_fails == 0) {
+      fprintf(stderr, "# All %lld backend-drain-into tests passed.\n",
+              (long long)count);
+      return 0;
+    }
+    fprintf(stderr, "# %d/%lld backend-drain-into tests failed.\n",
+            g_bdi_fails, (long long)count);
+    return 1;
+    ```)
+
+  ;; Filesystem helpers.
+
+  (defn make-dir [path :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <sys/stat.h> */
+    return mkdir((const char *)(intptr_t)path, 0755);
+    ```)
+
+  (defn rmdir-path [path :cstr] #{Unsafe} :int
+    ```c
+    return rmdir((const char *)(intptr_t)path);
+    ```)
+
+  (defn delete-file [path :cstr] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <unistd.h> */
+    return unlink((const char *)(intptr_t)path);
+    ```)
+
+  (defn sleep-ms [ms :int] #{Unsafe} :void
+    ```c
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  ;; Background thread: wait ms, then write `content` to `path`.
+  (defn schedule-write [path :cstr content :cstr ms :int] #{Unsafe} :int
+    ```c
+    /* __tur_include__: #include <pthread.h> */
+    /* __tur_include__: typedef struct { char *path; char *content; int ms; } TurBdiWrite; */
+    /* __tur_include__: static void *tur_bdi_write(void *arg) { TurBdiWrite *a = (TurBdiWrite *)arg; usleep((useconds_t)a->ms * 1000u); FILE *f = fopen(a->path, "w"); if (f) { if (a->content) fputs(a->content, f); fclose(f); } free(a->path); free(a->content); free(a); return NULL; } */
+    TurBdiWrite *a = (TurBdiWrite *)calloc(1, sizeof(*a));
+    a->path    = strdup((const char *)(intptr_t)path);
+    a->content = strdup((const char *)(intptr_t)content);
+    a->ms      = (int)ms;
+    pthread_t th;
+    pthread_create(&th, NULL, tur_bdi_write, a);
+    pthread_detach(th);
+    return 0;
+    ```)
+
+  (defn tmp-root [] #{Unsafe} :cstr
+    ```c
+    static char buf[256];
+    snprintf(buf, sizeof(buf), "/tmp/tur-bdi-test-%d", (int)getpid());
+    return (const char *)buf;
+    ```)
+
+  (defn path-join [a :cstr b :cstr] #{Unsafe} :cstr
+    ```c
+    static char buf[1024];
+    snprintf(buf, sizeof(buf), "%s/%s",
+             (const char *)(intptr_t)a, (const char *)(intptr_t)b);
+    return (const char *)buf;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = (const char *)(intptr_t)a;
+    const char *sb = (const char *)(intptr_t)b;
+    if (!sa) sa = ""; if (!sb) sb = "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  ;; On Linux, scan evbuf for any entry whose name matches `target`.
+  ;; On Darwin, name is always "" so we just check count > 0.
+  (defn find-name-in-evbuf [handle :int target :cstr count :int] #{Unsafe} :bool
+    ```c
+    int n = (int)count;
+    const char *want = target ? (const char *)(intptr_t)target : "";
+    #if defined(__linux__)
+    for (int i = 0; i < n; i++) {
+      const char *got = (const char *)(intptr_t)
+        watch__backend__backend_event_name_at(handle, (int64_t)i);
+      if (got && strcmp(got, want) == 0) return 1;
+    }
+    return 0;
+    #else
+    /* Darwin: kqueue gives no name; count > 0 is the best we can assert. */
+    (void)want;
+    return n > 0;
+    #endif
+    ```)
+
+  (defn main [] #{Unsafe} :int
+    (do
+      (tap-record 1 "backend-supported?" (= (backend-supported?) 1))
+
+      (let [root (tmp-root)
+            file (path-join root "watch-target.txt")]
+        (do
+          ;; Best-effort cleanup from a prior stale run.
+          (delete-file file)
+          (rmdir-path root)
+
+          (make-dir root)
+
+          ;; Open backend on root with empty base so all entries are forwarded.
+          (let [h (backend-open root "")]
+            (do
+              (tap-record 2 "backend-open returned non-zero" (not (= h 0)))
+
+              ;; Schedule a write inside the watched directory.
+              (schedule-write file "hello" 30)
+
+              ;; Wait up to 5 s for an event.
+              (let [rc (backend-wait h 5000)]
+                (do
+                  (tap-record 3 "backend-wait saw an event" (= rc 1))
+                  (let [n (backend-drain-into h)]
+                    (do
+                      (tap-record 4 "backend-drain-into returned >= 0" (>= n 0))
+                      (tap-record 5 "at least one event in evbuf" (> (backend-event-count h) 0))
+                      ;; Linux: name must match; Darwin: count check is enough.
+                      (tap-record 6 "event name or count matches target"
+                                  (find-name-in-evbuf h "watch-target.txt"
+                                                       (backend-event-count h)))
+                      ;; mask must be non-zero.
+                      (tap-record 7 "first event has non-zero mask"
+                                  (> (backend-event-mask-at h 0) 0))))))
+
+              (backend-close h)))
+
+          ;; Drain on a null handle returns -1, does not crash.
+          (tap-record 8 "backend-drain-into on null returns -1"
+                      (= (backend-drain-into 0) -1))
+
+          ;; Cleanup.
+          (delete-file file)
+          (rmdir-path root)))
+
+      (tap-finish 8)))
+
+) ;; end defmodule

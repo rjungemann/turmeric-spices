@@ -1,4 +1,4 @@
-;; tests/tree_test.tur -- WT6 acceptance for recursive directory watch.
+;; tests/tree_test.tur -- WT6 + WTNF2/3 acceptance for recursive directory watch.
 ;;
 ;; Lays down a small tree:
 ;;   /tmp/tur-watch-tree-<pid>/
@@ -6,12 +6,14 @@
 ;;       b/
 ;;         leaf.txt
 ;;     c/
-;; opens a tree watcher on the root, then fires a write inside a/b/
-;; from a background pthread.  Expects watch-next to return an event
-;; whose path is a or a/b (whichever directory the backend recorded).
+;; Opens a tree watcher on the root, then fires a write inside a/b/
+;; from a background pthread.  WTNF2/3 expectation: watch-next returns an
+;; event whose path is exactly "a/b/leaf.txt" (relative to root) on both
+;; Linux (inotify name) and Darwin (snapshot diff).
 
 (defmodule watch/tests/tree
-  (import watch/event :refer [watch-kind-write watch-kind-overflow
+  (import watch/event :refer [watch-kind-write watch-kind-rename
+                              watch-kind-overflow
                               watch-event-kind watch-event-path
                               watch-event-free])
   (import watch/opts  :refer [watch-opts-make watch-opts-free
@@ -123,6 +125,22 @@
     return strstr(h ? h : "", n ? n : "") != NULL;
     ```)
 
+  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+    ```c
+    const char *sa = (const char *)(intptr_t)a;
+    const char *sb = (const char *)(intptr_t)b;
+    if (!sa) sa = ""; if (!sb) sb = "";
+    return strcmp(sa, sb) == 0;
+    ```)
+
+  ;; Print the event path to stderr for debugging on failure.
+  (defn dbg-path [ev :int] #{Unsafe} :void
+    ```c
+    const char *p = (const char *)(intptr_t)
+        watch__event__watch_event_path(ev);
+    fprintf(stderr, "# event path: [%s]\n", p ? p : "<null>");
+    ```)
+
   (defn main [] #{Unsafe} :int
     (do
       (let [root  (dup (tmp-root))
@@ -130,6 +148,11 @@
             b     (dup (path-join a    "b"))
             c     (dup (path-join root "c"))
             leaf  (dup (path-join b    "leaf.txt"))
+            ;; Expected relative path: "a/b/leaf.txt"
+            ;; On Darwin an atomic-save via rename changes the inode of
+            ;; leaf.txt, triggering a rename kind event in the snapshot diff.
+            ;; On Linux inotify reports IN_MOVED_TO for the rename arrival.
+            ;; Both produce kind=rename (4) or kind=write (1).
             opts  (watch-opts-make 1 150 1 0 1)]
         (do
           ;; Best-effort cleanup of stale state from a prior failed run.
@@ -158,14 +181,16 @@
                 (do
                   (tap-record 4 "watch-next returned an event"
                               (not (= ev 0)))
-                  (tap-record 5 "event kind is write (tree mode)"
-                              (= (watch-event-kind ev) (watch-kind-write)))
-                  ;; The event path is one of the registered directories.
-                  ;; On Linux that's typically a/b (where the rename
-                  ;; landed); on Darwin the kqueue may also wake on the
-                  ;; parent.  Either way it should sit under the root.
-                  (tap-record 6 "event path is under the watched root"
-                              (cstr-contains? (watch-event-path ev) "tur-watch-tree"))
+                  (tap-record 5 "event kind is write or rename (atomic-save)"
+                              (or (= (watch-event-kind ev) (watch-kind-write))
+                                  (= (watch-event-kind ev) (watch-kind-rename))))
+                  ;; WTNF2/3: path must now name the file, not the directory.
+                  ;; Linux delivers IN_MOVED_TO with name "leaf.txt" inside a/b.
+                  ;; Darwin snapshot diff sees inode change for "leaf.txt".
+                  ;; In both cases the relative path should be "a/b/leaf.txt".
+                  (dbg-path ev)
+                  (tap-record 6 "event path is a/b/leaf.txt (per-file naming)"
+                              (cstr-eq? (watch-event-path ev) "a/b/leaf.txt"))
                   (watch-event-free ev)))
 
               (watch-close w)))

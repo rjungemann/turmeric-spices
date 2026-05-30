@@ -1,0 +1,57 @@
+;; Fixture: hello-world -- GET / returns 200 "Hello"
+
+(defmodule tourist/tests/hello-world
+  (import tourist/app     :refer [tourist])
+  (import tourist/dsl     :refer [get!])
+  (import tourist/helpers :refer [text])
+  (import httpd/server    :refer [server-stop])
+  (import http/client     :refer [http-get])
+  (import http/response   :refer [response-status response-body response-header])
+  (import test/suite      :refer [describe it])
+  (import test/assert     :refer [assert-eq assert-true])
+  (import test/runner     :refer [run-all])
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return false;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn main [] :int
+    (let [srv (tourist 18100
+                (get! "/" (fn [_] (text "Hello"))))]
+      (do
+        (sleep-ms 50)
+        (describe "tourist hello-world"
+          (it "GET / status is 200"
+            (let [r (http-get "http://127.0.0.1:18100/")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+          (it "GET / body is Hello"
+            (let [r (http-get "http://127.0.0.1:18100/")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "Hello" (response-body (__cr-val r))))
+                (assert-true false))))
+          (it "GET / Content-Type is text/plain"
+            (let [r (http-get "http://127.0.0.1:18100/")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "text/plain"
+                                       (response-header (__cr-val r) "Content-Type")))
+                (assert-true false)))))
+        (server-stop srv)
+        (run-all)))
+    0))

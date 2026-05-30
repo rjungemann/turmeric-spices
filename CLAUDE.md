@@ -41,6 +41,38 @@ The tarball that `install-tur.sh` extracts contains `tur`, `libturi.a`,
 `include/turi/*.h`, and the full `stdlib/` tree. The stdlib lives next to
 the binary on purpose -- do not move them apart.
 
+## Cross-spice development (workspace-local imports)
+
+All spices in this repo are listed as `:members` of the root `build.tur`.
+That makes them a workspace, so one sibling can import another **without
+`tur fetch`, a symlink, or a lockfile entry**.
+
+```sh
+cd spices/notebook
+tur check src/notebook/cli.tur   # resolves watch/watch via workspace member
+```
+
+The first undeclared sibling import prints a one-time advisory:
+
+```
+warning: import 'watch/watch' resolved via workspace sibling 'spices/watch';
+         declare it in :spices for release builds.
+```
+
+To declare a local dep explicitly (for editor/LSP autocomplete or to avoid the
+advisory), use a `:path` entry in `build.tur`:
+
+```turmeric
+:spices {
+  "watch" {:path "../watch"}
+}
+```
+
+`tur fetch --dry-run` shows which deps would be fetched vs skipped locally.
+Local-source deps never produce a `tur.lock` entry. Do not hand-edit
+`tur.lock` to add stub entries for workspace siblings -- that workaround is
+no longer needed.
+
 ## CI
 
 `.github/workflows/ci.yml` currently checks out `rjungemann/turmeric` and

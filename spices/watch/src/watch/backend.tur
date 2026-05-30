@@ -19,11 +19,19 @@
 ;; The watcher always observes the PARENT DIRECTORY of the target file
 ;; rather than the file node itself, which is what lets atomic-save flows
 ;; (write temp + rename into place) survive without losing the watch.
+;;
+;; WTNF1: backend-drain-into fills TurBackendEvent evbuf[64] with one entry
+;; per OS event (inotify event on Linux; one synthetic entry on Darwin).
+;; Callers iterate via backend-event-count / backend-event-{name,mask,...}-at.
+;; backend-drain remains as a thin boolean wrapper for single-file callers.
 
 (defmodule watch/backend
   (export backend-supported?
           backend-open backend-close
-          backend-wait backend-drain
+          backend-wait backend-drain backend-drain-into
+          backend-event-count
+          backend-event-name-at backend-event-mask-at
+          backend-event-cookie-at backend-event-is-dir-at
           backend-last-overflow?
           backend-dir backend-base
           backend-fd)
@@ -62,7 +70,8 @@
     /* __tur_include__: #include <sys/event.h> */
     /* __tur_include__: #include <sys/time.h> */
     /* __tur_include__: #endif */
-    /* __tur_include__: typedef struct { char *dir; char *base; int overflow; int fd; int wd; int kq; int dir_fd; } TurWatchBackend; */
+    /* __tur_include__: typedef struct { char name[256]; unsigned int mask; unsigned int cookie; int is_dir; } TurBackendEvent; */
+    /* __tur_include__: typedef struct { char *dir; char *base; int overflow; int fd; int wd; int kq; int dir_fd; TurBackendEvent evbuf[64]; int ev_n; } TurWatchBackend; */
 
     const char *cdir  = dir  ? (const char *)(intptr_t)dir  : "";
     const char *cbase = base ? (const char *)(intptr_t)base : "";
@@ -81,7 +90,7 @@
     }
     w->wd = inotify_add_watch(w->fd, w->dir,
       IN_CLOSE_WRITE | IN_CREATE | IN_MODIFY | IN_MOVED_TO |
-      IN_ATTRIB | IN_DELETE | IN_MOVE_SELF | IN_DELETE_SELF);
+      IN_ATTRIB | IN_DELETE | IN_MOVE_SELF | IN_DELETE_SELF | IN_MOVED_FROM);
     if (w->wd < 0) {
       close(w->fd);
       free(w->dir); free(w->base); free(w); return 0;
@@ -173,22 +182,26 @@
     #endif
     ```)
 
-  ;;; backend-drain -- read all queued events from the backend.
+  ;;; backend-drain-into -- drain all queued OS events into the handle's evbuf.
+  ;;;
+  ;;; Fills handle->evbuf[0..ev_n-1] with one TurBackendEvent per OS event.
+  ;;; On Linux each inotify_event becomes one entry with name + mask + cookie.
+  ;;; On Darwin one synthetic entry is stored carrying the combined NOTE_* flags
+  ;;; (name is always ""); the snapshot-diff layer above recovers per-file names.
   ;;;
   ;;; Returns:
-  ;;;   1 if at least one event matched the registered basename (or the
-  ;;;     basename is empty, meaning "forward everything"),
-  ;;;   0 if events fired but none affected the target,
-  ;;;  -1 on a fatal read error.
+  ;;;   N >= 0  number of events stored in evbuf (ev_n)
+  ;;;  -1       fatal read error
   ;;;
-  ;;; Backend-level overflow is recorded on the handle; query it with
-  ;;; backend-last-overflow?.
-  (defn backend-drain [handle :int] #{Unsafe} :int
+  ;;; Overflow is stored on the handle; query via backend-last-overflow?.
+  ;;; Calling this function clears ev_n and overflow before draining.
+  (defn backend-drain-into [handle :int] #{Unsafe} :int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     if (!w) return -1;
 
-    int matched = 0;
+    w->ev_n    = 0;
+    w->overflow = 0;
     int empty_base = !w->base || w->base[0] == '\0';
 
     #if defined(__linux__)
@@ -201,38 +214,114 @@
         struct inotify_event *ev = (struct inotify_event *)(buf + off);
         if (ev->mask & IN_Q_OVERFLOW) {
           w->overflow = 1;
-          matched = 1;
-        } else if (empty_base) {
-          matched = 1;
-        } else if (ev->len > 0) {
-          if (strcmp(ev->name, w->base) == 0) matched = 1;
         } else {
-          matched = 1;
+          /* Does this event touch the registered basename (if any)? */
+          int name_matches = empty_base || (ev->len == 0);
+          if (!name_matches && ev->len > 0)
+            name_matches = (strcmp(ev->name, w->base) == 0);
+          if (name_matches) {
+            if (w->ev_n < 64) {
+              TurBackendEvent *be = &w->evbuf[w->ev_n++];
+              memset(be->name, 0, sizeof(be->name));
+              if (ev->len > 0)
+                strncpy(be->name, ev->name, sizeof(be->name) - 1);
+              be->mask   = (unsigned int)ev->mask;
+              be->cookie = (unsigned int)ev->cookie;
+              be->is_dir = (ev->mask & IN_ISDIR) ? 1 : 0;
+            } else {
+              w->overflow = 1;
+            }
+          }
         }
-        off += sizeof(struct inotify_event) + ev->len;
+        off += (ssize_t)(sizeof(struct inotify_event) + ev->len);
       }
     }
-    return matched;
+    return (int64_t)w->ev_n;
+
     #elif defined(__APPLE__)
-    /* kqueue does not name a file inside the directory, so any vnode
-       event on the watched dir-fd counts.  The watch/watch layer is
-       expected to re-stat the target and decide whether the change is
-       material; backend-drain only reports "yes, the dir-fd saw an
-       event".  Drain everything currently queued with a zero timeout. */
     struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 0;
     struct kevent evs[16];
+    unsigned int combined = 0;
     for (;;) {
       int n = kevent(w->kq, NULL, 0, evs, 16, &ts);
-      if (n <  0) return -1;
-      if (n == 0) break;
-      matched = 1;
+      if (n <= 0) break;
+      for (int i = 0; i < n; i++)
+        combined |= (unsigned int)evs[i].fflags;
+    }
+    if (combined) {
+      TurBackendEvent *be = &w->evbuf[0];
+      memset(be->name, 0, sizeof(be->name));
+      be->mask   = combined;
+      be->cookie = 0;
+      be->is_dir = 0; /* filled by snapshot diff in tree layer */
+      w->ev_n    = 1;
     }
     (void)empty_base;
-    return matched;
+    return (int64_t)w->ev_n;
+
     #else
     (void)empty_base;
     return -1;
     #endif
+    ```)
+
+  ;;; backend-drain -- drain events and return a boolean result.
+  ;;;
+  ;;; Thin wrapper around backend-drain-into for single-file callers that only
+  ;;; need to know whether the backend fired.  Returns the event count (>= 0)
+  ;;; or -1 on a fatal error.  Overflow is recorded on the handle separately;
+  ;;; check with backend-last-overflow?.
+  (defn backend-drain [handle :int] #{Unsafe} :int
+    (backend-drain-into handle))
+
+  ;;; backend-event-count -- number of events stored in evbuf after a drain.
+  ;;; Returns 0 if handle is null.
+  (defn backend-event-count [handle :int] #{Unsafe} :int
+    ```c
+    TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
+    return w ? (int64_t)w->ev_n : 0;
+    ```)
+
+  ;;; backend-event-name-at -- filename from the i-th buffered event.
+  ;;; On Linux: the name field from the inotify_event (may be "" for self-events).
+  ;;; On Darwin: always "" (snapshot diff provides names in the tree layer).
+  (defn backend-event-name-at [handle :int idx :int] #{Unsafe} :cstr
+    ```c
+    TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
+    int i = (int)idx;
+    if (!w || i < 0 || i >= w->ev_n) return "";
+    return (const char *)w->evbuf[i].name;
+    ```)
+
+  ;;; backend-event-mask-at -- OS event flags from the i-th buffered event.
+  ;;; On Linux: inotify mask (IN_CREATE, IN_DELETE, IN_MODIFY, IN_MOVED_TO, …).
+  ;;; On Darwin: combined NOTE_* vnode flags from the fired kevent.
+  (defn backend-event-mask-at [handle :int idx :int] #{Unsafe} :int
+    ```c
+    TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
+    int i = (int)idx;
+    if (!w || i < 0 || i >= w->ev_n) return 0;
+    return (int64_t)w->evbuf[i].mask;
+    ```)
+
+  ;;; backend-event-cookie-at -- inotify rename cookie from the i-th event.
+  ;;; Non-zero only for IN_MOVED_FROM / IN_MOVED_TO pairs on Linux.
+  (defn backend-event-cookie-at [handle :int idx :int] #{Unsafe} :int
+    ```c
+    TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
+    int i = (int)idx;
+    if (!w || i < 0 || i >= w->ev_n) return 0;
+    return (int64_t)w->evbuf[i].cookie;
+    ```)
+
+  ;;; backend-event-is-dir-at -- 1 if the i-th event's target is a directory.
+  ;;; On Linux: from IN_ISDIR flag.  On Darwin: always 0 (snapshot diff fills it).
+  (defn backend-event-is-dir-at [handle :int idx :int] #{Unsafe} :int
+    ```c
+    TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
+    int i = (int)idx;
+    if (!w || i < 0 || i >= w->ev_n) return 0;
+    return (int64_t)w->evbuf[i].is_dir;
     ```)
 
   ;;; backend-last-overflow? -- 1 if the most recent drain saw an overflow.

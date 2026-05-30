@@ -1,0 +1,270 @@
+;;; tourist/app -- tourist entry point and server lifecycle.
+;;;
+;;; tourist -- collects routes and middleware, starts tur-httpd, and
+;;; routes each incoming request through the middleware chain and
+;;; dispatch table.
+;;;
+;;; Middleware items (use!) run in declaration order before any route handler.
+;;; Routes are matched in declaration order; first match wins.
+;;;
+;;; Since: v0.1.0
+;;
+;; Global dispatch state:
+;;
+;;   typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+;;
+;; Stored as a static local inside tourist-state-ptr so it persists across
+;; calls. Set once by tourist before server-start; read concurrently by
+;; worker threads (set-once = no race on aligned int64_t reads on POSIX).
+
+(defmodule tourist/app
+  (import tourist/dsl       :refer [route-method route-pattern route-call-handler])
+  (import tourist/middleware :refer [mw-item? mw-chain-run])
+  (import tourist/param     :refer [tourist-ctx-new tourist-ctx-free])
+  (import tourist/router    :refer [router-match captures-free])
+  (import tourist/static    :refer [static-item? static-route-fs-root static-serve])
+  (import httpd/server      :refer [server-start])
+  (import httpd/request     :refer [req-method req-path])
+  (import httpd/response    :refer [not-found])
+  (export tourist)
+
+;; -- Cons list helpers ------------------------------------------------------
+
+;;; __tourist-cons -- allocate a cons cell with the given head and tail.
+(defn __tourist-cons [h :int t :int] :int
+  ```c
+  #include <stdlib.h>
+  typedef struct { int64_t head; int64_t tail; } __tur_cons;
+  __tur_cons *c = malloc(sizeof(*c));
+  c->head = h;
+  c->tail = t;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;;; __tourist-cons-head -- head element of a cons cell.
+(defn __tourist-cons-head [lst :int] :int
+  ```c
+  typedef struct { int64_t head; int64_t tail; } __tur_cons;
+  return ((__tur_cons *)(intptr_t)lst)->head;
+  ```)
+
+;;; __tourist-cons-tail -- tail pointer of a cons cell.
+(defn __tourist-cons-tail [lst :int] :int
+  ```c
+  typedef struct { int64_t head; int64_t tail; } __tur_cons;
+  return ((__tur_cons *)(intptr_t)lst)->tail;
+  ```)
+
+;;; __tourist-list-rev -- reverse a cons list using an accumulator.
+(defn __tourist-list-rev [lst :int acc :int] :int
+  (if (= lst 0)
+    acc
+    (__tourist-list-rev (__tourist-cons-tail lst)
+                        (__tourist-cons (__tourist-cons-head lst) acc))))
+
+;; -- Global dispatch state (singleton) -------------------------------------
+
+;;; tourist-state-ptr -- return a pointer to the persistent dispatch state.
+;;;
+;;; Stores mws and routes as a static local; lives for the process lifetime.
+;;; Other functions in this module reference it via its mangled C name.
+(defn tourist-state-ptr [] :int
+  ```c
+  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+  static __tourist_app_state s = { 0, 0 };
+  return (int64_t)(intptr_t)&s;
+  ```)
+
+;;; __tourist-state-set -- write mws and routes into the dispatch state.
+(defn __tourist-state-set [mws :int routes :int] :void
+  ```c
+  extern int64_t tourist__app__tourist_state_ptr(void);
+  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+  __tourist_app_state *s =
+    (__tourist_app_state *)(intptr_t)tourist__app__tourist_state_ptr();
+  s->mws    = mws;
+  s->routes = routes;
+  ```)
+
+;;; __tourist-state-mws -- read the mws cons list from the dispatch state.
+(defn __tourist-state-mws [] :int
+  ```c
+  extern int64_t tourist__app__tourist_state_ptr(void);
+  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+  return ((__tourist_app_state *)
+    (intptr_t)tourist__app__tourist_state_ptr())->mws;
+  ```)
+
+;;; __tourist-state-routes -- read the routes cons list from the dispatch state.
+(defn __tourist-state-routes [] :int
+  ```c
+  extern int64_t tourist__app__tourist_state_ptr(void);
+  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+  return ((__tourist_app_state *)
+    (intptr_t)tourist__app__tourist_state_ptr())->routes;
+  ```)
+
+;; -- Item partition --------------------------------------------------------
+
+;;; __tourist-collect-mws -- accumulate middleware handles from items (reversed).
+;;;
+;;; Caller reverses with __tourist-list-rev to restore declaration order.
+(defn __tourist-collect-mws [items :int acc :int] :int
+  (if (= items 0)
+    acc
+    (let [item (__tourist-cons-head items)
+          rest (__tourist-cons-tail items)]
+      (if (mw-item? item)
+        (__tourist-collect-mws rest (__tourist-cons item acc))
+        (__tourist-collect-mws rest acc)))))
+
+;;; __tourist-collect-routes -- accumulate route handles from items (reversed).
+(defn __tourist-collect-routes [items :int acc :int] :int
+  (if (= items 0)
+    acc
+    (let [item (__tourist-cons-head items)
+          rest (__tourist-cons-tail items)]
+      (if (mw-item? item)
+        (__tourist-collect-routes rest acc)
+        (__tourist-collect-routes rest (__tourist-cons item acc))))))
+
+;; -- Dispatch internals ----------------------------------------------------
+
+;;; __tourist-caps-wildcard -- extract the "*" wildcard value from captures.
+;;;
+;;; Returns the char* of the wildcard capture value as int64_t (0 = not found).
+;;; Caller must read the value before calling captures-free.
+(defn __tourist-caps-wildcard [caps :int] :int
+  ```c
+  struct __tourist_caps { char **keys; char **vals; int count; int cap; };
+  if (caps == 0) return 0;
+  struct __tourist_caps *c = (struct __tourist_caps *)(intptr_t)caps;
+  for (int i = 0; i < c->count; i++) {
+    if (c->keys[i][0] == '*' && c->keys[i][1] == '\0')
+      return (int64_t)(intptr_t)c->vals[i];
+  }
+  return 0;
+  ```)
+
+;;; __tourist-method-match? -- true if rmethod matches the request method.
+;;;
+;;; An empty rmethod string matches any HTTP method (used by any!).
+(defn __tourist-method-match? [rmethod :cstr qmethod :cstr] :bool
+  ```c
+  #include <string.h>
+  return ((const char *)rmethod)[0] == '\0'
+      || strcmp((const char *)rmethod, (const char *)qmethod) == 0;
+  ```)
+
+;;; __tourist-opt-extract -- unwrap a some(Response) option and free the option.
+;;;
+;;; Precondition: opt != 0 (i.e., the option is some).
+(defn __tourist-opt-extract [opt :int] :int
+  ```c
+  #include <stdlib.h>
+  struct __opt { bool is_some; int64_t value; };
+  struct __opt *o = (struct __opt *)(intptr_t)opt;
+  int64_t resp = o->value;
+  free(o);
+  return resp;
+  ```)
+
+;;; __tourist-route-dispatch -- find the first matching route and dispatch.
+;;;
+;;; Walks the route cons list in order. Static routes (serve-static!) are
+;;; detected via static-item? and handled by static-serve, which returns 0
+;;; on a miss (file not found / traversal) to fall through to the next route.
+;;; Regular routes are dispatched through a tourist ctx and route-call-handler.
+;;; Returns a 404 Not Found response if no route matches.
+(defn __tourist-route-dispatch [routes :int req :int] :int
+  (if (= routes 0)
+    (not-found "404 Not Found")
+    (let [route (__tourist-cons-head routes)
+          path  (req-path req)
+          rqm   (req-method req)]
+      (if (static-item? route)
+        ;; Static file route: GET only; fall through on any miss.
+        (if (__tourist-method-match? "GET" rqm)
+          (let [caps (router-match (route-pattern route) path)]
+            (if (not= caps 0)
+              (let [rel  (__tourist-caps-wildcard caps)
+                    resp (if (not= rel 0)
+                           (static-serve (static-route-fs-root route) rel)
+                           0)]
+                (captures-free caps)
+                (if (not= resp 0)
+                  resp
+                  (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
+              (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
+          (__tourist-route-dispatch (__tourist-cons-tail routes) req))
+        ;; Regular route: method match, build ctx, call handler.
+        (let [method (route-method route)]
+          (if (__tourist-method-match? method rqm)
+            (let [caps (router-match (route-pattern route) path)]
+              (if (not= caps 0)
+                (let [ctx  (tourist-ctx-new req caps)
+                      resp (route-call-handler route ctx)]
+                  (tourist-ctx-free ctx)
+                  resp)
+                (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
+            (__tourist-route-dispatch (__tourist-cons-tail routes) req)))))))
+
+;;; __tourist-handler -- top-level request handler passed to server-start.
+;;;
+;;; Runs the middleware chain first. If any middleware returns some(resp),
+;;; that response is returned immediately. Otherwise, dispatches to the
+;;; route table.
+(defn __tourist-handler [req :int] :int
+  (let [opt (mw-chain-run (__tourist-state-mws) req)]
+    (if (not= opt 0)
+      (__tourist-opt-extract opt)
+      (__tourist-route-dispatch (__tourist-state-routes) req))))
+
+;;; __tourist-handler-ptr -- return __tourist-handler as a :ptr<void>.
+;;;
+;;; server-start expects the handler as an opaque function pointer.
+(defn __tourist-handler-ptr [] :ptr<void>
+  ```c
+  extern int64_t tourist__app____tourist_handler(int64_t);
+  return (void *)tourist__app____tourist_handler;
+  ```)
+
+;; -- Public API ------------------------------------------------------------
+
+;;; tourist -- start an HTTP server on port with the given routes and middleware.
+;;;
+;;; Accepts a variadic mix of items from get!, post!, put!, delete!, any!,
+;;; serve-static!, and use!. Middleware (use!) items run in declaration order
+;;; before any route handler. Routes are matched in declaration order; the
+;;; first match wins. The dispatch state is written once before the server
+;;; starts and is safe to read from concurrent worker threads.
+;;;
+;;; Starts a bounded thread-pool server (default pool size 8) and returns the
+;;; server handle. The caller is responsible for blocking until shutdown and
+;;; calling server-stop to join all threads.
+;;;
+;;; Parameters:
+;;;   port  -- TCP port to bind on (IPv4, INADDR_ANY)
+;;;   items -- mix of Route and Middleware handles from the DSL constructors
+;;;
+;;; Returns:
+;;;   :ptr<void> -- server handle; pass to server-stop when done,
+;;;                 or NULL on bind/pool failure
+;;;
+;;; Example:
+;;;   (import httpd/server :refer [server-stop])
+;;;   (let [srv (tourist 3000
+;;;               (use! logger)
+;;;               (get! "/hello/:name"
+;;;                 (fn [req]
+;;;                   (text (ok-val (capture req "name"))))))]
+;;;     (server-stop srv))
+;;;
+;;; Since: v0.1.0
+(defn tourist [port :int & items :int] :ptr<void>
+  (let [mws    (__tourist-list-rev (__tourist-collect-mws    items 0) 0)
+        routes (__tourist-list-rev (__tourist-collect-routes items 0) 0)]
+    (__tourist-state-set mws routes)
+    (server-start port (__tourist-handler-ptr))))
+
+) ;; end defmodule tourist/app

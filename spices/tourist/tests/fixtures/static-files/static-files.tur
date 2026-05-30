@@ -1,0 +1,104 @@
+;; Fixture: static-files -- serve-static!; mime detection; path-traversal rejection
+;;
+;; Creates test files in /tmp/tourist-static-test/ so the test is independent
+;; of the working directory.
+
+(defmodule tourist/tests/static-files
+  (import tourist/app    :refer [tourist])
+  (import tourist/static :refer [serve-static!])
+  (import httpd/server   :refer [server-stop])
+  (import http/client    :refer [http-get])
+  (import http/response  :refer [response-status response-body response-header])
+  (import test/suite     :refer [describe it])
+  (import test/assert    :refer [assert-eq assert-true])
+  (import test/runner    :refer [run-all])
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return false;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;; cstr-starts? -- true if s starts with prefix
+  (defn cstr-starts? [s :cstr prefix :cstr] :bool
+    ```c
+    #include <string.h>
+    const char *sp = (const char *)s;
+    const char *pp = (const char *)prefix;
+    size_t plen = strlen(pp);
+    return strncmp(sp, pp, plen) == 0;
+    ```)
+
+  ;; __setup-test-dir -- create /tmp/tourist-static-test/ and write test files.
+  ;; Returns the directory path.
+  (defn __setup-test-dir [] :cstr
+    ```c
+    #include <stdlib.h>
+    #include <stdio.h>
+    #include <sys/stat.h>
+    const char *dir = "/tmp/tourist-static-test";
+    mkdir(dir, 0755);
+    FILE *f;
+    f = fopen("/tmp/tourist-static-test/hello.txt", "w");
+    if (f) { fputs("hello from static", f); fclose(f); }
+    f = fopen("/tmp/tourist-static-test/style.css", "w");
+    if (f) { fputs("body { color: red; }", f); fclose(f); }
+    return (int64_t)(intptr_t)dir;
+    ```)
+
+  (defn main [] :int
+    (let [pub-dir (__setup-test-dir)
+          srv     (tourist 18105
+                    (serve-static! "/assets" pub-dir))]
+      (do
+        (sleep-ms 50)
+        (describe "tourist static-files"
+          (it "GET /assets/hello.txt status is 200"
+            (let [r (http-get "http://127.0.0.1:18105/assets/hello.txt")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+          (it "GET /assets/hello.txt body is hello from static"
+            (let [r (http-get "http://127.0.0.1:18105/assets/hello.txt")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "hello from static"
+                                       (response-body (__cr-val r))))
+                (assert-true false))))
+          (it "GET /assets/style.css Content-Type is text/css"
+            (let [r (http-get "http://127.0.0.1:18105/assets/style.css")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "text/css"
+                                       (response-header (__cr-val r) "Content-Type")))
+                (assert-true false))))
+          (it "GET /assets/hello.txt Content-Type is text/plain"
+            (let [r (http-get "http://127.0.0.1:18105/assets/hello.txt")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "text/plain"
+                                       (response-header (__cr-val r) "Content-Type")))
+                (assert-true false))))
+          (it "GET /assets/../../../etc/passwd falls through to 404"
+            (let [r (http-get "http://127.0.0.1:18105/assets/../../../etc/passwd")]
+              (if (__cr-ok? r)
+                (assert-eq 404 (response-status (__cr-val r)))
+                (assert-true false))))
+          (it "GET /assets/missing.txt falls through to 404"
+            (let [r (http-get "http://127.0.0.1:18105/assets/missing.txt")]
+              (if (__cr-ok? r)
+                (assert-eq 404 (response-status (__cr-val r)))
+                (assert-true false)))))
+        (server-stop srv)
+        (run-all)))
+    0))

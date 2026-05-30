@@ -17,15 +17,26 @@
 ;; Watcher state is a heap-allocated C struct.  Single-file mode tracks
 ;; one backend + a stat snapshot of the target.  Tree mode tracks a list
 ;; of (dir, backend) pairs.  Both modes share the debounce / opts fields.
+;;
+;; WTNF2/3/4:
+;;   - __watch-next-tree now uses a per-watcher pending-event queue.
+;;   - __watcher-tree-produce-events fills the pending queue:
+;;       Linux: iterate inotify evbuf, classify mask, emit one event per entry.
+;;       Darwin: snapshot-diff the directory, emit create/delete/write/rename.
+;;   - watch-open-tree calls __watcher-tree-snap-init after the walk.
+;;   - watch-refresh also refreshes snapshots.
 
 (defmodule watch/watch
   (import watch/backend :refer [backend-supported? backend-open backend-close
-                                backend-wait backend-drain
+                                backend-wait backend-drain backend-drain-into
+                                backend-event-count backend-event-name-at
+                                backend-event-mask-at backend-event-cookie-at
+                                backend-event-is-dir-at
                                 backend-last-overflow? backend-fd])
   (import watch/event :refer [watch-kind-write watch-kind-create
                               watch-kind-delete watch-kind-rename
                               watch-kind-overflow
-                              watch-event-make])
+                              watch-event-make watch-event-free])
   (import watch/opts :refer [watch-opts-debounce-ms watch-opts-coalesce
                              watch-opts-attrib watch-opts-follow-moves
                              watch-opts-recursive])
@@ -52,7 +63,7 @@
     /* __tur_include__: #include <sys/stat.h> */
     /* __tur_include__: #include <stdlib.h> */
     /* __tur_include__: #include <string.h> */
-    /* __tur_include__: typedef struct { int mode; int64_t backend; char *dir; char *base; char *full_path; int debounce_ms; int coalesce; int attrib_enabled; int follow_moves; int exists; long long mtime_sec; long long mtime_nsec; long long size; long long ino; char *root; int64_t *t_backends; char **t_dirs; int t_n; int t_cap; } TurWatcher; */
+    /* __tur_include__: typedef struct { int mode; int64_t backend; char *dir; char *base; char *full_path; int debounce_ms; int coalesce; int attrib_enabled; int follow_moves; int exists; long long mtime_sec; long long mtime_nsec; long long size; long long ino; char *root; int64_t *t_backends; char **t_dirs; int t_n; int t_cap; int64_t *pending_evs; int pending_n; int pending_cap; void **t_snaps; } TurWatcher; */
 
     TurWatcher *w = (TurWatcher *)calloc(1, sizeof(*w));
     if (!w) return 0;
@@ -248,6 +259,22 @@
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w) return;
+
+    /* Free pending event handles, then the array. */
+    if (w->pending_evs) {
+      for (int i = 0; i < w->pending_n; i++) {
+        if (w->pending_evs[i]) watch__event__watch_event_free(w->pending_evs[i]);
+      }
+      free(w->pending_evs);
+    }
+
+    /* Free directory snapshots (TurDirSnapshot is hoisted to file scope). */
+    if (w->t_snaps) {
+      for (int i = 0; i < w->t_n; i++)
+        tur_snap_free((TurDirSnapshot *)w->t_snaps[i]);
+      free(w->t_snaps);
+    }
+
     if (w->dir)       free(w->dir);
     if (w->base)      free(w->base);
     if (w->full_path) free(w->full_path);
@@ -446,6 +473,43 @@
     }
     ```)
 
+  ;; --------------------------------------------------------------------
+  ;; Snapshot machinery (WTNF3).
+  ;;
+  ;; A TurDirSnapshot is a flat array of TurSnapEntry records, one per
+  ;; non-hidden entry in a directory (populated via readdir + lstat).
+  ;; The snapshot does not track mtime to stay platform-agnostic; inode
+  ;; and size changes cover the atomic-save and direct-write cases.
+  ;; --------------------------------------------------------------------
+
+  ;;; __watcher-tree-snap-init -- (re-)take a snapshot for every registered dir.
+  ;;;
+  ;;; Called after the initial walk and after watch-refresh.  Frees any
+  ;;; pre-existing snapshots before allocating new ones.
+  (defn __watcher-tree-snap-init [watcher :int] #{Unsafe} :void
+    ```c
+    /* __tur_include__: typedef struct { char name[256]; long long ino; long long size; int is_dir; } TurSnapEntry; */
+    /* __tur_include__: typedef struct { TurSnapEntry *entries; int n; int cap; } TurDirSnapshot; */
+    /* __tur_include__: static TurDirSnapshot *tur_snap_take(const char *dir) { DIR *dh = opendir(dir); if (!dh) return NULL; TurDirSnapshot *s = (TurDirSnapshot *)calloc(1, sizeof(*s)); if (!s) { closedir(dh); return NULL; } struct dirent *ent; while ((ent = readdir(dh)) != NULL) { if (ent->d_name[0] == '.') continue; if (s->n == s->cap) { int nc = s->cap ? s->cap * 2 : 8; TurSnapEntry *g = (TurSnapEntry *)realloc(s->entries, sizeof(TurSnapEntry)*(size_t)nc); if (!g) break; s->entries = g; s->cap = nc; } TurSnapEntry *e = &s->entries[s->n]; memset(e, 0, sizeof(*e)); strncpy(e->name, ent->d_name, sizeof(e->name)-1); char full[PATH_MAX]; snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name); struct stat st; if (lstat(full, &st) == 0) { e->ino = (long long)st.st_ino; e->size = (long long)st.st_size; e->is_dir = (st.st_mode & S_IFMT) == S_IFDIR ? 1 : 0; } s->n++; } closedir(dh); return s; } */
+    /* __tur_include__: static void tur_snap_free(TurDirSnapshot *s) { if (!s) return; if (s->entries) free(s->entries); free(s); } */
+
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    if (!w || w->mode != 1 || w->t_n == 0) return;
+
+    /* Free old snapshot array if present. */
+    if (w->t_snaps) {
+      for (int i = 0; i < w->t_n; i++)
+        tur_snap_free((TurDirSnapshot *)w->t_snaps[i]);
+      free(w->t_snaps);
+      w->t_snaps = NULL;
+    }
+
+    w->t_snaps = (void **)calloc((size_t)w->t_n, sizeof(void *));
+    if (!w->t_snaps) return;
+    for (int i = 0; i < w->t_n; i++)
+      w->t_snaps[i] = tur_snap_take(w->t_dirs[i]);
+    ```)
+
   ;;; watch-open-tree -- recursively watch a directory and all subdirs.
   ;;;
   ;;; Walks `root` at open time, registering one backend per directory.
@@ -466,7 +530,9 @@
           (__watcher-tree-walk w root 0)
           (if (= (watch-tree-dir-count w) 0)
             (do (watch-close w) 0)
-            w)))))
+            (do
+              (__watcher-tree-snap-init w)
+              w))))))
 
   ;;; watch-open -- open a watcher on a path with auto-dispatch.
   ;;;
@@ -508,8 +574,238 @@
     (if (= (__watcher-mode watcher) 1)
       (do
         (__watcher-tree-walk watcher (__watcher-tree-root watcher) 0)
+        (__watcher-tree-snap-init watcher)
         (watch-tree-dir-count watcher))
       0))
+
+  ;; --------------------------------------------------------------------
+  ;; Pending event queue (WTNF4).
+  ;;
+  ;; watch-next returns one event per call.  When the backend drain or
+  ;; snapshot diff produces multiple events, extras are stored here and
+  ;; returned on subsequent calls without another OS wait.
+  ;; --------------------------------------------------------------------
+
+  ;;; __watcher-pending-push -- append an event to the tail of the pending queue.
+  (defn __watcher-pending-push [watcher :int ev :int] #{Unsafe} :void
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    if (!w || ev == 0) return;
+    if (w->pending_n == w->pending_cap) {
+      int nc = w->pending_cap ? w->pending_cap * 2 : 4;
+      int64_t *g = (int64_t *)realloc(w->pending_evs, sizeof(int64_t) * (size_t)nc);
+      if (!g) {
+        watch__event__watch_event_free(ev);
+        return;
+      }
+      w->pending_evs = g;
+      w->pending_cap = nc;
+    }
+    w->pending_evs[w->pending_n++] = ev;
+    ```)
+
+  ;;; __watcher-pending-pop -- remove and return the oldest event (FIFO), or 0.
+  (defn __watcher-pending-pop [watcher :int] #{Unsafe} :int
+    ```c
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    if (!w || w->pending_n == 0) return 0;
+    int64_t ev = w->pending_evs[0];
+    if (w->pending_n > 1)
+      memmove(w->pending_evs, w->pending_evs + 1,
+              sizeof(int64_t) * (size_t)(w->pending_n - 1));
+    w->pending_n--;
+    return ev;
+    ```)
+
+  ;; --------------------------------------------------------------------
+  ;; Per-file event production (WTNF2 Linux + WTNF3 Darwin).
+  ;; --------------------------------------------------------------------
+
+  ;;; __watcher-tree-mk-event -- build a watch-event for a tree-mode file hit.
+  ;;;
+  ;;; Computes full_path = dir + "/" + name (or just dir when name is ""),
+  ;;; then strips the root + "/" prefix to produce the relative path stored
+  ;;; in watch-event-path.
+  (defn __watcher-tree-mk-event [root :cstr dir :cstr name :cstr
+                                 kind :int is-dir :int cookie :int] #{Unsafe} :int
+    ```c
+    const char *r = root ? (const char *)(intptr_t)root : "";
+    const char *d = dir  ? (const char *)(intptr_t)dir  : "";
+    const char *n = name ? (const char *)(intptr_t)name : "";
+
+    char full_path[PATH_MAX];
+    if (n[0])
+      snprintf(full_path, sizeof(full_path), "%s/%s", d, n);
+    else
+      snprintf(full_path, sizeof(full_path), "%s", d);
+
+    /* rel_path: strip root + "/" prefix so callers get "a/b/leaf.txt"
+       instead of the absolute path. */
+    const char *rel_path = full_path;
+    size_t rlen = strlen(r);
+    if (rlen > 0 && strncmp(full_path, r, rlen) == 0) {
+      const char *after = full_path + rlen;
+      if (*after == '/') rel_path = after + 1;
+    }
+
+    return watch__event__watch_event_make(
+      (int64_t)(intptr_t)r,
+      (int64_t)(intptr_t)rel_path,
+      (int64_t)(intptr_t)full_path,
+      (int64_t)kind,
+      (int64_t)is_dir,
+      (int64_t)cookie);
+    ```)
+
+  ;;; __watcher-tree-produce-events -- drain the fired backend and push
+  ;;; watch-events onto the watcher's pending queue.
+  ;;;
+  ;;; Linux: iterates the inotify evbuf and classifies each entry by mask.
+  ;;; Darwin: takes a fresh directory snapshot and diffs against the prior one.
+  ;;;
+  ;;; Both paths call __watcher-tree-mk-event to build events, then push
+  ;;; them onto w->pending_evs via inline realloc logic.
+  (defn __watcher-tree-produce-events [watcher :int idx :int root :cstr] #{Unsafe} :void
+    ```c
+    /* __tur_include__: #if defined(__linux__) */
+    /* __tur_include__: #include <sys/inotify.h> */
+    /* __tur_include__: static int tur_inotify_kind(unsigned int mask) { if (mask & IN_Q_OVERFLOW) return 6; if (mask & (IN_DELETE|IN_DELETE_SELF|IN_MOVED_FROM)) return 3; if (mask & IN_MOVED_TO) return 4; if (mask & IN_CREATE) return 2; if (mask & (IN_MODIFY|IN_CLOSE_WRITE)) return 1; if (mask & IN_ATTRIB) return 5; return 1; } */
+    /* __tur_include__: #endif */
+
+    TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
+    if (!w || w->mode != 1) return;
+    int i = (int)idx;
+    if (i < 0 || i >= w->t_n) return;
+
+    const char *croot = root ? (const char *)(intptr_t)root : "";
+    const char *cdir  = w->t_dirs[i];
+    int64_t bk        = w->t_backends[i];
+
+    /* Helper: push one event onto the pending queue inline. */
+    #define TUR_PEND_PUSH(ev_) do { \
+      int64_t _ev = (ev_); \
+      if (_ev) { \
+        if (w->pending_n == w->pending_cap) { \
+          int _nc = w->pending_cap ? w->pending_cap * 2 : 4; \
+          int64_t *_g = (int64_t *)realloc(w->pending_evs, \
+                          sizeof(int64_t) * (size_t)_nc); \
+          if (!_g) { watch__event__watch_event_free(_ev); break; } \
+          w->pending_evs = _g; w->pending_cap = _nc; \
+        } \
+        w->pending_evs[w->pending_n++] = _ev; \
+      } \
+    } while (0)
+
+    #if defined(__linux__)
+    {
+      int ev_count = (int)watch__backend__backend_event_count(bk);
+      for (int j = 0; j < ev_count; j++) {
+        const char *ename = (const char *)(intptr_t)
+            watch__backend__backend_event_name_at(bk, (int64_t)j);
+        unsigned int mask   = (unsigned int)watch__backend__backend_event_mask_at(bk, (int64_t)j);
+        unsigned int cookie = (unsigned int)watch__backend__backend_event_cookie_at(bk, (int64_t)j);
+        int          is_dir = (int)watch__backend__backend_event_is_dir_at(bk, (int64_t)j);
+        if (!ename) ename = "";
+
+        int kind = tur_inotify_kind(mask);
+        if (kind == 6) {
+          /* overflow: emit one overflow event for the directory itself */
+          int64_t ev = watch__watch____watcher_tree_mk_event(
+              (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
+              (int64_t)(intptr_t)"", 6, 1, 0);
+          TUR_PEND_PUSH(ev);
+          break; /* one overflow is enough */
+        }
+        int64_t ev = watch__watch____watcher_tree_mk_event(
+            (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
+            (int64_t)(intptr_t)ename, kind, is_dir, (int64_t)cookie);
+        TUR_PEND_PUSH(ev);
+      }
+
+      /* ev_count == 0 after debounce drain: activity collapsed within the
+         window, nothing to report this tick.  The overflow flag from the
+         second drain is checked at the Turmeric level on the next wake. */
+    }
+
+    #elif defined(__APPLE__)
+    {
+      TurDirSnapshot *old_s = (w->t_snaps && i < w->t_n)
+          ? (TurDirSnapshot *)w->t_snaps[i] : NULL;
+      TurDirSnapshot *new_s = tur_snap_take(cdir);
+
+      if (new_s) {
+        /* Scan new entries: match + create */
+        for (int ni = 0; ni < new_s->n; ni++) {
+          TurSnapEntry *ne = &new_s->entries[ni];
+          int found = 0;
+          if (old_s) {
+            for (int oi = 0; oi < old_s->n; oi++) {
+              TurSnapEntry *oe = &old_s->entries[oi];
+              if (strcmp(ne->name, oe->name) != 0) continue;
+              found = 1;
+              int kind = 0;
+              if (ne->ino != oe->ino)        kind = 4; /* rename / atomic-save */
+              else if (ne->size != oe->size) kind = 1; /* write */
+              if (kind) {
+                int64_t ev = watch__watch____watcher_tree_mk_event(
+                    (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
+                    (int64_t)(intptr_t)ne->name, kind, ne->is_dir, 0);
+                TUR_PEND_PUSH(ev);
+              }
+              break;
+            }
+          }
+          if (!found) {
+            /* New entry: create */
+            int64_t ev = watch__watch____watcher_tree_mk_event(
+                (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
+                (int64_t)(intptr_t)ne->name, 2, ne->is_dir, 0);
+            TUR_PEND_PUSH(ev);
+          }
+        }
+
+        /* Scan old entries for deletions */
+        if (old_s) {
+          for (int oi = 0; oi < old_s->n; oi++) {
+            TurSnapEntry *oe = &old_s->entries[oi];
+            int still_there = 0;
+            for (int ni = 0; ni < new_s->n; ni++) {
+              if (strcmp(oe->name, new_s->entries[ni].name) == 0) {
+                still_there = 1; break;
+              }
+            }
+            if (!still_there) {
+              int64_t ev = watch__watch____watcher_tree_mk_event(
+                  (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
+                  (int64_t)(intptr_t)oe->name, 3, oe->is_dir, 0);
+              TUR_PEND_PUSH(ev);
+            }
+          }
+        }
+
+        /* Replace stored snapshot. */
+        if (w->t_snaps) {
+          tur_snap_free(old_s);
+          w->t_snaps[i] = new_s;
+        } else {
+          tur_snap_free(new_s);
+        }
+      } else if (old_s) {
+        /* Could not snapshot (dir deleted?): emit a delete for the dir. */
+        int64_t ev = watch__watch____watcher_tree_mk_event(
+            (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
+            (int64_t)(intptr_t)"", 3, 1, 0);
+        TUR_PEND_PUSH(ev);
+      }
+    }
+    #endif /* platform */
+
+    #undef TUR_PEND_PUSH
+    ```)
+
+  ;; --------------------------------------------------------------------
+  ;; Public API
+  ;; --------------------------------------------------------------------
 
   ;;; watch-next -- block until the next event, return its handle or 0.
   ;;;
@@ -559,28 +855,31 @@
 
   ;;; __watch-next-tree -- the recursive-tree case.
   ;;;
-  ;;; Polls all backend fds.  When one fires, drains it, applies the
-  ;;; debounce window, and emits an event whose path is the directory
-  ;;; that produced the event.  The kind is `write` for normal events,
-  ;;; `overflow` when the backend reports an overflow.  Per-file naming
-  ;;; and stat-compare classification within the tree would require an
-  ;;; index of every file in the tree -- deferred to v0.2.
+  ;;; Returns a pending event immediately if one is queued.  Otherwise
+  ;;; polls all backend fds.  When a backend fires, drains its evbuf and
+  ;;; calls __watcher-tree-produce-events to push per-file events onto the
+  ;;; pending queue, then pops and returns the first.
   (defn __watch-next-tree [watcher :int timeout-ms :int] #{Unsafe} :int
-    (let [idx (__watcher-tree-poll-fired watcher timeout-ms)]
-      (if (< idx 0)
-        0
-        (let [back (__watcher-tree-dir-backend watcher idx)
-              dir  (watch-tree-dir-at watcher idx)]
-          (do
-            (backend-drain back)
-            (if (= (backend-last-overflow? back) 1)
-              (watch-event-make (__watcher-tree-root watcher) dir dir
-                                (watch-kind-overflow) 1 0)
+    (let [queued (__watcher-pending-pop watcher)]
+      (if (not (= queued 0))
+        queued
+        (let [idx (__watcher-tree-poll-fired watcher timeout-ms)]
+          (if (< idx 0)
+            0
+            (let [back (__watcher-tree-dir-backend watcher idx)
+                  root (__watcher-tree-root watcher)]
               (do
-                (__watcher-sleep-ms (__watcher-debounce-ms watcher))
-                (backend-drain back)
-                (watch-event-make (__watcher-tree-root watcher) dir dir
-                                  (watch-kind-write) 1 0))))))))
+                (backend-drain-into back)
+                (if (= (backend-last-overflow? back) 1)
+                  (watch-event-make root (watch-tree-dir-at watcher idx)
+                                    (watch-tree-dir-at watcher idx)
+                                    (watch-kind-overflow) 1 0)
+                  (do
+                    (__watcher-sleep-ms (__watcher-debounce-ms watcher))
+                    ;; Second drain after debounce window.
+                    (backend-drain-into back)
+                    (__watcher-tree-produce-events watcher idx root)
+                    (__watcher-pending-pop watcher)))))))))
 
   ;;; __watch-make-cons -- internal: wrap a single event handle in a cons cell.
   (defn __watch-make-cons [head :int] #{Unsafe} :int
@@ -596,14 +895,15 @@
 
   ;;; watch-drain -- gather a debounced batch (see watch/debounce).
   ;;;
-  ;;; v0.1.0 single-file: at most one logical event accrues per debounce
-  ;;; window, so watch-drain returns a cons-list containing 0 or 1 event
-  ;;; handle.  Multi-event batches arrive with multi-path / recursive watch.
+  ;;; Returns a cons-list of watch-event handles accumulated over the
+  ;;; debounce window.  With multi-event batches now arriving from tree
+  ;;; mode, coalesce-by-path (debounce-batch-coalesce) meaningfully
+  ;;; deduplicates bursts of saves to the same file.
   ;;;
   ;;; Returns a Turmeric cons-list (use list head/tail accessors).
   (defn watch-drain [watcher :int timeout-ms :int debounce-ms :int] #{Unsafe} :int
     ;; debounce-ms is honored implicitly by watch-next's internal sleep;
-    ;; multi-element batches arrive with WT6.
+    ;; multi-element batches arrive with WT6 / WTNF4.
     (let [_ debounce-ms
           ev (watch-next watcher timeout-ms)]
       (__watch-make-cons ev))))

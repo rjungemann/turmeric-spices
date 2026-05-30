@@ -1,0 +1,50 @@
+;;; tourist/template -- render-template wrapper (requires tur-template dep).
+;;;
+;;; Exposes render-template as a convenience helper that resolves paths
+;;; relative to the working directory, renders the template against an Env,
+;;; and returns the output as a heap-allocated :cstr for use with html.
+;;;
+;;; Only available when tur-template is declared as a :spices dep in the
+;;; consumer's build.tur.
+;;;
+;;; Since: v0.1.0
+
+(defmodule tourist/template
+  (import template/render :refer [render-file])
+  (export render-template)
+
+;;; __rt-extract-ok -- extract the ok_val cstr from a result handle and free
+;;; the result struct. Returns empty string on an err result.
+(defn __rt-extract-ok [r :int] :cstr
+  ```c
+  #include <stdlib.h>
+  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  if (r == 0) return (int64_t)(intptr_t)"";
+  struct __res *res = (struct __res *)(intptr_t)r;
+  char *val = res->is_ok ? (char *)(intptr_t)res->ok_val : (char *)"";
+  free(res);
+  return (int64_t)(intptr_t)val;
+  ```)
+
+;;; render-template -- render a template file against an Env.
+;;;
+;;; Reads the template at path (relative to the working directory), renders
+;;; it against env, and returns the output as a heap-allocated cstr. The
+;;; returned string is typically passed to html which copies it into the
+;;; response body.
+;;;
+;;; Parameters:
+;;;   path -- path to the template file, e.g. "views/greet.html.tur"
+;;;   env  -- Env handle from env-new or make-env
+;;;
+;;; Returns:
+;;;   :cstr -- rendered output (heap-allocated); "" on render failure
+;;;
+;;; Example:
+;;;   (html (render-template "views/index.html.tur" (env-new)))
+;;;
+;;; Since: v0.1.0
+(defn render-template [path :cstr env :int] :cstr
+  (__rt-extract-ok (render-file path env)))
+
+) ;; end defmodule tourist/template

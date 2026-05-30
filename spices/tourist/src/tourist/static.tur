@@ -1,0 +1,240 @@
+;;; tourist/static -- static file serving with path-traversal guard.
+;;;
+;;; serve-static! matches GET <url-prefix>/* and serves files from fs-root.
+;;; Rejects any resolved path that escapes fs-root (.. segments and symlink
+;;; escapes via realpath). Content-Type is inferred from a built-in extension/
+;;; mime table. A 404 falls through to the next route; dynamic routes can
+;;; shadow static paths.
+;;;
+;;; Since: v0.1.0
+;;
+;; C struct layout for static routes (first 3 fields MUST match __tourist_route
+;; so existing dsl accessors -- route-pattern, route-method -- work correctly):
+;;
+;;   struct __tourist_static_route {
+;;     char    *method;   /* "__static" sentinel */
+;;     int64_t  pattern;  /* compiled pattern for "<prefix>/*" */
+;;     int64_t  handler;  /* 0 (unused; static-serve is called by app) */
+;;     char    *prefix;   /* url-prefix (informational; match uses pattern) */
+;;     char    *fs_root;  /* filesystem root directory */
+;;   };
+
+(defmodule tourist/static
+  (import tourist/router :refer [router-compile])
+  (export serve-static!
+          static-item?
+          static-route-fs-root
+          static-serve)
+
+;; -- Internal: build pattern string "<prefix>/*" ----------------------------
+
+;;; __static-pat-join -- build "<prefix>/*" by concatenating two cstrs.
+(defn __static-pat-join [prefix :cstr] :cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const char *pfx = (const char *)prefix;
+  size_t plen = strlen(pfx);
+  char *out = (char *)malloc(plen + 3);  /* "/" + "*" + NUL */
+  memcpy(out, pfx, plen);
+  out[plen]     = '/';
+  out[plen + 1] = '*';
+  out[plen + 2] = '\0';
+  return (int64_t)(intptr_t)out;
+  ```)
+
+;; -- Internal: allocate the extended static-route struct --------------------
+
+;;; __static-route-alloc -- allocate a __tourist_static_route struct.
+(defn __static-route-alloc [prefix :cstr fs-root :cstr pat :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __tourist_static_route {
+    char *method; int64_t pattern; int64_t handler;
+    char *prefix; char *fs_root;
+  };
+  struct __tourist_static_route *r =
+    (struct __tourist_static_route *)malloc(sizeof(*r));
+  r->method  = strdup("__static");
+  r->pattern = (int64_t)pat;
+  r->handler = 0;
+  r->prefix  = strdup((const char *)prefix);
+  r->fs_root = strdup((const char *)fs_root);
+  return (int64_t)(intptr_t)r;
+  ```)
+
+;; -- Public API -----------------------------------------------------------
+
+;;; serve-static! -- declare a static-file serving route.
+;;;
+;;; Registers a GET route that matches <url-prefix>/*. Each request strips
+;;; the prefix, resolves the remainder against fs-root (realpath), rejects
+;;; any path escaping fs-root (path-traversal guard), and responds with the
+;;; file content and an inferred Content-Type. Returns 0 (falls through to
+;;; the next route) on any miss: file not found, path traversal, not a
+;;; regular file.
+;;;
+;;; Parameters:
+;;;   url-prefix -- URL path prefix to strip, e.g. "/assets"
+;;;   fs-root    -- filesystem directory to serve from, e.g. "./public"
+;;;
+;;; Returns:
+;;;   :int -- static Route handle; consumed by tourist
+;;;
+;;; Example:
+;;;   (serve-static! "/assets" "./public")
+;;;
+;;; Since: v0.1.0
+(defn serve-static! [url-prefix :cstr fs-root :cstr] :int
+  (let [pat-str (__static-pat-join url-prefix)
+        pat     (router-compile pat-str)]
+    (__static-route-alloc url-prefix fs-root pat)))
+
+;;; static-item? -- true if an item handle is a static-file route.
+;;;
+;;; Detects the "__static" sentinel in the method field. Used by tourist/app
+;;; to distinguish static routes from regular routes in the dispatch loop.
+;;;
+;;; Parameters:
+;;;   item -- :int item handle from serve-static! or any other DSL constructor
+;;;
+;;; Returns:
+;;;   :bool
+;;;
+;;; Since: v0.1.0
+(defn static-item? [item :int] :bool
+  ```c
+  #include <string.h>
+  struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
+  if (item == 0) return false;
+  return strcmp(
+    ((struct __tourist_route *)(intptr_t)item)->method, "__static") == 0;
+  ```)
+
+;;; static-route-fs-root -- filesystem root directory of a static route.
+;;;
+;;; Parameters:
+;;;   route -- :int static route handle from serve-static!
+;;;
+;;; Returns:
+;;;   :cstr -- absolute or relative path to the served directory
+;;;
+;;; Since: v0.1.0
+(defn static-route-fs-root [route :int] :cstr
+  ```c
+  struct __tourist_static_route {
+    char *method; int64_t pattern; int64_t handler;
+    char *prefix; char *fs_root;
+  };
+  return (int64_t)(intptr_t)
+    ((struct __tourist_static_route *)(intptr_t)route)->fs_root;
+  ```)
+
+;;; static-serve -- serve a file from fs-root; returns 0 on any miss.
+;;;
+;;; Resolves fs-root + "/" + rel-raw using realpath, checks that the result
+;;; stays inside fs-root (path-traversal guard), reads the file, and returns
+;;; a 200 response with an inferred Content-Type. Returns 0 if the file is
+;;; absent, is not a regular file, or would escape fs-root.
+;;;
+;;; Parameters:
+;;;   fs-root -- :cstr filesystem root directory
+;;;   rel-raw -- :int  relative path as char* cast to int64_t (from wildcard
+;;;                    capture); 0 is treated as a miss
+;;;
+;;; Returns:
+;;;   :int -- Response handle (200 + body) on success, 0 on miss
+;;;
+;;; Since: v0.1.0
+(defn static-serve [fs-root :cstr rel-raw :int] :int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdio.h>
+  #include <limits.h>
+  #include <sys/stat.h>
+
+  if (rel_raw == 0) return 0;
+  const char *fs  = (const char *)fs_root;
+  const char *rel = (const char *)(intptr_t)rel_raw;
+
+  /* Build full path: fs_root + "/" + rel */
+  size_t fs_len  = strlen(fs);
+  size_t rel_len = strlen(rel);
+  char *full = (char *)malloc(fs_len + 1 + rel_len + 1);
+  memcpy(full, fs, fs_len);
+  full[fs_len] = '/';
+  memcpy(full + fs_len + 1, rel, rel_len + 1);
+
+  /* Resolve both paths with realpath for traversal check */
+  char resolved[PATH_MAX];
+  char root_res[PATH_MAX];
+  int ok = (realpath(full, resolved) != NULL)
+        && (realpath(fs, root_res) != NULL);
+  free(full);
+  if (!ok) return 0;
+
+  size_t root_rlen = strlen(root_res);
+  if (strncmp(resolved, root_res, root_rlen) != 0 ||
+      (resolved[root_rlen] != '/' && resolved[root_rlen] != '\0'))
+    return 0;  /* path-traversal detected */
+
+  /* Must be a regular file */
+  struct stat st;
+  if (stat(resolved, &st) != 0 || !S_ISREG(st.st_mode)) return 0;
+
+  /* Read file (binary-safe) */
+  FILE *f = fopen(resolved, "rb");
+  if (!f) return 0;
+  long sz = st.st_size;
+  char *buf = (char *)malloc((size_t)sz + 1);
+  size_t got = fread(buf, 1, (size_t)sz, f);
+  fclose(f);
+  buf[got] = '\0';
+
+  /* Determine MIME type from extension */
+  const char *mime = "application/octet-stream";
+  const char *dot  = strrchr(resolved, '.');
+  if (dot) {
+    dot++;
+    if (strcmp(dot, "html") == 0 || strcmp(dot, "htm") == 0) mime = "text/html";
+    else if (strcmp(dot, "css")  == 0) mime = "text/css";
+    else if (strcmp(dot, "js")   == 0) mime = "application/javascript";
+    else if (strcmp(dot, "json") == 0) mime = "application/json";
+    else if (strcmp(dot, "txt")  == 0) mime = "text/plain";
+    else if (strcmp(dot, "png")  == 0) mime = "image/png";
+    else if (strcmp(dot, "jpg")  == 0 ||
+             strcmp(dot, "jpeg") == 0) mime = "image/jpeg";
+    else if (strcmp(dot, "gif")  == 0) mime = "image/gif";
+    else if (strcmp(dot, "svg")  == 0) mime = "image/svg+xml";
+    else if (strcmp(dot, "ico")  == 0) mime = "image/x-icon";
+    else if (strcmp(dot, "wasm") == 0) mime = "application/wasm";
+    else if (strcmp(dot, "pdf")  == 0) mime = "application/pdf";
+  }
+
+  /* Build response struct directly so body_len is exact (not strlen) */
+  struct __httpd_resp {
+    int    status; char  *body; int body_len;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
+  };
+  struct __httpd_resp *r =
+    (struct __httpd_resp *)malloc(sizeof(*r));
+  r->status    = 200;
+  r->body      = buf;
+  r->body_len  = (int)got;
+  r->hdr_cap   = 4;
+  r->hdr_count = 0;
+  r->hdr_keys  = (char **)malloc(sizeof(char *) * (size_t)r->hdr_cap);
+  r->hdr_vals  = (char **)malloc(sizeof(char *) * (size_t)r->hdr_cap);
+
+  size_t ml = strlen(mime);
+  r->hdr_keys[0] = strdup("Content-Type");
+  r->hdr_vals[0] = (char *)malloc(ml + 1);
+  memcpy(r->hdr_vals[0], mime, ml + 1);
+  r->hdr_count = 1;
+
+  return (int64_t)(intptr_t)r;
+  ```)
+
+) ;; end defmodule tourist/static

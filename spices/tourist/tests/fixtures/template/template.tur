@@ -1,0 +1,87 @@
+;; Fixture: template -- render-template integration (requires tur-template)
+
+(defmodule tourist/tests/template
+  (import tourist/app      :refer [tourist])
+  (import tourist/dsl      :refer [get!])
+  (import tourist/helpers  :refer [html])
+  (import tourist/param    :refer [capture])
+  (import tourist/template :refer [render-template])
+  (import template/env     :refer [env-new env-set])
+  (import httpd/server     :refer [server-stop])
+  (import http/client      :refer [http-get])
+  (import http/response    :refer [response-status response-body])
+  (import test/suite       :refer [describe it])
+  (import test/assert      :refer [assert-eq assert-true])
+  (import test/runner      :refer [run-all])
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return false;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;; cstr-contains? -- true if haystack contains needle
+  (defn cstr-contains? [haystack :cstr needle :cstr] :bool
+    ```c
+    #include <string.h>
+    return strstr((const char *)haystack, (const char *)needle) != NULL;
+    ```)
+
+  ;; __setup-template-dir -- write test template to /tmp/tourist-template-test/
+  ;; Returns the path to the view file.
+  (defn __setup-template-dir [] :cstr
+    ```c
+    #include <stdlib.h>
+    #include <stdio.h>
+    #include <sys/stat.h>
+    const char *dir  = "/tmp/tourist-template-test";
+    const char *path = "/tmp/tourist-template-test/greet.html.tur";
+    mkdir(dir, 0755);
+    FILE *f = fopen(path, "w");
+    if (f) {
+      fputs("<p>Hello, <%= name %>!</p>", f);
+      fclose(f);
+    }
+    return (int64_t)(intptr_t)path;
+    ```)
+
+  (defn main [] :int
+    (let [tpl-path (__setup-template-dir)
+          srv      (tourist 18106
+                     (get! "/greet/:name"
+                       (fn [req]
+                         (let [r   (capture req "name")
+                               nm  (if (ok? r) (ok-val r) "world")
+                               e   (env-new)]
+                           (do
+                             (env-set e "name" nm)
+                             (html (render-template tpl-path e)))))))]
+      (do
+        (sleep-ms 50)
+        (describe "tourist template"
+          (it "GET /greet/alice status is 200"
+            (let [r (http-get "http://127.0.0.1:18106/greet/alice")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+          (it "GET /greet/alice body contains Alice"
+            (let [r (http-get "http://127.0.0.1:18106/greet/alice")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-contains? (response-body (__cr-val r)) "alice"))
+                (assert-true false)))))
+        (server-stop srv)
+        (run-all)))
+    0))

@@ -1,0 +1,80 @@
+;; Fixture: query-param -- GET /search?q=foo; param "q"
+
+(defmodule tourist/tests/query-param
+  (import tourist/app     :refer [tourist])
+  (import tourist/dsl     :refer [get!])
+  (import tourist/helpers :refer [text])
+  (import tourist/param   :refer [param])
+  (import httpd/server    :refer [server-stop])
+  (import http/client     :refer [http-get])
+  (import http/response   :refer [response-status response-body])
+  (import test/suite      :refer [describe it])
+  (import test/assert     :refer [assert-eq assert-true])
+  (import test/runner     :refer [run-all])
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return false;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn __join-prefix [prefix :cstr val :cstr] :cstr
+    ```c
+    #include <stdlib.h>
+    #include <string.h>
+    const char *p = (const char *)prefix;
+    const char *v = (const char *)val;
+    size_t pl = strlen(p), vl = strlen(v);
+    char *out = (char *)malloc(pl + vl + 1);
+    memcpy(out, p, pl);
+    memcpy(out + pl, v, vl + 1);
+    return (int64_t)(intptr_t)out;
+    ```)
+
+  (defn main [] :int
+    (let [srv (tourist 18102
+                (get! "/search"
+                  (fn [req]
+                    (let [r (param req "q")]
+                      (if (ok? r)
+                        (text (__join-prefix "q:" (ok-val r)))
+                        (text "missing"))))))]
+      (do
+        (sleep-ms 50)
+        (describe "tourist query-param"
+          (it "GET /search?q=foo status is 200"
+            (let [r (http-get "http://127.0.0.1:18102/search?q=foo")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+          (it "GET /search?q=foo body is q:foo"
+            (let [r (http-get "http://127.0.0.1:18102/search?q=foo")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "q:foo" (response-body (__cr-val r))))
+                (assert-true false))))
+          (it "GET /search?q=hello body is q:hello"
+            (let [r (http-get "http://127.0.0.1:18102/search?q=hello")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "q:hello" (response-body (__cr-val r))))
+                (assert-true false))))
+          (it "GET /search (no q param) body is missing"
+            (let [r (http-get "http://127.0.0.1:18102/search")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "missing" (response-body (__cr-val r))))
+                (assert-true false)))))
+        (server-stop srv)
+        (run-all)))
+    0))

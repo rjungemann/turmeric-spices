@@ -19,7 +19,7 @@
   (export tokenize token-type token-value token-line token-col tokens-free
           lex-ok lex-err lex-ok? lex-err? lex-ok-val lex-err-val
           cons head tail nil-value list-nil?
-          scscm-list-rev scscm-cstr-eq? scscm-cstr-as-int)
+          scscm-list-rev scscm-cstr-eq? scscm-cstr-as-int scscm-int-as-cstr)
 
 ;; ---- minimal cons list primitives ----
 
@@ -369,6 +369,12 @@
 (defn scscm-cstr-as-int [s :cstr] #{Unsafe} :int
   ```c
   return (int64_t)(intptr_t)s;
+  ```)
+
+;; Helper: cast an :int (cstr pointer) back to :cstr.
+(defn scscm-int-as-cstr [n :int] #{Unsafe} :cstr
+  ```c
+  return (const char *)(intptr_t)n;
   ```)
 
 ;; String equality helper shared across all scscm modules.

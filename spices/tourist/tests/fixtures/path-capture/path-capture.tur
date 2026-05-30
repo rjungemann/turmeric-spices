@@ -1,0 +1,76 @@
+;; Fixture: path-capture -- GET /user/:id; capture "id"
+
+(defmodule tourist/tests/path-capture
+  (import tourist/app     :refer [tourist])
+  (import tourist/dsl     :refer [get!])
+  (import tourist/helpers :refer [text])
+  (import tourist/param   :refer [capture])
+  (import httpd/server    :refer [server-stop])
+  (import http/client     :refer [http-get])
+  (import http/response   :refer [response-status response-body])
+  (import test/suite      :refer [describe it])
+  (import test/assert     :refer [assert-eq assert-true])
+  (import test/runner     :refer [run-all])
+
+  (defn __cr-ok? [r :ptr<void>] :bool
+    ```c
+    if (!r) return false;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r :ptr<void>] :int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a :cstr b :cstr] :bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;; Inline join -- avoid str-concat elaborator issue through multiple spices.
+  (defn __join-prefix [prefix :cstr id :cstr] :cstr
+    ```c
+    #include <stdlib.h>
+    #include <string.h>
+    const char *p = (const char *)prefix;
+    const char *d = (const char *)id;
+    size_t pl = strlen(p), dl = strlen(d);
+    char *out = (char *)malloc(pl + dl + 1);
+    memcpy(out, p, pl);
+    memcpy(out + pl, d, dl + 1);
+    return (int64_t)(intptr_t)out;
+    ```)
+
+  (defn main [] :int
+    (let [srv (tourist 18101
+                (get! "/user/:id"
+                  (fn [req]
+                    (let [r (capture req "id")]
+                      (if (ok? r)
+                        (text (__join-prefix "user:" (ok-val r)))
+                        (text "missing"))))))]
+      (do
+        (sleep-ms 50)
+        (describe "tourist path-capture"
+          (it "GET /user/42 status is 200"
+            (let [r (http-get "http://127.0.0.1:18101/user/42")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+          (it "GET /user/42 body is user:42"
+            (let [r (http-get "http://127.0.0.1:18101/user/42")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "user:42" (response-body (__cr-val r))))
+                (assert-true false))))
+          (it "GET /user/hello body is user:hello"
+            (let [r (http-get "http://127.0.0.1:18101/user/hello")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "user:hello" (response-body (__cr-val r))))
+                (assert-true false)))))
+        (server-stop srv)
+        (run-all)))
+    0))
