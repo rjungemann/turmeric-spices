@@ -1,0 +1,28 @@
+;; raygui/layout smoke tests.
+;;
+;; Verifies that layout module exports resolve correctly.
+;; Rendering tests require a live window and are exercised by the examples.
+
+(defmodule layout_test
+  (export)
+
+(import raygui/layout :refer [gui-window-box gui-group-box gui-line gui-panel
+                               gui-dummy-rec gui-status-bar gui-scroll-panel])
+
+;;; T1: layout exports resolve without error.
+(defn test-exports-resolve [] :int
+  ;; Simply referencing the imported names proves resolution at link time.
+  (let [_ gui-window-box
+        _ gui-group-box
+        _ gui-line
+        _ gui-panel
+        _ gui-dummy-rec
+        _ gui-status-bar
+        _ gui-scroll-panel]
+    (println "T1 PASS: layout exports resolve")
+    0))
+
+(defn main [] :int
+  (test-exports-resolve))
+
+) ;; end defmodule layout_test

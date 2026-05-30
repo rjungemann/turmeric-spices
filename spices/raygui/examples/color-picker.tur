@@ -1,0 +1,41 @@
+;;; examples/color-picker -- color picker + alpha bar + progress bar demo.
+;;;
+;;; Run with: tur run color-picker.tur
+;;;
+;;; Since: Phase 3
+
+(defmodule color_picker
+  (export)
+
+(import raylib/core  :refer [init-window close-window window-should-close
+                              begin-drawing end-drawing clear-background
+                              set-target-fps])
+(import raylib/color :refer [raywhite])
+(import raygui/core     :refer [gui-load-style-default])
+(import raygui/controls :refer [gui-color-picker gui-color-bar-alpha gui-label
+                                 gui-progress-bar])
+(import raygui/layout   :refer [gui-status-bar])
+(import raygui/rect     :refer [rect])
+
+(defn main [] :int
+  (init-window 800 600 "Color Picker")
+  (set-target-fps 60)
+  (gui-load-style-default)
+  (let [color 0xFF0000FF
+        alpha 1.0]
+    (while (not (window-should-close))
+      (begin-drawing)
+      (clear-background (raywhite))
+      (gui-label (rect 10.0 10.0 200.0 20.0) "Pick a color:")
+      (set! color (gui-color-picker (rect 10.0 35.0 200.0 200.0) "" color))
+      (gui-label (rect 220.0 10.0 150.0 20.0) "Alpha:")
+      (set! alpha (gui-color-bar-alpha (rect 220.0 35.0 150.0 20.0) "" alpha))
+      (gui-label (rect 220.0 70.0 150.0 20.0) "Alpha level:")
+      (gui-progress-bar (rect 220.0 95.0 150.0 20.0) "0" "1" alpha 0.0 1.0)
+      (gui-status-bar (rect 0.0 580.0 800.0 20.0)
+                      "Drag the color picker or alpha bar")
+      (end-drawing)))
+  (close-window)
+  0)
+
+) ;; end defmodule color_picker
