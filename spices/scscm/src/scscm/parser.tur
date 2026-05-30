@@ -18,6 +18,13 @@
 ;;   0=atom 1=symbol 2=keyword 3=number 4=string
 ;;   5=list 6=vector 7=quote 8=quasiquote 9=unquote 10=unquote-splice 11=hash-paren
 
+(defmodule scscm/parser
+  (export parse
+          ast-kind ast-symbol-name ast-number-value ast-string-value
+          ast-list-len ast-list-get ast-free ast-free-all
+          scscm-ast-leaf scscm-ast-list-node scscm-ast-add-child
+          scscm-ast-value)
+
 ;; ---- AST node allocators (inline-C) ----
 
 ;; ---- cross-file type stubs (from scscm/lexer) ----
@@ -396,3 +403,5 @@
 ;;; Since: SC1
 (defn parse [tokens :int] #{Unsafe} :ptr<void>
   (scscm-parse-all tokens (nil-value)))
+
+) ;; end defmodule scscm/parser

@@ -5,6 +5,9 @@
 ;; compile-text returns result<:cstr> (lex-ok = sclang text, lex-err = error message).
 ;; compile-file reads the file and delegates to compile-text.
 
+(defmodule scscm/compile
+  (export compile-text compile-file)
+
 ;; ---- cross-file type stubs ----
 ;; These stubs provide type information for per-file tur check.
 (defn lex-err? [r :ptr<void>] #{Unsafe} :bool
@@ -134,4 +137,6 @@
       (lex-err 0)
       (let [src (scscm-int-as-cstr buf)]
         (compile-text src)))))
+
+) ;; end defmodule scscm/compile
 

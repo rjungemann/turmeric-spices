@@ -15,6 +15,12 @@
 ;; primitives (cons/head/tail/nil-value/list-nil? and lex-ok/lex-err/lex-ok?/lex-err?/lex-ok-val/lex-err-val)
 ;; so no stdlib loads are needed.
 
+(defmodule scscm/lexer
+  (export tokenize token-type token-value token-line token-col tokens-free
+          lex-ok lex-err lex-ok? lex-err? lex-ok-val lex-err-val
+          cons head tail nil-value list-nil?
+          scscm-list-rev scscm-cstr-eq? scscm-cstr-as-int)
+
 ;; ---- minimal cons list primitives ----
 
 (defn nil-value [] #{Unsafe} :int
@@ -423,3 +429,5 @@
     (do
       (scscm-token-free-one (head ts))
       (tokens-free (tail ts)))))
+
+) ;; end defmodule scscm/lexer
