@@ -148,6 +148,24 @@ current `Result` encoding.
 
 ### B3. `linalg` — three independent issues in `src/linalg/`
 
+> **Status:** ⚠️ Larger than expected — needs a decision (see Priority order).
+> A closer look shows **all six** `src/linalg/*.tur` files fail, and the spice
+> appears to target an older Turmeric dialect rather than having three local
+> bugs:
+> - `malloc`/`free`/`printf` are called as Turmeric-level functions via
+>   `(declare ...)`; the current compiler only accepts these inside inline-C
+>   (`#include <stdlib.h>` / `<stdio.h>`), the way every working spice does.
+> - `defstruct` uses the old non-vector field-list syntax (`small.tur`,
+>   `vec.tur`).
+> - Several functions have untyped params (`[n]` rather than `[n :int]`).
+> - `decomp.tur:185`, `solve.tur:177`, `fmt.tur:188` have parse errors
+>   (unterminated lists / unexpected `)`).
+>
+> Fixing this is a port of the whole spice (FFI strategy, struct syntax, param
+> types, parse repairs), not the three small edits below. Recommend treating it
+> as its own work item. The three points below are still accurate as far as
+> they go.
+
 **B3a. `malloc`/`free` unbound:**
 ```
 linalg/src/linalg/vec.tur:6:10: error [TUR-E0003]: unbound symbol 'malloc'
