@@ -62,5 +62,5 @@ plot-write-png
 
 ## See also
 
-- [Guide](docs/guides/plot-guide.md)
+- [Guide](https://github.com/rjungemann/turmeric-spices/blob/main/spices/plot/docs/guides/plot-guide.md)
 - Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/plot>

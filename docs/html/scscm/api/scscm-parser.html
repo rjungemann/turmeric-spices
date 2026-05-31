@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/scscm/parser | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#scscm-ast-leaf">scscm-ast-leaf</a></li>
+    <li><a href="#scscm-ast-list-node">scscm-ast-list-node</a></li>
+    <li><a href="#scscm-ast-add-child">scscm-ast-add-child</a></li>
+    <li><a href="#ast-kind">ast-kind</a></li>
+    <li><a href="#ast-symbol-name">ast-symbol-name</a></li>
+    <li><a href="#ast-number-value">ast-number-value</a></li>
+    <li><a href="#ast-string-value">ast-string-value</a></li>
+    <li><a href="#ast-list-len">ast-list-len</a></li>
+    <li><a href="#ast-list-get">ast-list-get</a></li>
+    <li><a href="#scscm-ast-value">scscm-ast-value</a></li>
+    <li><a href="#ast-free">ast-free</a></li>
+    <li><a href="#ast-free-all">ast-free-all</a></li>
+    <li><a href="#parse">parse</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#scscm-parse-list-body" style="color:var(--faint)">scscm-parse-list-body</a></li>
+    <li><a href="#scscm-parse-wrapper" style="color:var(--faint)">scscm-parse-wrapper</a></li>
+    <li><a href="#scscm-parse-all" style="color:var(--faint)">scscm-parse-all</a></li>
+    <li><a href="#scscm-parse-form" style="color:var(--faint)">scscm-parse-form</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>scscm/parser</h1>
+    <div class="module-path">src/scscm/parser.tur</div>
+  </div>
+<div class="def-card" id="scscm-ast-leaf">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-ast-leaf</h2>
+  </div>
+  <pre class="def-signature">(scscm-ast-leaf [kind :int value :cstr])</pre>
+  <p class="def-summary">allocate a leaf AST node with a value string.</p>
+</div>
+<div class="def-card" id="scscm-ast-list-node">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-ast-list-node</h2>
+  </div>
+  <pre class="def-signature">(scscm-ast-list-node [kind :int])</pre>
+  <p class="def-summary">allocate a composite AST node (list or vector).</p>
+</div>
+<div class="def-card" id="scscm-ast-add-child">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-ast-add-child</h2>
+  </div>
+  <pre class="def-signature">(scscm-ast-add-child [node :int child :int])</pre>
+  <p class="def-summary">append a child handle to a composite node.</p>
+</div>
+<div class="def-card" id="ast-kind">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-kind</h2>
+  </div>
+  <pre class="def-signature">(ast-kind [node :int])</pre>
+  <p class="def-summary">return the kind keyword string of an AST node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>node</td><td></td><td>AST node handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">One of &quot;:atom&quot; &quot;:symbol&quot; &quot;:keyword&quot; &quot;:number&quot; &quot;:string&quot; &quot;:list&quot;
+  &quot;:vector&quot; &quot;:quote&quot; &quot;:quasiquote&quot; &quot;:unquote&quot; &quot;:unquote-splice&quot; &quot;:hash-paren&quot;</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-kind node)  ; =&gt; &quot;:symbol&quot;</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="ast-symbol-name">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-symbol-name</h2>
+  </div>
+  <pre class="def-signature">(ast-symbol-name [node :int])</pre>
+  <p class="def-summary">return the raw symbol text of a symbol node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>node</td><td></td><td>a &quot;:symbol&quot; AST node</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Symbol name as :cstr (e.g. &quot;foo-bar&quot;).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-symbol-name node)  ; =&gt; &quot;foo-bar&quot;</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="ast-number-value">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-number-value</h2>
+  </div>
+  <pre class="def-signature">(ast-number-value [node :int])</pre>
+  <p class="def-summary">return the text representation of a number node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>node</td><td></td><td>a &quot;:number&quot; AST node</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Number text as :cstr (e.g. &quot;440&quot;, &quot;0.5&quot;).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-number-value node)  ; =&gt; &quot;440&quot;</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="ast-string-value">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-string-value</h2>
+  </div>
+  <pre class="def-signature">(ast-string-value [node :int])</pre>
+  <p class="def-summary">return the contents of a string node (without quotes).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>node</td><td></td><td>a &quot;:string&quot; AST node</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">String contents as :cstr (escape sequences preserved as-is from source).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-string-value node)  ; =&gt; &quot;hello&quot;</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="ast-list-len">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-list-len</h2>
+  </div>
+  <pre class="def-signature">(ast-list-len [node :int])</pre>
+  <p class="def-summary">return the number of children of a composite node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>node</td><td></td><td>a &quot;:list&quot;, &quot;:vector&quot;, or wrapper node</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Child count as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-list-len node)  ; =&gt; 3</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="ast-list-get">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-list-get</h2>
+  </div>
+  <pre class="def-signature">(ast-list-get [node :int i :int])</pre>
+  <p class="def-summary">return the i-th child (0-indexed) of a composite node.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>node</td><td></td><td>a &quot;:list&quot;, &quot;:vector&quot;, or wrapper node</td></tr>
+    <tr><td>i</td><td></td><td>0-based child index</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Child node handle as :int.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-list-get node 0)  ; =&gt; first child handle</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="scscm-ast-value">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>scscm-ast-value</h2>
+  </div>
+  <pre class="def-signature">(scscm-ast-value [node :int])</pre>
+</div>
+<div class="def-card" id="ast-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-free</h2>
+  </div>
+  <pre class="def-signature">(ast-free [node :int])</pre>
+  <p class="def-summary">free one AST node and all its children recursively.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>node</td><td></td><td>AST node handle (may be 0/nil)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-free node)</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="ast-free-all">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>ast-free-all</h2>
+  </div>
+  <pre class="def-signature">(ast-free-all [nodes :int])</pre>
+  <p class="def-summary">free every AST node in a cons list plus the list cells.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>nodes</td><td></td><td>cons list of AST node handles</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(ast-free-all top-level-forms)</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<div class="def-card" id="parse">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>parse</h2>
+  </div>
+  <pre class="def-signature">(parse [tokens :int])</pre>
+  <p class="def-summary">parse a token cons list into a cons list of top-level AST nodes.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>tokens</td><td></td><td>cons list of token handles returned by tokenize</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">lex-ok(nodes :int) where nodes is a cons list of AST node handles.
+  lex-err(msg-int :int) on parse error (msg-int is a :cstr cast to :int).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (tokenize &quot;(+ 1 2)&quot;)]
+    (if (lex-ok? r) (parse (lex-ok-val r)) (lex-err-val r)))</pre>
+  </div>
+  <p class="def-since">Since: SC1</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="scscm-parse-list-body"><code>scscm-parse-list-body</code></div>
+  <div class="internal-item" id="scscm-parse-wrapper"><code>scscm-parse-wrapper</code></div>
+  <div class="internal-item" id="scscm-parse-all"><code>scscm-parse-all</code></div>
+  <div class="internal-item" id="scscm-parse-form"><code>scscm-parse-form</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

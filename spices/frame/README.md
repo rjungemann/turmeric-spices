@@ -62,6 +62,6 @@ let [f       read-csv-string("g,v\nA,10\nB,20\nA,30\n" 0 0 1 0 "")
 
 ## See also
 
-- [Guide](docs/guides/frame-guide.md)
+- [Guide](https://turmeric-lang.com/docs/html/guides/frame-guide.html)
 - [API reference](api/)
 - Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/frame>

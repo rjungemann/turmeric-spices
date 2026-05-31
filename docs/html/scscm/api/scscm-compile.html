@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tur-watch API | API Docs</title>
+<title>tur/scscm/compile | Turmeric API</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -109,38 +109,79 @@
 <div class="page-layout">
 <div class="sidebar">
   <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#compile-text">compile-text</a></li>
+    <li><a href="#compile-file">compile-file</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#scscm-read-file" style="color:var(--faint)">scscm-read-file</a></li>
+    <li><a href="#scscm-int-as-cstr" style="color:var(--faint)">scscm-int-as-cstr</a></li>
+  </ul>
 </div>
 <div class="content">
-  <h1 style="color:var(--gold);font-size:2rem;margin-bottom:0.5rem">tur-watch API</h1>
-  <p style="color:var(--faint);margin-bottom:1.5rem">Auto-generated API reference. Run <code>just docs</code> to regenerate.</p>
-  <h2 style="color:var(--gold);font-size:1.25rem;margin:2rem 0 0.75rem;padding-bottom:0.4rem;border-bottom:1px solid var(--border)">watch</h2>
-  <div class="index-grid">
-  <a href="watch-backend.html" class="index-card" style="display:block">
-    <h3>watch/backend</h3>
-    <p>platform-specific OS watcher bridge (internal).</p>
-    <div class="export-count">15 exported definitions</div>
-  </a>
-  <a href="watch-debounce.html" class="index-card" style="display:block">
-    <h3>watch/debounce</h3>
-    <p>burst-collapse + coalesce helpers for batched events.</p>
-    <div class="export-count">6 exported definitions</div>
-  </a>
-  <a href="watch-event.html" class="index-card" style="display:block">
-    <h3>watch/event</h3>
-    <p>normalized filesystem-watch event record.</p>
-    <div class="export-count">16 exported definitions</div>
-  </a>
-  <a href="watch-opts.html" class="index-card" style="display:block">
-    <h3>watch/opts</h3>
-    <p>watcher configuration options.</p>
-    <div class="export-count">14 exported definitions</div>
-  </a>
-  <a href="watch-watch.html" class="index-card" style="display:block">
-    <h3>watch/watch</h3>
-    <p>public watcher API.</p>
-    <div class="export-count">12 exported definitions</div>
-  </a>
+  <div class="module-heading">
+    <h1>scscm/compile</h1>
+    <div class="module-path">src/scscm/compile.tur</div>
   </div>
+<div class="def-card" id="compile-text">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>compile-text</h2>
+  </div>
+  <pre class="def-signature">(compile-text [source :cstr])</pre>
+  <p class="def-summary">compile scscm source text to sclang text.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>source</td><td></td><td>NUL-terminated scscm source string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">lex-ok(sclang-text :cstr) on success.
+  lex-err(message-int :int) on lexer/parser error (cast :int to :cstr for message).</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (compile-text &quot;(+ 1 2)&quot;)]
+    (if (lex-ok? r) (lex-ok-val r) &quot;error&quot;))</pre>
+  </div>
+  <p class="def-since">Since: SC4</p>
+</div>
+<div class="def-card" id="compile-file">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>compile-file</h2>
+  </div>
+  <pre class="def-signature">(compile-file [path :cstr])</pre>
+  <p class="def-summary">read a file and compile its scscm content to sclang.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>path</td><td></td><td>NUL-terminated filesystem path to a .tur or .scscm file</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">lex-ok(sclang-text :cstr) on success.
+  lex-err(message-int :int) on I/O or compile error.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [r (compile-file &quot;my-synth.scscm&quot;)]
+    (if (lex-ok? r) (lex-ok-val r) &quot;error&quot;))</pre>
+  </div>
+  <p class="def-since">Since: SC4</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="scscm-read-file"><code>scscm-read-file</code></div>
+  <div class="internal-item" id="scscm-int-as-cstr"><code>scscm-int-as-cstr</code></div>
+  </div>
+</details>
 </div>
 </div>
 <footer class="site-footer">

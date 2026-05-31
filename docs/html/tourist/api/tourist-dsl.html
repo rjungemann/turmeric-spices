@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/tourist/dsl | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#route-new">route-new</a></li>
+    <li><a href="#route-method">route-method</a></li>
+    <li><a href="#route-pattern">route-pattern</a></li>
+    <li><a href="#route-handler">route-handler</a></li>
+    <li><a href="#route-call-handler">route-call-handler</a></li>
+    <li><a href="#route-free">route-free</a></li>
+    <li><a href="#get_">get!</a></li>
+    <li><a href="#post_">post!</a></li>
+    <li><a href="#put_">put!</a></li>
+    <li><a href="#delete_">delete!</a></li>
+    <li><a href="#any_">any!</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__route-alloc" style="color:var(--faint)">__route-alloc</a></li>
+    <li><a href="#__route-free-struct" style="color:var(--faint)">__route-free-struct</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>tourist/dsl</h1>
+    <div class="module-path">src/tourist/dsl.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">Route type and HTTP method constructors.</p>
+    <p class="def-since">Since: v0.1.0</p>
+  </div>
+<div class="def-card" id="route-new">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>route-new</h2>
+  </div>
+  <pre class="def-signature">(route-new [method :cstr pat :int handler :int] :int)</pre>
+  <p class="def-summary">construct a Route from a compiled pattern handle.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>method</td><td></td><td>HTTP method string: &quot;GET&quot;, &quot;POST&quot;, &quot;PUT&quot;, &quot;DELETE&quot;, or &quot;&quot;</td></tr>
+    <tr><td></td><td></td><td>for any-method matching</td></tr>
+    <tr><td>pat</td><td></td><td>compiled pattern handle from router-compile</td></tr>
+    <tr><td>handler</td><td></td><td>Turmeric function value (fn [req :int] :int)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Route handle; free with route-free (which also frees pat)</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(route-new &quot;GET&quot; (router-compile &quot;/hello&quot;) my-handler)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="route-method">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>route-method</h2>
+  </div>
+  <pre class="def-signature">(route-method [r :int] :cstr)</pre>
+  <p class="def-summary">HTTP method string of a Route (&quot;&quot; means any).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int Route handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:cstr -- e.g. &quot;GET&quot;, &quot;POST&quot;, or &quot;&quot; for any</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="route-pattern">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>route-pattern</h2>
+  </div>
+  <pre class="def-signature">(route-pattern [r :int] :int)</pre>
+  <p class="def-summary">compiled pattern handle of a Route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int Route handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- compiled pattern handle (from router-compile)</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="route-handler">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>route-handler</h2>
+  </div>
+  <pre class="def-signature">(route-handler [r :int] :int)</pre>
+  <p class="def-summary">raw handler function value of a Route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int Route handle</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Turmeric function value; call via route-call-handler</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="route-call-handler">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>route-call-handler</h2>
+  </div>
+  <pre class="def-signature">(route-call-handler [r :int req :int] :int)</pre>
+  <p class="def-summary">invoke a Route&#x27;s handler with a request.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int Route handle</td></tr>
+    <tr><td>req</td><td></td><td>:int Request handle (from httpd/request or tourist ctx)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Response handle returned by the handler</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(route-call-handler route req)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="route-free">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>route-free</h2>
+  </div>
+  <pre class="def-signature">(route-free [r :int] :void)</pre>
+  <p class="def-summary">release a Route handle and its compiled pattern.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>:int Route handle, or 0 (no-op)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:void</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(route-free r)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="get_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>get!</h2>
+  </div>
+  <pre class="def-signature">(get! [pattern :cstr handler :int] :int)</pre>
+  <p class="def-summary">declare a GET route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>pattern</td><td></td><td>route pattern string, e.g. &quot;/hello/:name&quot;</td></tr>
+    <tr><td>handler</td><td></td><td>(fn [req :int] :int) request handler</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Route handle; consumed by tourist</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(get! &quot;/hello/:name&quot;
+    (fn [req] (text &quot;hi&quot;)))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="post_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>post!</h2>
+  </div>
+  <pre class="def-signature">(post! [pattern :cstr handler :int] :int)</pre>
+  <p class="def-summary">declare a POST route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>pattern</td><td></td><td>route pattern string</td></tr>
+    <tr><td>handler</td><td></td><td>(fn [req :int] :int) request handler</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Route handle</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="put_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>put!</h2>
+  </div>
+  <pre class="def-signature">(put! [pattern :cstr handler :int] :int)</pre>
+  <p class="def-summary">declare a PUT route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>pattern</td><td></td><td>route pattern string</td></tr>
+    <tr><td>handler</td><td></td><td>(fn [req :int] :int) request handler</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Route handle</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="delete_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>delete!</h2>
+  </div>
+  <pre class="def-signature">(delete! [pattern :cstr handler :int] :int)</pre>
+  <p class="def-summary">declare a DELETE route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>pattern</td><td></td><td>route pattern string</td></tr>
+    <tr><td>handler</td><td></td><td>(fn [req :int] :int) request handler</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Route handle</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="any_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>any!</h2>
+  </div>
+  <pre class="def-signature">(any! [pattern :cstr handler :int] :int)</pre>
+  <p class="def-summary">declare a route matching any HTTP method.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>pattern</td><td></td><td>route pattern string</td></tr>
+    <tr><td>handler</td><td></td><td>(fn [req :int] :int) request handler</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Route handle</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(any! &quot;/catch-all&quot; (fn [req] (text &quot;ok&quot;)))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__route-alloc"><code>__route-alloc</code></div>
+  <div class="internal-item" id="__route-free-struct"><code>__route-free-struct</code></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

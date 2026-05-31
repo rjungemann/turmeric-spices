@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/tourist/static | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#serve-static_">serve-static!</a></li>
+    <li><a href="#static-item_">static-item?</a></li>
+    <li><a href="#static-route-fs-root">static-route-fs-root</a></li>
+    <li><a href="#static-serve">static-serve</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__static-pat-join" style="color:var(--faint)">__static-pat-join</a></li>
+    <li><a href="#__static-route-alloc" style="color:var(--faint)">__static-route-alloc</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>tourist/static</h1>
+    <div class="module-path">src/tourist/static.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">static file serving with path-traversal guard.</p>
+    <p class="def-since">Since: v0.1.0</p>
+  </div>
+<div class="def-card" id="serve-static_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>serve-static!</h2>
+  </div>
+  <pre class="def-signature">(serve-static! [url-prefix :cstr fs-root :cstr] :int)</pre>
+  <p class="def-summary">declare a static-file serving route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>url-prefix</td><td></td><td>URL path prefix to strip, e.g. &quot;/assets&quot;</td></tr>
+    <tr><td>fs-root</td><td></td><td>filesystem directory to serve from, e.g. &quot;./public&quot;</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- static Route handle; consumed by tourist</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(serve-static! &quot;/assets&quot; &quot;./public&quot;)</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="static-item_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>static-item?</h2>
+  </div>
+  <pre class="def-signature">(static-item? [item :int] :bool)</pre>
+  <p class="def-summary">true if an item handle is a static-file route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>item</td><td></td><td>:int item handle from serve-static! or any other DSL constructor</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:bool</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="static-route-fs-root">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>static-route-fs-root</h2>
+  </div>
+  <pre class="def-signature">(static-route-fs-root [route :int] :cstr)</pre>
+  <p class="def-summary">filesystem root directory of a static route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>route</td><td></td><td>:int static route handle from serve-static!</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:cstr -- absolute or relative path to the served directory</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="static-serve">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>static-serve</h2>
+  </div>
+  <pre class="def-signature">(static-serve [fs-root :cstr rel-raw :int] :int)</pre>
+  <p class="def-summary">serve a file from fs-root; returns 0 on any miss.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fs-root</td><td></td><td>:cstr filesystem root directory</td></tr>
+    <tr><td>rel-raw</td><td></td><td>:int  relative path as char* cast to int64_t (from wildcard</td></tr>
+    <tr><td></td><td></td><td>capture); 0 is treated as a miss</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- Response handle (200 + body) on success, 0 on miss</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__static-pat-join"><code>__static-pat-join</code><span class="internal-item-summary">-- build &quot;&lt;prefix&gt;/*&quot; by concatenating two cstrs.</span></div>
+  <div class="internal-item" id="__static-route-alloc"><code>__static-route-alloc</code><span class="internal-item-summary">-- allocate a __tourist_static_route struct.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

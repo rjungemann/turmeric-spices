@@ -221,8 +221,6 @@ is the recommended pattern.
 
 ## See also
 
-- `README.md` in `spices/watch/` -- module map and module-level docs
-- `docs/notebook-watch-semantics.md` -- the contract tur-watch v0.1.0
+- [tur-watch front page](https://spices.turmeric-lang.com/watch/) -- module map and module-level docs
+- [docs/notebook-watch-semantics.md](https://github.com/rjungemann/turmeric-spices/blob/main/docs/notebook-watch-semantics.md) -- the contract tur-watch v0.1.0
   preserves from the original notebook watcher
-- `docs/tur-watch-spice-plan.md` (in the upstream `turmeric` repo) --
-  the design plan this spice implements

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tur-watch API | API Docs</title>
+<title>tur/tourist/middleware | Turmeric API</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -109,38 +109,125 @@
 <div class="page-layout">
 <div class="sidebar">
   <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#use_">use!</a></li>
+    <li><a href="#mw-item_">mw-item?</a></li>
+    <li><a href="#mw-call">mw-call</a></li>
+    <li><a href="#mw-chain-run">mw-chain-run</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__mw-cons-head" style="color:var(--faint)">__mw-cons-head</a></li>
+    <li><a href="#__mw-cons-tail" style="color:var(--faint)">__mw-cons-tail</a></li>
+  </ul>
 </div>
 <div class="content">
-  <h1 style="color:var(--gold);font-size:2rem;margin-bottom:0.5rem">tur-watch API</h1>
-  <p style="color:var(--faint);margin-bottom:1.5rem">Auto-generated API reference. Run <code>just docs</code> to regenerate.</p>
-  <h2 style="color:var(--gold);font-size:1.25rem;margin:2rem 0 0.75rem;padding-bottom:0.4rem;border-bottom:1px solid var(--border)">watch</h2>
-  <div class="index-grid">
-  <a href="watch-backend.html" class="index-card" style="display:block">
-    <h3>watch/backend</h3>
-    <p>platform-specific OS watcher bridge (internal).</p>
-    <div class="export-count">15 exported definitions</div>
-  </a>
-  <a href="watch-debounce.html" class="index-card" style="display:block">
-    <h3>watch/debounce</h3>
-    <p>burst-collapse + coalesce helpers for batched events.</p>
-    <div class="export-count">6 exported definitions</div>
-  </a>
-  <a href="watch-event.html" class="index-card" style="display:block">
-    <h3>watch/event</h3>
-    <p>normalized filesystem-watch event record.</p>
-    <div class="export-count">16 exported definitions</div>
-  </a>
-  <a href="watch-opts.html" class="index-card" style="display:block">
-    <h3>watch/opts</h3>
-    <p>watcher configuration options.</p>
-    <div class="export-count">14 exported definitions</div>
-  </a>
-  <a href="watch-watch.html" class="index-card" style="display:block">
-    <h3>watch/watch</h3>
-    <p>public watcher API.</p>
-    <div class="export-count">12 exported definitions</div>
-  </a>
+  <div class="module-heading">
+    <h1>tourist/middleware</h1>
+    <div class="module-path">src/tourist/middleware.tur</div>
   </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">Middleware type and middleware chain runner.</p>
+    <p class="def-since">Since: v0.1.0</p>
+  </div>
+<div class="def-card" id="use_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>use!</h2>
+  </div>
+  <pre class="def-signature">(use! [fn :int] :int)</pre>
+  <p class="def-summary">register a middleware function.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>fn</td><td></td><td>(fn [req :int] :int) returning option&lt;Response&gt;:</td></tr>
+    <tr><td></td><td></td><td>(none) to continue, (some resp) to short-circuit</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- middleware handle; consumed by tourist</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(use! (fn [req]
+          (println (req-path req))
+          (none)))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mw-item_">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mw-item?</h2>
+  </div>
+  <pre class="def-signature">(mw-item? [item :int] :bool)</pre>
+  <p class="def-summary">true if an item handle is a middleware, not a route.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>item</td><td></td><td>:int item handle (from use!, get!, post!, etc.)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:bool</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mw-call">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mw-call</h2>
+  </div>
+  <pre class="def-signature">(mw-call [mw :int req :int] :int)</pre>
+  <p class="def-summary">invoke a middleware on a request.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>mw</td><td></td><td>:int middleware handle from use!</td></tr>
+    <tr><td>req</td><td></td><td>:int tourist ctx (request handle)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- option&lt;Response&gt;: 0 = none (continue), non-zero = some(resp)</p>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<div class="def-card" id="mw-chain-run">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>mw-chain-run</h2>
+  </div>
+  <pre class="def-signature">(mw-chain-run [mws :int req :int] :int)</pre>
+  <p class="def-summary">run a cons list of middleware handles in order.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>mws</td><td></td><td>:int cons list of middleware handles (0 = empty)</td></tr>
+    <tr><td>req</td><td></td><td>:int tourist ctx (request handle)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:int -- option&lt;Response&gt;: non-zero some(resp) or 0 for none</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(let [opt (mw-chain-run mw-list req)]
+    (when (not= opt 0) ...))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__mw-cons-head"><code>__mw-cons-head</code><span class="internal-item-summary">-- head of a Turmeric cons list cell.</span></div>
+  <div class="internal-item" id="__mw-cons-tail"><code>__mw-cons-tail</code><span class="internal-item-summary">-- tail of a Turmeric cons list cell.</span></div>
+  </div>
+</details>
 </div>
 </div>
 <footer class="site-footer">

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/tourist/app | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#tourist">tourist</a></li>
+  </ul>
+  <h3>Internal</h3>
+  <ul>
+    <li><a href="#__tourist-cons" style="color:var(--faint)">__tourist-cons</a></li>
+    <li><a href="#__tourist-cons-head" style="color:var(--faint)">__tourist-cons-head</a></li>
+    <li><a href="#__tourist-cons-tail" style="color:var(--faint)">__tourist-cons-tail</a></li>
+    <li><a href="#__tourist-list-rev" style="color:var(--faint)">__tourist-list-rev</a></li>
+    <li><a href="#tourist-state-ptr" style="color:var(--faint)">tourist-state-ptr</a></li>
+    <li><a href="#__tourist-state-set" style="color:var(--faint)">__tourist-state-set</a></li>
+    <li><a href="#__tourist-state-mws" style="color:var(--faint)">__tourist-state-mws</a></li>
+    <li><a href="#__tourist-state-routes" style="color:var(--faint)">__tourist-state-routes</a></li>
+    <li><a href="#__tourist-collect-mws" style="color:var(--faint)">__tourist-collect-mws</a></li>
+    <li><a href="#__tourist-collect-routes" style="color:var(--faint)">__tourist-collect-routes</a></li>
+    <li><a href="#__tourist-caps-wildcard" style="color:var(--faint)">__tourist-caps-wildcard</a></li>
+    <li><a href="#__tourist-method-match?" style="color:var(--faint)">__tourist-method-match?</a></li>
+    <li><a href="#__tourist-opt-extract" style="color:var(--faint)">__tourist-opt-extract</a></li>
+    <li><a href="#__tourist-route-dispatch" style="color:var(--faint)">__tourist-route-dispatch</a></li>
+    <li><a href="#__tourist-handler" style="color:var(--faint)">__tourist-handler</a></li>
+    <li><a href="#__tourist-handler-ptr" style="color:var(--faint)">__tourist-handler-ptr</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>tourist/app</h1>
+    <div class="module-path">src/tourist/app.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">tourist entry point and server lifecycle.</p>
+    <p class="def-since">Since: v0.1.0</p>
+  </div>
+<div class="def-card" id="tourist">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>tourist</h2>
+  </div>
+  <pre class="def-signature">(tourist [port :int items :int] :ptr&lt;void&gt;)</pre>
+  <p class="def-summary">start an HTTP server on port with the given routes and middleware.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>port</td><td></td><td>TCP port to bind on (IPv4, INADDR_ANY)</td></tr>
+    <tr><td>items</td><td></td><td>mix of Route and Middleware handles from the DSL constructors</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">:ptr&lt;void&gt; -- server handle; pass to server-stop when done,
+                or NULL on bind/pool failure</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(import httpd/server :refer [server-stop])
+  (let [srv (tourist 3000
+              (use! logger)
+              (get! &quot;/hello/:name&quot;
+                (fn [req]
+                  (text (ok-val (capture req &quot;name&quot;))))))]
+    (server-stop srv))</pre>
+  </div>
+  <p class="def-since">Since: v0.1.0</p>
+</div>
+<details class="internal-section">
+  <summary>Internal definitions</summary>
+  <div class="internal-list">
+  <div class="internal-item" id="__tourist-cons"><code>__tourist-cons</code><span class="internal-item-summary">-- allocate a cons cell with the given head and tail.</span></div>
+  <div class="internal-item" id="__tourist-cons-head"><code>__tourist-cons-head</code><span class="internal-item-summary">-- head element of a cons cell.</span></div>
+  <div class="internal-item" id="__tourist-cons-tail"><code>__tourist-cons-tail</code><span class="internal-item-summary">-- tail pointer of a cons cell.</span></div>
+  <div class="internal-item" id="__tourist-list-rev"><code>__tourist-list-rev</code><span class="internal-item-summary">-- reverse a cons list using an accumulator.</span></div>
+  <div class="internal-item" id="tourist-state-ptr"><code>tourist-state-ptr</code><span class="internal-item-summary">-- return a pointer to the persistent dispatch state.</span></div>
+  <div class="internal-item" id="__tourist-state-set"><code>__tourist-state-set</code><span class="internal-item-summary">-- write mws and routes into the dispatch state.</span></div>
+  <div class="internal-item" id="__tourist-state-mws"><code>__tourist-state-mws</code><span class="internal-item-summary">-- read the mws cons list from the dispatch state.</span></div>
+  <div class="internal-item" id="__tourist-state-routes"><code>__tourist-state-routes</code><span class="internal-item-summary">-- read the routes cons list from the dispatch state.</span></div>
+  <div class="internal-item" id="__tourist-collect-mws"><code>__tourist-collect-mws</code><span class="internal-item-summary">-- accumulate middleware handles from items (reversed).</span></div>
+  <div class="internal-item" id="__tourist-collect-routes"><code>__tourist-collect-routes</code><span class="internal-item-summary">-- accumulate route handles from items (reversed).</span></div>
+  <div class="internal-item" id="__tourist-caps-wildcard"><code>__tourist-caps-wildcard</code><span class="internal-item-summary">-- extract the &quot;*&quot; wildcard value from captures.</span></div>
+  <div class="internal-item" id="__tourist-method-match_"><code>__tourist-method-match?</code><span class="internal-item-summary">-- true if rmethod matches the request method.</span></div>
+  <div class="internal-item" id="__tourist-opt-extract"><code>__tourist-opt-extract</code><span class="internal-item-summary">-- unwrap a some(Response) option and free the option.</span></div>
+  <div class="internal-item" id="__tourist-route-dispatch"><code>__tourist-route-dispatch</code><span class="internal-item-summary">-- find the first matching route and dispatch.</span></div>
+  <div class="internal-item" id="__tourist-handler"><code>__tourist-handler</code><span class="internal-item-summary">-- top-level request handler passed to server-start.</span></div>
+  <div class="internal-item" id="__tourist-handler-ptr"><code>__tourist-handler-ptr</code><span class="internal-item-summary">-- return __tourist-handler as a :ptr&lt;void&gt;.</span></div>
+  </div>
+</details>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

@@ -81,10 +81,10 @@
 <li style=""><a href="#modules" style="">Modules</a></li>
 <li style=""><a href="#quick-start" style="">Quick start</a></li>
 <li style=""><a href="#event-kinds" style="">Event kinds</a></li>
-<li style=""><a href="#architecture-v010" style="">Architecture (v0.1.0)</a></li>
-<li style=""><a href="#what-v010-ships-vs-what-it-does-not" style="">What v0.1.0 ships, vs. what it does not</a></li>
+<li style=""><a href="#capability-matrix" style="">Capability matrix</a></li>
+<li style="padding-left:0.75rem;"><a href="#v020-semantics-change-for-tree-mode-callers" style="color:var(--text-sec);">v0.2.0 semantics change for tree-mode callers</a></li>
+<li style=""><a href="#architecture-v020" style="">Architecture (v0.2.0)</a></li>
 <li style=""><a href="#examples" style="">Examples</a></li>
-<li style=""><a href="#guide" style="">Guide</a></li>
 <li style=""><a href="#testing" style="">Testing</a></li></ul>
     </div>
     <div class="content guide-content">
@@ -93,13 +93,10 @@
 with debounce and coalescing helpers. Designed for CLI tools that need a
 "file changed, react" loop without each tool re-inventing a watch loop.</p>
 <blockquote>
-<p><strong>Status:</strong> v0.1.0 -- core spice (WT1-WT5 from the spice plan).
-Recursive directory watch (WT6), notebook cutover (WT7), and the
-<code>tur repl --watch</code> adopter (WT9) are tracked separately and not
-shipped here.</p>
+<p><strong>Status:</strong> v0.2.0 -- per-file naming in tree mode (WTNF1-WTNF6).
+<code>watch-open-tree</code> events now carry the file path, not just the directory.
+Darwin recovers names via directory-snapshot diff; Linux uses inotify names.</p>
 </blockquote>
-<p>See <code>docs/notebook-watch-semantics.md</code> for the contract this spice must
-preserve when notebook is cut over to depend on it.</p>
 <h2 id="modules">Modules</h2>
 <table>
 <thead>
@@ -119,7 +116,7 @@ preserve when notebook is cut over to depend on it.</p>
 </tr>
 <tr>
 <td><code>watch/watch</code></td>
-<td><code>watch-open-one</code>, <code>watch-close</code>, <code>watch-next</code>, <code>watch-drain</code></td>
+<td><code>watch-open-one</code>, <code>watch-open-tree</code>, <code>watch-close</code>, <code>watch-next</code>, <code>watch-drain</code></td>
 </tr>
 <tr>
 <td><code>watch/debounce</code></td>
@@ -130,7 +127,7 @@ preserve when notebook is cut over to depend on it.</p>
 <p><code>watch/backend</code> is internal (the inotify+kqueue inline-C bridge) and is
 not exported. Public callers should never import it.</p>
 <h2 id="quick-start">Quick start</h2>
-<pre><code class="language-turmeric">(import watch/event :refer [watch-event-kind watch-event-free
+<pre><code class="language-turmeric">(import watch/event :refer [watch-event-kind watch-event-path watch-event-free
                              watch-kind-write watch-kind-rename])
 (import watch/opts  :refer [default-watch-opts])
 (import watch/watch :refer [watch-open-one watch-close watch-next])
@@ -149,6 +146,29 @@ not exported. Public callers should never import it.</p>
               (recur)))))
       (watch-close w))))
 </code></pre>
+<p>For recursive directory watching use <code>watch-open-tree</code>:</p>
+<pre><code class="language-turmeric">(import watch/opts  :refer [watch-opts-make watch-opts-free])
+(import watch/watch :refer [watch-open-tree watch-close watch-next])
+(import watch/event :refer [watch-event-path watch-event-kind
+                             watch-kind-&gt;cstr watch-event-free])
+
+(defn main [] :int
+  (let [opts (watch-opts-make 1 150 1 0 1)   ; recursive, 150 ms debounce
+        w    (watch-open-tree &quot;src/&quot; opts)]
+    (do
+      (watch-opts-free opts)
+      (loop []
+        (let [ev (watch-next w -1)]
+          (if (= ev 0)
+            0
+            (do
+              ;; watch-event-path is now the FILE path, e.g. &quot;src/foo/bar.tur&quot;
+              (println (watch-kind-&gt;cstr (watch-event-kind ev)))
+              (println (watch-event-path ev))
+              (watch-event-free ev)
+              (recur)))))
+      (watch-close w))))
+</code></pre>
 <h2 id="event-kinds">Event kinds</h2>
 <table>
 <thead>
@@ -162,17 +182,17 @@ not exported. Public callers should never import it.</p>
 <tr>
 <td><code>watch-kind-write</code></td>
 <td>1</td>
-<td>file contents changed (Linux only; see notes)</td>
+<td>file contents changed</td>
 </tr>
 <tr>
 <td><code>watch-kind-create</code></td>
 <td>2</td>
-<td>target appeared</td>
+<td>file appeared</td>
 </tr>
 <tr>
 <td><code>watch-kind-delete</code></td>
 <td>3</td>
-<td>target disappeared</td>
+<td>file disappeared</td>
 </tr>
 <tr>
 <td><code>watch-kind-rename</code></td>
@@ -191,11 +211,103 @@ not exported. Public callers should never import it.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="architecture-v010">Architecture (v0.1.0)</h2>
-<pre><code>  client (notebook / repl / future build-watch)
+<h2 id="capability-matrix">Capability matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>v0.1.0</th>
+<th>v0.2.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single-file watch</td>
+<td>yes</td>
+<td>yes (unchanged)</td>
+</tr>
+<tr>
+<td>Atomic-save (write temp + rename) on Linux + Darwin</td>
+<td>yes</td>
+<td>yes (unchanged)</td>
+</tr>
+<tr>
+<td>In-place writes on Linux</td>
+<td>yes</td>
+<td>yes (unchanged)</td>
+</tr>
+<tr>
+<td>In-place writes on Darwin</td>
+<td>kind=rename via inode diff</td>
+<td>kind=write via size diff</td>
+</tr>
+<tr>
+<td>Recursive directory watch (<code>watch-open-tree</code>)</td>
+<td>yes (dir-level only)</td>
+<td>yes, <strong>per-file naming</strong></td>
+</tr>
+<tr>
+<td>Per-file path in tree-mode events</td>
+<td><strong>no</strong> (dir path only)</td>
+<td><strong>yes</strong> (both Linux + Darwin)</td>
+</tr>
+<tr>
+<td>Per-file kind classification in tree mode</td>
+<td><strong>no</strong> (always <code>write</code>)</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>Darwin: per-file names via snapshot diff</td>
+<td><strong>no</strong></td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>Linux: per-file names via inotify name field</td>
+<td><strong>no</strong></td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>Pending-event queue (multi-event drains)</td>
+<td><strong>no</strong></td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td><code>debounce-batch-coalesce</code> deduplication in tree mode</td>
+<td>no (all same path)</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td><code>watch-add-path</code> / <code>watch-remove-path</code></td>
+<td>stubs return -1</td>
+<td>stubs return -1</td>
+</tr>
+<tr>
+<td>Callback / async API</td>
+<td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td>macOS FSEvents backend</td>
+<td>no</td>
+<td>no (planned v0.3)</td>
+</tr>
+<tr>
+<td>Windows backend</td>
+<td>no</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<h3 id="v020-semantics-change-for-tree-mode-callers">v0.2.0 semantics change for tree-mode callers</h3>
+<p><code>watch-event-path</code> in tree mode previously returned the directory that fired.
+It now returns the relative file path (e.g. <code>"src/foo/bar.tur"</code> instead of
+<code>"src/foo"</code>). Callers that only need "something changed, trigger full rebuild"
+can ignore the path -- the event still arrives, the path is just more precise.</p>
+<h2 id="architecture-v020">Architecture (v0.2.0)</h2>
+<pre><code>  client (tail-events / build-watch / notebook)
                 |
                 v
-          watch/watch              &lt;-- stat-compare + classify + emit
+          watch/watch              &lt;-- pending queue + produce-events dispatch
                 |
         +-------+--------+
         |                |
@@ -203,95 +315,16 @@ not exported. Public callers should never import it.</p>
    watch/debounce    watch/event
         |
         v
-   watch/backend                   &lt;-- platform inline-C, internal
-        |
+   watch/backend                   &lt;-- platform inline-C + evbuf (WTNF1)
+        |                           -- backend-drain-into fills TurBackendEvent
         v
   inotify  or  kqueue
+        |
+        v
+  watch/watch: __watcher-tree-produce-events
+     Linux:  iterate evbuf, classify inotify mask
+     Darwin: snapshot diff (TurDirSnapshot per dir, taken at open + each drain)
 </code></pre>
-<p>The plan in the upstream Turmeric repo
-(<code>docs/tur-watch-spice-plan.md</code>) describes the backend as two files
-(<code>backend_linux.tur</code>, <code>backend_darwin.tur</code>). v0.1.0 ships them as a
-single <code>watch/backend.tur</code> whose inline-C is <code>#ifdef</code>-guarded -- the
-notebook code we extracted is already structured this way, and a
-per-platform Turmeric-level split would just be two stubs of each other
-on the wrong OS. Same outward contract.</p>
-<h2 id="what-v010-ships-vs-what-it-does-not">What v0.1.0 ships, vs. what it does not</h2>
-<table>
-<thead>
-<tr>
-<th>Capability</th>
-<th>v0.1.0</th>
-<th>Deferred to</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Single-file watch</td>
-<td>yes</td>
-<td>--</td>
-</tr>
-<tr>
-<td>Atomic-save (write temp + rename) on Linux + Darwin</td>
-<td>yes</td>
-<td>--</td>
-</tr>
-<tr>
-<td>In-place writes on Linux</td>
-<td>yes</td>
-<td>--</td>
-</tr>
-<tr>
-<td>In-place writes on Darwin</td>
-<td><strong>no</strong> (see semantics doc)</td>
-<td>v0.2</td>
-</tr>
-<tr>
-<td>Bounded / forever / poll <code>watch-next</code> timeout</td>
-<td>yes</td>
-<td>--</td>
-</tr>
-<tr>
-<td>Burst-collapse via debounce window</td>
-<td>yes</td>
-<td>--</td>
-</tr>
-<tr>
-<td>Backend queue overflow surfaced explicitly</td>
-<td>yes</td>
-<td>--</td>
-</tr>
-<tr>
-<td>Multi-path <code>watch-open</code></td>
-<td>no (single path only)</td>
-<td>WT6</td>
-</tr>
-<tr>
-<td>Recursive directory watch</td>
-<td>no</td>
-<td>WT6</td>
-</tr>
-<tr>
-<td><code>watch-add-path</code> / <code>watch-remove-path</code></td>
-<td>stubs return -1</td>
-<td>WT6</td>
-</tr>
-<tr>
-<td>Callback / async API</td>
-<td>no</td>
-<td>v0.2</td>
-</tr>
-<tr>
-<td>macOS FSEvents backend</td>
-<td>no</td>
-<td>v0.2</td>
-</tr>
-<tr>
-<td>Windows backend</td>
-<td>no</td>
-<td>future</td>
-</tr>
-</tbody>
-</table>
 <h2 id="examples">Examples</h2>
 <table>
 <thead>
@@ -316,18 +349,16 @@ on the wrong OS. Same outward contract.</p>
 </tbody>
 </table>
 <p>Run any of them with <code>tur run examples/&lt;name&gt;.tur -- &lt;path&gt;</code>.</p>
-<h2 id="guide">Guide</h2>
-<p><a href="../../docs/guides/watch-guide.md"><code>docs/guides/watch-guide.md</code></a> walks
-through single-file watch, recursive watch, debounce, the kind constants,
-and the adopter contract.</p>
 <h2 id="testing">Testing</h2>
 <pre><code class="language-sh">tur run tests/event_test.tur
 tur run tests/opts_test.tur
 tur run tests/backend_smoke_test.tur
+tur run tests/backend_drain_into_test.tur   # WTNF1 -- evbuf + names
 tur run tests/debounce_test.tur
-tur run tests/watch_test.tur          # spawns background pthreads
-tur run tests/drain_burst_test.tur    # WT5 acceptance
-tur run tests/tree_test.tur           # WT6 acceptance
+tur run tests/watch_test.tur                # spawns background pthreads
+tur run tests/drain_burst_test.tur          # single-file burst collapse
+tur run tests/tree_test.tur                 # WT6 + WTNF2/3 per-file naming
+tur run tests/tree_burst_test.tur           # WTNF4 multi-file coalesce
 </code></pre>
     </div>
   </div>

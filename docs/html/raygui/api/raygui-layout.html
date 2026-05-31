@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tur/raygui/layout | Turmeric API</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/400.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5/500.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <button class="hamburger" aria-label="Toggle navigation">
+    <span></span><span></span><span></span>
+  </button>
+  <a class="nav-logo" href="https://turmeric-lang.com">
+    <img src="/logo-icon.svg" width="28" height="28" alt="">
+    <img src="/logo.svg" width="101" height="28" alt="Turmeric">
+  </a>
+  <nav>
+    <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+    <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+    <a href="index.html" class="active">Spice API</a>
+    <a href="https://turmeric-lang.com/try">Try It</a>
+  </nav>
+  <div class="search-wrap">
+    <input class="search-input" type="search" placeholder="Filter... (/)" aria-label="Filter definitions">
+  </div>
+</header>
+<p class="search-no-results">No matching definitions.</p>
+<div class="sidebar-overlay"></div>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.querySelector('.hamburger');
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.querySelector('.sidebar-overlay');
+    if (!btn || !sidebar) return;
+    function open() { sidebar.classList.add('is-open'); overlay && overlay.classList.add('is-open'); }
+    function close() { sidebar.classList.remove('is-open'); overlay && overlay.classList.remove('is-open'); }
+    btn.addEventListener('click', function(){ sidebar.classList.contains('is-open') ? close() : open(); });
+    overlay && overlay.addEventListener('click', close);
+  });
+
+  // Search filtering
+  document.addEventListener('DOMContentLoaded', function(){
+    var input = document.querySelector('.search-input');
+    if (!input) return;
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+
+      // Module pages: filter .def-card elements
+      var defCards = document.querySelectorAll('.def-card');
+      var visibleDefs = 0;
+      defCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleDefs++;
+      });
+
+      // Sync sidebar links with card visibility
+      document.querySelectorAll('.sidebar a[href^="#"]').forEach(function(link) {
+        var anchor = link.getAttribute('href').slice(1);
+        var target = document.getElementById(anchor);
+        link.parentElement.style.display =
+          (!target || target.style.display !== 'none') ? '' : 'none';
+      });
+
+      // Index pages: filter .index-card elements
+      var indexCards = document.querySelectorAll('.index-card');
+      var visibleIndex = 0;
+      indexCards.forEach(function(card) {
+        var match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleIndex++;
+      });
+
+      // Show/hide "no results" message
+      var noResults = document.querySelector('.search-no-results');
+      if (noResults) {
+        var total = defCards.length + indexCards.length;
+        var visible = visibleDefs + visibleIndex;
+        noResults.style.display = (q && total > 0 && visible === 0) ? 'block' : 'none';
+      }
+    }
+
+    input.addEventListener('input', filter);
+
+    // Clear on Escape
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { input.value = ''; filter(); input.blur(); }
+    });
+
+    // Focus search with '/' shortcut (when not typing elsewhere)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          document.activeElement.tagName !== 'INPUT' &&
+          document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+  });
+</script>
+<div class="page-layout">
+<div class="sidebar">
+  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>
+  <h3>Exported</h3>
+  <ul>
+    <li><a href="#gui-window-box">gui-window-box</a></li>
+    <li><a href="#gui-group-box">gui-group-box</a></li>
+    <li><a href="#gui-line">gui-line</a></li>
+    <li><a href="#gui-panel">gui-panel</a></li>
+    <li><a href="#gui-tab-bar">gui-tab-bar</a></li>
+    <li><a href="#gui-scroll-panel">gui-scroll-panel</a></li>
+    <li><a href="#gui-dummy-rec">gui-dummy-rec</a></li>
+    <li><a href="#gui-status-bar">gui-status-bar</a></li>
+  </ul>
+</div>
+<div class="content">
+  <div class="module-heading">
+    <h1>raygui/layout</h1>
+    <div class="module-path">src/raygui/layout.tur</div>
+  </div>
+  <div class="module-doc">
+    <p class="module-doc-summary">container controls for grouping and scrolling GUI elements.</p>
+    <p class="def-since">Since: Phase 2</p>
+  </div>
+<div class="def-card" id="gui-window-box">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-window-box</h2>
+  </div>
+  <pre class="def-signature">(gui-window-box [r :Rect title :cstr] :int)</pre>
+  <p class="def-summary">draw a titled window frame with a close button.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect</td></tr>
+    <tr><td>title</td><td></td><td>window title string</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">1 if the close button was clicked this frame, 0 otherwise.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(when (gui-window-box (rect 50.0 50.0 300.0 250.0) &quot;Settings&quot;)
+    (set! show-settings 0))</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="gui-group-box">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-group-box</h2>
+  </div>
+  <pre class="def-signature">(gui-group-box [r :Rect text :cstr] :void)</pre>
+  <p class="def-summary">draw a labeled rectangle border around a group of controls.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect</td></tr>
+    <tr><td>text</td><td></td><td>group label shown in the top border</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(gui-group-box (rect 10.0 10.0 200.0 100.0) &quot;Physics&quot;)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="gui-line">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-line</h2>
+  </div>
+  <pre class="def-signature">(gui-line [r :Rect text :cstr] :void)</pre>
+  <p class="def-summary">draw a horizontal separator line, optionally labeled.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect (height determines the line y position)</td></tr>
+    <tr><td>text</td><td></td><td>optional label; pass &quot;&quot; for a plain line</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(gui-line (rect 10.0 50.0 200.0 16.0) &quot;&quot;)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="gui-panel">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-panel</h2>
+  </div>
+  <pre class="def-signature">(gui-panel [r :Rect text :cstr] :void)</pre>
+  <p class="def-summary">draw a filled panel background.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect</td></tr>
+    <tr><td>text</td><td></td><td>panel title (shown in header bar if non-empty)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(gui-panel (rect 10.0 10.0 300.0 200.0) &quot;Inspector&quot;)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="gui-tab-bar">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-tab-bar</h2>
+  </div>
+  <pre class="def-signature">(gui-tab-bar [r :Rect text :cstr count :int active :int] :int)</pre>
+  <p class="def-summary">draw a tab bar; returns the currently active tab index.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect for the entire tab bar</td></tr>
+    <tr><td>text</td><td></td><td>semicolon-separated tab labels (&quot;File;Edit;View&quot;)</td></tr>
+    <tr><td>count</td><td></td><td>number of tabs</td></tr>
+    <tr><td>active</td><td></td><td>index of the active tab</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">Index of the active tab after this frame.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(set! tab (gui-tab-bar (rect 10.0 10.0 400.0 30.0) &quot;File;Edit;View&quot; 3 tab))</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="gui-scroll-panel">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-scroll-panel</h2>
+  </div>
+  <pre class="def-signature">(gui-scroll-panel [r :Rect text :cstr content :Rect scroll :int] :int)</pre>
+  <p class="def-summary">draw a scroll panel; returns packed scroll vector as int.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect of the scroll container</td></tr>
+    <tr><td>text</td><td></td><td>optional panel title</td></tr>
+    <tr><td>content</td><td></td><td>Rect describing the total scrollable content size</td></tr>
+    <tr><td>scroll</td><td></td><td>current scroll position (packed int, 0 for initial)</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">New packed scroll vector after this frame.</p>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(set! scroll (gui-scroll-panel (rect 10.0 10.0 300.0 400.0)
+                                 &quot;Props&quot; content-rect scroll))</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="gui-dummy-rec">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-dummy-rec</h2>
+  </div>
+  <pre class="def-signature">(gui-dummy-rec [r :Rect text :cstr] :void)</pre>
+  <p class="def-summary">draw a placeholder rectangle (for layout prototyping).</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect</td></tr>
+    <tr><td>text</td><td></td><td>placeholder label</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(gui-dummy-rec (rect 10.0 10.0 200.0 60.0) &quot;TODO&quot;)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+<div class="def-card" id="gui-status-bar">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>gui-status-bar</h2>
+  </div>
+  <pre class="def-signature">(gui-status-bar [r :Rect text :cstr] :void)</pre>
+  <p class="def-summary">draw a status bar along the bottom of a window.</p>
+  <div class="def-section">
+    <div class="def-section-label">Parameters</div>
+    <table class="param-table">
+    <tr><td>r</td><td></td><td>bounding Rect (typically a thin full-width strip)</td></tr>
+    <tr><td>text</td><td></td><td>status message text</td></tr>
+    </table>
+  </div>
+  <div class="def-section">
+    <div class="def-section-label">Example</div>
+    <pre class="def-example">(gui-status-bar (rect 0.0 580.0 800.0 20.0) &quot;Ready&quot;)</pre>
+  </div>
+  <p class="def-since">Since: Phase 2</p>
+</div>
+</div>
+</div>
+<footer class="site-footer">
+  Auto-generated by <code>tools/gendocs.py</code>.
+  Do not edit by hand -- run <code>just docs</code> to regenerate.
+</footer>
+</body>
+</html>

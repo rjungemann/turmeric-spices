@@ -407,6 +407,6 @@ production numerical work, consider:
 
 ## See also
 
-- [API Reference](../../spices/linalg/) - Detailed function documentation
-- [tur-math](https://github.com/rjungemann/turmeric-spices/tree/main/spices/math) - Alternative vector/math library
-- [tur-stats](https://github.com/rjungemann/turmeric-spices/tree/main/spices/stats) - Statistics library that uses tur-linalg
+- [API Reference](https://spices.turmeric-lang.com/linalg/api/) - Detailed function documentation
+- [tur-math](https://spices.turmeric-lang.com/math/) - Alternative vector/math library
+- [tur-stats](https://spices.turmeric-lang.com/stats/) - Statistics library that uses tur-linalg

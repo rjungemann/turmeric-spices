@@ -115,7 +115,13 @@
     <li><a href="#backend-open">backend-open</a></li>
     <li><a href="#backend-close">backend-close</a></li>
     <li><a href="#backend-wait">backend-wait</a></li>
+    <li><a href="#backend-drain-into">backend-drain-into</a></li>
     <li><a href="#backend-drain">backend-drain</a></li>
+    <li><a href="#backend-event-count">backend-event-count</a></li>
+    <li><a href="#backend-event-name-at">backend-event-name-at</a></li>
+    <li><a href="#backend-event-mask-at">backend-event-mask-at</a></li>
+    <li><a href="#backend-event-cookie-at">backend-event-cookie-at</a></li>
+    <li><a href="#backend-event-is-dir-at">backend-event-is-dir-at</a></li>
     <li><a href="#backend-last-overflow_">backend-last-overflow?</a></li>
     <li><a href="#backend-dir">backend-dir</a></li>
     <li><a href="#backend-base">backend-base</a></li>
@@ -183,23 +189,69 @@
   -1 a fatal backend error occurred</p>
   </div>
 </div>
+<div class="def-card" id="backend-drain-into">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>backend-drain-into</h2>
+  </div>
+  <pre class="def-signature">(backend-drain-into [handle :int])</pre>
+  <p class="def-summary">drain all queued OS events into the handle&#x27;s evbuf.</p>
+  <div class="def-section">
+    <div class="def-section-label">Returns</div>
+    <p class="def-returns">N &gt;= 0  number of events stored in evbuf (ev_n)
+ -1       fatal read error
+
+Overflow is stored on the handle; query via backend-last-overflow?.
+Calling this function clears ev_n and overflow before draining.</p>
+  </div>
+</div>
 <div class="def-card" id="backend-drain">
   <div class="def-card-header">
     <span class="kind-badge kind-defn">defn</span>
     <h2>backend-drain</h2>
   </div>
   <pre class="def-signature">(backend-drain [handle :int])</pre>
-  <p class="def-summary">read all queued events from the backend.</p>
-  <div class="def-section">
-    <div class="def-section-label">Returns</div>
-    <p class="def-returns">1 if at least one event matched the registered basename (or the
-    basename is empty, meaning &quot;forward everything&quot;),
-  0 if events fired but none affected the target,
- -1 on a fatal read error.
-
-Backend-level overflow is recorded on the handle; query it with
-backend-last-overflow?.</p>
+  <p class="def-summary">drain events and return a boolean result.</p>
+</div>
+<div class="def-card" id="backend-event-count">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>backend-event-count</h2>
   </div>
+  <pre class="def-signature">(backend-event-count [handle :int])</pre>
+  <p class="def-summary">number of events stored in evbuf after a drain.</p>
+</div>
+<div class="def-card" id="backend-event-name-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>backend-event-name-at</h2>
+  </div>
+  <pre class="def-signature">(backend-event-name-at [handle :int idx :int])</pre>
+  <p class="def-summary">filename from the i-th buffered event.</p>
+</div>
+<div class="def-card" id="backend-event-mask-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>backend-event-mask-at</h2>
+  </div>
+  <pre class="def-signature">(backend-event-mask-at [handle :int idx :int])</pre>
+  <p class="def-summary">OS event flags from the i-th buffered event.</p>
+</div>
+<div class="def-card" id="backend-event-cookie-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>backend-event-cookie-at</h2>
+  </div>
+  <pre class="def-signature">(backend-event-cookie-at [handle :int idx :int])</pre>
+  <p class="def-summary">inotify rename cookie from the i-th event.</p>
+</div>
+<div class="def-card" id="backend-event-is-dir-at">
+  <div class="def-card-header">
+    <span class="kind-badge kind-defn">defn</span>
+    <h2>backend-event-is-dir-at</h2>
+  </div>
+  <pre class="def-signature">(backend-event-is-dir-at [handle :int idx :int])</pre>
+  <p class="def-summary">1 if the i-th event&#x27;s target is a directory.</p>
 </div>
 <div class="def-card" id="backend-last-overflow_">
   <div class="def-card-header">
