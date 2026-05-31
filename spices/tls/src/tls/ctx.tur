@@ -1,0 +1,183 @@
+;; tls/ctx.tur -- server-side TLS context (cert, key, ciphers, RNG).
+;;
+;; A context is created via `tls-ctx-new`, loaded with a PEM cert chain and
+;; a PEM private key, then handed to `tls-wrap-fd` in tls/conn (T3) to
+;; produce a TLS connection bound to an accepted TCP fd.
+;;
+;; All ctx-* functions (except -new and -free) return 0 on success and a
+;; non-zero mbedTLS error code on failure -- callers can format these via
+;; `mbedtls_strerror` if they import it, or treat them as opaque markers.
+;;
+;; The mbedTLS headers declare top-level `static inline` functions, which
+;; cannot legally appear inside a function body. To keep them at file
+;; scope we use `__tur_include__: #include ...` comments below; the
+;; codegen scrapes these out of the inline-C and prepends them to the
+;; generated translation unit's top.
+
+(defmodule tls/ctx
+  (export tls-ctx-new tls-ctx-free
+          tls-ctx-load-cert-pem tls-ctx-load-key-pem)
+
+;; The C-side struct that backs each TLS context handle. The typedef is
+;; duplicated in every defn's inline-C body because each Turmeric defn
+;; compiles to its own slice of the translation unit; redefining an
+;; identical typedef is legal C. Layout:
+;;
+;;   conf     -- mbedTLS server config (cipher list, version range, ALPN)
+;;   srvcert  -- cert chain loaded from PEM (server cert + intermediates)
+;;   pkey     -- private key loaded from PEM, bound to conf via own_cert
+;;   entropy  -- entropy source (reads from /dev/urandom on POSIX)
+;;   ctr_drbg -- CTR_DRBG CSPRNG seeded from entropy; handshake nonces
+
+;;; tls-ctx-new -- allocate and initialize a new server-side TLS context.
+;;;
+;;; Returns:
+;;;   Handle as :int on success; 0 on allocation or RNG seed failure.
+;;;
+;;; Example:
+;;;   (let [ctx (tls-ctx-new)]
+;;;     (tls-ctx-load-cert-pem ctx "cert.pem")
+;;;     (tls-ctx-load-key-pem  ctx "key.pem")
+;;;     ...
+;;;     (tls-ctx-free ctx))
+;;;
+;;; Since: T2
+(defn tls-ctx-new [] :int
+  ```c
+  /* __tur_include__: #include <stdlib.h> */
+  /* __tur_include__: #include <string.h> */
+  /* __tur_include__: #include "mbedtls/ssl.h" */
+  /* __tur_include__: #include "mbedtls/entropy.h" */
+  /* __tur_include__: #include "mbedtls/ctr_drbg.h" */
+  /* __tur_include__: #include "mbedtls/x509_crt.h" */
+  /* __tur_include__: #include "mbedtls/pk.h" */
+  typedef struct {
+    mbedtls_ssl_config       conf;
+    mbedtls_x509_crt         srvcert;
+    mbedtls_pk_context       pkey;
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+  } tls_ctx_t;
+
+  tls_ctx_t *c = (tls_ctx_t *)malloc(sizeof(tls_ctx_t));
+  if (!c) return 0;
+
+  mbedtls_ssl_config_init  (&c->conf);
+  mbedtls_x509_crt_init    (&c->srvcert);
+  mbedtls_pk_init          (&c->pkey);
+  mbedtls_entropy_init     (&c->entropy);
+  mbedtls_ctr_drbg_init    (&c->ctr_drbg);
+
+  const char *pers = "tur-tls-server";
+  int rc = mbedtls_ctr_drbg_seed(&c->ctr_drbg,
+                                 mbedtls_entropy_func, &c->entropy,
+                                 (const unsigned char *)pers,
+                                 strlen(pers));
+  if (rc != 0) goto fail;
+
+  rc = mbedtls_ssl_config_defaults(&c->conf,
+                                   MBEDTLS_SSL_IS_SERVER,
+                                   MBEDTLS_SSL_TRANSPORT_STREAM,
+                                   MBEDTLS_SSL_PRESET_DEFAULT);
+  if (rc != 0) goto fail;
+
+  mbedtls_ssl_conf_rng(&c->conf, mbedtls_ctr_drbg_random, &c->ctr_drbg);
+  return (int64_t)(intptr_t)c;
+
+fail:
+  mbedtls_ctr_drbg_free  (&c->ctr_drbg);
+  mbedtls_entropy_free   (&c->entropy);
+  mbedtls_pk_free        (&c->pkey);
+  mbedtls_x509_crt_free  (&c->srvcert);
+  mbedtls_ssl_config_free(&c->conf);
+  free(c);
+  return 0;
+  ```)
+
+;;; tls-ctx-free -- release a TLS context and every mbedTLS sub-object it owns.
+;;;
+;;; Parameters:
+;;;   ctx -- handle returned by tls-ctx-new. 0 is a safe no-op.
+;;;
+;;; Since: T2
+(defn tls-ctx-free [ctx :int] :void
+  ```c
+  typedef struct {
+    mbedtls_ssl_config       conf;
+    mbedtls_x509_crt         srvcert;
+    mbedtls_pk_context       pkey;
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+  } tls_ctx_t;
+
+  if (ctx == 0) return;
+  tls_ctx_t *c = (tls_ctx_t *)(intptr_t)ctx;
+  mbedtls_ctr_drbg_free  (&c->ctr_drbg);
+  mbedtls_entropy_free   (&c->entropy);
+  mbedtls_pk_free        (&c->pkey);
+  mbedtls_x509_crt_free  (&c->srvcert);
+  mbedtls_ssl_config_free(&c->conf);
+  free(c);
+  ```)
+
+;;; tls-ctx-load-cert-pem -- load a PEM certificate chain into the context.
+;;;
+;;; Parameters:
+;;;   ctx  -- handle from tls-ctx-new.
+;;;   path -- filesystem path to a PEM file containing the server cert
+;;;           (optionally followed by any intermediate certs).
+;;;
+;;; Returns:
+;;;   0 on success; non-zero mbedTLS error code on failure (file missing,
+;;;   not a PEM, malformed, etc.).
+;;;
+;;; Since: T2
+(defn tls-ctx-load-cert-pem [ctx :int path :cstr] :int
+  ```c
+  typedef struct {
+    mbedtls_ssl_config       conf;
+    mbedtls_x509_crt         srvcert;
+    mbedtls_pk_context       pkey;
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+  } tls_ctx_t;
+
+  if (ctx == 0) return -1;
+  tls_ctx_t *c = (tls_ctx_t *)(intptr_t)ctx;
+  return mbedtls_x509_crt_parse_file(&c->srvcert, (const char *)path);
+  ```)
+
+;;; tls-ctx-load-key-pem -- load a PEM private key and finalize the conf binding.
+;;;
+;;; Must be called *after* tls-ctx-load-cert-pem: the call wires the cert
+;;; chain and the parsed key into the conf via `mbedtls_ssl_conf_own_cert`,
+;;; which is what the handshake consults.
+;;;
+;;; Parameters:
+;;;   ctx  -- handle from tls-ctx-new.
+;;;   path -- filesystem path to a PEM-encoded private key (unencrypted).
+;;;
+;;; Returns:
+;;;   0 on success; non-zero mbedTLS error code on key-parse or
+;;;   conf-bind failure.
+;;;
+;;; Since: T2
+(defn tls-ctx-load-key-pem [ctx :int path :cstr] :int
+  ```c
+  typedef struct {
+    mbedtls_ssl_config       conf;
+    mbedtls_x509_crt         srvcert;
+    mbedtls_pk_context       pkey;
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+  } tls_ctx_t;
+
+  if (ctx == 0) return -1;
+  tls_ctx_t *c = (tls_ctx_t *)(intptr_t)ctx;
+  int rc = mbedtls_pk_parse_keyfile(&c->pkey, (const char *)path, NULL,
+                                    mbedtls_ctr_drbg_random, &c->ctr_drbg);
+  if (rc != 0) return rc;
+  return mbedtls_ssl_conf_own_cert(&c->conf, &c->srvcert, &c->pkey);
+  ```)
+
+) ;; end defmodule tls/ctx

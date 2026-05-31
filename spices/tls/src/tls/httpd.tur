@@ -1,0 +1,62 @@
+;; tls/httpd.tur -- bridge between tur/tls and stdlib/httpd's H5 TLS hooks.
+;;
+;; stdlib/httpd.tur ships a file-scope function-pointer table
+;; (httpd_tls_ops) that httpd-handle / httpd-worker consult when a
+;; tls_ctx is attached to an Httpd instance. The table is populated by
+;; httpd-register-tls-impl, which takes six int64 function-pointer values.
+;;
+;; This module's only job is to capture pointers to the tls-wrap-fd /
+;; tls-handshake / tls-read / tls-write / tls-shutdown / tls-free
+;; symbols (TU-local statics emitted by the spice's tls/conn module)
+;; and forward them to httpd-register-tls-impl. Because the spice and
+;; the user binary (which loads stdlib/httpd.tur) share a translation
+;; unit at compile time, taking the address of those static functions
+;; is well-defined here.
+;;
+;; Usage:
+;;
+;;   (import tls/ctx   :refer [tls-ctx-new tls-ctx-load-cert-pem
+;;                              tls-ctx-load-key-pem tls-ctx-free])
+;;   (import tls/httpd :refer [tls-httpd-init])
+;;
+;;   (tls-httpd-init)            ;; wire the function pointers (once).
+;;   (let [ctx (tls-ctx-new)]
+;;     (tls-ctx-load-cert-pem ctx "cert.pem")
+;;     (tls-ctx-load-key-pem  ctx "key.pem")
+;;     (let [h (httpd-new-tls 8443 4 my-handler ctx)]
+;;       (httpd-run h)
+;;       (httpd-free h)
+;;       (tls-ctx-free ctx)))
+
+(defmodule tls/httpd
+  (import tls/conn :refer [tls-wrap-fd tls-handshake
+                            tls-read tls-write
+                            tls-shutdown tls-free])
+  (export tls-httpd-init)
+
+;;; tls-httpd-init -- wire the spice's TLS ops into stdlib/httpd's hook table.
+;;;
+;;; Idempotent: re-calling it just rewrites the table with the same
+;;; pointers. Must be called before the first httpd-new-tls invocation.
+;;;
+;;; Returns:
+;;;   0 always.
+;;;
+;;; Since: T5
+(defn tls-httpd-init [] :int
+  ```c
+  /* httpd_register_tls_impl is a file-scope static emitted by
+   * stdlib/httpd.tur in the same TU; the codegen places a forward
+   * declaration of it at the top of the TU, so we can call it here
+   * without a local prototype. */
+  httpd_register_tls_impl(
+    (int64_t)(intptr_t)&tls__conn__tls_wrap_fd,
+    (int64_t)(intptr_t)&tls__conn__tls_handshake,
+    (int64_t)(intptr_t)&tls__conn__tls_read,
+    (int64_t)(intptr_t)&tls__conn__tls_write,
+    (int64_t)(intptr_t)&tls__conn__tls_shutdown,
+    (int64_t)(intptr_t)&tls__conn__tls_free);
+  return 0;
+  ```)
+
+) ;; end defmodule tls/httpd

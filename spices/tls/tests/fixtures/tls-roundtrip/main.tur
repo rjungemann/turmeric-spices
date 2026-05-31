@@ -1,0 +1,210 @@
+;; tests/fixtures/tls-roundtrip/main.tur -- T3 smoke test.
+;;
+;; Drives a full TLS roundtrip over a socketpair within one process:
+;;
+;;   server thread (pthread, uses spice public API)
+;;     |-- tls-ctx-new + load cert + load key
+;;     |-- tls-wrap-fd(ctx, srv-fd)
+;;     |-- tls-handshake
+;;     |-- tls-read -> tls-write echo
+;;     `-- tls-shutdown + tls-free + tls-ctx-free
+;;
+;;   client (main thread, inline-C mbedTLS client)
+;;     |-- mbedtls_ssl_config_defaults(IS_CLIENT) + VERIFY_NONE
+;;     |-- mbedtls_ssl_handshake
+;;     |-- mbedtls_ssl_write "ping"
+;;     |-- mbedtls_ssl_read -> assert "ping" echoed back
+;;     `-- mbedtls_ssl_close_notify + frees
+;;
+;; The cert + key are produced by tools/gen-cert.sh into /tmp/tls-smoke-test/
+;; (same fixture cert as ctx-lifecycle). Cert verification is disabled
+;; because the cert is self-signed; this matches the plan's testing
+;; strategy ("self-signed cert; echo server smoke test").
+;;
+;; The server thread function is a Turmeric defn, so its emitted symbol
+;; is `roundtrip__server_thread_fn` -- referenced by name from the
+;; inline-C in run-roundtrip when calling pthread_create.
+
+(defmodule roundtrip
+  (import tls/ctx      :refer [tls-ctx-new tls-ctx-free
+                                tls-ctx-load-cert-pem tls-ctx-load-key-pem])
+  (import tls/conn     :refer [tls-wrap-fd tls-handshake
+                                tls-read tls-write
+                                tls-shutdown tls-free])
+  (import tls/autolink :refer [tls-autolink-hint])
+
+  ;; Server-side echo: read up to 64 bytes from `conn`, write the same
+  ;; bytes back. Returns 0 on a clean exchange, non-zero on any failure.
+  ;; Buffer is malloc'd via inline-C since tls-read/write take :int
+  ;; pointers; we don't expose a Turmeric-side buffer type for v0.1.0.
+  (defn echo-once [conn :int] :int
+    ```c
+    /* __tur_include__: #include <stdlib.h> */
+    unsigned char *buf = (unsigned char *)malloc(64);
+    if (!buf) return -1;
+    int64_t n = tls__conn__tls_read((int64_t)conn,
+                                    (int64_t)(intptr_t)buf, 64);
+    if (n <= 0) { free(buf); return -2; }
+    int64_t w = tls__conn__tls_write((int64_t)conn,
+                                     (int64_t)(intptr_t)buf, n);
+    free(buf);
+    return (w == n) ? 0 : -3;
+    ```)
+
+  ;; Server-side lifecycle: new ctx, load cert+key, wrap fd, handshake,
+  ;; echo one record, shutdown, free everything. Returns 0 on success
+  ;; or a non-zero step-id on failure. Pure Turmeric -- exercises every
+  ;; tls/ctx and tls/conn entry point through the public API.
+  (defn server-side [fd :int cert-path :cstr key-path :cstr] :int
+    (let [ctx (tls-ctx-new)]
+      (if (= ctx 0)
+        1
+        (let [crc (tls-ctx-load-cert-pem ctx cert-path)]
+          (if (not (= crc 0))
+            (do (tls-ctx-free ctx) 2)
+            (let [krc (tls-ctx-load-key-pem ctx key-path)]
+              (if (not (= krc 0))
+                (do (tls-ctx-free ctx) 3)
+                (let [conn (tls-wrap-fd ctx fd)]
+                  (if (= conn 0)
+                    (do (tls-ctx-free ctx) 4)
+                    (let [hrc (tls-handshake conn)]
+                      (if (not (= hrc 0))
+                        (do (tls-free conn) (tls-ctx-free ctx) 5)
+                        (let [erc (echo-once conn)]
+                          (tls-shutdown conn)
+                          (tls-free conn)
+                          (tls-ctx-free ctx)
+                          (if (= erc 0) 0 6)))))))))))))
+
+  ;; pthread entry point. Receives a pointer to an rt_args struct
+  ;; (defined in run-roundtrip's inline-C); unpacks it, calls
+  ;; server-side, writes the result back into the struct so the main
+  ;; thread can inspect it after pthread_join.
+  (defn server-thread-fn [arg :ptr<void>] :ptr<void>
+    ```c
+    struct rt_args { int fd; const char *cert; const char *key; int err; };
+    struct rt_args *sa = (struct rt_args *)arg;
+    sa->err = (int)roundtrip__server_side((int64_t)sa->fd,
+                                          (const char *)sa->cert,
+                                          (const char *)sa->key);
+    return NULL;
+    ```)
+
+  ;; Driver: socketpair + spawn server thread + run mbedTLS client +
+  ;; cleanup. Returns 0 on a full clean roundtrip, otherwise:
+  ;;   1..9    -- failure in setup (socketpair, pthread_create, ...)
+  ;;   100+    -- client-side mbedTLS failure (200..299) or echo mismatch
+  ;;   1000+   -- server-thread failure (1000 + step-id from server-side)
+  (defn run-roundtrip [cert-path :cstr key-path :cstr msg :cstr msg-len :int] :int
+    ```c
+    /* __tur_include__: #include <stdio.h> */
+    /* __tur_include__: #include <stdlib.h> */
+    /* __tur_include__: #include <string.h> */
+    /* __tur_include__: #include <unistd.h> */
+    /* __tur_include__: #include <sys/socket.h> */
+    /* __tur_include__: #include <pthread.h> */
+    /* __tur_include__: #include "mbedtls/ssl.h" */
+    /* __tur_include__: #include "mbedtls/entropy.h" */
+    /* __tur_include__: #include "mbedtls/ctr_drbg.h" */
+    /* __tur_include__: #include "mbedtls/net_sockets.h" */
+    struct rt_args { int fd; const char *cert; const char *key; int err; };
+
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) return 1;
+
+    struct rt_args sa;
+    sa.fd   = fds[0];
+    sa.cert = (const char *)cert_path;
+    sa.key  = (const char *)key_path;
+    sa.err  = 0;
+
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, roundtrip__server_thread_fn, &sa) != 0) {
+        close(fds[0]); close(fds[1]); return 2;
+    }
+
+    int client_fd = fds[1];
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    mbedtls_ssl_context      ssl;
+    mbedtls_ssl_config       conf;
+    mbedtls_net_context      net;
+    mbedtls_entropy_init    (&entropy);
+    mbedtls_ctr_drbg_init   (&ctr_drbg);
+    mbedtls_ssl_init        (&ssl);
+    mbedtls_ssl_config_init (&conf);
+    mbedtls_net_init        (&net);
+    net.fd = client_fd;
+
+    int client_err = 0;
+    const char *pers = "tur-tls-client-smoke";
+    int rc = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                                   (const unsigned char *)pers, strlen(pers));
+    if (rc != 0) { client_err = 200; goto cleanup; }
+    rc = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT,
+                                     MBEDTLS_SSL_TRANSPORT_STREAM,
+                                     MBEDTLS_SSL_PRESET_DEFAULT);
+    if (rc != 0) { client_err = 201; goto cleanup; }
+    /* Self-signed cert: client skips verification. */
+    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_NONE);
+    mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
+    rc = mbedtls_ssl_setup(&ssl, &conf);
+    if (rc != 0) { client_err = 202; goto cleanup; }
+    mbedtls_ssl_set_bio(&ssl, &net,
+                        mbedtls_net_send, mbedtls_net_recv, NULL);
+
+    while ((rc = mbedtls_ssl_handshake(&ssl)) != 0) {
+        if (rc != MBEDTLS_ERR_SSL_WANT_READ &&
+            rc != MBEDTLS_ERR_SSL_WANT_WRITE) { client_err = 203; goto cleanup; }
+    }
+
+    int wn = mbedtls_ssl_write(&ssl,
+                               (const unsigned char *)msg, (size_t)msg_len);
+    if (wn != (int)msg_len) { client_err = 204; goto cleanup; }
+
+    unsigned char rxbuf[64];
+    int rn = 0;
+    while (rn < (int)msg_len) {
+        int r = mbedtls_ssl_read(&ssl, rxbuf + rn,
+                                 (size_t)((int)msg_len - rn));
+        if (r == MBEDTLS_ERR_SSL_WANT_READ ||
+            r == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+        if (r <= 0) { client_err = 205; goto cleanup; }
+        rn += r;
+    }
+    if (memcmp(rxbuf, msg, (size_t)msg_len) != 0) { client_err = 206; goto cleanup; }
+
+    /* Best-effort clean close; ignore the return code. */
+    while ((rc = mbedtls_ssl_close_notify(&ssl)) ==
+           MBEDTLS_ERR_SSL_WANT_READ ||
+           rc == MBEDTLS_ERR_SSL_WANT_WRITE) { /* loop */ }
+
+cleanup:
+    mbedtls_ssl_free       (&ssl);
+    mbedtls_ssl_config_free(&conf);
+    mbedtls_ctr_drbg_free  (&ctr_drbg);
+    mbedtls_entropy_free   (&entropy);
+
+    pthread_join(tid, NULL);
+    close(fds[0]);
+    close(fds[1]);
+
+    if (sa.err     != 0) return 1000 + sa.err;
+    if (client_err != 0) return client_err;
+    return 0;
+    ```)
+
+  (defn main [] :int
+    ;; Touch the autolink hint so the mbedtls link flags reach the cc
+    ;; line even when only Turmeric-via-inline-C uses mbedtls.
+    (tls-autolink-hint)
+
+    (let [rc (run-roundtrip "/tmp/tls-smoke-test/test-cert.pem"
+                            "/tmp/tls-smoke-test/test-key.pem"
+                            "ping" 4)]
+      (if (= rc 0)
+        (do (println "ok: tls roundtrip ping <-> ping") 0)
+        (do (println "FAIL: tls roundtrip rc != 0") 1))))
+
+) ;; end defmodule roundtrip

@@ -1,0 +1,247 @@
+;; tls/conn.tur -- per-connection TLS state machine (handshake + I/O).
+;;
+;; A conn handle wraps an accepted TCP fd with an mbedTLS server SSL
+;; context. The expected lifecycle is:
+;;
+;;   conn <- (tls-wrap-fd ctx accepted-fd)
+;;   (tls-handshake conn)                  ;; blocks until done; returns 0
+;;   (loop ... (tls-read conn buf n) ... (tls-write conn buf n))
+;;   (tls-shutdown conn)                   ;; best-effort close_notify
+;;   (tls-free conn)
+;;   (close accepted-fd)                   ;; caller owns the fd
+;;
+;; tls-free does NOT close the underlying fd -- the caller controls
+;; that lifecycle (httpd-handle in H5 wants to log + close itself).
+;; All `:int` parameters/returns that name pointers are intptr_t-cast
+;; handles, matching the convention in tls/ctx and the postgres spice.
+
+(defmodule tls/conn
+  (export tls-wrap-fd tls-handshake
+          tls-read tls-write
+          tls-shutdown tls-free)
+
+;; Both struct layouts (the public tls_conn_t and the private
+;; tls_ctx_t from tls/ctx) are duplicated as typedefs in each
+;; inline-C block because each defn becomes its own slice of the
+;; translation unit. Redefining an identical typedef across blocks
+;; is legal C and is the postgres spice's pattern too.
+;;
+;; tls_conn_t layout:
+;;   ssl -- the mbedTLS connection state machine
+;;   net -- mbedtls_net_context, a thin {int fd;} that wraps the TCP
+;;          fd for the bio read/write callbacks
+;;
+;; tls_ctx_t layout (must match tls/ctx.tur byte-for-byte):
+;;   conf, srvcert, pkey, entropy, ctr_drbg
+
+;;; tls-wrap-fd -- bind an accepted TCP fd to a new server-side TLS conn.
+;;;
+;;; The conn shares the cert / key / RNG state from `ctx`; multiple
+;;; conns can be wrapped against one ctx (typical: one ctx per Httpd
+;;; instance, one conn per accepted client). Does NOT block; the
+;;; actual handshake happens in `tls-handshake`.
+;;;
+;;; Parameters:
+;;;   ctx -- handle from tls-ctx-new with cert + key loaded.
+;;;   fd  -- accepted TCP socket (blocking; we use mbedtls_net_send/recv).
+;;;
+;;; Returns:
+;;;   Conn handle as :int on success; 0 on allocation or ssl_setup failure.
+;;;
+;;; Example:
+;;;   (let [conn (tls-wrap-fd ctx client-fd)]
+;;;     (tls-handshake conn)
+;;;     ...
+;;;     (tls-shutdown conn)
+;;;     (tls-free conn))
+;;;
+;;; Since: T3
+(defn tls-wrap-fd [ctx :int fd :int] :int
+  ```c
+  /* __tur_include__: #include <stdlib.h> */
+  /* __tur_include__: #include "mbedtls/ssl.h" */
+  /* __tur_include__: #include "mbedtls/entropy.h" */
+  /* __tur_include__: #include "mbedtls/ctr_drbg.h" */
+  /* __tur_include__: #include "mbedtls/x509_crt.h" */
+  /* __tur_include__: #include "mbedtls/pk.h" */
+  /* __tur_include__: #include "mbedtls/net_sockets.h" */
+  typedef struct {
+    mbedtls_ssl_config       conf;
+    mbedtls_x509_crt         srvcert;
+    mbedtls_pk_context       pkey;
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+  } tls_ctx_t;
+
+  typedef struct {
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context net;
+  } tls_conn_t;
+
+  if (ctx == 0) return 0;
+  tls_ctx_t  *c  = (tls_ctx_t *)(intptr_t)ctx;
+  tls_conn_t *cn = (tls_conn_t *)malloc(sizeof(tls_conn_t));
+  if (!cn) return 0;
+
+  mbedtls_ssl_init(&cn->ssl);
+  mbedtls_net_init(&cn->net);
+  cn->net.fd = (int)fd;
+
+  int rc = mbedtls_ssl_setup(&cn->ssl, &c->conf);
+  if (rc != 0) {
+    mbedtls_ssl_free(&cn->ssl);
+    free(cn);
+    return 0;
+  }
+  mbedtls_ssl_set_bio(&cn->ssl, &cn->net,
+                      mbedtls_net_send, mbedtls_net_recv, NULL);
+  return (int64_t)(intptr_t)cn;
+  ```)
+
+;;; tls-handshake -- drive the TLS handshake to completion (blocking).
+;;;
+;;; Loops over MBEDTLS_ERR_SSL_WANT_READ / WANT_WRITE so the call
+;;; works correctly with non-blocking fds too; with the default
+;;; blocking sockets the loop body executes once.
+;;;
+;;; Parameters:
+;;;   conn -- handle from tls-wrap-fd.
+;;;
+;;; Returns:
+;;;   0 on success; non-zero mbedTLS error code on failure (peer
+;;;   reset, cert mismatch, version mismatch, ...).
+;;;
+;;; Since: T3
+(defn tls-handshake [conn :int] :int
+  ```c
+  typedef struct {
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context net;
+  } tls_conn_t;
+
+  if (conn == 0) return -1;
+  tls_conn_t *cn = (tls_conn_t *)(intptr_t)conn;
+  int rc;
+  while ((rc = mbedtls_ssl_handshake(&cn->ssl)) != 0) {
+    if (rc != MBEDTLS_ERR_SSL_WANT_READ &&
+        rc != MBEDTLS_ERR_SSL_WANT_WRITE) {
+      return rc;
+    }
+  }
+  return 0;
+  ```)
+
+;;; tls-read -- decrypt up to `len` bytes from the TLS stream into `buf`.
+;;;
+;;; Parameters:
+;;;   conn -- handle from tls-wrap-fd (post-handshake).
+;;;   buf  -- caller-owned destination buffer, as a raw pointer.
+;;;   len  -- buffer capacity in bytes.
+;;;
+;;; Returns:
+;;;   Bytes read (> 0) on success; 0 on clean close_notify from peer;
+;;;   negative mbedTLS error code on transport failure. Like recv(),
+;;;   may return fewer bytes than requested.
+;;;
+;;; Since: T3
+(defn tls-read [conn :int buf :int len :int] :int
+  ```c
+  typedef struct {
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context net;
+  } tls_conn_t;
+
+  if (conn == 0) return -1;
+  tls_conn_t *cn = (tls_conn_t *)(intptr_t)conn;
+  int rc;
+  do {
+    rc = mbedtls_ssl_read(&cn->ssl,
+                          (unsigned char *)(intptr_t)buf, (size_t)len);
+  } while (rc == MBEDTLS_ERR_SSL_WANT_READ ||
+           rc == MBEDTLS_ERR_SSL_WANT_WRITE);
+  if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) return 0;
+  return rc;
+  ```)
+
+;;; tls-write -- encrypt and send `len` bytes from `buf` over the TLS stream.
+;;;
+;;; Parameters:
+;;;   conn -- handle from tls-wrap-fd (post-handshake).
+;;;   buf  -- caller-owned source buffer, as a raw pointer.
+;;;   len  -- bytes to send.
+;;;
+;;; Returns:
+;;;   Bytes written (> 0) on success; negative mbedTLS error code on
+;;;   failure. May return fewer bytes than requested.
+;;;
+;;; Since: T3
+(defn tls-write [conn :int buf :int len :int] :int
+  ```c
+  typedef struct {
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context net;
+  } tls_conn_t;
+
+  if (conn == 0) return -1;
+  tls_conn_t *cn = (tls_conn_t *)(intptr_t)conn;
+  int rc;
+  do {
+    rc = mbedtls_ssl_write(&cn->ssl,
+                           (const unsigned char *)(intptr_t)buf, (size_t)len);
+  } while (rc == MBEDTLS_ERR_SSL_WANT_READ ||
+           rc == MBEDTLS_ERR_SSL_WANT_WRITE);
+  return rc;
+  ```)
+
+;;; tls-shutdown -- send a close_notify alert (best-effort).
+;;;
+;;; Well-behaved peers see a clean TLS shutdown rather than a TCP
+;;; reset. Errors are intentionally swallowed -- the only sensible
+;;; recovery is to close the fd anyway.
+;;;
+;;; Parameters:
+;;;   conn -- handle from tls-wrap-fd. 0 is a safe no-op.
+;;;
+;;; Since: T3
+(defn tls-shutdown [conn :int] :void
+  ```c
+  typedef struct {
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context net;
+  } tls_conn_t;
+
+  if (conn == 0) return;
+  tls_conn_t *cn = (tls_conn_t *)(intptr_t)conn;
+  int rc;
+  do { rc = mbedtls_ssl_close_notify(&cn->ssl); }
+  while (rc == MBEDTLS_ERR_SSL_WANT_READ ||
+         rc == MBEDTLS_ERR_SSL_WANT_WRITE);
+  ```)
+
+;;; tls-free -- release the conn's mbedTLS state. Does NOT close the fd.
+;;;
+;;; Use tls-shutdown first if you want a clean close_notify exchange.
+;;; The TCP fd stored in net is left untouched (we do not call
+;;; mbedtls_net_free, which would shutdown(2) + close(2) it); the
+;;; caller is responsible for the fd's lifecycle.
+;;;
+;;; Parameters:
+;;;   conn -- handle from tls-wrap-fd. 0 is a safe no-op.
+;;;
+;;; Since: T3
+(defn tls-free [conn :int] :void
+  ```c
+  /* __tur_include__: #include <stdlib.h> */
+  typedef struct {
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context net;
+  } tls_conn_t;
+
+  if (conn == 0) return;
+  tls_conn_t *cn = (tls_conn_t *)(intptr_t)conn;
+  mbedtls_ssl_free(&cn->ssl);
+  /* Note: deliberately not mbedtls_net_free -- caller owns the fd. */
+  free(cn);
+  ```)
+
+) ;; end defmodule tls/conn
