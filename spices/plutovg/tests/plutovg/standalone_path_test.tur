@@ -6,7 +6,7 @@
 
 (defmodule plutovg/tests/standalone-path
   (import test/suite      :refer [describe it])
-  (import test/assert     :refer [assert-eq assert-ok assert-true])
+  (import test/assert     :refer [assert-eq assert-ok assert-true result-val])
   (import test/runner     :refer [run-all])
   (import plutovg/surface :refer [surface-create surface-destroy])
   (import plutovg/canvas  :refer [canvas-create canvas-destroy
@@ -42,11 +42,11 @@
     (it "computes the bounding box of an axis-aligned rect path"
       (let [r (path-create)]
         (assert-ok r)
-        (let [p (ok-val r)]
+        (let [p (result-val r)]
           (path-add-rect p 2.0 3.0 4.0 5.0)
           (let [er (path-extents p)]
             (assert-ok er)
-            (let [box (ok-val er)]
+            (let [box (result-val er)]
               (assert-true (fapprox (rect-x box) 2.0))
               (assert-true (fapprox (rect-y box) 3.0))
               (assert-true (fapprox (rect-w box) 4.0))
@@ -58,7 +58,7 @@
     (it "measures the perimeter of a triangle (3-4-5 right triangle)"
       (let [r (path-create)]
         (assert-ok r)
-        (let [p (ok-val r)]
+        (let [p (result-val r)]
           (path-move-to p 0.0 0.0)
           (path-line-to p 3.0 0.0)
           (path-line-to p 3.0 4.0)
@@ -71,7 +71,7 @@
     (it "parses 'M 0 0 H 4 V 4 Z' into a closed unit square"
       (let [r (path-create)]
         (assert-ok r)
-        (let [p (ok-val r)]
+        (let [p (result-val r)]
           (assert-ok (path-parse p "M 0 0 H 4 V 4 Z"))
           (assert-true (fapprox (path-length p) 12.0))
           (path-destroy p)))))
@@ -80,7 +80,7 @@
     (it "approximates a quadratic curve with line segments and keeps a sensible length"
       (let [r (path-create)]
         (assert-ok r)
-        (let [p (ok-val r)]
+        (let [p (result-val r)]
           (path-move-to p 0.0 0.0)
           (path-quad-to p 5.0 0.0 5.0 5.0)
           ;; length of the curve from (0,0) -> (5,0) -> (5,5) via the
@@ -91,7 +91,7 @@
             (assert-true (<f lc 10.5)))
           (let [fr (path-clone-flatten p)]
             (assert-ok fr)
-            (let [flat (ok-val fr)]
+            (let [flat (result-val fr)]
               ;; The flattened path approximates the same arc; its length
               ;; should be very close to the original within rounding.
               (let [lf (path-length flat)
@@ -104,12 +104,12 @@
     (it "fills a standalone path via canvas-fill-path"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr)
+          (let [c (result-val cr)
                 pr (path-create)]
             (assert-ok pr)
-            (let [path (ok-val pr)]
+            (let [path (result-val pr)]
               (path-add-rect path 0.0 0.0 4.0 4.0)
               (canvas-set-source-color c 1.0 0.0 0.0 1.0)
               (canvas-fill-path c path)
@@ -119,7 +119,7 @@
               (assert-eq 255 (surface-byte s 2))
               (assert-eq 255 (surface-byte s 3))
               (path-destroy path)))
-          (canvas-destroy (ok-val cr))
+          (canvas-destroy (result-val cr))
           (surface-destroy s)))))
 
   ;; Local float helpers (avoid pulling in stdlib comparisons).

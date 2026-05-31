@@ -2,7 +2,8 @@
 
 (defmodule test/assert
   (export assert-eq assert-ne assert-true assert-false
-          assert-some assert-none assert-ok assert-err)
+          assert-some assert-none assert-ok assert-err
+          result-ok? result-val result-err)
 
 ;;; assert-eq -- assert two integer values are equal.
 ;;;
@@ -172,6 +173,68 @@
       (void*)(intptr_t)r;
   if (!res->is_ok) return 1;
   printf("  FAIL assert-err: expected err, got ok\n"); return 0;
+  ```)
+
+;;; result-ok? -- predicate for the opaque ptr<void> result encoding used by
+;;; the C-backed spices (plutovg, png, plot, wav, ...).
+;;;
+;;; These spices return a malloc'd `{ is_ok; ok_val; err_val }` struct as an
+;;; opaque handle, NOT the stdlib Result type, so the auto-loaded stdlib
+;;; ok?/ok-val do not apply.  Use result-ok?/result-val to inspect them; this
+;;; reads the same layout assert-ok/assert-err do.
+;;;
+;;; Parameters:
+;;;   r -- result value (opaque :int handle)
+;;;
+;;; Returns:
+;;;   true if the result is ok.
+;;;
+;;; Since: P1
+(defn result-ok? [r :int] :bool
+  ```c
+  #include <stdint.h>
+  if (!r) return 0;
+  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
+      (void*)(intptr_t)r;
+  return res->is_ok ? 1 : 0;
+  ```)
+
+;;; result-val -- extract the ok payload from the opaque ptr<void> result
+;;; encoding (see result-ok?).
+;;;
+;;; Parameters:
+;;;   r -- result value (opaque :int handle)
+;;;
+;;; Returns:
+;;;   the ok_val payload, or 0 if r is null.
+;;;
+;;; Since: P1
+(defn result-val [r :int] :int
+  ```c
+  #include <stdint.h>
+  if (!r) return 0;
+  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
+      (void*)(intptr_t)r;
+  return res->ok_val;
+  ```)
+
+;;; result-err -- extract the err payload from the opaque ptr<void> result
+;;; encoding (see result-ok?).
+;;;
+;;; Parameters:
+;;;   r -- result value (opaque :int handle)
+;;;
+;;; Returns:
+;;;   the err_val payload, or 0 if r is null.
+;;;
+;;; Since: P1
+(defn result-err [r :int] :int
+  ```c
+  #include <stdint.h>
+  if (!r) return 0;
+  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
+      (void*)(intptr_t)r;
+  return res->err_val;
   ```)
 
 ) ;; end defmodule test/assert

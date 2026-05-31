@@ -2,7 +2,7 @@
 
 (defmodule plot/tests/line
   (import plot/core  :refer [plot plot-write-png
-                             __is-ok? __ok-val __surface-destroy
+                             __ok? __ok-val __surface-destroy
                              __pixel-is-background? __count-non-background])
   (import plot/line  :refer [function lines parametric polar inverse density])
   (import plot/decor :refer [axes tick-grid])
@@ -11,8 +11,8 @@
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
 
-  ;; Rename from `pair` (collides with auto-loaded stdlib `pair`).
-  (defn mk-pair [x :float y :float] :int
+  ;; Local pair constructor (shadows stdlib `pair`).
+  (defn xy-pair [x :float y :float] :int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -53,7 +53,7 @@
   ;; pointers (`double(*)(double)` / `int64_t(*)(double)`), so they must be
   ;; named defns rather than untyped `fn` literals.
   (defn curve-square [x :float] :float ```c return (double)x * (double)x; ```)
-  (defn curve-half [t :float] :int (mk-pair t (* 0.5 t)))
+  (defn curve-half [t :float] :int (xy-pair t (* 0.5 t)))
   (defn curve-radius [t :float] :float ```c return 0.4 + 0.1 * (double)t * (double)t; ```)
   (defn curve-y2 [y :float] :float ```c return (double)y * (double)y; ```)
 
@@ -64,9 +64,9 @@
                       -2.0 2.0 96
                       (default-line-style)
                       "f")
-            (lines (t-cons (mk-pair -2.0 -1.0)
-                     (t-cons (mk-pair -1.0 0.5)
-                       (t-cons (mk-pair 1.0 1.5) 0)))
+            (lines (t-cons (xy-pair -2.0 -1.0)
+                     (t-cons (xy-pair -1.0 0.5)
+                       (t-cons (xy-pair 1.0 1.5) 0)))
                    (default-line-style)
                    "l")
             (parametric curve-half
@@ -98,7 +98,7 @@
   (defn pixel-sanity-line [] :bool
     (let [rs (line-renderers)
           rr (plot rs (default-plot-opts))]
-      (if (__is-ok? rr)
+      (if (__ok? rr)
         (let [s       (__ok-val rr)
               ;; corner outside the plot rect must stay background.
               corner? (__pixel-is-background? s 4 4)

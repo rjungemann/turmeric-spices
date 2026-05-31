@@ -2,7 +2,7 @@
 
 (defmodule plot/tests/point
   (import plot/core  :refer [plot plot-write-png
-                             __is-ok? __ok-val __surface-destroy
+                             __ok? __ok-val __surface-destroy
                              __pixel-is-background? __count-non-background])
   (import plot/point :refer [points error-bars vector-field arrows])
   (import plot/line  :refer [function])
@@ -12,8 +12,8 @@
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
 
-  ;; Renamed from `pair` (collides with auto-loaded stdlib `pair`).
-  (defn mk-pair [x :float y :float] :int
+  ;; Local pair constructor (shadows stdlib `pair`).
+  (defn xy-pair [x :float y :float] :int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -62,12 +62,12 @@
 
   ;; Curve / vector-field callbacks (need typed defns, not `fn` literals).
   (defn pt-diag [x :float] :float ```c return (double)x; ```)
-  (defn pt-vf [x :float y :float] :int (mk-pair (* -1.0 y) x))
+  (defn pt-vf [x :float y :float] :int (xy-pair (* -1.0 y) x))
 
   (defn point-renderers [] :int
     (vec-of (axes)
             (function pt-diag -1.0 2.0 64 (default-line-style) "diag")
-            (points (t-cons (mk-pair 0.0 0.0) (t-cons (mk-pair 1.0 1.0) (t-cons (mk-pair 1.5 0.5) 0)))
+            (points (t-cons (xy-pair 0.0 0.0) (t-cons (xy-pair 1.0 1.0) (t-cons (xy-pair 1.5 0.5) 0)))
                     (default-point-style)
                     "pts")
             (error-bars (t-cons (triple 0.5 0.5 0.25) (t-cons (triple 1.2 1.0 0.2) 0))
@@ -91,7 +91,7 @@
   (defn pixel-sanity-point [] :bool
     (let [rs (point-renderers)
           rr (plot rs (default-plot-opts))]
-      (if (__is-ok? rr)
+      (if (__ok? rr)
         (let [s       (__ok-val rr)
               corner? (__pixel-is-background? s 4 4)
               ink     (__count-non-background s 100 100 500 350)]

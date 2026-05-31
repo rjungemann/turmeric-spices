@@ -72,6 +72,20 @@
 ;;;
 ;;; Since: v0.1.0
 (defn shader-program [& shaders] :int
+  ;; The compiler rejects inline-C inside a variadic body (it needs a fixed
+  ;; arity signature), so the variadic form just forwards the collected
+  ;; cons-list handle to the fixed-arity linker below.
+  (__shader-program-link shaders))
+
+;;; __shader-program-link -- link a cons-list of compiled shader handles.
+;;;
+;;; Parameters:
+;;;   shaders -- :int handle to a cons list of :int shader handles.
+;;;
+;;; Returns:
+;;;   Opaque :int program handle.  Individual shaders are deleted after linking.
+;;;   Prints the driver error log and calls exit(1) if linking fails.
+(defn __shader-program-link [shaders :int] :int
   ```c
   #include <stdio.h>
   #include <stdlib.h>

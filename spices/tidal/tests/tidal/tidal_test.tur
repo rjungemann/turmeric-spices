@@ -40,39 +40,39 @@
 
   ;; ---- minimal result primitives ----
 
-  (defn ok [x :int] #{Unsafe} :ptr<void>
+  (defn __ok [x :int] #{Unsafe} :ptr<void>
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
     r->is_ok = true; r->ok_val = x; r->err_val = 0;
     return (void*)r;
     ```)
 
-  (defn err [e :int] #{Unsafe} :ptr<void>
+  (defn __err [e :int] #{Unsafe} :ptr<void>
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
     r->is_ok = false; r->ok_val = 0; r->err_val = e;
     return (void*)r;
     ```)
 
-  (defn ok? [r :ptr<void>] #{Unsafe} :bool
+  (defn __ok? [r :ptr<void>] #{Unsafe} :bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
     return res != NULL && res->is_ok;
     ```)
 
-  (defn err? [r :ptr<void>] #{Unsafe} :bool
+  (defn __err? [r :ptr<void>] #{Unsafe} :bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
     return res == NULL || !res->is_ok;
     ```)
 
-  (defn ok-val [r :ptr<void>] #{Unsafe} :int
+  (defn __ok-val [r :ptr<void>] #{Unsafe} :int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
     return res->ok_val;
     ```)
 
-  (defn err-val [r :ptr<void>] #{Unsafe} :int
+  (defn __err-val [r :ptr<void>] #{Unsafe} :int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
     return res->err_val;
@@ -95,7 +95,7 @@
     ```)
 
   ;; list-length -- count elements in a cons list.
-  (defn list-length [lst :int] #{Unsafe} :int
+  (defn tidal-list-length [lst :int] #{Unsafe} :int
     ```c
     typedef struct { int64_t value; int64_t next; } ConsCell;
     int n = 0;
@@ -541,14 +541,14 @@
 
   (defn tidal-parse-element [ta :int i :int] #{Unsafe} :ptr<void>
     (if (>= i (tidal-tok-count ta))
-      (err 0)
+      (__err 0)
       (let [ttype (tidal-tok-type ta i)]
         (if (= ttype 1)
           (let [subnode (tidal-pat-alloc 2)
                 r       (tidal-parse-seq-body ta (+ i 1) subnode)]
-            (if (err? r)
+            (if (__err? r)
               r
-              (let [pair  (ok-val r)
+              (let [pair  (__ok-val r)
                     seq   (head pair)
                     end-i (tail pair)
                     next-i (if (< end-i (tidal-tok-count ta))
@@ -556,7 +556,7 @@
                                (+ end-i 1)
                                end-i)
                              end-i)]
-                (ok (cons seq next-i)))))
+                (__ok (cons seq next-i)))))
           (if (= ttype 3)
             (let [altnode (tidal-pat-alloc 3)
                   r       (tidal-parse-alt-body ta (+ i 1) altnode)]
@@ -567,19 +567,19 @@
               (tidal-pat-set-value leaf base)
               (let [mt (tidal-atom-mod-type val)]
                 (if (= mt 0)
-                  (ok (cons leaf (+ i 1)))
+                  (__ok (cons leaf (+ i 1)))
                   (if (= mt 1)
                     (let [n   (tidal-atom-mod-n val)
                           rep (tidal-pat-alloc 4)]
                       (tidal-pat-set-param-n rep n)
                       (tidal-pat-add-child rep leaf 1.0)
-                      (ok (cons rep (+ i 1))))
+                      (__ok (cons rep (+ i 1))))
                     (if (= mt 2)
                       (let [f  (tidal-atom-mod-f val)
                             sl (tidal-pat-alloc 5)]
                         (tidal-pat-set-param-f sl f)
                         (tidal-pat-add-child sl leaf 1.0)
-                        (ok (cons sl (+ i 1))))
+                        (__ok (cons sl (+ i 1))))
                       (if (= mt 3)
                         (let [n  (tidal-atom-mod-n val)
                               k  (tidal-atom-mod-k val)
@@ -587,23 +587,23 @@
                           (tidal-pat-set-param-n eu n)
                           (tidal-pat-set-param-k eu k)
                           (tidal-pat-add-child eu leaf 1.0)
-                          (ok (cons eu (+ i 1))))
+                          (__ok (cons eu (+ i 1))))
                         (let [w (tidal-atom-mod-f val)]
                           (tidal-pat-set-param-f leaf w)
-                          (ok (cons leaf (+ i 1)))))))))))))))
+                          (__ok (cons leaf (+ i 1)))))))))))))))
 
   (defn tidal-parse-seq-body [ta :int i :int node :int] #{Unsafe} :ptr<void>
     (if (>= i (tidal-tok-count ta))
-      (ok (cons node i))
+      (__ok (cons node i))
       (let [ttype (tidal-tok-type ta i)]
         (if (= ttype 2)
-          (ok (cons node i))
+          (__ok (cons node i))
           (if (= ttype 4)
-            (ok (cons node i))
+            (__ok (cons node i))
             (let [r (tidal-parse-element ta i)]
-              (if (err? r)
+              (if (__err? r)
                 r
-                (let [pair  (ok-val r)
+                (let [pair  (__ok-val r)
                       child (head pair)
                       new-i (tail pair)
                       w     (if (= (tidal-pat-kind child) 0)
@@ -614,14 +614,14 @@
 
   (defn tidal-parse-alt-body [ta :int i :int node :int] #{Unsafe} :ptr<void>
     (if (>= i (tidal-tok-count ta))
-      (ok (cons node i))
+      (__ok (cons node i))
       (let [ttype (tidal-tok-type ta i)]
         (if (= ttype 4)
-          (ok (cons node (+ i 1)))
+          (__ok (cons node (+ i 1)))
           (let [r (tidal-parse-element ta i)]
-            (if (err? r)
+            (if (__err? r)
               r
-              (let [pair  (ok-val r)
+              (let [pair  (__ok-val r)
                     child (head pair)
                     new-i (tail pair)]
                 (tidal-pat-add-child node child 1.0)
@@ -632,9 +632,9 @@
           root (tidal-pat-alloc 1)
           r    (tidal-parse-seq-body ta 0 root)]
       (tidal-tok-free ta)
-      (if (err? r)
+      (if (__err? r)
         r
-        (ok (head (ok-val r))))))
+        (__ok (head (__ok-val r))))))
 
   ;; ---- EventList helpers ----
 
@@ -968,8 +968,8 @@
 
   (defn parse-notation [text :cstr] #{Unsafe} :ptr<void>
     (let [r (tidal-parse-seq text)]
-      (if (err? r)
-        (err 0)
+      (if (__err? r)
+        (__err 0)
         r)))
 
   (defn notation-free [p :int] #{Unsafe} :void
@@ -1133,8 +1133,8 @@
   (println "=== parse-notation: basic sequence ===")
 
   (let [r (parse-notation "bd sd cp")]
-    (print-bool "parse ok?:     " (ok? r))
-    (let [p    (ok-val r)
+    (print-bool "parse ok?:     " (__ok? r))
+    (let [p    (__ok-val r)
           evts (pattern-events p 0)]
       (print-bool "has events:    " (not (list-nil? evts)))
       (let [e0 (head evts)
@@ -1149,8 +1149,8 @@
   (println "=== parse-notation: subsequence ===")
 
   (let [r (parse-notation "[bd sd] cp")]
-    (print-bool "parse ok?:     " (ok? r))
-    (let [p    (ok-val r)
+    (print-bool "parse ok?:     " (__ok? r))
+    (let [p    (__ok-val r)
           evts (pattern-events p 0)]
       (print-bool "has events:    " (not (list-nil? evts)))
       ;; should have 3 events: bd, sd, cp
@@ -1164,8 +1164,8 @@
   (println "=== parse-notation: alternating <...> ===")
 
   (let [r (parse-notation "<60 62 64>")]
-    (print-bool "parse ok?:     " (ok? r))
-    (let [p     (ok-val r)
+    (print-bool "parse ok?:     " (__ok? r))
+    (let [p     (__ok-val r)
           evts0 (pattern-events p 0)
           evts1 (pattern-events p 1)
           evts2 (pattern-events p 2)]
@@ -1184,8 +1184,8 @@
   (println "=== parse-notation: repeat *n ===")
 
   (let [r (parse-notation "bd*3")]
-    (print-bool "parse ok?:     " (ok? r))
-    (let [p    (ok-val r)
+    (print-bool "parse ok?:     " (__ok? r))
+    (let [p    (__ok-val r)
           evts (pattern-events p 0)]
       ;; should yield 3 bd events
       (print-bool "event 1:       " (not (list-nil? evts)))
@@ -1198,12 +1198,12 @@
   (println "=== parse-notation: Euclidean rhythm ===")
 
   (let [r (parse-notation "bd(3,8)")]
-    (print-bool "parse ok?:     " (ok? r))
-    (let [p    (ok-val r)
+    (print-bool "parse ok?:     " (__ok? r))
+    (let [p    (__ok-val r)
           evts (pattern-events p 0)]
       (print-bool "has events:    " (not (list-nil? evts)))
       ;; 3 pulses in 8 steps
-      (let [count (list-length evts)]
+      (let [count (tidal-list-length evts)]
         (print-bool "3 pulses:      " (= count 3)))
       (notation-free p)))
 
@@ -1211,7 +1211,7 @@
   (println "=== render-events ===")
 
   (let [r (parse-notation "c4 d4 e4")]
-    (let [p     (ok-val r)
+    (let [p     (__ok-val r)
           table (render-events p 0)]
       (println table)
       (notation-free p)))
@@ -1220,7 +1220,7 @@
   (println "=== render-sclang ===")
 
   (let [r (parse-notation "c4 d4")]
-    (let [p  (ok-val r)
+    (let [p  (__ok-val r)
           sc (render-sclang p "piano")]
       (println sc)
       (notation-free p)))
@@ -1229,7 +1229,7 @@
   (println "=== render-pbind ===")
 
   (let [r (parse-notation "c4 d4")]
-    (let [p     (ok-val r)
+    (let [p     (__ok-val r)
           scscm (render-pbind p "piano")]
       (println scscm)
       (notation-free p)))
@@ -1238,7 +1238,7 @@
   (println "=== pattern-fast combinator ===")
 
   (let [r (parse-notation "c4 d4")]
-    (let [p    (ok-val r)
+    (let [p    (__ok-val r)
           fast (let [node (tidal-pat-alloc 10)]
                  (tidal-pat-set-param-f node 2.0)
                  (tidal-pat-add-child node p 1.0)

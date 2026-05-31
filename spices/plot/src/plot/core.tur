@@ -6,7 +6,7 @@
           __surface-create __surface-destroy __surface-write-png
           __canvas-create __canvas-destroy
           __plot-sample-adaptive
-          __is-ok? __ok-val __err-val
+          __ok? __ok-val __err-val
           __surface-width __surface-height __surface-pixel-byte
           __pixel-is-background? __count-non-background)
 
@@ -28,8 +28,8 @@
     r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
     ```)
 
-  ;;; __is-ok? -- predicate for the local :ptr<void> result envelope.
-  (defn __is-ok? [r :ptr<void>] :bool
+  ;;; __ok? -- predicate for the local :ptr<void> result envelope.
+  (defn __ok? [r :ptr<void>] :bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
     return res && res->is_ok;
@@ -1428,14 +1428,14 @@
     (let [w (if (> (plot-opts-width opts) 0) (plot-opts-width opts) 600)
           h (if (> (plot-opts-height opts) 0) (plot-opts-height opts) 450)
           sr (__surface-create w h)]
-      (if (__is-ok? sr)
+      (if (__ok? sr)
         (let [surface (__ok-val sr)
               cr (__canvas-create surface)]
-          (if (__is-ok? cr)
+          (if (__ok? cr)
             (let [canvas (__ok-val cr)
                   rr (plot-into-canvas canvas renderers opts 0 0 w h)]
               (__canvas-destroy canvas)
-              (if (__is-ok? rr)
+              (if (__ok? rr)
                 (__ok surface)
                 (do
                   (__surface-destroy surface)
@@ -1449,7 +1449,7 @@
   ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
   (defn plot-write-png [renderers :int opts :int path :cstr] :ptr<void>
     (let [r (plot renderers opts)]
-      (if (__is-ok? r)
+      (if (__ok? r)
         (let [s (__ok-val r)
               wr (__surface-write-png s path)]
           (__surface-destroy s)
