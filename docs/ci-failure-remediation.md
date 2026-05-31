@@ -586,9 +586,29 @@ fetch step installs them.
 For `httpd`, `postgres`, and `raygui`, verify that `:cmake-deps` is present
 in each `build.tur` and that the CI fetch step is not being skipped.
 
-For `ansi`, add `#define _DEFAULT_SOURCE` (or `_POSIX_C_SOURCE 200809L`)
-before the `#include <signal.h>` in the relevant inline-C block to expose
-`struct sigaction` on glibc systems.
+For `ansi`, the picture is more subtle than "add a feature macro". Turmeric
+**already** emits `#define _DEFAULT_SOURCE 1`, but in the generated
+`tests_term_test_tur.c` it lands at **line 23 — after** the system headers
+(`<sys/ioctl.h>`, `<signal.h>`, … at lines 1–8) that the spice's
+`/* __tur_include__: #include <...> */` directives hoist to the very top of
+the translation unit. Because the feature macro is defined *after* those
+headers are processed, glibc never exposes `struct sigaction`, `SA_RESTART`,
+or `CLOCK_MONOTONIC`/`CLOCK_REALTIME`, so the term/image tests fail to
+compile.
+
+This is an **emission-ordering issue**: the feature-test macro must precede
+every hoisted `#include`. The clean fix is most likely compiler-side (emit
+`_DEFAULT_SOURCE`/`_GNU_SOURCE` before the `__tur_include__` block), or a
+documented way for a spice to inject a define ahead of the hoisted headers.
+A spice-level workaround (prepending a `__tur_include__: #define _GNU_SOURCE`)
+is fragile because directive ordering across defns isn't controllable, so it
+was not attempted here. The `watch` test failures in §E4a are very likely the
+same ordering problem (`usleep`/`useconds_t`/`FILE` are also feature-gated).
+
+The library-dependency rows (`mbedtls`, `libpq`, `sndfile`, `glad/gl.h`,
+`raygui`) cannot be verified in this sandbox — they need the actual system
+packages or fetched cmake-deps. They are left documented for a CI/environment
+with those libraries available.
 
 ### E4a. `watch` test suite — inline-C missing feature macro / headers
 
@@ -612,29 +632,59 @@ without the feature-test macro and headers. Same class as the `ansi` row.
 
 ---
 
-## Priority order
+## Progress summary
 
-1. **§C** — Add missing workspace members to root `build.tur`. Unblocks B7 and
-   lets cross-spice imports resolve. Low risk, mechanical change.
+### ✅ Done and verified (committed)
 
-2. **§A** — Fix the test runner path so CI can actually find test files.
-   Either update CI or move the files. Unblocks all §D findings.
+| Section | What landed |
+|---|---|
+| §C | Added the 10 missing spices to root `build.tur` `:members`. |
+| §B7 | `notebook` resolves `ansi/term` (via §C). |
+| §A | CI test step now discovers nested/`fixtures` test layouts; every spice's tests are found. |
+| §B1 | Closed the unterminated `defmodule` in `watch/watch.tur` (also unblocked notebook). |
+| §D1 | `rtaudio`/`rtmidi`: moved `defmodule` off the comment line (both suites pass). |
+| §B2 | `ptr<void>` Result accessors fixed in `plot`/`plutovg`/`wav`; added reusable `result-ok?`/`result-val`/`result-err` to `test/assert`. |
+| §D2 | `tidal`: renamed local `ok`/`err`/`list-length`/… that shadowed stdlib (suite passes). |
+| §D4 | `glsl`: declared the `test` spice dependency. |
+| §B4 | `opengl`: moved `shader-program` inline-C into a fixed-arity helper (source clean). |
+| §B5 | `sdf-raylib`: fixed the paren placement that left `scene-glsl` outside its `let` (source clean). |
+| §D7 | `plot`: renamed test-local `pair` → `xy-pair`. |
+| §D5 | `opengl` tests: `(!= h 0)` → `(not (= h 0))` for `assert-true` (type error gone). |
+| §B6 (part) | `stats/test.tur`: corrected `pf`/`qf` → `pf-dist`/`qf-dist` import names. |
 
-3. **§B1** — Add closing `)` to `watch/watch.tur`. One-line fix, unblocks all
-   `watch` tests.
+### ⏳ Remaining — needs a decision or an environment with native libs
 
-4. **§D1** — Fix `rtaudio`/`rtmidi` comment-line bug. Mechanical, unblocks
-   those test suites.
+These were investigated and turned out larger than the original plan, or
+depend on things not available in this sandbox. Grouped by what they need:
 
-5. **§B2** — Fix `ok-val` / `ptr<void>` type mismatch in `plot`, `plutovg`,
-   `wav`. Requires understanding the current `Result` encoding.
+1. **Compiler / framework decisions** (see the "Systemic note" and §D8):
+   - **Older-dialect drift** in test files — typed `fn` lambdas (§D7
+     downstream), Turmeric-level float math + `(float n)` (§B6/stats,
+     §B3/linalg), `cstr`/`:int`-list API mismatches (§D3 `c-dsl`, §D4/glsl
+     downstream). Decide: tighten/restore compiler behavior, or rewrite the
+     tests to the current idiom.
+   - **§D8 plutovg** — ~40 void-bodied `(it ...)` blocks vs `it [… result
+     :bool]`. Decide: rewrite the bodies, or change `test/suite`.
+   - **§D6 signal** — `Pair__int__int` vs `int64_t` return mismatch; looks
+     compiler-side.
+   - **§B6 stats / §B3 linalg `static inline`** — `static` C helpers defined
+     inside defn inline-C bodies now emit nested ("invalid storage class");
+     systemic across `dist.tur`/`rng.tur`, likely a compiler emission change.
 
-6. **§D2, §D4** — `tidal` name conflict and `glsl` missing dep. Small fixes.
+2. **Larger ports** (own work items):
+   - **§B3 linalg** — all 6 source files target an older dialect (FFI via
+     `declare`, old `defstruct`, untyped params, parse errors).
 
-7. **§B3, §B4, §B5, §B6** — Remaining type-check failures in `linalg`,
-   `opengl`, `sdf-raylib`, `stats`. Each is self-contained.
+3. **Native libraries / build wiring** (need the packages or fetched
+   cmake-deps; not verifiable here): **§E** — `mbedtls` (httpd), `libpq`
+   (postgres), `sndfile` (wav), `glad/gl.h` (opengl), `raygui`; plus the
+   **feature-macro emission-ordering** issue affecting `ansi` (§E) and the
+   `watch` test suite (§E4a), which looks compiler-side.
 
-8. **§D3, §D5, §D6** — Remaining test-logic bugs (`c-dsl`, `opengl`, `signal`).
+### Suggested next decisions
 
-9. **§E** — C library / header issues. Verify cmake-deps are wired up; add
-   feature-test macros where needed.
+The biggest lever is the **systemic dialect drift**: a single call on whether
+the compiler should keep accepting typed `fn` lambdas / Turmeric-level numeric
+casts / file-scope inline-C function definitions would unblock the bulk of the
+remaining test failures (linalg, stats, glsl, c-dsl, plot, plutovg) at once.
+Absent that, each affected test file needs a hand rewrite to the current idiom.
