@@ -1,4 +1,10 @@
 ;; plot/line.tur -- line-like renderers.
+;;
+;; The sampled-curve renderers (function, parametric, polar, inverse) use the
+;; adaptive subdivision sampler from plot/core: `samples` sets the uniform
+;; baseline, and segments are bisected (up to depth 6) when adjacent
+;; screen-space sub-segments turn sharply or cross a NaN/non-NaN boundary.
+;; `lines` draws the caller's polyline as-is and retains NaN-as-gap behavior.
 
 (defmodule plot/line
   (export function lines parametric polar inverse density)
@@ -6,6 +12,9 @@
   (import plot/core :refer [__make-renderer __renderer-floats __renderer-ints __renderer-bounds])
 
   ;;; function -- sample y=f(x) over [x-min, x-max].
+  ;;; `samples` is the uniform baseline count; the renderer subdivides further
+  ;;; in high-curvature regions and around NaN boundaries via plot/core's
+  ;;; adaptive sampler.
   (defn function [f x-min :float x-max :float samples :int style :int label :cstr] :int
     (__renderer-bounds
       (__renderer-ints
@@ -15,10 +24,14 @@
       x-min x-max (/ 0.0 0.0) (/ 0.0 0.0)))
 
   ;;; lines -- draw a polyline through a cons list of (cons x y) points.
+  ;;; Pre-sampled input; the renderer plots the points as given and breaks the
+  ;;; polyline on NaN coordinates so callers can encode explicit gaps.
   (defn lines [vs :int style :int label :cstr] :int
     (__make-renderer 20 style 0 vs 0 0 0 0 label ""))
 
   ;;; parametric -- sample f(t) -> (cons x y).
+  ;;; `samples` is the uniform baseline; segments are adaptively subdivided
+  ;;; when they turn sharply or cross NaN boundaries.
   (defn parametric [f t-min :float t-max :float samples :int style :int label :cstr] :int
     (__renderer-ints
       (__renderer-floats (__make-renderer 22 style 0 f 0 0 0 0 label "")
@@ -26,6 +39,8 @@
       samples 0 0 0))
 
   ;;; polar -- sample radius=f(theta).
+  ;;; `samples` is the uniform baseline; segments are adaptively subdivided in
+  ;;; high-curvature regions.
   (defn polar [f theta-min :float theta-max :float samples :int style :int label :cstr] :int
     (__renderer-ints
       (__renderer-floats (__make-renderer 23 style 0 f 0 0 0 0 label "")
@@ -33,6 +48,8 @@
       samples 0 0 0))
 
   ;;; inverse -- sample x=f(y) over [y-min, y-max].
+  ;;; `samples` is the uniform baseline; segments are adaptively subdivided
+  ;;; when they turn sharply or cross NaN boundaries (e.g. log-domain edges).
   (defn inverse [f y-min :float y-max :float samples :int style :int label :cstr] :int
     (__renderer-ints
       (__renderer-floats (__make-renderer 24 style 0 f 0 0 0 0 label "")

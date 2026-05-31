@@ -19,6 +19,14 @@
   "function.png")
 ```
 
+The `samples` argument (128 above) is a baseline; `function`, `parametric`,
+`polar`, and `inverse` feed it to an adaptive subdivision pass that bisects
+segments (up to depth 6) wherever neighboring screen-space pieces turn sharply
+or cross a NaN/non-NaN boundary. Smooth curves keep the baseline cost; sharp
+turns and asymptotes get extra samples without forcing every caller to
+crank `samples` globally. `lines` is unaffected -- it plots its caller's
+points verbatim and only breaks on NaN coordinates.
+
 ## 2. Scatter plot with error bars
 
 Use `points` and `error-bars` together in the same renderer list.

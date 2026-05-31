@@ -929,8 +929,8 @@
         case RK_POLAR: {
           SET_LINE_STYLE(r->style1, ((int *)0));
           int n = (int)r->i1; if (n < 32) n = 32;
-          bool started = false;
           if (r->kind == RK_DENSITY) {
+            bool started = false;
             double xs[2048]; int m = 0;
             double mean = 0.0, sd = 0.0;
             for (Cons *p = (Cons *)(intptr_t)r->data1; p && m < 2048; p = (Cons *)(intptr_t)p->tail) {
@@ -955,26 +955,13 @@
               if (!started) { plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy); started = true; }
               else plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
             }
+            if (started) plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
           } else {
-            for (int i = 0; i < n; i++) {
-              double t = r->f1 + (r->f2 - r->f1) * ((double)i / (double)(n - 1));
-              double x = 0.0, y = 0.0;
-              if (r->kind == RK_FUNCTION) { x = t; y = ((double(*)(double))(intptr_t)r->data1)(t); }
-              else if (r->kind == RK_INVERSE) { y = t; x = ((double(*)(double))(intptr_t)r->data1)(t); }
-              else if (r->kind == RK_PARAMETRIC) {
-                Cons *pair = (Cons *)(intptr_t)((int64_t(*)(double))(intptr_t)r->data1)(t);
-                x = BITS_DBL(pair->head); y = BITS_DBL(pair->tail);
-              } else if (r->kind == RK_POLAR) {
-                double radius = ((double(*)(double))(intptr_t)r->data1)(t);
-                x = radius * cos(t); y = radius * sin(t);
-              }
-              if (ISNAN(x) || ISNAN(y)) { started = false; continue; }
-              double vx, vy; MAP_POINT(x, y, &vx, &vy);
-              if (!started) { plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy); started = true; }
-              else plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)canvas, (float)vx, (float)vy);
-            }
+            plot__core____plot_sample_adaptive(
+              (int64_t)(intptr_t)r, canvas,
+              bx_min, bx_max, by_min, by_max,
+              left, top, plot_w, plot_h, n);
           }
-          if (started) plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
         } break;
         case RK_POINTS: {
           PointStyle *ps = (PointStyle *)(intptr_t)r->style1;
