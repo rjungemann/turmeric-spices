@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- Adaptive subdivision sampler in `plot/core` (`__plot-sample-adaptive`).
+  The sampled-curve renderers (`function`, `parametric`, `polar`,
+  `inverse`) now bisect intervals where adjacent screen-space segments
+  turn sharply or cross a NaN boundary, up to a fixed depth cap. The
+  `samples` argument keeps acting as the uniform baseline; smooth curves
+  pay the baseline cost, sharp turns / asymptotes pick up extra samples
+  without raising it globally. `lines` is unchanged.
+- Pixel-readback helpers (`__surface-width`, `__surface-height`,
+  `__surface-pixel-byte`, `__pixel-is-background?`,
+  `__count-non-background`) so callers and tests can inspect the
+  rendered surface without round-tripping through PNG.
+
+### Fixed
+
+- The "auto y bound" NaN sentinels in `plot/line/function`,
+  `plot/interval/function-interval`, and `plot/decor/{hrule,vrule}-styled`
+  used `(/ 0.0 0.0)`, which the current Turmeric runtime aborts on. The
+  sentinels are now inline-C `0.0/0.0` helpers (no runtime check).
+- `plot/core` now uses local `__is-ok?` / `__ok-val` / `__err-val`
+  helpers for its `:ptr<void>` result envelopes, restoring type-checking
+  under the current compiler.
+
+### Tests
+
+- Every renderer family's test now actually runs (`describe` is invoked
+  from `main` rather than at module top level) and the assertions
+  inspect rendered surface pixels in addition to the PNG file size.
+
 ## 0.2.0
 
 ### Breaking changes

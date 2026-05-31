@@ -18,12 +18,15 @@ plots into a larger image.
 ```turmeric no-check
 :spices {
   "plot" {:url    "https://github.com/rjungemann/turmeric-spices"
-          :ref    "plot-v0.2.0"
+          :ref    "plot-v0.3.0"
           :subdir "spices/plot"}
 }
 ```
 
 ## Quick start
+
+The sampled-curve renderers take a typed C-callable: define your function
+with `defn` rather than passing an untyped `fn` literal.
 
 ```turmeric
 (import plot/core  :refer [plot-write-png])
@@ -31,10 +34,12 @@ plots into a larger image.
 (import plot/decor :refer [axes tick-grid])
 (import plot/style :refer [default-line-style default-plot-opts])
 
+(defn quadratic [x :float] :float (* x x))
+
 (plot-write-png
   (vec-of (tick-grid)
           (axes)
-          (function (fn [x :float] :float (* x x))
+          (function quadratic
                     -2.0 2.0 128
                     (default-line-style)
                     "x^2"))
@@ -49,16 +54,24 @@ import plot/line  :refer [function]
 import plot/decor :refer [axes tick-grid]
 import plot/style :refer [default-line-style default-plot-opts]
 
+defn quadratic [x : float] : float
+  *(x x)
+
 plot-write-png
   vec-of(tick-grid()
          axes()
-         function((fn [x :float] :float *(x x))
+         function(quadratic
                   -2.0 2.0 128
                   default-line-style()
                   "x^2"))
   default-plot-opts()
   "quadratic.png"
 ```
+
+`samples` (128 above) is a baseline; the renderer adaptively bisects
+segments in high-curvature regions and around NaN boundaries up to a fixed
+depth, so smooth curves stay cheap and sharp turns get extra samples
+without forcing every caller to crank the count globally.
 
 ## See also
 

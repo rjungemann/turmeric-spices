@@ -8,16 +8,22 @@
 (import plot/decor :refer [axes tick-grid])
 (import plot/style :refer [default-line-style default-plot-opts])
 
+(defn quadratic [x :float] :float (* x x))
+
 (plot-write-png
   (vec-of (tick-grid)
           (axes)
-          (function (fn [x :float] :float (* x x))
+          (function quadratic
                     -2.0 2.0 128
                     (default-line-style)
                     "x^2"))
   (default-plot-opts)
   "function.png")
 ```
+
+Sampled-curve renderers (`function`, `parametric`, `polar`, `inverse`) take a
+typed C-callable -- define it with `defn` rather than passing an untyped
+`fn` literal.
 
 The `samples` argument (128 above) is a baseline; `function`, `parametric`,
 `polar`, and `inverse` feed it to an adaptive subdivision pass that bisects
