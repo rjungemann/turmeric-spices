@@ -1,7 +1,9 @@
 ;; tests/plot/point_test.tur -- point renderer smoke tests.
 
 (defmodule plot/tests/point
-  (import plot/core  :refer [plot-write-png])
+  (import plot/core  :refer [plot plot-write-png
+                             __is-ok? __ok-val __surface-destroy
+                             __pixel-is-background? __count-non-background])
   (import plot/point :refer [points error-bars vector-field arrows])
   (import plot/line  :refer [function])
   (import plot/decor :refer [axes])
@@ -10,7 +12,8 @@
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
 
-  (defn pair [x :float y :float] :int
+  ;; Renamed from `pair` (collides with auto-loaded stdlib `pair`).
+  (defn mk-pair [x :float y :float] :int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -55,17 +58,23 @@
     return (int64_t)st.st_size;
     ```)
 
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
+  ;; Curve / vector-field callbacks (need typed defns, not `fn` literals).
+  (defn pt-diag [x :float] :float ```c return (double)x; ```)
+  (defn pt-vf [x :float y :float] :int (mk-pair (* -1.0 y) x))
+
   (defn point-renderers [] :int
     (vec-of (axes)
-            (function (fn [x :float] :float x) -1.0 2.0 64 (default-line-style) "diag")
-            (points (t-cons (pair 0.0 0.0) (t-cons (pair 1.0 1.0) (t-cons (pair 1.5 0.5) 0)))
+            (function pt-diag -1.0 2.0 64 (default-line-style) "diag")
+            (points (t-cons (mk-pair 0.0 0.0) (t-cons (mk-pair 1.0 1.0) (t-cons (mk-pair 1.5 0.5) 0)))
                     (default-point-style)
                     "pts")
             (error-bars (t-cons (triple 0.5 0.5 0.25) (t-cons (triple 1.2 1.0 0.2) 0))
                         (default-line-style)
                         0
                         "err")
-            (vector-field (fn [x :float y :float] :int (pair (* -1.0 y) x))
+            (vector-field pt-vf
                           -1.0 1.0 -1.0 1.0
                           8 1
                           (default-line-style)
@@ -79,12 +88,23 @@
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-point.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-point.png") 100)))))
 
-  (describe "plot/point"
-    (it "renders point and arrow-based plots"
-      (write-point-png-ok)))
-
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn pixel-sanity-point [] :bool
+    (let [rs (point-renderers)
+          rr (plot rs (default-plot-opts))]
+      (if (__is-ok? rr)
+        (let [s       (__ok-val rr)
+              corner? (__pixel-is-background? s 4 4)
+              ink     (__count-non-background s 100 100 500 350)]
+          (__surface-destroy s)
+          (and (assert-true corner?)
+               (assert-true (>i ink 100))))
+        (assert-true false))))
 
   (defn main [] :int
+    (describe "plot/point"
+      (it "renders point and arrow-based plots"
+        (write-point-png-ok))
+      (it "draws non-background marks in the interior"
+        (pixel-sanity-point)))
     (run-all)
     0))

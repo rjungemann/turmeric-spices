@@ -1,7 +1,10 @@
 ;; tests/plot/core_test.tur -- basic plot surface smoke tests.
 
 (defmodule plot/tests/core
-  (import plot/core  :refer [plot plot-write-png])
+  (import plot/core  :refer [plot plot-write-png
+                             __is-ok? __ok-val __surface-destroy
+                             __surface-width __surface-height
+                             __pixel-is-background?])
   (import plot/style :refer [default-plot-opts])
   (import plot/decor :refer [axes tick-grid])
   (import test/assert :refer [assert-ok assert-true])
@@ -12,14 +15,6 @@
     ```c
     #include <unistd.h>
     return access((const char *)(intptr_t)path, F_OK) == 0;
-    ```)
-
-  (defn t-cons [v :int n :int] :int
-    ```c
-    typedef struct { int64_t head; int64_t tail; } Cons;
-    Cons *c = malloc(sizeof(*c));
-    c->head = v; c->tail = n;
-    return (int64_t)(intptr_t)c;
     ```)
 
   (defn file-size [path :cstr] :int
@@ -36,11 +31,34 @@
     unlink((const char *)(intptr_t)path);
     ```)
 
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
   (defn core-renderers [] :int
     (vec-of (tick-grid) (axes)))
 
   (defn render-blank-ok [] :bool
-    (assert-ok (plot (core-renderers) (default-plot-opts))))
+    (let [rr (plot (core-renderers) (default-plot-opts))]
+      (if (__is-ok? rr)
+        (do (__surface-destroy (__ok-val rr)) (assert-true true))
+        (assert-true false))))
+
+  ;; Render a blank chart and confirm a known background corner pixel really is
+  ;; background, and the surface has the expected dimensions. Catches
+  ;; "all-zero pixels" / "transparent canvas" regressions that file-size alone
+  ;; cannot.
+  (defn pixel-sanity-blank [] :bool
+    (let [rr (plot (core-renderers) (default-plot-opts))]
+      (if (__is-ok? rr)
+        (let [s   (__ok-val rr)
+              w   (__surface-width s)
+              h   (__surface-height s)
+              ;; (5, 5) sits in the white border outside the plot rect.
+              bg? (__pixel-is-background? s 5 5)]
+          (__surface-destroy s)
+          (and (assert-true (>i w 0))
+               (assert-true (>i h 0))
+               (assert-true bg?)))
+        (assert-true false))))
 
   (defn write-core-png-ok [] :bool
     (let [out "/tmp/tur-plot-core.png"
@@ -53,14 +71,13 @@
            (assert-true (file-exists? out))
            (assert-true (>i (file-size out) 100)))))
 
-  (describe "plot/core"
-    (it "renders a blank plot surface"
-      (render-blank-ok))
-    (it "writes a PNG"
-      (write-core-png-ok)))
-
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
-
   (defn main [] :int
+    (describe "plot/core"
+      (it "renders a blank plot surface"
+        (render-blank-ok))
+      (it "background-corner pixel is white"
+        (pixel-sanity-blank))
+      (it "writes a PNG"
+        (write-core-png-ok)))
     (run-all)
     0))

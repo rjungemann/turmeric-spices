@@ -5,6 +5,11 @@
 
   (import plot/core :refer [__make-renderer __renderer-floats __renderer-ints __renderer-bounds])
 
+  ;;; __iv-nan -- quiet NaN sentinel for "auto y bound" on function-interval.
+  ;;; Inline-C avoids the runtime div-by-zero trap on `(/ 0.0 0.0)`.
+  (defn __iv-nan [] :float
+    ```c return 0.0 / 0.0; ```)
+
   ;;; function-interval -- shade between f1(x) and f2(x).
   (defn function-interval [f1 f2 x-min :float x-max :float samples :int fill :int style :int label :cstr] :int
     (__renderer-bounds
@@ -12,7 +17,7 @@
         (__renderer-floats (__make-renderer 40 fill style f1 f2 0 0 0 label "")
                            x-min x-max 0.0 0.0 0.0 0.0)
         samples 0 0 0)
-      x-min x-max (/ 0.0 0.0) (/ 0.0 0.0)))
+      x-min x-max (__iv-nan) (__iv-nan)))
 
   ;;; lines-interval -- shade between two sampled line lists.
   (defn lines-interval [vs1 :int vs2 :int fill :int style :int label :cstr] :int

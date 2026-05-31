@@ -11,6 +11,11 @@
 
   (import plot/core :refer [__make-renderer __renderer-floats __renderer-ints __renderer-bounds])
 
+  ;;; __ln-nan -- quiet NaN sentinel for "auto y bound" on function-style renderers.
+  ;;; Inline-C avoids the runtime div-by-zero trap on `(/ 0.0 0.0)`.
+  (defn __ln-nan [] :float
+    ```c return 0.0 / 0.0; ```)
+
   ;;; function -- sample y=f(x) over [x-min, x-max].
   ;;; `samples` is the uniform baseline count; the renderer subdivides further
   ;;; in high-curvature regions and around NaN boundaries via plot/core's
@@ -21,7 +26,7 @@
         (__renderer-floats (__make-renderer 21 style 0 f 0 0 0 0 label "")
                            x-min x-max 0.0 0.0 0.0 0.0)
         samples 0 0 0)
-      x-min x-max (/ 0.0 0.0) (/ 0.0 0.0)))
+      x-min x-max (__ln-nan) (__ln-nan)))
 
   ;;; lines -- draw a polyline through a cons list of (cons x y) points.
   ;;; Pre-sampled input; the renderer plots the points as given and breaks the

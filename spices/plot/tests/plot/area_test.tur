@@ -1,7 +1,9 @@
 ;; tests/plot/area_test.tur -- area renderer smoke tests.
 
 (defmodule plot/tests/area
-  (import plot/core  :refer [plot-write-png])
+  (import plot/core  :refer [plot plot-write-png
+                             __is-ok? __ok-val __surface-destroy
+                             __pixel-is-background? __count-non-background])
   (import plot/area  :refer [rectangles area-histogram discrete-histogram stacked-histogram])
   (import plot/style :refer [default-fill-style default-plot-opts])
   (import test/assert :refer [assert-ok assert-true])
@@ -104,12 +106,27 @@
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-area.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-area.png") 100)))))
 
-  (describe "plot/area"
-    (it "renders rectangles and histograms"
-      (write-area-png-ok)))
+  (defn pixel-sanity-area [] :bool
+    (let [fill  (default-fill-style)
+          fills (t-cons fill (t-cons fill (t-cons fill 0)))
+          rs    (area-renderers fill fills)
+          rr    (plot rs (default-plot-opts))]
+      (if (__is-ok? rr)
+        (let [s       (__ok-val rr)
+              corner? (__pixel-is-background? s 4 4)
+              ink     (__count-non-background s 100 100 500 350)]
+          (__surface-destroy s)
+          (and (assert-true corner?)
+               (assert-true (>i ink 100))))
+        (assert-true false))))
 
   (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
 
   (defn main [] :int
+    (describe "plot/area"
+      (it "renders rectangles and histograms"
+        (write-area-png-ok))
+      (it "fills the plot interior with non-background pixels"
+        (pixel-sanity-area)))
     (run-all)
     0))

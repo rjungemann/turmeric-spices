@@ -5,7 +5,10 @@
           __make-renderer __renderer-floats __renderer-ints __renderer-bounds
           __surface-create __surface-destroy __surface-write-png
           __canvas-create __canvas-destroy
-          __plot-sample-adaptive)
+          __plot-sample-adaptive
+          __is-ok? __ok-val __err-val
+          __surface-width __surface-height __surface-pixel-byte
+          __pixel-is-background? __count-non-background)
 
   (import plot/style :refer [plot-opts-width plot-opts-height])
 
@@ -202,6 +205,104 @@
     ```c
     extern void plutovg_canvas_destroy(void* canvas);
     if (canvas) plutovg_canvas_destroy((void *)(intptr_t)canvas);
+    ```)
+
+  ;;; __surface-width -- width of a plutovg surface in pixels.
+  (defn __surface-width [surface :int] :int
+    ```c
+    extern int plutovg_surface_get_width(const void* surface);
+    if (!surface) return 0;
+    return (int64_t)plutovg_surface_get_width((const void *)(intptr_t)surface);
+    ```)
+
+  ;;; __surface-height -- height of a plutovg surface in pixels.
+  (defn __surface-height [surface :int] :int
+    ```c
+    extern int plutovg_surface_get_height(const void* surface);
+    if (!surface) return 0;
+    return (int64_t)plutovg_surface_get_height((const void *)(intptr_t)surface);
+    ```)
+
+  ;;; __surface-pixel-byte -- read a single byte from the surface's raw pixel buffer.
+  ;;;
+  ;;; plutovg stores pixels in 32-bpp BGRA order (premultiplied alpha) on
+  ;;; little-endian platforms. `channel` selects the byte within the pixel:
+  ;;;   0 -- B, 1 -- G, 2 -- R, 3 -- A.
+  ;;; Returns -1 if (x, y) is out of bounds.
+  (defn __surface-pixel-byte [surface :int x :int y :int channel :int] :int
+    ```c
+    extern unsigned char* plutovg_surface_get_data(const void* surface);
+    extern int plutovg_surface_get_width(const void* surface);
+    extern int plutovg_surface_get_height(const void* surface);
+    extern int plutovg_surface_get_stride(const void* surface);
+    if (!surface) return -1;
+    int w = plutovg_surface_get_width((const void *)(intptr_t)surface);
+    int h = plutovg_surface_get_height((const void *)(intptr_t)surface);
+    if ((int)x < 0 || (int)x >= w || (int)y < 0 || (int)y >= h) return -1;
+    if ((int)channel < 0 || (int)channel > 3) return -1;
+    int stride = plutovg_surface_get_stride((const void *)(intptr_t)surface);
+    unsigned char *data = plutovg_surface_get_data((const void *)(intptr_t)surface);
+    if (!data) return -1;
+    return (int64_t)data[(int)y * stride + (int)x * 4 + (int)channel];
+    ```)
+
+  ;;; __count-non-background -- count pixels in [x0, x1) x [y0, y1) that are not background.
+  ;;;
+  ;;; Useful for "this renderer produced *some* ink in this region" assertions
+  ;;; without pinning a specific pixel.
+  (defn __count-non-background [surface :int
+                                x0 :int y0 :int
+                                x1 :int y1 :int] :int
+    ```c
+    extern unsigned char* plutovg_surface_get_data(const void* surface);
+    extern int plutovg_surface_get_width(const void* surface);
+    extern int plutovg_surface_get_height(const void* surface);
+    extern int plutovg_surface_get_stride(const void* surface);
+    if (!surface) return 0;
+    int w = plutovg_surface_get_width((const void *)(intptr_t)surface);
+    int h = plutovg_surface_get_height((const void *)(intptr_t)surface);
+    int stride = plutovg_surface_get_stride((const void *)(intptr_t)surface);
+    unsigned char *data = plutovg_surface_get_data((const void *)(intptr_t)surface);
+    if (!data) return 0;
+    int xa = (int)x0 < 0 ? 0 : (int)x0;
+    int ya = (int)y0 < 0 ? 0 : (int)y0;
+    int xb = (int)x1 > w ? w : (int)x1;
+    int yb = (int)y1 > h ? h : (int)y1;
+    int64_t cnt = 0;
+    for (int yy = ya; yy < yb; yy++) {
+      for (int xx = xa; xx < xb; xx++) {
+        unsigned char b = data[yy * stride + xx * 4 + 0];
+        unsigned char g = data[yy * stride + xx * 4 + 1];
+        unsigned char r = data[yy * stride + xx * 4 + 2];
+        unsigned char a = data[yy * stride + xx * 4 + 3];
+        if (!(r >= 250 && g >= 250 && b >= 250 && a >= 250)) cnt++;
+      }
+    }
+    return cnt;
+    ```)
+
+  ;;; __pixel-is-background? -- true when a pixel is near pure white (>=250 in all RGB channels and full alpha).
+  ;;;
+  ;;; Useful for "this region was not drawn over" assertions. The plot
+  ;;; background is `fill_rect` with rgba(1,1,1,1).
+  (defn __pixel-is-background? [surface :int x :int y :int] :bool
+    ```c
+    extern unsigned char* plutovg_surface_get_data(const void* surface);
+    extern int plutovg_surface_get_width(const void* surface);
+    extern int plutovg_surface_get_height(const void* surface);
+    extern int plutovg_surface_get_stride(const void* surface);
+    if (!surface) return false;
+    int w = plutovg_surface_get_width((const void *)(intptr_t)surface);
+    int h = plutovg_surface_get_height((const void *)(intptr_t)surface);
+    if ((int)x < 0 || (int)x >= w || (int)y < 0 || (int)y >= h) return false;
+    int stride = plutovg_surface_get_stride((const void *)(intptr_t)surface);
+    unsigned char *data = plutovg_surface_get_data((const void *)(intptr_t)surface);
+    if (!data) return false;
+    unsigned char b = data[(int)y * stride + (int)x * 4 + 0];
+    unsigned char g = data[(int)y * stride + (int)x * 4 + 1];
+    unsigned char r = data[(int)y * stride + (int)x * 4 + 2];
+    unsigned char a = data[(int)y * stride + (int)x * 4 + 3];
+    return r >= 250 && g >= 250 && b >= 250 && a >= 250;
     ```)
 
   ;;; __plot-sample-adaptive -- adaptive subdivision sampler for sampled-line renderers.

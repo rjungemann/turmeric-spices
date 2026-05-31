@@ -1,7 +1,9 @@
 ;; tests/plot/contour_test.tur -- contour renderer smoke tests.
 
 (defmodule plot/tests/contour
-  (import plot/core    :refer [plot-write-png])
+  (import plot/core    :refer [plot plot-write-png
+                               __is-ok? __ok-val __surface-destroy
+                               __pixel-is-background? __count-non-background])
   (import plot/contour :refer [isoline contours contour-intervals color-field])
   (import plot/style   :refer [default-line-style default-fill-style default-plot-opts])
   (import test/assert  :refer [assert-ok assert-true])
@@ -42,12 +44,27 @@
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-contour.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-contour.png") 100)))))
 
-  (describe "plot/contour"
-    (it "renders contour-like plots"
-      (write-contour-png-ok)))
+  ;; Contour / color-field renderers should fill or stroke a large portion of
+  ;; the plot interior. A blank image would have a much lower count.
+  (defn pixel-sanity-contour [] :bool
+    (let [rs (contour-renderers)
+          rr (plot rs (default-plot-opts))]
+      (if (__is-ok? rr)
+        (let [s       (__ok-val rr)
+              corner? (__pixel-is-background? s 4 4)
+              ink     (__count-non-background s 100 100 500 350)]
+          (__surface-destroy s)
+          (and (assert-true corner?)
+               (assert-true (>i ink 500))))
+        (assert-true false))))
 
   (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
 
   (defn main [] :int
+    (describe "plot/contour"
+      (it "renders contour-like plots"
+        (write-contour-png-ok))
+      (it "covers the interior with non-background ink"
+        (pixel-sanity-contour)))
     (run-all)
     0))

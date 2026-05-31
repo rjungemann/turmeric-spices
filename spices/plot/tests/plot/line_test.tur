@@ -1,7 +1,9 @@
 ;; tests/plot/line_test.tur -- line renderer smoke tests.
 
 (defmodule plot/tests/line
-  (import plot/core  :refer [plot-write-png])
+  (import plot/core  :refer [plot plot-write-png
+                             __is-ok? __ok-val __surface-destroy
+                             __pixel-is-background? __count-non-background])
   (import plot/line  :refer [function lines parametric polar inverse density])
   (import plot/decor :refer [axes tick-grid])
   (import plot/style :refer [default-line-style default-plot-opts])
@@ -9,7 +11,8 @@
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
 
-  (defn pair [x :float y :float] :int
+  ;; Rename from `pair` (collides with auto-loaded stdlib `pair`).
+  (defn mk-pair [x :float y :float] :int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -44,27 +47,37 @@
     return (int64_t)st.st_size;
     ```)
 
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
+  ;; Sampled-curve callbacks. The renderer stores these as raw function
+  ;; pointers (`double(*)(double)` / `int64_t(*)(double)`), so they must be
+  ;; named defns rather than untyped `fn` literals.
+  (defn curve-square [x :float] :float ```c return (double)x * (double)x; ```)
+  (defn curve-half [t :float] :int (mk-pair t (* 0.5 t)))
+  (defn curve-radius [t :float] :float ```c return 0.4 + 0.1 * (double)t * (double)t; ```)
+  (defn curve-y2 [y :float] :float ```c return (double)y * (double)y; ```)
+
   (defn line-renderers [] :int
     (vec-of (tick-grid)
             (axes)
-            (function (fn [x :float] :float (* x x))
+            (function curve-square
                       -2.0 2.0 96
                       (default-line-style)
                       "f")
-            (lines (t-cons (pair -2.0 -1.0)
-                     (t-cons (pair -1.0 0.5)
-                       (t-cons (pair 1.0 1.5) 0)))
+            (lines (t-cons (mk-pair -2.0 -1.0)
+                     (t-cons (mk-pair -1.0 0.5)
+                       (t-cons (mk-pair 1.0 1.5) 0)))
                    (default-line-style)
                    "l")
-            (parametric (fn [t :float] :int (pair t (* 0.5 t)))
+            (parametric curve-half
                         -1.0 1.0 96
                         (default-line-style)
                         "p")
-            (polar (fn [t :float] :float (+ 0.4 (* 0.1 (* t t))))
+            (polar curve-radius
                    -1.0 1.0 96
                    (default-line-style)
                    "r")
-            (inverse (fn [y :float] :float (* y y))
+            (inverse curve-y2
                      -1.0 1.0 96
                      (default-line-style)
                      "i")
@@ -78,12 +91,31 @@
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-line.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-line.png") 100)))))
 
-  (describe "plot/line"
-    (it "renders line-like plots"
-      (write-line-png-ok)))
-
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  ;; Render the full line bundle to a surface and confirm the plot rect
+  ;; actually has non-background ink: the chart background is `fill_rect`
+  ;; near-white, axes/curves are darker. A blank canvas would yield zero
+  ;; non-background pixels in the interior. We require a generous floor.
+  (defn pixel-sanity-line [] :bool
+    (let [rs (line-renderers)
+          rr (plot rs (default-plot-opts))]
+      (if (__is-ok? rr)
+        (let [s       (__ok-val rr)
+              ;; corner outside the plot rect must stay background.
+              corner? (__pixel-is-background? s 4 4)
+              ;; interior rect [100..500, 100..350] is fully inside the
+              ;; plot area for the default 600x450 opts. Axes alone already
+              ;; contribute hundreds of dark pixels; require >= 100.
+              ink     (__count-non-background s 100 100 500 350)]
+          (__surface-destroy s)
+          (and (assert-true corner?)
+               (assert-true (>i ink 100))))
+        (assert-true false))))
 
   (defn main [] :int
+    (describe "plot/line"
+      (it "renders line-like plots"
+        (write-line-png-ok))
+      (it "produces non-background ink in the plot interior"
+        (pixel-sanity-line)))
     (run-all)
     0))

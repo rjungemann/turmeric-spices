@@ -9,6 +9,11 @@
   (import plot/core  :refer [__make-renderer __renderer-floats __renderer-bounds])
   (import plot/style :refer [default-line-style])
 
+  ;;; __auto-bound -- quiet NaN sentinel for "auto" bounds.
+  ;;; Inline-C avoids the runtime div-by-zero trap on `(/ 0.0 0.0)`.
+  (defn __auto-bound [] :float
+    ```c return 0.0 / 0.0; ```)
+
   ;;; x-axis -- horizontal axis at y=0.
   (defn x-axis [] :int
     (__make-renderer 1 0 0 0 0 0 0 0 "" ""))
@@ -36,7 +41,7 @@
   ;;; hrule-styled -- horizontal reference line with explicit style.
   (defn hrule-styled [y :float style :int] :int
     (let [r (__make-renderer 7 style 0 0 0 0 0 0 "" "")]
-      (__renderer-bounds (__renderer-floats r y 0.0 0.0 0.0 0.0 0.0) (/ 0.0 0.0) (/ 0.0 0.0) y y)))
+      (__renderer-bounds (__renderer-floats r y 0.0 0.0 0.0 0.0 0.0) (__auto-bound) (__auto-bound) y y)))
 
   ;;; hrule -- horizontal reference line.
   (defn hrule [y :float] :int
@@ -45,7 +50,7 @@
   ;;; vrule-styled -- vertical reference line with explicit style.
   (defn vrule-styled [x :float style :int] :int
     (let [r (__make-renderer 8 style 0 0 0 0 0 0 "" "")]
-      (__renderer-bounds (__renderer-floats r x 0.0 0.0 0.0 0.0 0.0) x x (/ 0.0 0.0) (/ 0.0 0.0))))
+      (__renderer-bounds (__renderer-floats r x 0.0 0.0 0.0 0.0 0.0) x x (__auto-bound) (__auto-bound))))
 
   ;;; vrule -- vertical reference line.
   (defn vrule [x :float] :int

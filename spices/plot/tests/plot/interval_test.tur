@@ -1,7 +1,9 @@
 ;; tests/plot/interval_test.tur -- interval renderer smoke tests.
 
 (defmodule plot/tests/interval
-  (import plot/core     :refer [plot-write-png])
+  (import plot/core     :refer [plot plot-write-png
+                                __is-ok? __ok-val __surface-destroy
+                                __pixel-is-background? __count-non-background])
   (import plot/interval :refer [function-interval lines-interval parametric-interval polar-interval])
   (import plot/decor    :refer [axes])
   (import plot/style    :refer [default-fill-style default-line-style default-plot-opts])
@@ -9,7 +11,8 @@
   (import test/suite    :refer [describe it])
   (import test/runner   :refer [run-all])
 
-  (defn pair [x :float y :float] :int
+  ;; Renamed from `pair` (collides with auto-loaded stdlib `pair`).
+  (defn mk-pair [x :float y :float] :int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -33,20 +36,24 @@
     return (int64_t)st.st_size;
     ```)
 
+  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+
+  ;; Curve callbacks (renderer wants typed function pointers, not `fn` literals).
+  (defn iv-lo [x :float] :float ```c return (double)x * (double)x; ```)
+  (defn iv-hi [x :float] :float ```c return (double)x * (double)x + 0.5; ```)
+  (defn iv-plo [t :float] :int (mk-pair t (* 0.5 t)))
+  (defn iv-phi [t :float] :int (mk-pair t (+ (* 0.5 t) 0.3)))
+  (defn iv-rlo [t :float] :float ```c return 0.4; ```)
+  (defn iv-rhi [t :float] :float ```c return 0.8; ```)
+
   (defn interval-renderers [fill :int line :int] :int
     (vec-of (axes)
-            (function-interval (fn [x :float] :float (* x x))
-                               (fn [x :float] :float (+ (* x x) 0.5))
-                               -1.5 1.5 96 fill line "fi")
-            (lines-interval (t-cons (pair -1.0 -0.5) (t-cons (pair 0.0 0.0) (t-cons (pair 1.0 0.5) 0)))
-                            (t-cons (pair -1.0 0.2) (t-cons (pair 0.0 0.7) (t-cons (pair 1.0 1.1) 0)))
+            (function-interval iv-lo iv-hi -1.5 1.5 96 fill line "fi")
+            (lines-interval (t-cons (mk-pair -1.0 -0.5) (t-cons (mk-pair 0.0 0.0) (t-cons (mk-pair 1.0 0.5) 0)))
+                            (t-cons (mk-pair -1.0 0.2) (t-cons (mk-pair 0.0 0.7) (t-cons (mk-pair 1.0 1.1) 0)))
                             fill line "li")
-            (parametric-interval (fn [t :float] :int (pair t (* 0.5 t)))
-                                 (fn [t :float] :int (pair t (+ (* 0.5 t) 0.3)))
-                                 -1.0 1.0 72 fill line "pi")
-            (polar-interval (fn [t :float] :float 0.4)
-                            (fn [t :float] :float 0.8)
-                            -1.0 1.0 72 fill line "po")))
+            (parametric-interval iv-plo iv-phi -1.0 1.0 72 fill line "pi")
+            (polar-interval iv-rlo iv-rhi -1.0 1.0 72 fill line "po")))
 
   (defn write-interval-png-ok [] :bool
     (let [fill (default-fill-style)
@@ -55,12 +62,25 @@
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-interval.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-interval.png") 100)))))
 
-  (describe "plot/interval"
-    (it "renders interval fills"
-      (write-interval-png-ok)))
-
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn pixel-sanity-interval [] :bool
+    (let [fill (default-fill-style)
+          line (default-line-style)
+          rs   (interval-renderers fill line)
+          rr   (plot rs (default-plot-opts))]
+      (if (__is-ok? rr)
+        (let [s       (__ok-val rr)
+              corner? (__pixel-is-background? s 4 4)
+              ink     (__count-non-background s 100 100 500 350)]
+          (__surface-destroy s)
+          (and (assert-true corner?)
+               (assert-true (>i ink 100))))
+        (assert-true false))))
 
   (defn main [] :int
+    (describe "plot/interval"
+      (it "renders interval fills"
+        (write-interval-png-ok))
+      (it "produces non-background ink in the interior"
+        (pixel-sanity-interval)))
     (run-all)
     0))
