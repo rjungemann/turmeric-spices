@@ -240,6 +240,34 @@ the call to `csdf-glsl-free`.
 
 ### B6. `stats` — `static` functions in included header (`pcg32.h`)
 
+> **Status:** ⚠️ Partially done; the rest is larger than stated and needs a
+> decision (see Priority order).
+>
+> Done: a separate, clean bug — `stats/test.tur` imported `pf`/`qf` from
+> `stats/dist`, but the F-distribution functions are named `pf-dist`/`qf-dist`
+> (the names the module actually defines and exports). Corrected the import.
+>
+> Still open, and bigger than the plan implied:
+> - The `static inline` problem is **not just `pcg32.h`**. `dist.tur` also
+>   defines 7+ of its own `static inline` C helpers (`__lbeta`, `__igamma_p`,
+>   `__ibeta`, `__igamma_p2`, `__ibeta2`, `__igamma_r`, `__ibeta_r`) *inside*
+>   defn inline-C bodies, and they hit the same "invalid storage class for
+>   function" error. Because these spices presumably compiled before, this
+>   looks like a change in how the current compiler emits inline-C function
+>   definitions (file scope → nested inside the defn's C function). If so, the
+>   right fix is likely compiler-side (or a documented `c-preamble`/file-scope
+>   mechanism), not hoisting dozens of helpers by hand. A module-level ```` ```c
+>   #include "stats/pcg32.h" ```` block in `rng.tur` does make `rng.tur` check
+>   clean (the header guard turns the in-body includes into no-ops), but it
+>   does not address `dist.tur`'s own static helpers, so it was not committed —
+>   a piecemeal hoist would be inconsistent.
+> - `stats/test.tur` additionally does its arithmetic at the Turmeric level
+>   (`(float n)`, `(sqrt …)`, `(min …)`, `(/ …)`) while every *passing* stats
+>   module does float math inside inline-C. `(float n)` does not yield a float
+>   under the current numeric checker, and `sqrt`/`min` resolve to int-typed
+>   builtins. test.tur needs a numeric-dialect rework (same flavor as §B3
+>   linalg) — flagged, not attempted.
+
 **Error:**
 ```
 stats/src/stats/pcg32.h:23:20: error: invalid storage class for function 'pcg32_srandom_r'
