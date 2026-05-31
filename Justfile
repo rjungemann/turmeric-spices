@@ -1,5 +1,10 @@
+# Render markdown guides under docs/guides/ to HTML (served at /guides/).
+guides:
+    python3 tools/genguides.py docs/guides/ --out docs/html/guides/
+
 # Generate per-spice HTML docs from this repo's spices/ directory.
-docs:
+# Depends on `guides` so the landing page can list guides alongside spices.
+docs: guides
     python3 tools/genspices.py --out docs/html/ --emit-json docs/html/doc-names-spices.json
 
 # Run the spices doc site locally via wrangler dev.

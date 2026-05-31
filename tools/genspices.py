@@ -40,7 +40,8 @@ PAGE_HEADER = '''\
       <img src="/logo.svg" width="101" height="28" alt="Turmeric">
     </a>
     <nav>
-      <a href="https://turmeric-lang.com/docs/html/guides/">Guides</a>
+      <a href="/guides/">Guides</a>
+      <a href="/" class="active">Spices</a>
       <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
       <a href="https://turmeric-lang.com/try">Try It</a>
     </nav>
@@ -97,6 +98,71 @@ def extract_build_description(build_tur: Path) -> str:
     text = build_tur.read_text(encoding='utf-8', errors='replace')
     m = re.search(r':description\s+"([^"]+)"', text)
     return m.group(1) if m else ''
+
+
+def _extract_guide_summary(text: str) -> str:
+    """Pull the first meaningful sentence out of a guide's intro paragraph."""
+    lines = text.splitlines()
+    i = 0
+    # Skip leading blank / heading lines
+    while i < len(lines) and (not lines[i].strip() or lines[i].lstrip().startswith('#')):
+        i += 1
+    if i >= len(lines):
+        return ''
+    is_bq = lines[i].lstrip().startswith('>')
+    para: list[str] = []
+    while i < len(lines):
+        s = lines[i].strip()
+        if not s or s.startswith('#'):
+            break
+        if is_bq:
+            if not s.startswith('>'):
+                break
+            para.append(s.lstrip('>').strip())
+        else:
+            if s.startswith('>'):
+                break
+            para.append(s)
+        i += 1
+    full = ' '.join(p for p in para if p).strip()
+    # Strip "Spice version X.Y.Z -- " and an optional trailing "<name> <ver> "
+    # stamp (e.g. "plutovg 1.3.3 ") so the summary starts with real prose.
+    full = re.sub(r'^Spice version [^\s]+\s*--\s*(?:[\w\-]+\s+[\d.]+\s+)?',
+                  '', full)
+    # Prefer the first sentence with substance (skip short version-stamp fragments).
+    for s in re.findall(r'.+?[.!?](?=\s|$)', full):
+        s = s.strip()
+        if len(s) >= 30:
+            return s
+    return full[:200].rstrip()
+
+
+def discover_guides(guides_dir: Path) -> list[dict]:
+    """
+    Scan docs/guides/*.md and return a list of {stem, title, summary} entries
+    for each guide, ordered by filename. Returns [] when the directory is
+    absent so the landing page degrades gracefully.
+    """
+    if not guides_dir.is_dir():
+        return []
+    entries: list[dict] = []
+    for md in sorted(guides_dir.glob('*.md')):
+        if md.stem == 'README':
+            continue
+        text = md.read_text(encoding='utf-8', errors='replace')
+
+        title = md.stem.replace('-', ' ').title()
+        m = re.search(r'^#\s+(.+?)\s*$', text, re.MULTILINE)
+        if m:
+            heading = m.group(1).strip()
+            title = re.sub(r'^tur-[\w\-]+\s*--\s*', '', heading).strip() or heading
+
+        entries.append({
+            'stem': md.stem,
+            'title': title,
+            'summary': _extract_guide_summary(text),
+        })
+    return entries
 
 
 def collect_spice_meta(spice_dirs: list[Path],
@@ -235,10 +301,42 @@ def render_api_reference(meta: SpiceMeta, out_dir: Path):
 # Top-level spices index
 # ---------------------------------------------------------------------------
 
-def render_top_index(metas: list[SpiceMeta], out_dir: Path) -> None:
-    """Render docs/html/index.html with one row per spice."""
+def render_top_index(metas: list[SpiceMeta], out_dir: Path,
+                     guides: list[dict] | None = None) -> None:
+    """Render docs/html/index.html with a Guides section atop the spices list."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    guides = guides or []
 
+    # ---- Guides section (rendered above the spices table) ----------------
+    if guides:
+        guide_rows = []
+        for g in guides:
+            stem = html_module.escape(g['stem'])
+            title = html_module.escape(g['title'])
+            summary = html_module.escape(g['summary'])
+            guide_rows.append(
+                '      <tr>'
+                f'<td><a href="guides/{stem}.html">{title}</a></td>'
+                f'<td>{summary}</td>'
+                '</tr>'
+            )
+        guides_table_html = (
+            '<table class="guides-table">\n'
+            '  <thead><tr><th>Guide</th><th>Summary</th></tr></thead>\n'
+            '  <tbody>\n'
+            + '\n'.join(guide_rows)
+            + '\n  </tbody>\n</table>'
+        )
+        guides_section = (
+            '<h2 id="guides" style="margin-top:1.5rem">Guides</h2>\n'
+            '<p>Long-form, task-oriented walkthroughs for individual spices. '
+            'See the <a href="guides/">full guide index</a> for sidebar navigation.</p>\n'
+            f'{guides_table_html}\n'
+        )
+    else:
+        guides_section = ''
+
+    # ---- Spices section --------------------------------------------------
     rows = []
     for meta in metas:
         name = meta['name']
@@ -270,11 +368,22 @@ def render_top_index(metas: list[SpiceMeta], out_dir: Path) -> None:
         'reference.</p>'
     )
 
+    sidebar_links = ''
+    if guides:
+        sidebar_links = (
+            '      <h3>On this page</h3>\n'
+            '      <ul>\n'
+            '        <li><a href="#guides">Guides</a></li>\n'
+            '        <li><a href="#spices">Spices</a></li>\n'
+            '      </ul>\n'
+        )
+
     sidebar_html = (
         '<div style="margin-bottom:1.25rem">'
         '<a href="https://turmeric-lang.com" style="font-size:0.8rem;color:var(--text-sec)">&larr; turmeric-lang.com</a>'
         '</div>\n      '
-        '<h3>About</h3>\n'
+        f'{sidebar_links}'
+        '      <h3>About</h3>\n'
         '      <ul>\n'
         f'        <li><a href="{GITHUB_BASE}">GitHub repo</a></li>\n'
         '      </ul>'
@@ -295,8 +404,9 @@ def render_top_index(metas: list[SpiceMeta], out_dir: Path) -> None:
   <link rel="stylesheet" href="/styles/style.css">
   <style>
 {GUIDE_CSS}
-    .spices-table {{ width:100%; margin-top:1rem; }}
+    .spices-table, .guides-table {{ width:100%; margin-top:1rem; }}
     .spices-table td code {{ font-size:0.85rem; }}
+    .guides-table th:first-child, .guides-table td:first-child {{ white-space:nowrap; }}
   </style>
 </head>
 <body>
@@ -307,7 +417,9 @@ def render_top_index(metas: list[SpiceMeta], out_dir: Path) -> None:
       {sidebar_html}
     </div>
     <div class="content guide-content">
-      <h1>Spices</h1>
+      <h1>Turmeric Spices</h1>
+      {guides_section}
+      <h2 id="spices" style="margin-top:2rem">Spices</h2>
       {intro}
       {table_html}
     </div>
@@ -361,7 +473,10 @@ def main() -> None:
             continue
         all_entries.extend(collect_doc_entries(modules, spice=meta['name']))
 
-    render_top_index(metas, out_dir)
+    guides = discover_guides(SPICES_REPO / 'docs' / 'guides')
+    if guides:
+        print(f'Found {len(guides)} guide(s) for landing-page Guides section')
+    render_top_index(metas, out_dir, guides=guides)
     if args.emit_json:
         out_json = Path(args.emit_json)
         out_json.parent.mkdir(parents=True, exist_ok=True)

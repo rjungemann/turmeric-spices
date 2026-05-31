@@ -57,15 +57,15 @@ PAGE_HEADER = '''\
     <button class="hamburger" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
     </button>
-    <a class="nav-logo" href="/">
+    <a class="nav-logo" href="https://turmeric-lang.com">
       <img src="/logo-icon.svg" width="28" height="28" alt="">
       <img src="/logo.svg" width="101" height="28" alt="Turmeric">
     </a>
     <nav>
-      <a href="/docs/html/guides/" class="active">Guides</a>
-      <a href="/docs/html/api/">API Docs</a>
-      <a href="/docs/html/spices/">Spices</a>
-      <a href="/try">Try It</a>
+      <a href="/guides/" class="active">Guides</a>
+      <a href="/">Spices</a>
+      <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
+      <a href="https://turmeric-lang.com/try">Try It</a>
     </nav>
   </header>'''
 
