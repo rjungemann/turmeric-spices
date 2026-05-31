@@ -11,6 +11,16 @@ roughly by blast radius — fix A first because it masks every other test result
 
 ## A. Test runner can't find tests in subdirectories
 
+> **Status:** ✅ Done — implemented **Option 1** (updated the CI "Run spice
+> tests" step). If `tests/` has flat `.tur` files it runs `tur test tests`
+> (covering flat spices and the linalg/template aggregators); otherwise it
+> descends and runs `tur test` on every directory that directly contains a
+> `.tur` file (covering frame-style 1-level nesting and tourist's 2-level
+> fixtures). Verified locally that the runner now finds and attempts tests in
+> every spice with a `tests/` dir — no more "no .tur files found". Template's
+> `fixtures/` (run by `run-fixtures.sh`, not `tur test`) are deliberately left
+> alone. Suites that still fail now do so for the §B/§D reasons below.
+
 ### Symptom
 
 `tur test tests` exits non-zero with:
