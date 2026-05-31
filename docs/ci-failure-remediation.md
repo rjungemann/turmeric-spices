@@ -327,6 +327,11 @@ Affects all `.tur` files under `tests/rtaudio/` and `tests/rtmidi/`.
 
 ### D2. `tidal` — local `ok` shadows stdlib
 
+> **Status:** ✅ Done — renamed the test's local result primitives (`ok`,
+> `err`, `ok?`, `err?`, `ok-val`, `err-val`) to `__`-prefixed names and a
+> further shadowing helper `list-length` → `tidal-list-length`, updating all
+> usages. `tidal` suite now passes (1/1).
+
 **Error:**
 ```
 tidal/tests/tidal/tidal_test.tur:43:9:
