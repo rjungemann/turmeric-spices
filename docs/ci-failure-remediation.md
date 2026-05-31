@@ -451,6 +451,12 @@ The `glsl` spice `build.tur` does not declare a `:spices` dependency on the
 
 ### D5. `opengl` — `assert-true` called with `int`
 
+> **Status:** ✅ Done — the cause was `(!= handle 0)`, which is int-typed in the
+> current dialect, feeding `assert-true` (which wants `bool`). Replaced all 7
+> occurrences across `buffers_test`/`window_test`/`shaders_test` with
+> `(not (= handle 0))`. The type error is gone; the suites now fail only at the
+> C-compile step on a missing `glad/gl.h` → tracked under §E.
+
 **Error (from `tests/opengl/buffers_test.tur:28`):**
 ```
 error [TUR-E0001]: function 'assert-true' arg 1: expected bool, got int
@@ -575,6 +581,7 @@ fetch step installs them.
 | `raygui` | raygui headers | `raygui` cmake dep must be fetched; CI fetch step skips if `:cmake-deps` absent from `build.tur` |
 | `ansi` (`image_test`, `term_test`) | `struct sigaction` incomplete | Likely a missing `_POSIX_C_SOURCE` or `_DEFAULT_SOURCE` feature-test macro in the inline-C preamble |
 | `wav` (`info_test`) | `sndfile.h` | Surfaced after §B2; needs `libsndfile` dev headers (system package or cmake dep). The other 2 wav suites pass. |
+| `opengl` (all 3 suites) | `glad/gl.h` | Surfaced after §D5; needs the glad/GLFW headers (cmake dep). The §D5 type fix is done, so these compile cleanly once the headers are present. |
 
 For `httpd`, `postgres`, and `raygui`, verify that `:cmake-deps` is present
 in each `build.tur` and that the CI fetch step is not being skipped.
