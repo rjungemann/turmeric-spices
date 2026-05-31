@@ -195,6 +195,12 @@ module name so it does not shadow the stdlib symbol.
 
 ### B4. `opengl/shaders.tur` — variadic body with inline-C
 
+> **Status:** ✅ Done — kept the public variadic `shader-program` API but moved
+> the inline-C into a fixed-arity helper `__shader-program-link [shaders :int]`
+> (the variadic rest-param was already passed to the inline-C as a cons-list
+> handle); the variadic form now just forwards to it. All 8 opengl source
+> files check clean. (The opengl *tests* still hit §D5.)
+
 **Error:**
 ```
 opengl/src/opengl/shaders.tur:75:3: error:
