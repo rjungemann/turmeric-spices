@@ -4,7 +4,8 @@
   (export plot plot-write-png plot-into-canvas
           __make-renderer __renderer-floats __renderer-ints __renderer-bounds
           __surface-create __surface-destroy __surface-write-png
-          __canvas-create __canvas-destroy)
+          __canvas-create __canvas-destroy
+          __plot-sample-adaptive)
 
   (import plot/style :refer [plot-opts-width plot-opts-height])
 
@@ -201,6 +202,177 @@
     ```c
     extern void plutovg_canvas_destroy(void* canvas);
     if (canvas) plutovg_canvas_destroy((void *)(intptr_t)canvas);
+    ```)
+
+  ;;; __plot-sample-adaptive -- adaptive subdivision sampler for sampled-line renderers.
+  ;;;
+  ;;; Walks the parameter interval `[r->f1, r->f2]` in `initial-samples`
+  ;;; uniform pieces and bisects each piece when the angle between adjacent
+  ;;; screen-space segments exceeds the subdivision threshold, up to a fixed
+  ;;; recursion cap. NaN evaluations break the active sub-path so curves with
+  ;;; vertical asymptotes (e.g. tan, 1/x) render as separate strokes.
+  ;;;
+  ;;; Strokes the resulting polyline onto canvas. The caller is responsible for
+  ;;; installing the line style (color / width / dash / alpha) before invoking.
+  ;;; Supports renderer kinds RK_FUNCTION (21), RK_PARAMETRIC (22),
+  ;;; RK_POLAR (23), and RK_INVERSE (24); other kinds are a no-op.
+  ;;;
+  ;;; Parameters:
+  ;;;   renderer        -- PlotRenderer* (treat as opaque int64_t handle)
+  ;;;   canvas          -- plutovg canvas handle
+  ;;;   bx-min/bx-max   -- data-space x bounds
+  ;;;   by-min/by-max   -- data-space y bounds
+  ;;;   left/top        -- viewport top-left in canvas pixels
+  ;;;   plot-w/plot-h   -- viewport size in pixels
+  ;;;   initial-samples -- baseline uniform sample count (clamped to >= 2)
+  ;;;
+  ;;; Since: plot-v0.1.0
+  (defn __plot-sample-adaptive [renderer :int canvas :int
+                                bx-min :float bx-max :float
+                                by-min :float by-max :float
+                                left :int top :int
+                                plot-w :int plot-h :int
+                                initial-samples :int] :void
+    ```c
+    extern double cos(double);
+    extern double sin(double);
+    extern double sqrt(double);
+    extern void plutovg_canvas_move_to(void* canvas, float x, float y);
+    extern void plutovg_canvas_line_to(void* canvas, float x, float y);
+    extern void plutovg_canvas_stroke(void* canvas);
+
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct __plot_renderer {
+      int64_t kind;
+      int64_t style1, style2;
+      int64_t data1, data2, data3, data4, data5;
+      double f1, f2, f3, f4, f5, f6;
+      int64_t i1, i2, i3, i4;
+      char *label;
+      char *text;
+      double x_min, x_max, y_min, y_max;
+    } PlotRenderer;
+
+    #define ADAPTIVE_BITS_DBL(v) (((union { double d; int64_t i; }){.i=(v)}).d)
+    #define ADAPTIVE_ISNAN(v) ((v) != (v))
+
+    enum { RK_FUNCTION_K = 21, RK_PARAMETRIC_K = 22, RK_POLAR_K = 23, RK_INVERSE_K = 24 };
+
+    PlotRenderer *r = (PlotRenderer *)(intptr_t)renderer;
+    void *cv = (void *)(intptr_t)canvas;
+    if (!r || !cv) return;
+    if (r->kind != RK_FUNCTION_K && r->kind != RK_INVERSE_K
+        && r->kind != RK_PARAMETRIC_K && r->kind != RK_POLAR_K) return;
+
+    int n = (int)initial_samples; if (n < 2) n = 2;
+    double t_min = r->f1, t_max = r->f2;
+    if (!(t_max > t_min)) return;
+    double inv_w = (bx_max > bx_min) ? 1.0 / (bx_max - bx_min) : 1.0;
+    double inv_h = (by_max > by_min) ? 1.0 / (by_max - by_min) : 1.0;
+    double pw_d = (double)plot_w, ph_d = (double)plot_h;
+    double left_d = (double)left, top_d = (double)top;
+
+    enum { MAX_DEPTH = 6 };
+    const double cos_thresh = 0.9961947;  /* cos(5 deg) */
+    const double min_seg_px2 = 0.25;      /* (0.5 px)^2 floor */
+
+    typedef struct { double t; double vx, vy; int valid; } Sample;
+
+    #define EVAL_AT(T, OUT) do { \
+      double __t = (T); \
+      double __x = 0.0, __y = 0.0; \
+      if (r->kind == RK_FUNCTION_K) { __x = __t; __y = ((double(*)(double))(intptr_t)r->data1)(__t); } \
+      else if (r->kind == RK_INVERSE_K) { __y = __t; __x = ((double(*)(double))(intptr_t)r->data1)(__t); } \
+      else if (r->kind == RK_PARAMETRIC_K) { \
+        Cons *__pair = (Cons *)(intptr_t)((int64_t(*)(double))(intptr_t)r->data1)(__t); \
+        if (__pair) { __x = ADAPTIVE_BITS_DBL(__pair->head); __y = ADAPTIVE_BITS_DBL(__pair->tail); } \
+        else { __x = __y = 0.0/0.0; } \
+      } else { \
+        double __radius = ((double(*)(double))(intptr_t)r->data1)(__t); \
+        __x = __radius * cos(__t); __y = __radius * sin(__t); \
+      } \
+      (OUT).t = __t; \
+      if (ADAPTIVE_ISNAN(__x) || ADAPTIVE_ISNAN(__y)) { (OUT).valid = 0; (OUT).vx = 0.0; (OUT).vy = 0.0; } \
+      else { \
+        double __tx = (__x - bx_min) * inv_w; \
+        double __ty = (__y - by_min) * inv_h; \
+        (OUT).vx = left_d + __tx * pw_d; \
+        (OUT).vy = top_d + ph_d - __ty * ph_d; \
+        (OUT).valid = 1; \
+      } \
+    } while (0)
+
+    int started = 0;
+    #define EMIT(S) do { \
+      if ((S).valid) { \
+        if (!started) { plutovg_canvas_move_to(cv, (float)(S).vx, (float)(S).vy); started = 1; } \
+        else { plutovg_canvas_line_to(cv, (float)(S).vx, (float)(S).vy); } \
+      } else { \
+        started = 0; \
+      } \
+    } while (0)
+
+    typedef struct { Sample A, B; int depth; } Frame;
+    Frame stack[MAX_DEPTH * 2 + 4];
+
+    Sample prev; EVAL_AT(t_min, prev);
+    EMIT(prev);
+
+    for (int i = 0; i < n - 1; i++) {
+      double tB = t_min + (t_max - t_min) * ((double)(i + 1) / (double)(n - 1));
+      Sample A = prev;
+      Sample B; EVAL_AT(tB, B);
+
+      int sp = 0;
+      stack[sp].A = A; stack[sp].B = B; stack[sp].depth = 0; sp++;
+
+      while (sp > 0) {
+        Frame f = stack[--sp];
+        int subdivide = 0;
+        Sample M; M.valid = 0; M.t = 0.0; M.vx = 0.0; M.vy = 0.0;
+        double dx_ab = f.B.vx - f.A.vx;
+        double dy_ab = f.B.vy - f.A.vy;
+        double seg_len2 = dx_ab * dx_ab + dy_ab * dy_ab;
+        int both_valid = f.A.valid && f.B.valid;
+
+        if (f.depth < MAX_DEPTH && (!both_valid || seg_len2 > min_seg_px2)) {
+          double tM = 0.5 * (f.A.t + f.B.t);
+          EVAL_AT(tM, M);
+          if (M.valid != f.A.valid || M.valid != f.B.valid) {
+            /* Validity transition inside segment -> bisect to localize the gap. */
+            subdivide = 1;
+          } else if (both_valid && M.valid) {
+            double v1x = M.vx - f.A.vx, v1y = M.vy - f.A.vy;
+            double v2x = f.B.vx - M.vx, v2y = f.B.vy - M.vy;
+            double l1 = v1x * v1x + v1y * v1y;
+            double l2 = v2x * v2x + v2y * v2y;
+            if (l1 > min_seg_px2 && l2 > min_seg_px2) {
+              double dot = v1x * v2x + v1y * v2y;
+              double denom = sqrt(l1 * l2);
+              double cos_a = (denom > 0.0) ? (dot / denom) : 1.0;
+              if (cos_a < cos_thresh) subdivide = 1;
+            }
+          }
+        }
+
+        if (subdivide) {
+          /* Right then left so left pops first => emission is left-to-right. */
+          stack[sp].A = M;   stack[sp].B = f.B; stack[sp].depth = f.depth + 1; sp++;
+          stack[sp].A = f.A; stack[sp].B = M;   stack[sp].depth = f.depth + 1; sp++;
+        } else {
+          EMIT(f.B);
+        }
+      }
+
+      prev = B;
+    }
+
+    if (started) plutovg_canvas_stroke(cv);
+
+    #undef EVAL_AT
+    #undef EMIT
+    #undef ADAPTIVE_BITS_DBL
+    #undef ADAPTIVE_ISNAN
     ```)
 
   ;;; data->viewport -- map data coordinates to viewport coordinates.
