@@ -365,6 +365,15 @@ update the test to build the argument list in the way `c-join` actually expects.
 
 ### D4. `glsl` — `test/assert` not found
 
+> **Status:** ✅ Done (the missing dep). Added the standard
+> `:spices #{ "test" #{...} }` block to `spices/glsl/build.tur`; `test/assert`
+> now resolves. **Downstream (separate, §D3 family):** both glsl test files
+> then fail on a list-encoding API mismatch — they build statement/decl lists
+> as `cons`/`vec-of` of `cstr` values, but `glsl-stmts`/`glsl-defn`/
+> `glsl-vertex-shader` expect `:int`-encoded lists (`vec-push! arg 2: expected
+> int, got cstr`; `expression in call head has type cstr`). The glsl *source*
+> compiles fine. Tracked with §D3.
+
 **Error:**
 ```
 glsl/tests/glsl/codegen_test.tur:11:3: error: module 'test/assert' not found
