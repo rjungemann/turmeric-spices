@@ -80,6 +80,13 @@ These are caught by `tur check` and block compilation.
 
 ### B1. `watch/watch.tur` — unterminated `defmodule`
 
+> **Status:** ✅ Done — added the missing closing `)` for the `defmodule`.
+> `watch/watch.tur` now checks clean, and `notebook/main.tur` + `cli.tur`
+> (which transitively import it) now check clean too. **Newly surfaced:** with
+> the source fixed, the `watch` *test* suite now fails at C compile time
+> because its inline-C helpers use `usleep`/`useconds_t`/`FILE` without the
+> needed feature-test macro and headers — tracked under §E4a.
+
 **Error:**
 ```
 watch/src/watch/watch.tur:29:1: error: unterminated list (missing ')')
@@ -389,6 +396,26 @@ in each `build.tur` and that the CI fetch step is not being skipped.
 For `ansi`, add `#define _DEFAULT_SOURCE` (or `_POSIX_C_SOURCE 200809L`)
 before the `#include <signal.h>` in the relevant inline-C block to expose
 `struct sigaction` on glibc systems.
+
+### E4a. `watch` test suite — inline-C missing feature macro / headers
+
+> **Status:** Open — surfaced after the §B1 fix.
+
+Once `watch/watch.tur` compiles, the `watch` test suite (8 of 9 files) fails
+at the C compile step:
+
+```
+tests_backend_drain_into_test_tur.c:21: error: 'useconds_t' undeclared
+... warning: implicit declaration of function 'usleep'
+... error: unknown type name 'FILE'
+```
+
+The test helpers embed inline-C that calls `usleep` and uses `FILE`/`fopen`
+without the feature-test macro and headers. Same class as the `ansi` row.
+
+**Fix:** In the inline-C blocks of the affected `watch` test files, add
+`#define _DEFAULT_SOURCE` and `#include <unistd.h>` / `#include <stdio.h>`
+(or hoist these into a shared test preamble).
 
 ---
 
