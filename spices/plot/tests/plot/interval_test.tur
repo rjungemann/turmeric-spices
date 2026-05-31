@@ -9,7 +9,7 @@
   (import test/suite    :refer [describe it])
   (import test/runner   :refer [run-all])
 
-  (defn pair [x :float y :float] :int
+  (defn xy-pair [x :float y :float] :int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -38,11 +38,11 @@
             (function-interval (fn [x :float] :float (* x x))
                                (fn [x :float] :float (+ (* x x) 0.5))
                                -1.5 1.5 96 fill line "fi")
-            (lines-interval (t-cons (pair -1.0 -0.5) (t-cons (pair 0.0 0.0) (t-cons (pair 1.0 0.5) 0)))
-                            (t-cons (pair -1.0 0.2) (t-cons (pair 0.0 0.7) (t-cons (pair 1.0 1.1) 0)))
+            (lines-interval (t-cons (xy-pair -1.0 -0.5) (t-cons (xy-pair 0.0 0.0) (t-cons (xy-pair 1.0 0.5) 0)))
+                            (t-cons (xy-pair -1.0 0.2) (t-cons (xy-pair 0.0 0.7) (t-cons (xy-pair 1.0 1.1) 0)))
                             fill line "li")
-            (parametric-interval (fn [t :float] :int (pair t (* 0.5 t)))
-                                 (fn [t :float] :int (pair t (+ (* 0.5 t) 0.3)))
+            (parametric-interval (fn [t :float] :int (xy-pair t (* 0.5 t)))
+                                 (fn [t :float] :int (xy-pair t (+ (* 0.5 t) 0.3)))
                                  -1.0 1.0 72 fill line "pi")
             (polar-interval (fn [t :float] :float 0.4)
                             (fn [t :float] :float 0.8)

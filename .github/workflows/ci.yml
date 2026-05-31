@@ -124,10 +124,43 @@ jobs:
         env:
           TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
         run: |
-          if [ -d tests ]; then
-            "$GITHUB_WORKSPACE/turmeric/build/tur" test tests
-          else
+          # `tur test <dir>` is NOT recursive -- it only picks up *.tur files
+          # at the top level of the directory it is given.  Spices store their
+          # test suites in one of two layouts:
+          #
+          #   1. flat:    tests/*.tur                      (ansi, notebook, ...)
+          #               (or a flat aggregator that imports nested modules,
+          #                e.g. linalg/tests/linalg.tur, template/tests/smoke.tur)
+          #   2. nested:  tests/<group>/*_test.tur         (frame, plot, ...)
+          #               or tests/<group>/<case>/*.tur    (tourist fixtures)
+          #
+          # If tests/ has any flat .tur file we run `tur test tests` and stop:
+          # that covers the flat spices and the aggregators (descending would
+          # double-run the modules the aggregator already imports, and would
+          # wrongly try to `tur test` non-suite fixtures like template's).
+          # Otherwise we descend and run `tur test` on every directory that
+          # directly contains a .tur file.
+          if [ ! -d tests ]; then
             echo "no tests/ directory; skipping test run"
+            exit 0
+          fi
+          TUR="$GITHUB_WORKSPACE/turmeric/build/tur"
+          if ls tests/*.tur >/dev/null 2>&1; then
+            "$TUR" test tests
+          else
+            n_fail=0
+            while IFS= read -r d; do
+              echo "== tur test $d =="
+              if ! "$TUR" test "$d"; then
+                n_fail=$((n_fail + 1))
+              fi
+            done < <(find tests -name '*.tur' -print0 \
+                       | xargs -0 -n1 dirname \
+                       | sort -u)
+            if [ "$n_fail" -gt 0 ]; then
+              echo "$n_fail test directory/directories failed"
+              exit 1
+            fi
           fi
 
   # Enumerate the spices/ subdirectories that contain a build.tur so the

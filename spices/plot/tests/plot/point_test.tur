@@ -10,7 +10,7 @@
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
 
-  (defn pair [x :float y :float] :int
+  (defn xy-pair [x :float y :float] :int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -58,14 +58,14 @@
   (defn point-renderers [] :int
     (vec-of (axes)
             (function (fn [x :float] :float x) -1.0 2.0 64 (default-line-style) "diag")
-            (points (t-cons (pair 0.0 0.0) (t-cons (pair 1.0 1.0) (t-cons (pair 1.5 0.5) 0)))
+            (points (t-cons (xy-pair 0.0 0.0) (t-cons (xy-pair 1.0 1.0) (t-cons (xy-pair 1.5 0.5) 0)))
                     (default-point-style)
                     "pts")
             (error-bars (t-cons (triple 0.5 0.5 0.25) (t-cons (triple 1.2 1.0 0.2) 0))
                         (default-line-style)
                         0
                         "err")
-            (vector-field (fn [x :float y :float] :int (pair (* -1.0 y) x))
+            (vector-field (fn [x :float y :float] :int (xy-pair (* -1.0 y) x))
                           -1.0 1.0 -1.0 1.0
                           8 1
                           (default-line-style)
