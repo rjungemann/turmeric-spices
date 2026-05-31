@@ -266,6 +266,10 @@ not in the spice source. They will surface once §A is resolved.
 
 ### D1. `rtaudio` / `rtmidi` — `defmodule` accidentally inside comment
 
+> **Status:** ✅ Done — split the opening line of all 7 affected test files so
+> `(defmodule ...)` starts on its own line. Both suites now compile and pass
+> (`rtaudio` 3/3, `rtmidi` 4/4).
+
 **Error:**
 ```
 rtaudio/tests/rtaudio/core_test.tur:13:7: error: unexpected ')'
