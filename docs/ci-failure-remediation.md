@@ -217,6 +217,13 @@ of shaders rather than a variadic rest argument.
 
 ### B5. `sdf-raylib/integration.tur` — unbound `scene-glsl`
 
+> **Status:** ✅ Done — the real cause was paren placement: the inline-C
+> block's closing ` ```)` also closed the `(let [scene-glsl ...] ...)`, so the
+> trailing `(csdf-glsl-free scene-glsl)` cleanup landed *outside* the `let`
+> where `scene-glsl` is unbound. Dropped the `)` from the fence line and closed
+> the `let` after the cleanup call instead. All 16 sdf-raylib source files
+> check clean.
+
 **Error:**
 ```
 sdf-raylib/src/raylib/integration.tur:537:19: error [TUR-E0003]: unbound symbol 'scene-glsl'
