@@ -482,7 +482,15 @@ a struct type that the current emitter handles cleanly.
 
 ### D7. `plot` — local `pair` shadows stdlib (surfaced after §B2)
 
-> **Status:** Open — same class as §D2.
+> **Status:** ✅ Done (the `pair` shadow) — renamed the local `pair` helper to
+> `xy-pair` (defn + usages) in `interval_test`, `line_test`, `point_test`.
+> **Downstream (dialect drift, still open):** those same three suites then fail
+> with `compile-time fn parameter must be a symbol` on their typed `fn`
+> lambdas, e.g. `(fn [x :float] :float (* x x))` passed to
+> `function-interval`/`parametric`. The current compiler rejects typed
+> anonymous-fn params here. This is the same older-dialect pattern seen in the
+> glsl/stats/linalg test files (see "Systemic note" below). plot *source*
+> compiles; 3/6 plot suites pass.
 
 `tests/plot/interval_test.tur`, `line_test.tur`, and `point_test.tur` each
 define a local `(defn pair [x :float y :float] :int ...)` that collides with
@@ -523,6 +531,34 @@ directions:
    every spice.
 
 This was masked by the B2 `ok-val` error and is independent of it.
+
+---
+
+## Systemic note: older-dialect drift in test files
+
+Several spices' **test files** (not their source) were written against an
+earlier Turmeric dialect and fail once the headline issue is cleared. The
+recurring forms:
+
+| Pattern | Current compiler says | Seen in |
+|---|---|---|
+| Typed `fn` lambdas: `(fn [x :float] :float ...)` | `compile-time fn parameter must be a symbol` | plot (§D7) |
+| Turmeric-level float math + `(float n)` cast | `(float n)` is int; `sqrt`/`min` are int-typed → `mixed-width numeric arithmetic` | stats/test.tur (§B6) |
+| `cons`/`vec-of` of `cstr` into `:int`-list APIs | `expected int, got cstr` / `cstr is not callable` | glsl (§D3/§D4), c-dsl (§D3) |
+| void-bodied `(it ...)` blocks | `it arg 2: expected bool, got nil` | plutovg (§D8) |
+| Turmeric-level `malloc`/`free`/`printf`, old `defstruct` | unbound symbol / bad field list | linalg (§B3) |
+
+Because the *source* of most of these spices compiles, the most likely root
+cause is that the compiler tightened (or changed) these behaviors after the
+tests were written. A blanket decision is probably more efficient than fixing
+each test file by hand:
+
+- decide whether typed `fn` lambdas / Turmeric-level numeric casts are meant
+  to be supported (→ possible compiler fix), or whether the tests should be
+  rewritten to the current idiom (inline-C float math, `:int`-encoded lists);
+- and whether `it` should accept void bodies (→ `test/suite` change, see §D8).
+
+These are grouped here so they can be triaged together rather than piecemeal.
 
 ---
 
