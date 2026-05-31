@@ -184,6 +184,8 @@ affected definitions to `extern` with a matching `.c` compilation unit.
 
 ### B7. `notebook` — cannot resolve `ansi/term`
 
+> **Status:** ✅ Done via §C (added `spices/ansi` to root `:members`).
+
 **Error:**
 ```
 notebook/src/notebook/tui.tur:12:3: error: module 'ansi/term' not found
@@ -199,6 +201,11 @@ this for all affected spices at once).
 ---
 
 ## C. New spices missing from root workspace `:members`
+
+> **Status:** ✅ Done — all ten added to root `build.tur` `:members`. Verified
+> `notebook/tui.tur` now resolves `ansi/term` (B7 fixed). `notebook/main.tur`
+> and `cli.tur` still fail, but only because they transitively import the
+> broken `watch/watch.tur` (B1).
 
 The following spice directories exist on disk but are absent from the root
 `build.tur` `:members` list:
