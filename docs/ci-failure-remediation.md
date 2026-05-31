@@ -101,6 +101,32 @@ is missing its closing `)`. The last line of the file needs an additional `)`.
 
 ### B2. `ok-val` receives `ptr<void>` — affects `plot`, `plutovg`, `wav`
 
+> **Status:** ✅ Done (the `ok-val`/`ptr<void>` mismatch itself). These spices
+> roll their own `Result` encoding — a malloc'd `{is_ok, ok_val, err_val}`
+> struct returned as an opaque handle — but the call sites used the stdlib
+> `ok?`/`ok-val`/`err-val`, which only accept the stdlib `Result` type.
+>
+> Fix applied:
+> - **plot**: `plot/core.tur` defines its own encoding (`__ok`/`__err`); added
+>   local `__ok?`/`__ok-val`/`__err-val` accessors and switched the 11 call
+>   sites to them. `plot/core.tur` now checks clean.
+> - **plutovg/wav (tests)**: added reusable `result-ok?`/`result-val`/
+>   `result-err` accessors to `test/assert` (co-located with `assert-ok`,
+>   which already reads this struct), exported them in `test/assert.tur` and
+>   `test/build.tur`, and switched the test call sites off the stdlib
+>   `ok?`/`ok-val`.
+>
+> **Downstream issues surfaced once the type error cleared:**
+> - **wav**: type error gone; 2/3 suites pass. `info_test` now fails only on a
+>   missing `sndfile.h` → tracked under §E.
+> - **plot**: `core.tur` compiles, 3/6 suites pass. `interval`/`line`/`point`
+>   tests define a local `pair` that shadows the stdlib `pair` (same class as
+>   §D2) → tracked under §D7.
+> - **plutovg**: type error gone, but the suites use multi-statement `(it ...)`
+>   bodies that end in cleanup (void), while `it` is `(defn it [desc result
+>   :bool])`. ~40 `it` blocks need restructuring to return a bool → tracked
+>   under §D8 (needs a decision, see Priority order).
+
 **Error (representative):**
 ```
 plot/src/plot/core.tur:1151:31: error [TUR-E0001]:
@@ -381,6 +407,52 @@ a struct type that the current emitter handles cleanly.
 
 ---
 
+### D7. `plot` — local `pair` shadows stdlib (surfaced after §B2)
+
+> **Status:** Open — same class as §D2.
+
+`tests/plot/interval_test.tur`, `line_test.tur`, and `point_test.tur` each
+define a local `(defn pair [x :float y :float] :int ...)` that collides with
+the auto-loaded stdlib `pair`:
+
+```
+error: defn: 'pair' is already defined by an auto-loaded stdlib module
+```
+
+**Fix:** Rename the local helper (e.g. `plot-pair` or `__pair`) in those test
+files. `plot/core.tur` itself compiles; 3 of 6 plot suites already pass.
+
+---
+
+### D8. `plutovg` — `(it ...)` bodies don't return `bool` (surfaced after §B2)
+
+> **Status:** Open — needs a decision (see Priority order). Out of original
+> plan scope.
+
+`test/suite`'s `it` is `(defn it [desc :cstr result :bool] :bool)` — its
+second argument is an eagerly-evaluated bool. The plutovg suites instead pass
+multi-statement `(let ...)` bodies that perform asserts and end in resource
+cleanup (`(surface-destroy s)` etc.), which return `:void`:
+
+```
+error [TUR-E0001]: function 'it' arg 2: expected bool, got nil
+```
+
+There are ~40 such `(it ...)` blocks across the plutovg tests. Two possible
+directions:
+
+1. **Restructure each test body** to compute a single bool pass-value, run
+   cleanup, then return the bool. Faithful, but laborious and amounts to
+   authoring test logic for each case.
+2. **Change the framework**: give `test/suite` an `it`-like form that accepts
+   a void/any body (e.g. a macro that treats reaching the end without a failed
+   assert as a pass). This changes how the suite tally is computed and affects
+   every spice.
+
+This was masked by the B2 `ok-val` error and is independent of it.
+
+---
+
 ## E. Missing native C libraries
 
 These spices fail to compile their tests because system headers or libraries
@@ -393,6 +465,7 @@ fetch step installs them.
 | `postgres` | `libpq-fe.h` | Requires a PostgreSQL client dev package or a bundled `libpq` cmake dep |
 | `raygui` | raygui headers | `raygui` cmake dep must be fetched; CI fetch step skips if `:cmake-deps` absent from `build.tur` |
 | `ansi` (`image_test`, `term_test`) | `struct sigaction` incomplete | Likely a missing `_POSIX_C_SOURCE` or `_DEFAULT_SOURCE` feature-test macro in the inline-C preamble |
+| `wav` (`info_test`) | `sndfile.h` | Surfaced after §B2; needs `libsndfile` dev headers (system package or cmake dep). The other 2 wav suites pass. |
 
 For `httpd`, `postgres`, and `raygui`, verify that `:cmake-deps` is present
 in each `build.tur` and that the CI fetch step is not being skipped.

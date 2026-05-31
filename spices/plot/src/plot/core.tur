@@ -24,6 +24,29 @@
     r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
     ```)
 
+  ;;; __ok? -- true if the ptr<void> PlotResult r is an ok value.
+  ;;; (The stdlib ok?/ok-val/err-val operate on the Result type, not on this
+  ;;; spice's hand-rolled ptr<void> encoding, so we provide local accessors.)
+  (defn __ok? [r :ptr<void>] :bool
+    ```c
+    struct PlotResult { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return r ? ((struct PlotResult *)r)->is_ok : false;
+    ```)
+
+  ;;; __ok-val -- extract the ok payload from a ptr<void> PlotResult.
+  (defn __ok-val [r :ptr<void>] :int
+    ```c
+    struct PlotResult { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return r ? ((struct PlotResult *)r)->ok_val : 0;
+    ```)
+
+  ;;; __err-val -- extract the err payload from a ptr<void> PlotResult.
+  (defn __err-val [r :ptr<void>] :int
+    ```c
+    struct PlotResult { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return r ? ((struct PlotResult *)r)->err_val : 0;
+    ```)
+
   ;;; __make-renderer -- allocate the generic opaque renderer handle used by all plot modules.
   (defn __make-renderer [kind :int
                          style1 :int style2 :int
@@ -1147,20 +1170,20 @@
     (let [w (if (> (plot-opts-width opts) 0) (plot-opts-width opts) 600)
           h (if (> (plot-opts-height opts) 0) (plot-opts-height opts) 450)
           sr (__surface-create w h)]
-      (if (ok? sr)
-        (let [surface (ok-val sr)
+      (if (__ok? sr)
+        (let [surface (__ok-val sr)
               cr (__canvas-create surface)]
-          (if (ok? cr)
-            (let [canvas (ok-val cr)
+          (if (__ok? cr)
+            (let [canvas (__ok-val cr)
                   rr (plot-into-canvas canvas renderers opts 0 0 w h)]
               (__canvas-destroy canvas)
-              (if (ok? rr)
+              (if (__ok? rr)
                 (__ok surface)
                 (do
                   (__surface-destroy surface)
-                  (__err (err-val rr)))))
-            (__err (err-val cr))))
-        (__err (err-val sr)))))
+                  (__err (__err-val rr)))))
+            (__err (__err-val cr))))
+        (__err (__err-val sr)))))
 
   ;;; plot-write-png -- render a Vec[Renderer] and write it to a PNG file.
   ;;;
@@ -1168,11 +1191,11 @@
   ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
   (defn plot-write-png [renderers :int opts :int path :cstr] :ptr<void>
     (let [r (plot renderers opts)]
-      (if (ok? r)
-        (let [s (ok-val r)
+      (if (__ok? r)
+        (let [s (__ok-val r)
               wr (__surface-write-png s path)]
           (__surface-destroy s)
           wr)
-        (__err (err-val r)))))
+        (__err (__err-val r)))))
 
 ) ;; end defmodule plot/core

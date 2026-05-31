@@ -3,7 +3,7 @@
 
 (defmodule plutovg/tests/state
   (import test/suite      :refer [describe it])
-  (import test/assert     :refer [assert-eq assert-ok])
+  (import test/assert     :refer [assert-eq assert-ok result-val])
   (import test/runner     :refer [run-all])
   (import plutovg/surface :refer [surface-create surface-destroy])
   (import plutovg/canvas  :refer [canvas-create canvas-destroy
@@ -37,9 +37,9 @@
     (it "translates the origin so a 1x1 fill lands at (2, 1)"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr)]
+          (let [c (result-val cr)]
             (canvas-translate c 2.0 1.0)
             (fill-origin-red c)
             ;; Pixel (2, 1) = byte offset (1*16) + (2*4) = 24..27 (B G R A)
@@ -57,9 +57,9 @@
     (it "save/restore isolates a translate"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr)]
+          (let [c (result-val cr)]
             (canvas-save c)
             (canvas-translate c 3.0 0.0)
             (fill-origin-red c)
@@ -78,9 +78,9 @@
     (it "discards accumulated translate / scale"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr)]
+          (let [c (result-val cr)]
             (canvas-translate c 2.0 2.0)
             (canvas-scale c 2.0 2.0)
             (canvas-reset-transform c)
@@ -94,9 +94,9 @@
     (it "scales the alpha of subsequent fills"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr)]
+          (let [c (result-val cr)]
             (canvas-set-opacity c 0.5)
             (canvas-set-source-color c 1.0 0.0 0.0 1.0)
             (canvas-rect c 0.0 0.0 1.0 1.0)
@@ -114,11 +114,11 @@
     (it "accepts a dash buffer and applies it to a stroke (smoke check)"
       (let [sr (surface-create 8 1)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)
+        (let [s (result-val sr) cr (canvas-create s)
               dr (dash-array-create)]
           (assert-ok cr)
           (assert-ok dr)
-          (let [c (ok-val cr) dashes (ok-val dr)]
+          (let [c (result-val cr) dashes (result-val dr)]
             (dash-array-add dashes 2.0)  ; 2 on
             (dash-array-add dashes 2.0)  ; 2 off
             (assert-eq 2 (dash-array-count dashes))
@@ -145,9 +145,9 @@
     (it "accepts :non-zero and :even-odd keyword values"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr)]
+          (let [c (result-val cr)]
             (canvas-set-fill-rule c ":non-zero")
             (canvas-set-fill-rule c ":even-odd")
             (canvas-destroy c))
@@ -157,9 +157,9 @@
     (it "accepts the documented Porter-Duff keywords"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr)]
+          (let [c (result-val cr)]
             (canvas-set-operator c ":src-over")
             (canvas-set-operator c ":src-in")
             (canvas-set-operator c ":dst-out")

@@ -8,7 +8,7 @@
 
 (defmodule plutovg/tests/paint
   (import test/suite      :refer [describe it])
-  (import test/assert     :refer [assert-eq assert-ok])
+  (import test/assert     :refer [assert-eq assert-ok result-val])
   (import test/runner     :refer [run-all])
   (import plutovg/surface :refer [surface-create surface-destroy])
   (import plutovg/canvas  :refer [canvas-create canvas-destroy
@@ -33,11 +33,11 @@
     (it "fills a rect via canvas-set-source with a solid-color paint"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr) pr (paint-create-color 1.0 0.0 0.0 1.0)]
+          (let [c (result-val cr) pr (paint-create-color 1.0 0.0 0.0 1.0)]
             (assert-ok pr)
-            (let [paint (ok-val pr)]
+            (let [paint (result-val pr)]
               (canvas-set-source c paint)
               (canvas-rect c 0.0 0.0 4.0 4.0)
               (canvas-fill c)
@@ -47,18 +47,18 @@
               (assert-eq 255 (surface-byte s 2))
               (assert-eq 255 (surface-byte s 3))
               (paint-destroy paint)))
-          (canvas-destroy (ok-val cr))
+          (canvas-destroy (result-val cr))
           (surface-destroy s)))))
 
   (describe "plutovg/paint hex-string color"
     (it "parses '#0000ff' as opaque blue"
       (let [sr (surface-create 4 4)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)]
+        (let [s (result-val sr) cr (canvas-create s)]
           (assert-ok cr)
-          (let [c (ok-val cr) pr (paint-create-color-hex "#0000ff")]
+          (let [c (result-val cr) pr (paint-create-color-hex "#0000ff")]
             (assert-ok pr)
-            (let [paint (ok-val pr)]
+            (let [paint (result-val pr)]
               (canvas-set-source c paint)
               (canvas-rect c 0.0 0.0 4.0 4.0)
               (canvas-fill c)
@@ -68,7 +68,7 @@
               (assert-eq 0   (surface-byte s 2))
               (assert-eq 255 (surface-byte s 3))
               (paint-destroy paint)))
-          (canvas-destroy (ok-val cr))
+          (canvas-destroy (result-val cr))
           (surface-destroy s)))))
 
   (describe "plutovg/paint hex-string rejection"
@@ -88,7 +88,7 @@
     (it "counts the stops added to a buffer"
       (let [sr (gradient-stops-create)]
         (assert-ok sr)
-        (let [s (ok-val sr)]
+        (let [s (result-val sr)]
           (assert-eq 0 (gradient-stops-count s))
           (gradient-stops-add s 0.0 1.0 0.0 0.0 1.0)
           (gradient-stops-add s 1.0 0.0 0.0 1.0 1.0)
@@ -99,46 +99,46 @@
     (it "constructs a 2-stop linear gradient and paints a rect (smoke)"
       (let [sr (surface-create 8 8)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)
+        (let [s (result-val sr) cr (canvas-create s)
               stops-r (gradient-stops-create)]
           (assert-ok cr)
           (assert-ok stops-r)
-          (let [stops (ok-val stops-r)]
+          (let [stops (result-val stops-r)]
             (gradient-stops-add stops 0.0 1.0 0.0 0.0 1.0)  ; red
             (gradient-stops-add stops 1.0 0.0 0.0 1.0 1.0)  ; blue
             (let [pr (paint-create-linear-gradient
                         0.0 0.0 8.0 0.0 ":pad" stops)]
               (assert-ok pr)
-              (let [paint (ok-val pr)]
-                (canvas-set-source (ok-val cr) paint)
-                (canvas-rect (ok-val cr) 0.0 0.0 8.0 8.0)
-                (canvas-fill (ok-val cr))
+              (let [paint (result-val pr)]
+                (canvas-set-source (result-val cr) paint)
+                (canvas-rect (result-val cr) 0.0 0.0 8.0 8.0)
+                (canvas-fill (result-val cr))
                 ;; Smoke: the leftmost pixel column should have a non-zero
                 ;; red component (stop 0 is red).
                 (let [r0 (surface-byte s 2)]
                   (assert-eq true (>i r0 0)))
                 (paint-destroy paint)))
             (gradient-stops-destroy stops))
-          (canvas-destroy (ok-val cr))
+          (canvas-destroy (result-val cr))
           (surface-destroy s)))))
 
   (describe "plutovg/paint radial gradient"
     (it "constructs a radial gradient and paints without crashing"
       (let [sr (surface-create 8 8)]
         (assert-ok sr)
-        (let [s (ok-val sr) cr (canvas-create s)
+        (let [s (result-val sr) cr (canvas-create s)
               stops-r (gradient-stops-create)]
           (assert-ok cr)
           (assert-ok stops-r)
-          (let [stops (ok-val stops-r)]
+          (let [stops (result-val stops-r)]
             (gradient-stops-add stops 0.0 0.0 1.0 0.0 1.0)
             (gradient-stops-add stops 1.0 0.0 0.0 1.0 1.0)
             (let [pr (paint-create-radial-gradient
                         4.0 4.0 4.0 4.0 4.0 0.0 ":pad" stops)]
               (assert-ok pr)
-              (paint-destroy (ok-val pr)))
+              (paint-destroy (result-val pr)))
             (gradient-stops-destroy stops))
-          (canvas-destroy (ok-val cr))
+          (canvas-destroy (result-val cr))
           (surface-destroy s)))))
 
   (describe "plutovg/paint texture"
@@ -150,20 +150,20 @@
             dst-r (surface-create 4 4)]
         (assert-ok src-r)
         (assert-ok dst-r)
-        (let [src (ok-val src-r) dst (ok-val dst-r)
+        (let [src (result-val src-r) dst (result-val dst-r)
               src-cr (canvas-create src)]
           (assert-ok src-cr)
-          (let [src-c (ok-val src-cr)
+          (let [src-c (result-val src-cr)
                 green (paint-create-color 0.0 1.0 0.0 1.0)]
             (assert-ok green)
-            (canvas-set-source src-c (ok-val green))
+            (canvas-set-source src-c (result-val green))
             (canvas-rect src-c 0.0 0.0 2.0 2.0)
             (canvas-fill src-c)
-            (paint-destroy (ok-val green))
+            (paint-destroy (result-val green))
             (canvas-destroy src-c))
           (let [tex-r (paint-create-texture src ":tiled" 1.0)]
             (assert-ok tex-r)
-            (paint-destroy (ok-val tex-r)))
+            (paint-destroy (result-val tex-r)))
           (surface-destroy src)
           (surface-destroy dst)))))
 
