@@ -633,6 +633,11 @@ a:hover { text-decoration: underline; }
 .sidebar li { margin: 0.15rem 0; }
 .sidebar a { font-size: 0.825rem; color: var(--text-sec); font-family: 'Iosevka', 'Fira Code', monospace; }
 .sidebar a:hover { color: var(--gold-bright); text-decoration: none; }
+.sidebar-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.25rem 0 0.5rem;
+}
 
 /* Content */
 .content {
@@ -988,6 +993,27 @@ _SIDEBAR_TOGGLE_JS = """\
 </script>"""
 
 
+SIDEBAR_GLOBALS = """\
+  <hr class="sidebar-divider">
+  <h3>Spices</h3>
+  <ul>
+    <li><a href="/">Index</a></li>
+    <li><a href="/guides/">Guides</a></li>
+  </ul>
+  <h3>Turmeric</h3>
+  <ul>
+    <li><a href="https://turmeric-lang.com">Home</a></li>
+    <li><a href="https://turmeric-lang.com/docs/html/guides/">Guides</a></li>
+    <li><a href="https://turmeric-lang.com/docs/html/api/">API Docs</a></li>
+    <li><a href="https://turmeric-lang.com/try">Try It</a></li>
+  </ul>
+  <h3>Community</h3>
+  <ul>
+    <li><a href="https://github.com/rjungemann/turmeric-spices">GitHub</a></li>
+  </ul>
+"""
+
+
 def _html_header(title, css_path='style.css'):
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1159,6 +1185,7 @@ def render_module_page(module, out_dir, brand='stdlib'):
     # Build sidebar TOC (exported only)
     sidebar = '<div class="sidebar">\n'
     sidebar += '  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>\n'
+    sidebar += '  <hr class="sidebar-divider">\n'
     sidebar += '  <h3>Exported</h3>\n  <ul>\n'
     for defn in exported:
         anchor = re.sub(r'[^a-zA-Z0-9_\-]', '_', defn['name'])
@@ -1169,6 +1196,7 @@ def render_module_page(module, out_dir, brand='stdlib'):
         for defn in internal:
             sidebar += f'    <li><a href="#{html_module.escape(defn["name"])}" style="color:var(--faint)">{html_module.escape(defn["name"])}</a></li>\n'
         sidebar += '  </ul>\n'
+    sidebar += SIDEBAR_GLOBALS
     sidebar += '</div>\n'
 
     # Path display: prefer the relative path stored on the module (when generated
@@ -1302,6 +1330,7 @@ def render_index_page(modules, out_dir, brand='stdlib', brand_label=None):
 
     sidebar = '<div class="sidebar">\n'
     sidebar += '  <div style="margin-bottom:1.25rem"><a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a></div>\n'
+    sidebar += SIDEBAR_GLOBALS
     sidebar += '</div>\n'
 
     page = _html_header(f'{brand_label} | API Docs', css_path='style.css')

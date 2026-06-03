@@ -23,7 +23,7 @@ import markdown as md_lib
 
 sys.path.insert(0, str(Path(__file__).parent))
 from genguides import (SIDEBAR_TOGGLE_JS, SYNTAX_TOGGLE_JS,
-                       TURMERIC_HIGHLIGHT_JS, GUIDE_CSS,
+                       TURMERIC_HIGHLIGHT_JS, GUIDE_CSS, SIDEBAR_GLOBALS,
                        inject_syntax_toggles, toc_tokens_to_sidebar)
 from gendocs import render_tree, collect_doc_entries
 
@@ -231,7 +231,9 @@ def render_front_page(meta: SpiceMeta, out_dir: Path, style_rel: str) -> None:
         '<div style="margin-bottom:1.25rem">'
         '<a href="api/" style="font-size:0.85rem;color:var(--gold-bright)">API reference &rarr;</a>'
         '</div>\n      '
-        f'<h3>On this page</h3>\n      <ul>{sidebar_items}</ul>'
+        '<hr class="sidebar-divider">\n      '
+        f'<h3>On this page</h3>\n      <ul>{sidebar_items}</ul>\n'
+        f'{SIDEBAR_GLOBALS}'
     )
 
     title = f'tur-{meta["name"]} | Turmeric Spices'
@@ -382,11 +384,9 @@ def render_top_index(metas: list[SpiceMeta], out_dir: Path,
         '<div style="margin-bottom:1.25rem">'
         '<a href="https://turmeric-lang.com" style="font-size:0.8rem;color:var(--text-sec)">&larr; turmeric-lang.com</a>'
         '</div>\n      '
+        '<hr class="sidebar-divider">\n'
         f'{sidebar_links}'
-        '      <h3>About</h3>\n'
-        '      <ul>\n'
-        f'        <li><a href="{GITHUB_BASE}">GitHub repo</a></li>\n'
-        '      </ul>'
+        f'{SIDEBAR_GLOBALS}'
     )
 
     html = f'''<!DOCTYPE html>
