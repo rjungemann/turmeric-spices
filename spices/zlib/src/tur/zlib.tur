@@ -1,0 +1,299 @@
+;;; tur/zlib -- gzip + raw deflate encode/decode for Turmeric.
+;;;
+;;; Wraps system zlib (pinned upstream via :cmake-deps).  All functions are
+;;; binary-safe buffer-in / buffer-out: inputs are (ptr, byte-count) pairs
+;;; and outputs are heap-allocated GzipBuf handles that carry their own
+;;; length, so embedded NUL bytes round-trip correctly.
+;;;
+;;; The GzipBuf result owns its compressed-bytes allocation; the caller
+;;; frees it via gzip-buf-free.  Pass the data pointer to whatever sink
+;;; needs the bytes (e.g. an httpd response body setter) before freeing.
+;;;
+;;; Since: Phase Z1
+
+;; -------------------------------------------------------------------------
+;; Internal: GzipBuf shape (kept in one allocation, opaque to callers).
+;;
+;;   struct __gzbuf { int64_t len; unsigned char data[]; };
+;;
+;; The flexible array means a single malloc holds both metadata and bytes,
+;; and a single free releases everything.
+;; -------------------------------------------------------------------------
+
+;;; gzip-encode -- gzip-compress a raw byte buffer.
+;;;
+;;; Parameters:
+;;;   data     -- input buffer (ptr<void>)
+;;;   data-len -- input byte count
+;;;
+;;; Returns:
+;;;   A newly-allocated GzipBuf (opaque ptr<void>) with the compressed
+;;;   bytes; the caller frees via gzip-buf-free.  Returns NULL on
+;;;   allocation failure or zlib internal error.
+;;;
+;;; Example:
+;;;   (let [b (gzip-encode src src-len)]
+;;;     (use-bytes (gzip-buf-data b) (gzip-buf-len b))
+;;;     (gzip-buf-free b))
+;;;
+;;; Since: Phase Z1
+(defn gzip-encode [data :ptr<void> data-len :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <zlib.h>
+  struct __gzbuf { int64_t len; unsigned char data[1]; };
+  if (data_len < 0) return NULL;
+  uLong src_len = (uLong)data_len;
+  /* deflateBound is an upper bound on the raw deflate output; the gzip
+     wrapper adds at most 18 bytes of header/trailer plus a few for the
+     extra fields.  +64 is plenty of slack. */
+  uLong bound = deflateBound(NULL, src_len) + 64;
+  z_stream zs;
+  memset(&zs, 0, sizeof(zs));
+  /* windowBits = 15 + 16 selects the gzip wrapper. */
+  if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                   15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+    return NULL;
+  unsigned char *out = (unsigned char *)malloc((size_t)bound);
+  if (!out) { deflateEnd(&zs); return NULL; }
+  zs.next_in   = (Bytef *)data;
+  zs.avail_in  = (uInt)src_len;
+  zs.next_out  = (Bytef *)out;
+  zs.avail_out = (uInt)bound;
+  int rc = deflate(&zs, Z_FINISH);
+  if (rc != Z_STREAM_END) { free(out); deflateEnd(&zs); return NULL; }
+  size_t produced = (size_t)zs.total_out;
+  deflateEnd(&zs);
+  struct __gzbuf *b = (struct __gzbuf *)malloc(sizeof(int64_t) + produced);
+  if (!b) { free(out); return NULL; }
+  b->len = (int64_t)produced;
+  memcpy(b->data, out, produced);
+  free(out);
+  return b;
+  ```)
+
+;;; gzip-decode -- gzip-decompress to a new buffer.
+;;;
+;;; Parameters:
+;;;   data     -- compressed input buffer (ptr<void>); must start with
+;;;               the standard gzip magic bytes (1F 8B).
+;;;   data-len -- input byte count
+;;;
+;;; Returns:
+;;;   A newly-allocated GzipBuf (opaque ptr<void>) with the decompressed
+;;;   bytes; the caller frees via gzip-buf-free.  Returns NULL on
+;;;   allocation failure or invalid input.  Use inflate-raw for raw
+;;;   deflate streams (no gzip wrapper).
+;;;
+;;; Example:
+;;;   (let [b (gzip-decode src src-len)]
+;;;     (use-bytes (gzip-buf-data b) (gzip-buf-len b))
+;;;     (gzip-buf-free b))
+;;;
+;;; Since: Phase Z1
+(defn gzip-decode [data :ptr<void> data-len :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <zlib.h>
+  struct __gzbuf { int64_t len; unsigned char data[1]; };
+  if (data_len < 0) return NULL;
+  z_stream zs;
+  memset(&zs, 0, sizeof(zs));
+  /* windowBits = 15 + 32 enables automatic gzip/zlib header detection. */
+  if (inflateInit2(&zs, 15 + 32) != Z_OK) return NULL;
+  zs.next_in  = (Bytef *)data;
+  zs.avail_in = (uInt)data_len;
+  size_t cap = (size_t)data_len * 4 + 64;
+  unsigned char *out = (unsigned char *)malloc(cap);
+  if (!out) { inflateEnd(&zs); return NULL; }
+  size_t produced = 0;
+  for (;;) {
+    if (produced == cap) {
+      size_t new_cap = cap * 2;
+      unsigned char *new_out = (unsigned char *)realloc(out, new_cap);
+      if (!new_out) { free(out); inflateEnd(&zs); return NULL; }
+      out = new_out; cap = new_cap;
+    }
+    zs.next_out  = (Bytef *)(out + produced);
+    zs.avail_out = (uInt)(cap - produced);
+    int rc = inflate(&zs, Z_NO_FLUSH);
+    produced = cap - zs.avail_out;
+    if (rc == Z_STREAM_END) break;
+    if (rc != Z_OK)        { free(out); inflateEnd(&zs); return NULL; }
+    if (zs.avail_in == 0 && zs.avail_out > 0) {
+      free(out); inflateEnd(&zs); return NULL;
+    }
+  }
+  inflateEnd(&zs);
+  struct __gzbuf *b = (struct __gzbuf *)malloc(sizeof(int64_t) + produced);
+  if (!b) { free(out); return NULL; }
+  b->len = (int64_t)produced;
+  memcpy(b->data, out, produced);
+  free(out);
+  return b;
+  ```)
+
+;;; deflate-raw -- compress a buffer using raw deflate (no gzip wrapper).
+;;;
+;;; Parameters:
+;;;   data     -- input buffer (ptr<void>)
+;;;   data-len -- input byte count
+;;;
+;;; Returns:
+;;;   A GzipBuf with the raw-deflate bytes, or NULL on failure.  Caller
+;;;   frees via gzip-buf-free.
+;;;
+;;; Example:
+;;;   (let [b (deflate-raw src src-len)]
+;;;     (write-bytes (gzip-buf-data b) (gzip-buf-len b))
+;;;     (gzip-buf-free b))
+;;;
+;;; Since: Phase Z1
+(defn deflate-raw [data :ptr<void> data-len :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <zlib.h>
+  struct __gzbuf { int64_t len; unsigned char data[1]; };
+  if (data_len < 0) return NULL;
+  uLong src_len = (uLong)data_len;
+  uLong bound = deflateBound(NULL, src_len) + 64;
+  z_stream zs;
+  memset(&zs, 0, sizeof(zs));
+  /* Negative windowBits selects raw deflate (no wrapper). */
+  if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                   -15, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+    return NULL;
+  unsigned char *out = (unsigned char *)malloc((size_t)bound);
+  if (!out) { deflateEnd(&zs); return NULL; }
+  zs.next_in   = (Bytef *)data;
+  zs.avail_in  = (uInt)src_len;
+  zs.next_out  = (Bytef *)out;
+  zs.avail_out = (uInt)bound;
+  int rc = deflate(&zs, Z_FINISH);
+  if (rc != Z_STREAM_END) { free(out); deflateEnd(&zs); return NULL; }
+  size_t produced = (size_t)zs.total_out;
+  deflateEnd(&zs);
+  struct __gzbuf *b = (struct __gzbuf *)malloc(sizeof(int64_t) + produced);
+  if (!b) { free(out); return NULL; }
+  b->len = (int64_t)produced;
+  memcpy(b->data, out, produced);
+  free(out);
+  return b;
+  ```)
+
+;;; inflate-raw -- decompress a raw deflate stream (no gzip wrapper).
+;;;
+;;; Parameters:
+;;;   data     -- compressed input buffer (ptr<void>)
+;;;   data-len -- input byte count
+;;;
+;;; Returns:
+;;;   A GzipBuf with the decompressed bytes, or NULL on failure.  Caller
+;;;   frees via gzip-buf-free.
+;;;
+;;; Example:
+;;;   (let [b (inflate-raw src src-len)]
+;;;     (use-bytes (gzip-buf-data b) (gzip-buf-len b))
+;;;     (gzip-buf-free b))
+;;;
+;;; Since: Phase Z1
+(defn inflate-raw [data :ptr<void> data-len :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <zlib.h>
+  struct __gzbuf { int64_t len; unsigned char data[1]; };
+  if (data_len < 0) return NULL;
+  z_stream zs;
+  memset(&zs, 0, sizeof(zs));
+  if (inflateInit2(&zs, -15) != Z_OK) return NULL;
+  zs.next_in  = (Bytef *)data;
+  zs.avail_in = (uInt)data_len;
+  size_t cap = (size_t)data_len * 4 + 64;
+  unsigned char *out = (unsigned char *)malloc(cap);
+  if (!out) { inflateEnd(&zs); return NULL; }
+  size_t produced = 0;
+  for (;;) {
+    if (produced == cap) {
+      size_t new_cap = cap * 2;
+      unsigned char *new_out = (unsigned char *)realloc(out, new_cap);
+      if (!new_out) { free(out); inflateEnd(&zs); return NULL; }
+      out = new_out; cap = new_cap;
+    }
+    zs.next_out  = (Bytef *)(out + produced);
+    zs.avail_out = (uInt)(cap - produced);
+    int rc = inflate(&zs, Z_NO_FLUSH);
+    produced = cap - zs.avail_out;
+    if (rc == Z_STREAM_END) break;
+    if (rc != Z_OK)        { free(out); inflateEnd(&zs); return NULL; }
+    if (zs.avail_in == 0 && zs.avail_out > 0) {
+      free(out); inflateEnd(&zs); return NULL;
+    }
+  }
+  inflateEnd(&zs);
+  struct __gzbuf *b = (struct __gzbuf *)malloc(sizeof(int64_t) + produced);
+  if (!b) { free(out); return NULL; }
+  b->len = (int64_t)produced;
+  memcpy(b->data, out, produced);
+  free(out);
+  return b;
+  ```)
+
+;;; gzip-buf-data -- raw byte pointer into a GzipBuf payload.
+;;;
+;;; Parameters:
+;;;   b -- GzipBuf handle from gzip-encode/gzip-decode/deflate-raw/inflate-raw
+;;;
+;;; Returns:
+;;;   A ptr<void> into the buffer's bytes.  The pointer is valid until
+;;;   gzip-buf-free is called.  Pair with gzip-buf-len for the byte count.
+;;;
+;;; Example:
+;;;   (write-bytes fd (gzip-buf-data b) (gzip-buf-len b))
+;;;
+;;; Since: Phase Z1
+(defn gzip-buf-data [b :ptr<void>] :ptr<void>
+  ```c
+  struct __gzbuf { int64_t len; unsigned char data[1]; };
+  struct __gzbuf *p = (struct __gzbuf *)b;
+  if (!p) return NULL;
+  return (void *)p->data;
+  ```)
+
+;;; gzip-buf-len -- byte count of a GzipBuf payload.
+;;;
+;;; Parameters:
+;;;   b -- GzipBuf handle
+;;;
+;;; Returns:
+;;;   Number of bytes in the buffer.  Returns 0 for a NULL handle.
+;;;
+;;; Example:
+;;;   (gzip-buf-len b)
+;;;
+;;; Since: Phase Z1
+(defn gzip-buf-len [b :ptr<void>] :int
+  ```c
+  struct __gzbuf { int64_t len; unsigned char data[1]; };
+  struct __gzbuf *p = (struct __gzbuf *)b;
+  if (!p) return 0;
+  return (int64_t)p->len;
+  ```)
+
+;;; gzip-buf-free -- release a GzipBuf allocation.
+;;;
+;;; Parameters:
+;;;   b -- GzipBuf handle (NULL is a no-op)
+;;;
+;;; Example:
+;;;   (gzip-buf-free b)
+;;;
+;;; Since: Phase Z1
+(defn gzip-buf-free [b :ptr<void>] :void
+  ```c
+  #include <stdlib.h>
+  if (b) free(b);
+  ```)

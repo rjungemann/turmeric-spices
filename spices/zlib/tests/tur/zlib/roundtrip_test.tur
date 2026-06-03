@@ -1,0 +1,62 @@
+;; tests/tur/zlib/roundtrip_test.tur -- gzip encode -> decode roundtrip.
+;;
+;; Repeats "hello world\n" 100x so the gzip output is materially shorter
+;; than the input, encodes it, decodes the result, and asserts byte-for-byte
+;; equality with the original.
+
+(defmodule tur/zlib/tests/roundtrip
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-eq assert-true])
+  (import test/runner :refer [run-all])
+  (import tur/zlib    :refer [gzip-encode gzip-decode
+                              gzip-buf-data gzip-buf-len gzip-buf-free])
+
+;;; build-input -- allocate "hello world\n" repeated `reps` times.
+(defn build-input [reps :int] :ptr<void>
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const char *unit = "hello world\n";
+  size_t ulen = strlen(unit);
+  size_t total = ulen * (size_t)reps;
+  unsigned char *buf = (unsigned char *)malloc(total);
+  for (int i = 0; i < (int)reps; i++) memcpy(buf + (size_t)i * ulen, unit, ulen);
+  return buf;
+  ```)
+
+;;; bufs-equal? -- compare two ptr<void> buffers of length `n` for equality.
+(defn bufs-equal? [a :ptr<void> b :ptr<void> n :int] :int
+  ```c
+  #include <string.h>
+  if (n <= 0) return 1;
+  return memcmp(a, b, (size_t)n) == 0 ? 1 : 0;
+  ```)
+
+;;; free-bytes -- free a raw buffer from build-input.
+(defn free-bytes [b :ptr<void>] :void
+  ```c
+  #include <stdlib.h>
+  if (b) free(b);
+  ```)
+
+(describe "tur/zlib roundtrip"
+  (it "gzip-encode then gzip-decode recovers the original bytes"
+    (let [reps    100
+          unit    12                       ;; strlen("hello world\n")
+          src-len (* reps unit)
+          src     (build-input reps)
+          enc     (gzip-encode src src-len)
+          enc-len (gzip-buf-len enc)
+          dec     (gzip-decode (gzip-buf-data enc) enc-len)
+          dec-len (gzip-buf-len dec)
+          ok-len  (assert-eq src-len dec-len)
+          ok-eq   (assert-true (bufs-equal? src (gzip-buf-data dec) dec-len))
+          ok-comp (assert-true (if (< enc-len src-len) 1 0))]
+      (gzip-buf-free enc)
+      (gzip-buf-free dec)
+      (free-bytes src)
+      (println "roundtrip=ok"))))
+
+(defn main [] :int
+  (run-all)
+  0))
