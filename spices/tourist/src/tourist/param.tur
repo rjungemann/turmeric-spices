@@ -19,7 +19,7 @@
 ;;   struct __tourist_ctx {
 ;;     // first 8 fields MUST match __httpd_req exactly (same offsets)
 ;;     char  *method;
-;;     char  *path;
+;;     char  *path;       // mutated by url-map! to point at the stripped suffix
 ;;     char  *query;      // raw query string (borrowed from httpd req)
 ;;     char  *body;
 ;;     char **hdr_keys;
@@ -32,13 +32,15 @@
 ;;     char  **qp_vals;   // parsed query-param values (owned)
 ;;     int     qp_count;
 ;;     int     qp_cap;
+;;     char   *full_path; // original unstripped path (borrowed from httpd req)
 ;;   };
 
 (defmodule tourist/param
   (import tourist/router :refer [captures-get captures-free])
   (export param capture
           tourist-ctx-new tourist-ctx-free
-          tourist-ctx-caps)
+          tourist-ctx-caps
+          tourist-ctx-strip-path req-full-path)
 
 ;; -- Internal: query-string parser ----------------------------------------
 
@@ -56,6 +58,7 @@
     char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
     int64_t caps;
     char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
   };
 
   struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
@@ -112,8 +115,74 @@
     char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
     int64_t caps;
     char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
   };
   return ((struct __tourist_ctx *)(intptr_t)ctx)->caps;
+  ```)
+
+;;; tourist-ctx-strip-path -- swap ctx->path with new-path and return the old.
+;;;
+;;; Used by url-map! to make req-path return a path with the mount prefix
+;;; removed. The caller is responsible for calling tourist-ctx-strip-path
+;;; again with the original pointer to restore ctx->path after the sub-app
+;;; returns. new-path may be a pointer into the borrowed httpd request
+;;; buffer (e.g. ctx->path + prefix-len) or a string literal such as "/".
+;;;
+;;; The original (pre-strip) path remains available via req-full-path; it is
+;;; recorded once at ctx construction time and is not affected by this call.
+;;;
+;;; Parameters:
+;;;   ctx      -- :int tourist ctx handle
+;;;   new-path -- :cstr new value for ctx->path
+;;;
+;;; Returns:
+;;;   :cstr -- previous ctx->path value; pass it back in to restore.
+;;;
+;;; Since: v0.2.0
+(defn tourist-ctx-strip-path [ctx :int new-path :cstr] :cstr
+  ```c
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+  };
+  struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
+  char *prev = c->path;
+  c->path = (char *)(intptr_t)new_path;
+  return (const char *)prev;
+  ```)
+
+;;; req-full-path -- original request path before any url-map! stripping.
+;;;
+;;; Inside a url-map! sub-app, req-path returns the path with the matched
+;;; mount prefix stripped. req-full-path always returns the original path
+;;; as received by the server.
+;;;
+;;; Parameters:
+;;;   ctx -- :int tourist ctx handle
+;;;
+;;; Returns:
+;;;   :cstr -- the original (unstripped) request path
+;;;
+;;; Example:
+;;;   ;; Request: GET /api/users  ;; sub-app mounted at /api
+;;;   (req-path      ctx)  ;; => "/users"
+;;;   (req-full-path ctx)  ;; => "/api/users"
+;;;
+;;; Since: v0.2.0
+(defn req-full-path [ctx :int] :cstr
+  ```c
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+  };
+  struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
+  return c->full_path ? c->full_path : c->path;
   ```)
 
 ;; -- Context lifecycle -----------------------------------------------------
@@ -159,6 +228,7 @@
     char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
     int64_t caps;
     char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
   };
 
   struct __httpd_req  *r = (struct __httpd_req  *)(intptr_t)req;
@@ -177,6 +247,7 @@
   c->qp_count  = 0;
   c->qp_keys   = malloc(sizeof(char *) * (size_t)c->qp_cap);
   c->qp_vals   = malloc(sizeof(char *) * (size_t)c->qp_cap);
+  c->full_path = r->path;
 
   return (int64_t)(intptr_t)c;
   ```)
@@ -212,6 +283,7 @@
     char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
     int64_t caps;
     char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
   };
   if (ctx == 0) return;
   struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
@@ -258,6 +330,7 @@
     char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
     int64_t caps;
     char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
   };
   struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
   struct __tourist_ctx *c   = (struct __tourist_ctx *)(intptr_t)ctx;

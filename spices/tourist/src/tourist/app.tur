@@ -23,6 +23,7 @@
   (import tourist/param     :refer [tourist-ctx-new tourist-ctx-free])
   (import tourist/router    :refer [router-match captures-free])
   (import tourist/static    :refer [static-item? static-route-fs-root static-serve])
+  (import tourist/routing   :refer [subapp-item? subapp-call])
   (import httpd/server      :refer [server-start])
   (import httpd/request     :refer [req-method req-path])
   (import httpd/response    :refer [not-found])
@@ -182,6 +183,16 @@
     (let [route (__tourist-cons-head routes)
           path  (req-path req)
           rqm   (req-method req)]
+      (if (subapp-item? route)
+        ;; Sub-app (url-map!/cascade!): build a ctx with empty captures and
+        ;; delegate. A return of 0 means "no inner route matched" -- fall
+        ;; through to the next item, exactly like a static-route miss.
+        (let [ctx  (tourist-ctx-new req 0)
+              resp (subapp-call route ctx)]
+          (tourist-ctx-free ctx)
+          (if (not= resp 0)
+            resp
+            (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
       (if (static-item? route)
         ;; Static file route: GET only; fall through on any miss.
         (if (__tourist-method-match? "GET" rqm)
@@ -207,7 +218,7 @@
                   (tourist-ctx-free ctx)
                   resp)
                 (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
-            (__tourist-route-dispatch (__tourist-cons-tail routes) req)))))))
+            (__tourist-route-dispatch (__tourist-cons-tail routes) req))))))))
 
 ;;; __tourist-handler -- top-level request handler passed to server-start.
 ;;;
