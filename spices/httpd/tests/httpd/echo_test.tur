@@ -20,20 +20,20 @@
   ;; Helpers: unwrap http/client's result<:int> and compare cstr equality.
   ;; ---------------------------------------------------------------------
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return 0;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
@@ -42,7 +42,7 @@
   ;; Local "<method> <path>" join -- stdlib/str-concat is generic and trips
   ;; over the elaborator when reached transitively through several spices,
   ;; so we inline a tiny purpose-built helper here.
-  (defn echo-join [method :cstr path :cstr] :cstr
+  (defn echo-join [method : cstr path : cstr] : cstr
     ```c
     #include <stdlib.h>
     #include <string.h>
@@ -61,14 +61,14 @@
   ;; Handler: echo "<METHOD> <PATH>" with status 200, text/plain.
   ;; ---------------------------------------------------------------------
 
-  (defn echo-handler [req :int] :int
+  (defn echo-handler [req : int] : int
     (resp-ok "text/plain" (echo-join (req-method req) (req-path req))))
 
   ;; ---------------------------------------------------------------------
   ;; Test driver
   ;; ---------------------------------------------------------------------
 
-  (defn main [] :int
+  (defn main [] : int
     (let [srv (server-start 18081 echo-handler)]
       (do
         (sleep-ms 50)

@@ -8,25 +8,25 @@
   (export http-get http-post http-put http-delete http-request)
 
 ;; Private request-struct accessors
-(defn __req-method [req :int] :cstr
+(defn __req-method [req : int] : cstr
   ```c
   struct __req { char *method; char *url; char *body; int64_t headers; };
   return ((struct __req *)(intptr_t)req)->method;
   ```)
 
-(defn __req-url [req :int] :cstr
+(defn __req-url [req : int] : cstr
   ```c
   struct __req { char *method; char *url; char *body; int64_t headers; };
   return ((struct __req *)(intptr_t)req)->url;
   ```)
 
-(defn __req-body [req :int] :cstr
+(defn __req-body [req : int] : cstr
   ```c
   struct __req { char *method; char *url; char *body; int64_t headers; };
   return ((struct __req *)(intptr_t)req)->body;
   ```)
 
-(defn __req-hdrs [req :int] :int
+(defn __req-hdrs [req : int] : int
   ```c
   struct __req { char *method; char *url; char *body; int64_t headers; };
   return ((struct __req *)(intptr_t)req)->headers;
@@ -34,7 +34,7 @@
 
 ;; Private: perform a raw HTTP/HTTPS request.
 ;; headers is a cons-list of alternating key/value :cstr strings (or 0 = nil).
-(defn __do-request [method :cstr url :cstr body :cstr headers :int] :ptr<void>
+(defn __do-request [method : cstr url : cstr body : cstr headers : int] : ptr<void>
   ```c
   #include <mbedtls/net_sockets.h>
   #include <mbedtls/ssl.h>
@@ -269,7 +269,7 @@
 ;;;     (when (ok? r) (println (response-body (ok-val r)))))
 ;;;
 ;;; Since: P5
-(defn http-get [url :cstr] :ptr<void>
+(defn http-get [url : cstr] : ptr<void>
   (__do-request "GET" url "" 0))
 
 ;;; http-post -- perform an HTTP POST request with a string body.
@@ -285,7 +285,7 @@
 ;;;   (http-post "https://httpbin.org/post" "{\"x\":1}")
 ;;;
 ;;; Since: P5
-(defn http-post [url :cstr body :cstr] :ptr<void>
+(defn http-post [url : cstr body : cstr] : ptr<void>
   (__do-request "POST" url body 0))
 
 ;;; http-put -- perform an HTTP PUT request with a string body.
@@ -298,7 +298,7 @@
 ;;;   result<:int> -- ok(response-handle) or err(:cstr message)
 ;;;
 ;;; Since: P5
-(defn http-put [url :cstr body :cstr] :ptr<void>
+(defn http-put [url : cstr body : cstr] : ptr<void>
   (__do-request "PUT" url body 0))
 
 ;;; http-delete -- perform an HTTP DELETE request.
@@ -310,7 +310,7 @@
 ;;;   result<:int> -- ok(response-handle) or err(:cstr message)
 ;;;
 ;;; Since: P5
-(defn http-delete [url :cstr] :ptr<void>
+(defn http-delete [url : cstr] : ptr<void>
   (__do-request "DELETE" url "" 0))
 
 ;;; http-request -- perform a fully custom HTTP request from a request handle.
@@ -326,7 +326,7 @@
 ;;;     (http-request req))
 ;;;
 ;;; Since: P5
-(defn http-request [req :int] :ptr<void>
+(defn http-request [req : int] : ptr<void>
   (__do-request (__req-method req) (__req-url req) (__req-body req) (__req-hdrs req)))
 
 ) ;; end defmodule http/client

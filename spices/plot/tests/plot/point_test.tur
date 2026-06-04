@@ -13,7 +13,7 @@
   (import test/runner :refer [run-all])
 
   ;; Local pair constructor (shadows stdlib `pair`).
-  (defn xy-pair [x :float y :float] :int
+  (defn xy-pair [x : float y : float] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -21,7 +21,7 @@
     p->head = ux.i; p->tail = uy.i; return (int64_t)(intptr_t)p;
     ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *c = malloc(sizeof(*c));
@@ -29,7 +29,7 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn triple [a :float b :float c :float] :int
+  (defn triple [a : float b : float c : float] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     union { double d; int64_t i; } ua, ub, uc; ua.d = a; ub.d = b; uc.d = c;
@@ -39,7 +39,7 @@
     return (int64_t)(intptr_t)c1;
     ```)
 
-  (defn quad [a :float b :float c :float d :float] :int
+  (defn quad [a : float b : float c : float d : float] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     union { double d; int64_t i; } ua, ub, uc, ud; ua.d = a; ub.d = b; uc.d = c; ud.d = d;
@@ -50,7 +50,7 @@
     return (int64_t)(intptr_t)c1;
     ```)
 
-  (defn file-size [path :cstr] :int
+  (defn file-size [path : cstr] : int
     ```c
     #include <sys/stat.h>
     struct stat st;
@@ -58,13 +58,13 @@
     return (int64_t)st.st_size;
     ```)
 
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn >i [a : int b : int] : bool ```c return (int)a > (int)b; ```)
 
   ;; Curve / vector-field callbacks (need typed defns, not `fn` literals).
-  (defn pt-diag [x :float] :float ```c return (double)x; ```)
-  (defn pt-vf [x :float y :float] :int (xy-pair (* -1.0 y) x))
+  (defn pt-diag [x : float] : float ```c return (double)x; ```)
+  (defn pt-vf [x : float y : float] : int (xy-pair (* -1.0 y) x))
 
-  (defn point-renderers [] :int
+  (defn point-renderers [] : int
     (vec-of (axes)
             (function pt-diag -1.0 2.0 64 (default-line-style) "diag")
             (points (t-cons (xy-pair 0.0 0.0) (t-cons (xy-pair 1.0 1.0) (t-cons (xy-pair 1.5 0.5) 0)))
@@ -83,12 +83,12 @@
                     (default-line-style)
                     "arr")))
 
-  (defn write-point-png-ok [] :bool
+  (defn write-point-png-ok [] : bool
     (let [rs (point-renderers)]
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-point.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-point.png") 100)))))
 
-  (defn pixel-sanity-point [] :bool
+  (defn pixel-sanity-point [] : bool
     (let [rs (point-renderers)
           rr (plot rs (default-plot-opts))]
       (if (__ok? rr)
@@ -100,7 +100,7 @@
                (assert-true (>i ink 100))))
         (assert-true false))))
 
-  (defn main [] :int
+  (defn main [] : int
     (describe "plot/point"
       (it "renders point and arrow-based plots"
         (write-point-png-ok))

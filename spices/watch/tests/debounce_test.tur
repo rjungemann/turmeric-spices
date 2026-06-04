@@ -13,7 +13,7 @@
                                  debounce-batch-event
                                  debounce-batch-coalesce])
 
-  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     /* __tur_include__: static int g_debounce_fails = 0; */
     if (!ok) g_debounce_fails++;
@@ -21,7 +21,7 @@
            (long long)idx, (const char *)(intptr_t)name);
     ```)
 
-  (defn tap-finish [count :int] #{Unsafe} :int
+  (defn tap-finish [count : int] #{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_debounce_fails == 0) {
@@ -34,17 +34,17 @@
     return 1;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     const char *sa = (const char *)(intptr_t)a;
     const char *sb = (const char *)(intptr_t)b;
     return strcmp(sa ? sa : "", sb ? sb : "") == 0;
     ```)
 
-  (defn make-evt [path :cstr kind :int] #{Unsafe} :int
+  (defn make-evt [path : cstr kind : int] #{Unsafe} : int
     (watch-event-make "/tmp" path "/tmp" kind 0 0))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       ;; Empty batch invariants.
       (let [b (debounce-batch-make)]

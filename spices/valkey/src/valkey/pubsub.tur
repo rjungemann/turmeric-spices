@@ -17,7 +17,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -25,7 +25,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -57,7 +57,7 @@
 ;;;     (if (ok? r) (println "subscribed") (println "subscribe failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-subscribe [c :int channel :cstr] :ptr<void>
+(defn pubsub-subscribe [c : int channel : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -84,7 +84,7 @@
 ;;;     (if (ok? r) (println "unsubscribed") (println "unsubscribe failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-unsubscribe [c :int channel :cstr] :ptr<void>
+(defn pubsub-unsubscribe [c : int channel : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -113,7 +113,7 @@
 ;;;     (if (ok? r) (println (ok-val r)) (println "publish failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-publish [c :int channel :cstr message :cstr] :ptr<void>
+(defn pubsub-publish [c : int channel : cstr message : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -154,7 +154,7 @@
 ;;;       (println "recv error")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-recv [c :int] :ptr<void>
+(defn pubsub-recv [c : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -197,7 +197,7 @@
 ;;;   (message-channel m)  ; => "events"
 ;;;
 ;;; Since: VK0
-(defn message-channel [m :int] :cstr
+(defn message-channel [m : int] : cstr
   ```c
   struct __msg { char *channel; char *payload; };
   return ((struct __msg *)(intptr_t)m)->channel;
@@ -215,7 +215,7 @@
 ;;;   (message-payload m)  ; => "hello"
 ;;;
 ;;; Since: VK0
-(defn message-payload [m :int] :cstr
+(defn message-payload [m : int] : cstr
   ```c
   struct __msg { char *channel; char *payload; };
   return ((struct __msg *)(intptr_t)m)->payload;

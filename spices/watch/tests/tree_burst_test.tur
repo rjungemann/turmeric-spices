@@ -22,7 +22,7 @@
   (import watch/opts    :refer [watch-opts-make watch-opts-free])
   (import watch/watch   :refer [watch-open-tree watch-close watch-drain])
 
-  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     /* __tur_include__: static int g_tree_burst_fails = 0; */
     if (!ok) g_tree_burst_fails++;
@@ -30,7 +30,7 @@
            (long long)idx, (const char *)(intptr_t)name);
     ```)
 
-  (defn tap-finish [count :int] #{Unsafe} :int
+  (defn tap-finish [count : int] #{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_tree_burst_fails == 0) {
@@ -43,24 +43,24 @@
     return 1;
     ```)
 
-  (defn make-dir [path :cstr] #{Unsafe} :int
+  (defn make-dir [path : cstr] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <sys/stat.h> */
     return mkdir((const char *)(intptr_t)path, 0755);
     ```)
 
-  (defn delete-file [path :cstr] #{Unsafe} :int
+  (defn delete-file [path : cstr] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <unistd.h> */
     return unlink((const char *)(intptr_t)path);
     ```)
 
-  (defn delete-dir [path :cstr] #{Unsafe} :int
+  (defn delete-dir [path : cstr] #{Unsafe} : int
     ```c
     return rmdir((const char *)(intptr_t)path);
     ```)
 
-  (defn write-file [path :cstr content :cstr] #{Unsafe} :int
+  (defn write-file [path : cstr content : cstr] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <stdio.h> */
     const char *p = (const char *)(intptr_t)path;
@@ -72,14 +72,14 @@
     return 0;
     ```)
 
-  (defn sleep-ms [ms :int] #{Unsafe} :void
+  (defn sleep-ms [ms : int] #{Unsafe} : void
     ```c
     if (ms > 0) usleep((useconds_t)ms * 1000u);
     ```)
 
   ;; Background thread: 3 atomic-saves to path_x at 30/60/90 ms,
   ;; 2 atomic-saves to path_y at 45/75 ms.
-  (defn schedule-tree-burst [path-x :cstr path-y :cstr] #{Unsafe} :int
+  (defn schedule-tree-burst [path-x : cstr path-y : cstr] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <pthread.h> */
     /* __tur_include__: typedef struct { char *px; char *py; } TurTreeBurst; */
@@ -94,14 +94,14 @@
     return 0;
     ```)
 
-  (defn tmp-root [] #{Unsafe} :cstr
+  (defn tmp-root [] #{Unsafe} : cstr
     ```c
     static char buf[256];
     snprintf(buf, sizeof(buf), "/tmp/tur-tree-burst-%d", (int)getpid());
     return (const char *)buf;
     ```)
 
-  (defn path-join [a :cstr b :cstr] #{Unsafe} :cstr
+  (defn path-join [a : cstr b : cstr] #{Unsafe} : cstr
     ```c
     static char buf[1024];
     snprintf(buf, sizeof(buf), "%s/%s",
@@ -109,13 +109,13 @@
     return (const char *)buf;
     ```)
 
-  (defn dup [s :cstr] #{Unsafe} :cstr
+  (defn dup [s : cstr] #{Unsafe} : cstr
     ```c return (const char *)strdup((const char *)(intptr_t)s); ```)
 
-  (defn free-cstr [s :cstr] #{Unsafe} :void
+  (defn free-cstr [s : cstr] #{Unsafe} : void
     ```c free((char *)(intptr_t)s); ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     const char *sa = (const char *)(intptr_t)a;
     const char *sb = (const char *)(intptr_t)b;
@@ -123,7 +123,7 @@
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn cstr-contains? [haystack :cstr needle :cstr] #{Unsafe} :bool
+  (defn cstr-contains? [haystack : cstr needle : cstr] #{Unsafe} : bool
     ```c
     const char *h = (const char *)(intptr_t)haystack;
     const char *n = (const char *)(intptr_t)needle;
@@ -132,7 +132,7 @@
 
   ;; Drain watch events into a debounce-batch until no more arrive within
   ;; `timeout-ms`.  Returns the batch (caller must free).
-  (defn drain-into-batch [w :int timeout-ms :int] #{Unsafe} :int
+  (defn drain-into-batch [w : int timeout-ms : int] #{Unsafe} : int
     (let [batch (debounce-batch-make)]
       (do
         (let [ev (watch-drain w timeout-ms 0)]
@@ -159,7 +159,7 @@
 
   ;; Collect all events that arrive within the burst window (5 s total,
   ;; multiple 300-ms polls) into a debounce-batch.
-  (defn collect-events [w :int batch :int rounds :int] #{Unsafe} :int
+  (defn collect-events [w : int batch : int rounds : int] #{Unsafe} : int
     (if (= rounds 0)
       batch
       (let [ev (watch-drain w 300 0)]
@@ -177,7 +177,7 @@
           ```
           (collect-events w batch (- rounds 1))))))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       (let [root  (dup (tmp-root))
             a-dir (dup (path-join root "a"))

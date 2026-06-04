@@ -12,7 +12,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -20,7 +20,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -47,7 +47,7 @@
 ;;;     (if (ok? r) (let [a (ok-val r)] ...) (println "audio init failed")))
 ;;;
 ;;; Since: RA0
-(defn audio-new [api :cstr] :ptr<void>
+(defn audio-new [api : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -79,7 +79,7 @@
 ;;;   (audio-free a)
 ;;;
 ;;; Since: RA0
-(defn audio-free [a :int] :void
+(defn audio-free [a : int] : void
   ```c
   #include <rtaudio/rtaudio_c.h>
   rtaudio_destroy((rtaudio_t)(intptr_t)a);
@@ -97,7 +97,7 @@
 ;;;   (println (audio-api a))
 ;;;
 ;;; Since: RA0
-(defn audio-api [a :int] :cstr
+(defn audio-api [a : int] : cstr
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (char*)rtaudio_api_name(rtaudio_current_api((rtaudio_t)(intptr_t)a));

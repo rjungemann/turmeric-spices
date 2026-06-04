@@ -49,7 +49,7 @@
 
 ;; -- Cons list helpers ------------------------------------------------------
 
-(defn __rt-cons [h :int t :int] :int
+(defn __rt-cons [h : int t : int] : int
   ```c
   #include <stdlib.h>
   typedef struct { int64_t head; int64_t tail; } __tur_cons;
@@ -58,13 +58,13 @@
   return (int64_t)(intptr_t)c;
   ```)
 
-(defn __rt-cons-head [lst :int] :int
+(defn __rt-cons-head [lst : int] : int
   ```c
   typedef struct { int64_t head; int64_t tail; } __tur_cons;
   return ((__tur_cons *)(intptr_t)lst)->head;
   ```)
 
-(defn __rt-cons-tail [lst :int] :int
+(defn __rt-cons-tail [lst : int] : int
   ```c
   typedef struct { int64_t head; int64_t tail; } __tur_cons;
   return ((__tur_cons *)(intptr_t)lst)->tail;
@@ -92,7 +92,7 @@
 ;;;             (mount! "/"      public-app))
 ;;;
 ;;; Since: v0.2.0
-(defn mount! [prefix :cstr item :int] :int
+(defn mount! [prefix : cstr item : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -107,19 +107,19 @@
   return (int64_t)(intptr_t)m;
   ```)
 
-(defn __mount-prefix-len [m :int] :int
+(defn __mount-prefix-len [m : int] : int
   ```c
   struct __tourist_mount { char *prefix; int prefix_len; int64_t item; };
   return ((struct __tourist_mount *)(intptr_t)m)->prefix_len;
   ```)
 
-(defn __mount-prefix [m :int] :cstr
+(defn __mount-prefix [m : int] : cstr
   ```c
   struct __tourist_mount { char *prefix; int prefix_len; int64_t item; };
   return ((struct __tourist_mount *)(intptr_t)m)->prefix;
   ```)
 
-(defn __mount-item [m :int] :int
+(defn __mount-item [m : int] : int
   ```c
   struct __tourist_mount { char *prefix; int prefix_len; int64_t item; };
   return ((struct __tourist_mount *)(intptr_t)m)->item;
@@ -127,7 +127,7 @@
 
 ;; -- sub-app struct ---------------------------------------------------------
 
-(defn __subapp-alloc [tag :int data :int] :int
+(defn __subapp-alloc [tag : int data : int] : int
   ```c
   #include <stdlib.h>
   struct __tourist_subapp { int tag; int64_t data; };
@@ -137,13 +137,13 @@
   return (int64_t)(intptr_t)s;
   ```)
 
-(defn __subapp-tag [sa :int] :int
+(defn __subapp-tag [sa : int] : int
   ```c
   struct __tourist_subapp { int tag; int64_t data; };
   return (int64_t)((struct __tourist_subapp *)(intptr_t)sa)->tag;
   ```)
 
-(defn __subapp-data [sa :int] :int
+(defn __subapp-data [sa : int] : int
   ```c
   struct __tourist_subapp { int tag; int64_t data; };
   return ((struct __tourist_subapp *)(intptr_t)sa)->data;
@@ -161,7 +161,7 @@
 ;;;   :bool
 ;;;
 ;;; Since: v0.2.0
-(defn subapp-item? [item :int] :bool
+(defn subapp-item? [item : int] : bool
   ```c
   #include <string.h>
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
@@ -177,7 +177,7 @@
 ;;; For prefix "/api", matches "/api", "/api/...", "/api?..." (treated as
 ;;; the end of path here -- query is separate in tourist).  Refuses partial
 ;;; word matches like "/api2".  Prefix "/" matches every path.
-(defn __prefix-match? [path :cstr prefix :cstr plen :int] :bool
+(defn __prefix-match? [path : cstr prefix : cstr plen : int] : bool
   ```c
   #include <string.h>
   const char *p = (const char *)path;
@@ -196,7 +196,7 @@
 ;;; If the prefix consumed the entire path, returns a static "/" so the
 ;;; sub-app sees a non-empty path to match against (e.g. (get! "/" ...)).
 ;;; Catch-all "/" prefix returns the original path unchanged.
-(defn __stripped-path [path :cstr prefix :cstr plen :int] :cstr
+(defn __stripped-path [path : cstr prefix : cstr plen : int] : cstr
   ```c
   const char *p = (const char *)path;
   const char *q = (const char *)prefix;
@@ -210,7 +210,7 @@
 ;; -- inner item dispatch (Route or sub-app) on a ctx ------------------------
 
 ;;; __method-match? -- "" matches any method; otherwise strcmp.
-(defn __method-match? [rmethod :cstr qmethod :cstr] :bool
+(defn __method-match? [rmethod : cstr qmethod : cstr] : bool
   ```c
   #include <string.h>
   return ((const char *)rmethod)[0] == '\0'
@@ -220,21 +220,21 @@
 ;;; __ctx-method -- read method field from a tourist ctx (or httpd req).
 ;;;
 ;;; Works on either struct because the first 8 fields are identical.
-(defn __ctx-method [ctx :int] :cstr
+(defn __ctx-method [ctx : int] : cstr
   ```c
   struct __tourist_ctx_hdr { char *method; char *path; };
   return (const char *)((struct __tourist_ctx_hdr *)(intptr_t)ctx)->method;
   ```)
 
 ;;; __ctx-path -- read current (possibly stripped) path from ctx.
-(defn __ctx-path [ctx :int] :cstr
+(defn __ctx-path [ctx : int] : cstr
   ```c
   struct __tourist_ctx_hdr { char *method; char *path; };
   return (const char *)((struct __tourist_ctx_hdr *)(intptr_t)ctx)->path;
   ```)
 
 ;;; __ctx-set-caps -- replace ctx->caps with caps, returning the previous.
-(defn __ctx-set-caps [ctx :int caps :int] :int
+(defn __ctx-set-caps [ctx : int caps : int] : int
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -253,7 +253,7 @@
 ;;;
 ;;; Returns the response handle on a hit, or 0 if the item did not match
 ;;; (so the caller can try the next item or fall through to 404).
-(defn __dispatch-item [item :int ctx :int] :int
+(defn __dispatch-item [item : int ctx : int] : int
   (if (subapp-item? item)
     (subapp-call item ctx)
     ;; Ordinary Route: method check then pattern match.
@@ -272,7 +272,7 @@
 ;; -- url-map dispatch -------------------------------------------------------
 
 ;;; __url-map-dispatch -- walk sorted mount list and dispatch first match.
-(defn __url-map-dispatch [mounts :int ctx :int] :int
+(defn __url-map-dispatch [mounts : int ctx : int] : int
   (if (= mounts 0)
     0
     (let [m      (__rt-cons-head mounts)
@@ -291,7 +291,7 @@
 
 ;; -- cascade struct ---------------------------------------------------------
 
-(defn __cascade-alloc [passes :int apps :int] :int
+(defn __cascade-alloc [passes : int apps : int] : int
   ```c
   #include <stdlib.h>
   struct __tourist_cascade { int64_t passes; int64_t apps; };
@@ -301,27 +301,27 @@
   return (int64_t)(intptr_t)c;
   ```)
 
-(defn __cascade-passes [c :int] :int
+(defn __cascade-passes [c : int] : int
   ```c
   struct __tourist_cascade { int64_t passes; int64_t apps; };
   return ((struct __tourist_cascade *)(intptr_t)c)->passes;
   ```)
 
-(defn __cascade-apps [c :int] :int
+(defn __cascade-apps [c : int] : int
   ```c
   struct __tourist_cascade { int64_t passes; int64_t apps; };
   return ((struct __tourist_cascade *)(intptr_t)c)->apps;
   ```)
 
 ;;; __resp-status -- read status field from a response handle.
-(defn __resp-status [resp :int] :int
+(defn __resp-status [resp : int] : int
   ```c
   struct __httpd_resp_hdr { int status; };
   return (int64_t)((struct __httpd_resp_hdr *)(intptr_t)resp)->status;
   ```)
 
 ;;; __status-in? -- true if status appears in the int cons list passes.
-(defn __status-in? [passes :int status :int] :bool
+(defn __status-in? [passes : int status : int] : bool
   (if (= passes 0)
     false
     (if (= (__rt-cons-head passes) status)
@@ -329,7 +329,7 @@
       (__status-in? (__rt-cons-tail passes) status))))
 
 ;;; __free-response -- release a response handle.
-(defn __free-response [resp :int] :void
+(defn __free-response [resp : int] : void
   ```c
   #include <stdlib.h>
   /* Mirror httpd/response free-response: status; body; body_len;
@@ -352,7 +352,7 @@
 ;;;
 ;;; If an app returns 0 (item did not match), treat that as pass-through
 ;;; and continue to the next app (without freeing anything).
-(defn __cascade-dispatch [passes :int apps :int ctx :int] :int
+(defn __cascade-dispatch [passes : int apps : int ctx : int] : int
   (if (= apps 0)
     0
     (let [resp (__dispatch-item (__rt-cons-head apps) ctx)]
@@ -381,7 +381,7 @@
 ;;;   :int -- response handle on hit, or 0 on no match
 ;;;
 ;;; Since: v0.2.0
-(defn subapp-call [item :int ctx :int] :int
+(defn subapp-call [item : int ctx : int] : int
   (let [sa  (route-pattern item)
         tag (__subapp-tag sa)]
     (if (= tag 0)
@@ -393,7 +393,7 @@
 ;; -- url-map! constructor ---------------------------------------------------
 
 ;;; __insert-sorted -- insert mount m into a longest-prefix-first cons list.
-(defn __insert-sorted [m :int lst :int] :int
+(defn __insert-sorted [m : int lst : int] : int
   (if (= lst 0)
     (__rt-cons m 0)
     (if (> (__mount-prefix-len m)
@@ -404,7 +404,7 @@
 
 ;;; __build-mounts -- consume the variadic cons list of mount handles and
 ;;; produce a single sorted (longest-first) cons list.
-(defn __build-mounts [entries :int acc :int] :int
+(defn __build-mounts [entries : int acc : int] : int
   (if (= entries 0)
     acc
     (__build-mounts (__rt-cons-tail entries)
@@ -436,7 +436,7 @@
 ;;;               (mount! "/"      (get! "/" (fn [_] (text "home"))))))
 ;;;
 ;;; Since: v0.2.0
-(defn url-map! [& mounts :int] :int
+(defn url-map! [& mounts : int] : int
   (let [sorted (__build-mounts mounts 0)
         sa     (__subapp-alloc 0 sorted)]
     (route-new "__subapp" sa 0)))
@@ -444,7 +444,7 @@
 ;; -- cascade! / cascade-with! ----------------------------------------------
 
 ;;; __default-passes -- cons list {404, 405} (allocated once per call site).
-(defn __default-passes [] :int
+(defn __default-passes [] : int
   (__rt-cons 404 (__rt-cons 405 0)))
 
 ;;; cascade! -- try apps in order; pass on 404/405 to the next.
@@ -467,7 +467,7 @@
 ;;;               (serve-static! "/" "./public")))
 ;;;
 ;;; Since: v0.2.0
-(defn cascade! [& apps :int] :int
+(defn cascade! [& apps : int] : int
   (let [data (__cascade-alloc (__default-passes) apps)
         sa   (__subapp-alloc 1 data)]
     (route-new "__subapp" sa 0)))
@@ -487,7 +487,7 @@
 ;;;                  primary fallback)
 ;;;
 ;;; Since: v0.2.0
-(defn cascade-with! [passes :int & apps :int] :int
+(defn cascade-with! [passes : int & apps : int] : int
   (let [data (__cascade-alloc passes apps)
         sa   (__subapp-alloc 1 data)]
     (route-new "__subapp" sa 0)))

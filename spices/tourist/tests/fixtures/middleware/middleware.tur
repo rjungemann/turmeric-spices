@@ -14,20 +14,20 @@
   (import test/assert        :refer [assert-eq assert-true])
   (import test/runner        :refer [run-all])
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return false;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
@@ -35,7 +35,7 @@
 
   ;; __some-resp -- wrap a Response in a some(Response) option.
   ;; Middleware returns option<Response>: none (0) to continue, some(resp) to short-circuit.
-  (defn __some-resp [resp :int] :int
+  (defn __some-resp [resp : int] : int
     ```c
     #include <stdlib.h>
     struct __opt { bool is_some; int64_t value; };
@@ -46,12 +46,12 @@
     ```)
 
   ;; blocker -- short-circuit with 403 when path is /block; pass otherwise.
-  (defn blocker [req :int] :int
+  (defn blocker [req : int] : int
     (if (cstr-eq? "/block" (req-path req))
       (__some-resp (response 403 "text/plain" "blocked"))
       0))
 
-  (defn main [] :int
+  (defn main [] : int
     (let [srv (tourist 18103
                 (use! blocker)
                 (get! "/" (fn [_] (text "ok")))

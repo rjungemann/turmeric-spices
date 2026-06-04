@@ -13,27 +13,27 @@
   (import test/assert    :refer [assert-eq assert-true])
   (import test/runner    :refer [run-all])
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return false;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
   ;; cstr-starts? -- true if s starts with prefix
-  (defn cstr-starts? [s :cstr prefix :cstr] :bool
+  (defn cstr-starts? [s : cstr prefix : cstr] : bool
     ```c
     #include <string.h>
     const char *sp = (const char *)s;
@@ -44,7 +44,7 @@
 
   ;; __setup-test-dir -- create /tmp/tourist-static-test/ and write test files.
   ;; Returns the directory path.
-  (defn __setup-test-dir [] :cstr
+  (defn __setup-test-dir [] : cstr
     ```c
     #include <stdlib.h>
     #include <stdio.h>
@@ -59,7 +59,7 @@
     return (int64_t)(intptr_t)dir;
     ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (let [pub-dir (__setup-test-dir)
           srv     (tourist 18105
                     (serve-static! "/assets" pub-dir))]

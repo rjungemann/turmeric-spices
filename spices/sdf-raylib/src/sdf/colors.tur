@@ -31,7 +31,7 @@
 ;; ---- private allocators ----
 
 ;;; csdf--make-leaf -- allocate a ColoredSDF leaf.
-(defn csdf--make-leaf [sdf :int r :float g :float b :float objid :int] :int
+(defn csdf--make-leaf [sdf : int r : float g : float b : float objid : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -50,7 +50,7 @@
   ```)
 
 ;;; csdf--make-node -- allocate a ColoredSDF interior node.
-(defn csdf--make-node [sdf :int left :int right :int] :int
+(defn csdf--make-node [sdf : int left : int right : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -85,7 +85,7 @@
 ;;;   (sdf-eval (csdf-sdf scene) 0.0 0.0 0.0)
 ;;;
 ;;; Since: Phase 2
-(defn csdf-sdf [cn :int] :int
+(defn csdf-sdf [cn : int] : int
   ```c
   #include <stdint.h>
   typedef struct colored_node {
@@ -95,7 +95,7 @@
   ```)
 
 ;;; csdf-left -- left colored child handle (0 for leaves). Since: Phase 3
-(defn csdf-left [cn :int] :int
+(defn csdf-left [cn : int] : int
   ```c
   #include <stdint.h>
   typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
@@ -103,7 +103,7 @@
   ```)
 
 ;;; csdf-right -- right colored child handle (0 for leaves and unaries). Since: Phase 3
-(defn csdf-right [cn :int] :int
+(defn csdf-right [cn : int] : int
   ```c
   #include <stdint.h>
   typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
@@ -111,7 +111,7 @@
   ```)
 
 ;;; csdf-r -- red color component of a leaf node. Since: Phase 3
-(defn csdf-r [cn :int] :float
+(defn csdf-r [cn : int] : float
   ```c
   #include <stdint.h>
   typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
@@ -119,7 +119,7 @@
   ```)
 
 ;;; csdf-g -- green color component of a leaf node. Since: Phase 3
-(defn csdf-g [cn :int] :float
+(defn csdf-g [cn : int] : float
   ```c
   #include <stdint.h>
   typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
@@ -127,7 +127,7 @@
   ```)
 
 ;;; csdf-b -- blue color component of a leaf node. Since: Phase 3
-(defn csdf-b [cn :int] :float
+(defn csdf-b [cn : int] : float
   ```c
   #include <stdint.h>
   typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
@@ -135,7 +135,7 @@
   ```)
 
 ;;; csdf-object-id -- object ID of a colored node (-1 for interior). Since: Phase 3
-(defn csdf-object-id [cn :int] :int
+(defn csdf-object-id [cn : int] : int
   ```c
   #include <stdint.h>
   typedef struct colored_node { int64_t sdf; float r,g,b; int32_t object_id; void *left_cn,*right_cn; } colored_node;
@@ -157,7 +157,7 @@
 ;;;   (csdf-free scene)
 ;;;
 ;;; Since: Phase 2
-(defn csdf-free [cn :int] :void
+(defn csdf-free [cn : int] : void
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -220,8 +220,8 @@
 ;;;   (colored-sphere 0.0 0.0 0.0 1.5  1.0 0.0 0.0  1)
 ;;;
 ;;; Since: Phase 2
-(defn colored-sphere [cx :float cy :float cz :float r :float
-                      cr :float cg :float cb :float objid :int] :int
+(defn colored-sphere [cx : float cy : float cz : float r : float
+                      cr : float cg : float cb : float objid : int] : int
   (csdf--make-leaf (sdf-sphere cx cy cz r) cr cg cb objid))
 
 ;;; colored-box -- AABB from (lx,ly,lz) to (hx,hy,hz) with RGB color.
@@ -239,23 +239,23 @@
 ;;;   (colored-box -1.0 -1.0 -1.0  1.0 1.0 1.0  0.0 1.0 0.0  2)
 ;;;
 ;;; Since: Phase 2
-(defn colored-box [lx :float ly :float lz :float
-                   hx :float hy :float hz :float
-                   cr :float cg :float cb :float objid :int] :int
+(defn colored-box [lx : float ly : float lz : float
+                   hx : float hy : float hz : float
+                   cr : float cg : float cb : float objid : int] : int
   (csdf--make-leaf (sdf-box lx ly lz hx hy hz) cr cg cb objid))
 
 ;;; colored-cylinder -- infinite cylinder through (cx,cy,*) radius r with color.
 ;;;
 ;;; Since: Phase 2
-(defn colored-cylinder [cx :float cy :float cz :float r :float
-                        cr :float cg :float cb :float objid :int] :int
+(defn colored-cylinder [cx : float cy : float cz : float r : float
+                        cr : float cg : float cb : float objid : int] : int
   (csdf--make-leaf (sdf-cylinder cx cy cz r) cr cg cb objid))
 
 ;;; colored-plane -- infinite plane n.p + d = 0 with given color.
 ;;;
 ;;; Since: Phase 2
-(defn colored-plane [nx :float ny :float nz :float d :float
-                     cr :float cg :float cb :float objid :int] :int
+(defn colored-plane [nx : float ny : float nz : float d : float
+                     cr : float cg : float cb : float objid : int] : int
   (csdf--make-leaf (sdf-plane nx ny nz d) cr cg cb objid))
 
 ;; ---- CSG combinators ----
@@ -277,7 +277,7 @@
 ;;;     (colored-sphere  1.0 0.0 0.0 0.8  0.0 1.0 0.0  2))
 ;;;
 ;;; Since: Phase 2
-(defn colored-union [a :int b :int] :int
+(defn colored-union [a : int b : int] : int
   (csdf--make-node (sdf-union (csdf-sdf a) (csdf-sdf b)) a b))
 
 ;;; colored-intersection -- CSG intersection of two colored SDFs.
@@ -286,7 +286,7 @@
 ;;; (the child with the larger distance, since intersection = max(a, b)).
 ;;;
 ;;; Since: Phase 2
-(defn colored-intersection [a :int b :int] :int
+(defn colored-intersection [a : int b : int] : int
   (csdf--make-node (sdf-intersection (csdf-sdf a) (csdf-sdf b)) a b))
 
 ;;; colored-difference -- CSG difference: a minus b.
@@ -299,7 +299,7 @@
 ;;;   b -- shape to subtract
 ;;;
 ;;; Since: Phase 2
-(defn colored-difference [a :int b :int] :int
+(defn colored-difference [a : int b : int] : int
   (csdf--make-node (sdf-difference (csdf-sdf a) (csdf-sdf b)) a b))
 
 ;;; colored-smooth-union -- smooth union of two colored SDFs (Quilez blend).
@@ -312,7 +312,7 @@
 ;;;   k   -- blend radius (>= 0)
 ;;;
 ;;; Since: Phase 2
-(defn colored-smooth-union [a :int b :int k :float] :int
+(defn colored-smooth-union [a : int b : int k : float] : int
   (csdf--make-node (sdf-smooth-union (csdf-sdf a) (csdf-sdf b) k) a b))
 
 ;; ---- transforms ----
@@ -333,7 +333,7 @@
 ;;;   (colored-translate my-sphere 0.0 2.0 0.0)
 ;;;
 ;;; Since: Phase 2
-(defn colored-translate [cn :int tx :float ty :float tz :float] :int
+(defn colored-translate [cn : int tx : float ty : float tz : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -377,9 +377,9 @@
 ;;;   (colored-torus 0.0 0.0 0.0 1.5 0.3  0.8 0.3 0.1  5)
 ;;;
 ;;; Since: Phase 5
-(defn colored-torus [cx :float cy :float cz :float
-                     big-r :float small-r :float
-                     cr :float cg :float cb :float objid :int] :int
+(defn colored-torus [cx : float cy : float cz : float
+                     big-r : float small-r : float
+                     cr : float cg : float cb : float objid : int] : int
   (csdf--make-leaf (sdf-torus cx cy cz big-r small-r) cr cg cb objid))
 
 ;;; colored-capsule -- capsule with a fixed surface color.
@@ -395,9 +395,9 @@
 ;;;   (colored-capsule 0.0 -1.0 0.0  0.0 1.0 0.0  0.4  0.2 0.7 0.9  6)
 ;;;
 ;;; Since: Phase 5
-(defn colored-capsule [ax :float ay :float az :float
-                       bx :float by :float bz :float r :float
-                       cr :float cg :float cb :float objid :int] :int
+(defn colored-capsule [ax : float ay : float az : float
+                       bx : float by : float bz : float r : float
+                       cr : float cg : float cb : float objid : int] : int
   (csdf--make-leaf (sdf-capsule ax ay az bx by bz r) cr cg cb objid))
 
 ;;; colored-smooth-intersection -- smooth CSG intersection of two colored SDFs.
@@ -409,7 +409,7 @@
 ;;;   k   -- blend radius (>= 0)
 ;;;
 ;;; Since: Phase 5
-(defn colored-smooth-intersection [a :int b :int k :float] :int
+(defn colored-smooth-intersection [a : int b : int k : float] : int
   (csdf--make-node (sdf-smooth-intersection (csdf-sdf a) (csdf-sdf b) k) a b))
 
 ;;; colored-repeat-inf -- infinite repetition of a colored SDF.
@@ -426,7 +426,7 @@
 ;;;                        1.5 1.5 1.5)
 ;;;
 ;;; Since: Phase 5
-(defn colored-repeat-inf [cn :int px :float py :float pz :float] :int
+(defn colored-repeat-inf [cn : int px : float py : float pz : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -469,8 +469,8 @@
 ;;;   (colored-repeat-fin sphere 2.0 2.0 2.0  3.0 3.0 3.0)
 ;;;
 ;;; Since: Phase 5
-(defn colored-repeat-fin [cn :int px :float py :float pz :float
-                           lx :float ly :float lz :float] :int
+(defn colored-repeat-fin [cn : int px : float py : float pz : float
+                           lx : float ly : float lz : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>

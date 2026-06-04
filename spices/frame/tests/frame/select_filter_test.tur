@@ -16,9 +16,9 @@
   (import test/suite    :refer [describe it])
   (import test/runner   :refer [run-all])
 
-  (defn t-nil [] :int ```c return 0; ```)
+  (defn t-nil [] : int ```c return 0; ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -29,20 +29,20 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn cstr->int [s :cstr] :int
+  (defn cstr->int [s : cstr] : int
     ```c
     #include <stdint.h>
     return (int64_t)(intptr_t)s;
     ```)
 
-  (defn t-cstr= [a :cstr b :cstr] :bool
+  (defn t-cstr= [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)(intptr_t)a, (const char *)(intptr_t)b) == 0;
     ```)
 
   ;; Build a 3-col, 4-row sample frame: x:int32, y:int32, name:utf8.
-  (defn sample-frame [] :int
+  (defn sample-frame [] : int
     (let [s   (schema (t-cons (field "x"    (type-int32) 0)
                       (t-cons (field "y"    (type-int32) 0)
                       (t-cons (field "name" (type-utf8)  0)
@@ -56,7 +56,7 @@
                                    (t-nil))))) 0 0)]
       (frame s (t-cons xs (t-cons ys (t-cons nm (t-nil)))))))
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
     (describe "frame=?"
       (it "equal frames compare true"
@@ -178,7 +178,7 @@
           (frame-free h) (frame-free g) (frame-free f)
           (assert-true ok)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

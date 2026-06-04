@@ -34,9 +34,9 @@
 ;; Private cons helpers.  Matches the layout used by all other spices.
 ;; ---------------------------------------------------------------------------
 
-(defn __nil [] :int ```c return 0; ```)
+(defn __nil [] : int ```c return 0; ```)
 
-(defn __cons [v :int n :int] :int
+(defn __cons [v : int n : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -47,7 +47,7 @@
   return (int64_t)(intptr_t)c;
   ```)
 
-(defn __cons-length [xs :int] :int
+(defn __cons-length [xs : int] : int
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -56,7 +56,7 @@
   return n;
   ```)
 
-(defn __cons-nth [xs :int i :int] :int
+(defn __cons-nth [xs : int i : int] : int
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -71,7 +71,7 @@
 ;; Internal: validate shape and allocate the frame struct.
 ;; ---------------------------------------------------------------------------
 
-(defn __shape-ok? [columns :int n-cols :int n-rows :int] :bool
+(defn __shape-ok? [columns : int n-cols : int n-rows : int] : bool
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -88,7 +88,7 @@
   return true;
   ```)
 
-(defn __frame-alloc [sch :int n-cols :int n-rows :int columns :int] :int
+(defn __frame-alloc [sch : int n-cols : int n-rows : int columns : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -113,7 +113,7 @@
   return (int64_t)(intptr_t)f;
   ```)
 
-(defn __schema-clone [s :int] :int
+(defn __schema-clone [s : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -172,7 +172,7 @@
 ;;;     (frame-nrows f))   ; => 2
 ;;;
 ;;; Since: FR0
-(defn frame [sch :int columns :int] :int
+(defn frame [sch : int columns : int] : int
   (let [n-cols   (__cons-length columns)
         expected (schema-arity sch)]
     (if (not= n-cols expected)
@@ -183,7 +183,7 @@
           0)))))
 
 ;;; frame-nrows -- number of rows. Since: FR0
-(defn frame-nrows [f :int] :int
+(defn frame-nrows [f : int] : int
   ```c
   #include <stdint.h>
   struct __frame_frame {
@@ -194,7 +194,7 @@
   ```)
 
 ;;; frame-ncols -- number of columns. Since: FR0
-(defn frame-ncols [f :int] :int
+(defn frame-ncols [f : int] : int
   ```c
   #include <stdint.h>
   struct __frame_frame {
@@ -205,7 +205,7 @@
   ```)
 
 ;;; frame-schema -- schema handle (still owned by the frame). Since: FR0
-(defn frame-schema [f :int] :int
+(defn frame-schema [f : int] : int
   ```c
   #include <stdint.h>
   struct __frame_frame {
@@ -218,7 +218,7 @@
 ;;; frame-column-at -- column handle at index i (0-based).  Returns 0 if out of range.
 ;;; The handle is still owned by the frame.
 ;;; Since: FR0
-(defn frame-column-at [f :int i :int] :int
+(defn frame-column-at [f : int i : int] : int
   ```c
   #include <stdint.h>
   struct __frame_frame {
@@ -232,7 +232,7 @@
 
 ;;; frame-column -- column handle for a named column.  Returns 0 if not found.
 ;;; Since: FR0
-(defn frame-column [f :int name :cstr] :int
+(defn frame-column [f : int name : cstr] : int
   (let [s (frame-schema f)
         i (schema-index-of s name)]
     (if (< i 0) 0 (frame-column-at f i))))
@@ -242,7 +242,7 @@
 ;; deep-copy the schema, then call frame to assemble.
 ;; ---------------------------------------------------------------------------
 
-(defn __slice-cols [f :int offset :int length :int i :int acc :int] :int
+(defn __slice-cols [f : int offset : int length : int i : int acc : int] : int
   ;; Walk indices high -> low so cons builds a forward-order list.
   (if (< i 0)
     acc
@@ -253,7 +253,7 @@
 ;;; Returns 0 on out-of-range arguments.
 ;;; The new frame owns a freshly-copied schema and freshly-sliced columns.
 ;;; Since: FR0
-(defn frame-slice [f :int offset :int length :int] :int
+(defn frame-slice [f : int offset : int length : int] : int
   (let [nrows (frame-nrows f)
         ncols (frame-ncols f)]
     (if (or (< offset 0) (< length 0) (> (+ offset length) nrows))
@@ -265,14 +265,14 @@
 ;;; frame-head -- a new frame containing the first n rows.
 ;;; n is clamped silently to [0, frame-nrows(f)].
 ;;; Since: FR0
-(defn frame-head [f :int n :int] :int
+(defn frame-head [f : int n : int] : int
   (let [nrows (frame-nrows f)
         k     (if (< n 0) 0 (if (> n nrows) nrows n))]
     (frame-slice f 0 k)))
 
 ;;; frame-free -- release a frame's schema, columns, and descriptor.
 ;;; Since: FR0
-(defn frame-free [f :int] :void
+(defn frame-free [f : int] : void
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -338,7 +338,7 @@
 ;;; for utf8.
 ;;;
 ;;; Since: FR2
-(defn frame=? [a :int b :int] :bool
+(defn frame=? [a : int b : int] : bool
   ```c
   #include <string.h>
   #include <stdint.h>

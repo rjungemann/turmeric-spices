@@ -8,7 +8,7 @@
                                    output-status-ok output-status-error output-status-skipped
                                    cell-output-status cell-output-value-repr])
 
-  (defn test-cons [value :int next :int] #{Unsafe} :int
+  (defn test-cons [value : int next : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -16,29 +16,29 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn test-head [lst :int] #{Unsafe} :int
+  (defn test-head [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->head : 0;
     ```)
 
-  (defn test-tail [lst :int] #{Unsafe} :int
+  (defn test-tail [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->tail : 0;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+  (defn tap-plan [count : int fails : int] #{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -48,22 +48,22 @@
     }
     ```)
 
-  (defn bool->fail [ok :bool] :int
+  (defn bool->fail [ok : bool] : int
     (if ok 0 1))
 
-  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
     (do
       (tap-line idx name ok)
       (bool->fail ok)))
 
-  (defn temp-cache-dir [label :cstr] #{Unsafe} :cstr
+  (defn temp-cache-dir [label : cstr] #{Unsafe} : cstr
     ```c
     char buf[256];
     snprintf(buf, sizeof(buf), "/tmp/%s-%lld-%d", (const char *)label, (long long)time(NULL), (int)getpid());
     return strdup(buf);
     ```)
 
-  (defn test-eval-false [] #{Unsafe} :bool
+  (defn test-eval-false [] #{Unsafe} : bool
     (let [s (session-open)
           cell (cell-make "skip" 0 "(+ 1 2)" (parse-attrs "turmeric {eval=false}") 1 3)
           out (eval-cell s cell 0)]
@@ -71,7 +71,7 @@
         (session-close s)
         (= (cell-output-status out) (output-status-skipped)))))
 
-  (defn test-eval-all-halt [] #{Unsafe} :bool
+  (defn test-eval-all-halt [] #{Unsafe} : bool
     (let [s (session-open)
           c1 (cell-make "a" 0 "(def n 2)" (parse-attrs "turmeric {id=a}") 1 3)
           c2 (cell-make "b" 0 "(+ missing 1)" (parse-attrs "turmeric {id=b}") 5 7)
@@ -85,7 +85,7 @@
              (and (= (cell-output-status o2) (output-status-error))
                   (= (test-tail (test-tail outs)) 0))))))
 
-  (defn test-eval-all-continue [] #{Unsafe} :bool
+  (defn test-eval-all-continue [] #{Unsafe} : bool
     (let [s (session-open)
           c1 (cell-make "a" 0 "(def n 2)" (parse-attrs "turmeric {id=a}") 1 3)
           c2 (cell-make "b" 0 "(+ missing 1)" (parse-attrs "turmeric {id=b error=continue}") 5 7)
@@ -97,7 +97,7 @@
         (and (= (cell-output-status o3) (output-status-ok))
              (cstr-eq? (cell-output-value-repr o3) "6")))))
 
-  (defn test-eval-from [] #{Unsafe} :bool
+  (defn test-eval-from [] #{Unsafe} : bool
     (let [s (session-open)
           c1 (cell-make "a" 0 "(def n 2)" (parse-attrs "turmeric {id=a}") 1 3)
           c2 (cell-make "b" 0 "(+ n 5)" (parse-attrs "turmeric {id=b}") 5 7)
@@ -111,7 +111,7 @@
         (and (cstr-eq? (cell-output-value-repr o1) "7")
              (cstr-eq? (cell-output-value-repr o2) "9")))))
 
-  (defn test-cache-hit-across-reset [] #{Unsafe} :bool
+  (defn test-cache-hit-across-reset [] #{Unsafe} : bool
     (let [dir (temp-cache-dir "turnb-eval-cache-hit")
           cache (cache-open dir)
           s (session-open)
@@ -128,7 +128,7 @@
                  (and (= (cell-output-status o2) (output-status-ok))
                      (cstr-eq? (cell-output-value-repr o2) "7"))))))))
 
-  (defn test-depends-busts-downstream-cache [] #{Unsafe} :bool
+  (defn test-depends-busts-downstream-cache [] #{Unsafe} : bool
     (let [dir (temp-cache-dir "turnb-eval-deps")
           cache (cache-open dir)
           s (session-open)
@@ -148,7 +148,7 @@
             (and (cstr-eq? (cell-output-value-repr b1-out) "3")
                  (cstr-eq? (cell-output-value-repr b2-out) "6")))))))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (let [f1 (run-case 1 "skips eval=false cells" (test-eval-false))
           f2 (run-case 2 "halts eval-all on error by default" (test-eval-all-halt))
           f3 (run-case 3 "continues eval-all when error=continue" (test-eval-all-continue))

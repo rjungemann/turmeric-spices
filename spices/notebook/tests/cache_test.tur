@@ -7,24 +7,24 @@
                                    cell-output-value-repr cell-output-error-msg
                                    cell-output-elapsed-ms])
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn temp-cache-dir [label :cstr] #{Unsafe} :cstr
+  (defn temp-cache-dir [label : cstr] #{Unsafe} : cstr
     ```c
     char buf[256];
     snprintf(buf, sizeof(buf), "/tmp/%s-%lld-%d", (const char *)label, (long long)time(NULL), (int)getpid());
     return strdup(buf);
     ```)
 
-  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+  (defn tap-plan [count : int fails : int] #{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -34,15 +34,15 @@
     }
     ```)
 
-  (defn bool->fail [ok :bool] :int
+  (defn bool->fail [ok : bool] : int
     (if ok 0 1))
 
-  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
     (do
       (tap-line idx name ok)
       (bool->fail ok)))
 
-  (defn test-cache-round-trip [] #{Unsafe} :bool
+  (defn test-cache-round-trip [] #{Unsafe} : bool
     (let [dir (temp-cache-dir "turnb-cache-rt")
           cache (cache-open dir)
           out (cell-output-make "cell-a" 0 "hello\n" "42" "" 17 0)]
@@ -57,7 +57,7 @@
                             (and (cstr-eq? (cell-output-error-msg got) "")
                                  (= (cell-output-elapsed-ms got) 17))))))))))
 
-  (defn test-cache-clear [] #{Unsafe} :bool
+  (defn test-cache-clear [] #{Unsafe} : bool
     (let [dir (temp-cache-dir "turnb-cache-clear")
           cache (cache-open dir)
           out (cell-output-make "cell-b" 1 "" "" "boom" 3 0)]
@@ -68,7 +68,7 @@
           (cache-close cache)
           (= got 0)))))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (let [f1 (run-case 1 "round-trips cached cell outputs" (test-cache-round-trip))
           f2 (run-case 2 "clears cached entries" (test-cache-clear))]
       (tap-plan 2 (+ f1 f2))

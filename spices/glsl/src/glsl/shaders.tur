@@ -32,7 +32,7 @@
 ;;;   ; => "layout(location = 0) in vec3 aPos;"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-input [name :cstr type :cstr location :int] :cstr
+(defn glsl-input [name : cstr type : cstr location : int] : cstr
   (let [loc-str (glsl-int->str location)]
     (glsl-sprintf3 "layout(location = %s) in %s %s;"
       loc-str (glsl-type type) name)))
@@ -50,7 +50,7 @@
 ;;;   (glsl-output "FragColor" ":vec4")  ; => "out vec4 FragColor;"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-output [name :cstr type :cstr] :cstr
+(defn glsl-output [name : cstr type : cstr] : cstr
   (glsl-sprintf2 "out %s %s;" (glsl-type type) name))
 
 ;;; glsl-uniform -- build a uniform variable declaration.
@@ -66,11 +66,11 @@
 ;;;   (glsl-uniform "model" ":mat4")  ; => "uniform mat4 model;"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-uniform [name :cstr type :cstr] :cstr
+(defn glsl-uniform [name : cstr type : cstr] : cstr
   (glsl-sprintf2 "uniform %s %s;" (glsl-type type) name))
 
 ;;; __build-shader -- internal helper: assemble a complete shader source.
-(defn __build-shader [version :cstr decls :int main-body :cstr] :cstr
+(defn __build-shader [version : cstr decls : int main-body : cstr] : cstr
   (let [ver   (glsl-sprintf1 "#version %s\n\n" version)
         dlist (glsl-join-vec "\n" decls)
         head  (glsl-cat4 ver dlist "\n\n" "void main() {\n")]
@@ -94,7 +94,7 @@
 ;;;     (glsl-set! "gl_Position" "model * vec4(aPos, 1.0)"))
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-vertex-shader [version :cstr decls :int main-body :cstr] :cstr
+(defn glsl-vertex-shader [version : cstr decls : int main-body : cstr] : cstr
   (__build-shader version decls main-body))
 
 ;;; glsl-fragment-shader -- build a complete fragment shader source string.
@@ -115,7 +115,7 @@
 ;;;     (glsl-set! "FragColor" "vec4(ourColor, 1.0)"))
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-fragment-shader [version :cstr decls :int main-body :cstr] :cstr
+(defn glsl-fragment-shader [version : cstr decls : int main-body : cstr] : cstr
   (__build-shader version decls main-body))
 
 ;;; glsl-compute-shader -- build a compute shader source with a work-group layout.
@@ -135,7 +135,7 @@
 ;;;   (glsl-compute-shader "450 core" 16 16 1 (vec-of) body)
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-compute-shader [version :cstr wg-x :int wg-y :int wg-z :int decls :int main-body :cstr] :cstr
+(defn glsl-compute-shader [version : cstr wg-x : int wg-y : int wg-z : int decls : int main-body : cstr] : cstr
   (let [ver   (glsl-sprintf1 "#version %s\n\n" version)
         wg    (glsl-sprintf3
                 "layout(local_size_x = %s, local_size_y = %s, local_size_z = %s) in;\n\n"
@@ -155,7 +155,7 @@
 ;;;   main-body      -- body of void main()
 ;;;
 ;;; __prim-keyword -- map a Turmeric keyword to a GLSL primitive layout string.
-(defn __prim-keyword [kw :cstr] :cstr
+(defn __prim-keyword [kw : cstr] : cstr
   ```c
   #include <string.h>
   if (!strcmp(kw, ":points"))         return (char *)"points";
@@ -175,8 +175,8 @@
 ;;;   (glsl-geometry-shader "330 core" ":points" ":triangle-strip" 4 (vec-of) body)
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-geometry-shader [version :cstr input-layout :cstr output-layout :cstr
-                              max-vertices :int decls :int main-body :cstr] :cstr
+(defn glsl-geometry-shader [version : cstr input-layout : cstr output-layout : cstr
+                              max-vertices : int decls : int main-body : cstr] : cstr
   (let [in-prim  (__prim-keyword input-layout)
         out-prim (__prim-keyword output-layout)
         ver      (glsl-sprintf1 "#version %s\n\n" version)

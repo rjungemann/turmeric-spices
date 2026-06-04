@@ -18,34 +18,34 @@
   ;; Walk *args* until we find the first positional path.  Skips the
   ;; program name slot if Turmeric injects it; otherwise treats *args*'s
   ;; head as the user-supplied path.
-  (defn first-arg [args :int] #{Unsafe} :cstr
+  (defn first-arg [args : int] #{Unsafe} : cstr
     ```c
     int64_t *cell = (int64_t *)(intptr_t)args;
     if (!cell) return "";
     return (const char *)(intptr_t)cell[0];
     ```)
 
-  (defn eputs [s :cstr] #{Unsafe} :int
+  (defn eputs [s : cstr] #{Unsafe} : int
     ```c
     fputs((const char *)(intptr_t)s, stderr);
     fputc('\n', stderr);
     return 0;
     ```)
 
-  (defn puts2 [a :cstr b :cstr] #{Unsafe} :int
+  (defn puts2 [a : cstr b : cstr] #{Unsafe} : int
     ```c
     printf("%s%s\n", (const char *)(intptr_t)a, (const char *)(intptr_t)b);
     return 0;
     ```)
 
-  (defn empty-cstr? [s :cstr] #{Unsafe} :bool
+  (defn empty-cstr? [s : cstr] #{Unsafe} : bool
     ```c
     const char *p = (const char *)(intptr_t)s;
     return !p || !p[0];
     ```)
 
   ;; Tiny helper to prefix two strings without pulling in stdlib/str.
-  (defn str-prefix [a :cstr b :cstr] #{Unsafe} :cstr
+  (defn str-prefix [a : cstr b : cstr] #{Unsafe} : cstr
     ```c
     static char buf[2048];
     snprintf(buf, sizeof(buf), "%s%s",
@@ -53,7 +53,7 @@
     return (const char *)buf;
     ```)
 
-  (defn loop-forever [w :int] #{Unsafe} :int
+  (defn loop-forever [w : int] #{Unsafe} : int
     (let [ev (watch-next w -1)]
       (if (= ev 0)
         0
@@ -63,7 +63,7 @@
           (watch-event-free ev)
           (loop-forever w)))))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (let [path (first-arg *args*)]
       (if (empty-cstr? path)
         (do

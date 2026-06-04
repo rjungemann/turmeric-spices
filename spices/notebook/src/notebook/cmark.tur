@@ -16,17 +16,17 @@
           md-emit md-emit-html)
 
   ;; Minimal cons helpers so the module stays self-contained.
-  (defn nil-value [] #{Unsafe} :int
+  (defn nil-value [] #{Unsafe} : int
     ```c
     return 0;
     ```)
 
-  (defn list-nil? [lst :int] #{Unsafe} :bool
+  (defn list-nil? [lst : int] #{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn cons [value :int next :int] #{Unsafe} :int
+  (defn cons [value : int next : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -34,21 +34,21 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn head [lst :int] #{Unsafe} :int
+  (defn head [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
     return cell->head;
     ```)
 
-  (defn tail [lst :int] #{Unsafe} :int
+  (defn tail [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
     return cell->tail;
     ```)
 
-  (defn __str-concat [a :cstr b :cstr] #{Unsafe} :cstr
+  (defn __str-concat [a : cstr b : cstr] #{Unsafe} : cstr
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
@@ -60,7 +60,7 @@
     return out;
     ```)
 
-  (defn __repeat-char [ch :int count :int] #{Unsafe} :cstr
+  (defn __repeat-char [ch : int count : int] #{Unsafe} : cstr
     ```c
     if (count <= 0) {
       char *out = malloc(1);
@@ -73,31 +73,31 @@
     return out;
     ```)
 
-  (defn __int->cstr [value :int] #{Unsafe} :cstr
+  (defn __int->cstr [value : int] #{Unsafe} : cstr
     ```c
     char buf[32];
     snprintf(buf, sizeof(buf), "%lld", (long long)value);
     return strdup(buf);
     ```)
 
-  (defn __int-as-cstr [value :int] #{Unsafe} :cstr
+  (defn __int-as-cstr [value : int] #{Unsafe} : cstr
     ```c
     return (const char *)(intptr_t)value;
     ```)
 
-  (defn __cstr-as-int [value :cstr] #{Unsafe} :int
+  (defn __cstr-as-int [value : cstr] #{Unsafe} : int
     ```c
     return (int64_t)(intptr_t)value;
     ```)
 
-  (defn __cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn __cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn __prefix-lines [prefix :cstr body :cstr] #{Unsafe} :cstr
+  (defn __prefix-lines [prefix : cstr body : cstr] #{Unsafe} : cstr
     ```c
     const char *p = prefix ? (const char *)(intptr_t)prefix : "";
     const char *s = body ? (const char *)(intptr_t)body : "";
@@ -126,7 +126,7 @@
     return out;
     ```)
 
-  (defn __format-list-item [prefix :cstr body :cstr] #{Unsafe} :cstr
+  (defn __format-list-item [prefix : cstr body : cstr] #{Unsafe} : cstr
     ```c
     const char *p = prefix ? (const char *)(intptr_t)prefix : "";
     const char *s = body ? (const char *)(intptr_t)body : "";
@@ -166,29 +166,29 @@
     ```)
 
   ;; AST tags used in NB0.
-  (defn md-tag-document [] :int 0)
-  (defn md-tag-heading [] :int 1)
-  (defn md-tag-paragraph [] :int 2)
-  (defn md-tag-blockquote [] :int 3)
-  (defn md-tag-list [] :int 4)
-  (defn md-tag-list-item [] :int 5)
-  (defn md-tag-code-block [] :int 6)
-  (defn md-tag-thematic-break [] :int 7)
-  (defn md-tag-table [] :int 8)
-  (defn md-tag-table-row [] :int 9)
-  (defn md-tag-table-cell [] :int 10)
-  (defn md-tag-text [] :int 11)
-  (defn md-tag-emph [] :int 12)
-  (defn md-tag-strong [] :int 13)
-  (defn md-tag-code-span [] :int 14)
-  (defn md-tag-link [] :int 15)
-  (defn md-tag-image [] :int 16)
-  (defn md-tag-strikethrough [] :int 17)
-  (defn md-tag-autolink [] :int 18)
-  (defn md-tag-hard-break [] :int 19)
-  (defn md-tag-soft-break [] :int 20)
-  (defn md-tag-math-block [] :int 22)
-  (defn md-tag-math-inline [] :int 23)
+  (defn md-tag-document [] : int 0)
+  (defn md-tag-heading [] : int 1)
+  (defn md-tag-paragraph [] : int 2)
+  (defn md-tag-blockquote [] : int 3)
+  (defn md-tag-list [] : int 4)
+  (defn md-tag-list-item [] : int 5)
+  (defn md-tag-code-block [] : int 6)
+  (defn md-tag-thematic-break [] : int 7)
+  (defn md-tag-table [] : int 8)
+  (defn md-tag-table-row [] : int 9)
+  (defn md-tag-table-cell [] : int 10)
+  (defn md-tag-text [] : int 11)
+  (defn md-tag-emph [] : int 12)
+  (defn md-tag-strong [] : int 13)
+  (defn md-tag-code-span [] : int 14)
+  (defn md-tag-link [] : int 15)
+  (defn md-tag-image [] : int 16)
+  (defn md-tag-strikethrough [] : int 17)
+  (defn md-tag-autolink [] : int 18)
+  (defn md-tag-hard-break [] : int 19)
+  (defn md-tag-soft-break [] : int 20)
+  (defn md-tag-math-block [] : int 22)
+  (defn md-tag-math-inline [] : int 23)
 
   ;;; md-node-tag -- return the block tag of a parsed markdown node.
   ;;;
@@ -202,7 +202,7 @@
   ;;;   (md-node-tag (md-parse "# Hi"))
   ;;;
   ;;; Since: NB0
-  (defn md-node-tag [n :int] #{Unsafe} :int
+  (defn md-node-tag [n : int] #{Unsafe} : int
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -222,7 +222,7 @@
   ;;;   (md-node-children doc)
   ;;;
   ;;; Since: NB0
-  (defn md-node-children [n :int] #{Unsafe} :int
+  (defn md-node-children [n : int] #{Unsafe} : int
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -251,7 +251,7 @@
   ;;;   (md-node-text heading)
   ;;;
   ;;; Since: NB0
-  (defn md-node-text [n :int] #{Unsafe} :cstr
+  (defn md-node-text [n : int] #{Unsafe} : cstr
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -271,7 +271,7 @@
   ;;;   (md-node-info code-block)
   ;;;
   ;;; Since: NB0
-  (defn md-node-info [n :int] #{Unsafe} :cstr
+  (defn md-node-info [n : int] #{Unsafe} : cstr
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -291,7 +291,7 @@
   ;;;   (md-node-meta heading)
   ;;;
   ;;; Since: NB0
-  (defn md-node-meta [n :int] #{Unsafe} :int
+  (defn md-node-meta [n : int] #{Unsafe} : int
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -311,7 +311,7 @@
   ;;;   (md-source-span node)
   ;;;
   ;;; Since: NB0
-  (defn md-source-span [n :int] #{Unsafe} :int
+  (defn md-source-span [n : int] #{Unsafe} : int
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -326,12 +326,12 @@
     return (int64_t)(intptr_t)a;
     ```)
 
-  (defn __md-void [] #{Unsafe} :void
+  (defn __md-void [] #{Unsafe} : void
     ```c
     (void)0;
     ```)
 
-  (defn __md-inline-fill [n :int] #{Unsafe} :void
+  (defn __md-inline-fill [n : int] #{Unsafe} : void
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -671,7 +671,7 @@
     #undef TBUF_FLUSH
     ```)
 
-  (defn __md-upgrade-gfm-node [n :int] #{Unsafe} :void
+  (defn __md-upgrade-gfm-node [n : int] #{Unsafe} : void
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -886,14 +886,14 @@
     #undef ADD_CHILD
     ```)
 
-  (defn __md-upgrade-gfm-list [nodes :int] #{Unsafe} :void
+  (defn __md-upgrade-gfm-list [nodes : int] #{Unsafe} : void
     (if (list-nil? nodes)
       (__md-void)
       (do
         (__md-upgrade-gfm (head nodes))
         (__md-upgrade-gfm-list (tail nodes)))))
 
-  (defn __md-upgrade-gfm [n :int] #{Unsafe} :void
+  (defn __md-upgrade-gfm [n : int] #{Unsafe} : void
     (do
       (__md-upgrade-gfm-node n)
       (let [tag (md-node-tag n)]
@@ -906,14 +906,14 @@
           (__md-upgrade-gfm-list (md-node-children n))
           (__md-void)))))
 
-  (defn __md-annotate-inline-list [nodes :int] #{Unsafe} :void
+  (defn __md-annotate-inline-list [nodes : int] #{Unsafe} : void
     (if (list-nil? nodes)
       (__md-void)
       (do
         (__md-annotate-inlines (head nodes))
         (__md-annotate-inline-list (tail nodes)))))
 
-  (defn __md-annotate-inlines [n :int] #{Unsafe} :void
+  (defn __md-annotate-inlines [n : int] #{Unsafe} : void
     (let [tag (md-node-tag n)]
       (if (or (= tag (md-tag-heading))
               (or (= tag (md-tag-paragraph))
@@ -940,7 +940,7 @@
   ;;;   (md-parse "# Title")
   ;;;
   ;;; Since: NB0
-  (defn __md-parse-blocks [source :cstr] #{Unsafe} :int
+  (defn __md-parse-blocks [source : cstr] #{Unsafe} : int
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -1472,14 +1472,14 @@
     return doc;
     ```)
 
-  (defn md-parse [source :cstr] #{Unsafe} :int
+  (defn md-parse [source : cstr] #{Unsafe} : int
     (let [doc (__md-parse-blocks source)]
       (do
         (__md-upgrade-gfm doc)
         (__md-annotate-inlines doc)
         doc)))
 
-  (defn __emit-nodes-with-sep [nodes :int sep :cstr] #{Unsafe} :int
+  (defn __emit-nodes-with-sep [nodes : int sep : cstr] #{Unsafe} : int
     (if (list-nil? nodes)
       (__cstr-as-int "")
       (let [cur (__emit-node-int (head nodes))]
@@ -1489,7 +1489,7 @@
             (__str-concat (__int-as-cstr cur)
                          (__str-concat sep (__int-as-cstr (__emit-nodes-with-sep (tail nodes) sep)))))))))
 
-  (defn __emit-list-items [items :int ordered :bool start :int marker :cstr idx :int] #{Unsafe} :int
+  (defn __emit-list-items [items : int ordered : bool start : int marker : cstr idx : int] #{Unsafe} : int
     (if (list-nil? items)
       (__cstr-as-int "")
       (let [item (head items)
@@ -1510,7 +1510,7 @@
             (__str-concat rendered
                          (__str-concat "\n" (__int-as-cstr (__emit-list-items (tail items) ordered start marker (+ idx 1))))))))))
 
-  (defn __table-align-mark [align :int] :cstr
+  (defn __table-align-mark [align : int] : cstr
     (if (= align 1)
       ":---"
       (if (= align 2)
@@ -1519,7 +1519,7 @@
           "---:"
           "---"))))
 
-  (defn __emit-table-row-cells [cells :int] #{Unsafe} :int
+  (defn __emit-table-row-cells [cells : int] #{Unsafe} : int
     (if (list-nil? cells)
       (__cstr-as-int "")
       (let [cell-text (md-node-text (head cells))]
@@ -1529,7 +1529,7 @@
             (__str-concat cell-text
                          (__str-concat " | " (__int-as-cstr (__emit-table-row-cells (tail cells))))))))))
 
-  (defn __emit-table-align-cells [cells :int] #{Unsafe} :int
+  (defn __emit-table-align-cells [cells : int] #{Unsafe} : int
     (if (list-nil? cells)
       (__cstr-as-int "")
       (let [cell-mark (__table-align-mark (md-node-meta (head cells)))]
@@ -1539,12 +1539,12 @@
             (__str-concat cell-mark
                          (__str-concat " | " (__int-as-cstr (__emit-table-align-cells (tail cells))))))))))
 
-  (defn __emit-table-row [row :int] #{Unsafe} :int
+  (defn __emit-table-row [row : int] #{Unsafe} : int
     (__cstr-as-int
       (__str-concat "| "
                     (__str-concat (__int-as-cstr (__emit-table-row-cells (md-node-children row))) " |"))))
 
-  (defn __emit-table-body-rows [rows :int] #{Unsafe} :int
+  (defn __emit-table-body-rows [rows : int] #{Unsafe} : int
     (if (list-nil? rows)
       (__cstr-as-int "")
       (let [rendered (__emit-table-row (head rows))]
@@ -1554,7 +1554,7 @@
             (__str-concat (__int-as-cstr rendered)
                          (__str-concat "\n" (__int-as-cstr (__emit-table-body-rows (tail rows))))))))))
 
-  (defn __emit-table-node [n :int] #{Unsafe} :int
+  (defn __emit-table-node [n : int] #{Unsafe} : int
     (let [rows (md-node-children n)
           header (head rows)
           body (tail rows)
@@ -1571,7 +1571,7 @@
                                      (__str-concat (__int-as-cstr align-row)
                                                    (__str-concat "\n" (__int-as-cstr (__emit-table-body-rows body))))))))))
 
-  (defn __emit-node-int [n :int] #{Unsafe} :int
+  (defn __emit-node-int [n : int] #{Unsafe} : int
     (let [tag (md-node-tag n)]
       (if (= tag (md-tag-document))
         (__emit-nodes-with-sep (md-node-children n) "\n\n")
@@ -1624,10 +1624,10 @@
   ;;;   (md-emit (md-parse "# Title"))
   ;;;
   ;;; Since: NB0
-  (defn md-emit [n :int] #{Unsafe} :cstr
+  (defn md-emit [n : int] #{Unsafe} : cstr
     (__int-as-cstr (__emit-node-int n)))
 
-  (defn __html-escape-math [s :cstr] #{Unsafe} :cstr
+  (defn __html-escape-math [s : cstr] #{Unsafe} : cstr
     ```c
     const char *src = s ? (const char *)(intptr_t)s : "";
     size_t len = strlen(src), cap = len * 5 + 1;
@@ -1653,7 +1653,7 @@
     return out;
     ```)
 
-  (defn __html-escape [s :cstr] #{Unsafe} :cstr
+  (defn __html-escape [s : cstr] #{Unsafe} : cstr
     ```c
     const char *src = s ? (const char *)(intptr_t)s : "";
     size_t len = strlen(src), cap = len * 6 + 1;
@@ -1680,21 +1680,21 @@
     return out;
     ```)
 
-  (defn __emit-inline-plain-list [nodes :int] #{Unsafe} :int
+  (defn __emit-inline-plain-list [nodes : int] #{Unsafe} : int
     (if (list-nil? nodes)
       (__cstr-as-int "")
       (__cstr-as-int
         (__str-concat (__int-as-cstr (__emit-inline-plain-node-int (head nodes)))
                       (__int-as-cstr (__emit-inline-plain-list (tail nodes)))))))
 
-  (defn __emit-inline-html-list [nodes :int] #{Unsafe} :int
+  (defn __emit-inline-html-list [nodes : int] #{Unsafe} : int
     (if (list-nil? nodes)
       (__cstr-as-int "")
       (__cstr-as-int
         (__str-concat (__int-as-cstr (__emit-inline-html-node-int (head nodes)))
                       (__int-as-cstr (__emit-inline-html-list (tail nodes)))))))
 
-  (defn __emit-block-html-list [nodes :int] #{Unsafe} :int
+  (defn __emit-block-html-list [nodes : int] #{Unsafe} : int
     (if (list-nil? nodes)
       (__cstr-as-int "")
       (let [cur (__emit-block-html-node-int (head nodes))]
@@ -1704,7 +1704,7 @@
             (__str-concat (__int-as-cstr cur)
                           (__str-concat "\n" (__int-as-cstr (__emit-block-html-list (tail nodes))))))))))
 
-  (defn __emit-inline-plain-node-int [n :int] #{Unsafe} :int
+  (defn __emit-inline-plain-node-int [n : int] #{Unsafe} : int
     (let [tag (md-node-tag n)]
       (if (= tag (md-tag-text))
         (__cstr-as-int (md-node-text n))
@@ -1726,7 +1726,7 @@
                       (__cstr-as-int "\n")
                       (__cstr-as-int "")))))))))))
 
-  (defn __emit-link-html-int [n :int] #{Unsafe} :int
+  (defn __emit-link-html-int [n : int] #{Unsafe} : int
     (let [title-attr (if (__cstr-eq? (md-node-text n) "")
                        ">"
                        (__str-concat " title=\"" (__str-concat (__html-escape (md-node-text n)) "\">")))]
@@ -1735,7 +1735,7 @@
           (__str-concat "\"" (__str-concat title-attr
             (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n))) "</a>"))))))))
 
-  (defn __emit-image-html-int [n :int] #{Unsafe} :int
+  (defn __emit-image-html-int [n : int] #{Unsafe} : int
     (let [title-tail (if (__cstr-eq? (md-node-text n) "")
                        " />"
                        (__str-concat " title=\"" (__str-concat (__html-escape (md-node-text n)) "\" />")))]
@@ -1744,7 +1744,7 @@
           (__str-concat "\" alt=\"" (__str-concat (__html-escape (__int-as-cstr (__emit-inline-plain-list (md-node-children n))))
             (__str-concat "\"" title-tail))))))))
 
-  (defn __emit-inline-html-node-int [n :int] #{Unsafe} :int
+  (defn __emit-inline-html-node-int [n : int] #{Unsafe} : int
     (let [tag (md-node-tag n)]
       (if (= tag (md-tag-text))
         (__cstr-as-int (__html-escape (md-node-text n)))
@@ -1778,7 +1778,7 @@
                               (__str-concat (__html-escape-math (md-node-text n)) "$</span>")))
                           (__cstr-as-int ""))))))))))))))
 
-  (defn __table-align-attr [align :int] :cstr
+  (defn __table-align-attr [align : int] : cstr
     (if (= align 1)
       " align=\"left\""
       (if (= align 2)
@@ -1787,7 +1787,7 @@
           " align=\"right\""
           ""))))
 
-  (defn __emit-table-cells-html [cells :int header? :bool] #{Unsafe} :int
+  (defn __emit-table-cells-html [cells : int header? : bool] #{Unsafe} : int
     (if (list-nil? cells)
       (__cstr-as-int "")
       (let [cell (head cells)
@@ -1807,12 +1807,12 @@
           (__cstr-as-int
             (__str-concat rendered (__int-as-cstr (__emit-table-cells-html (tail cells) header?))))))))
 
-  (defn __emit-table-row-html [row :int header? :bool] #{Unsafe} :int
+  (defn __emit-table-row-html [row : int header? : bool] #{Unsafe} : int
     (__cstr-as-int
       (__str-concat "<tr>"
                     (__str-concat (__int-as-cstr (__emit-table-cells-html (md-node-children row) header?)) "</tr>"))))
 
-  (defn __emit-table-body-html [rows :int] #{Unsafe} :int
+  (defn __emit-table-body-html [rows : int] #{Unsafe} : int
     (if (list-nil? rows)
       (__cstr-as-int "")
       (let [rendered (__emit-table-row-html (head rows) false)]
@@ -1822,7 +1822,7 @@
             (__str-concat (__int-as-cstr rendered)
                           (__str-concat "\n" (__int-as-cstr (__emit-table-body-html (tail rows))))))))))
 
-  (defn __emit-table-html-int [n :int] #{Unsafe} :int
+  (defn __emit-table-html-int [n : int] #{Unsafe} : int
     (let [rows (md-node-children n)
           header (head rows)
           body (tail rows)
@@ -1838,14 +1838,14 @@
                                                     (__str-concat (__int-as-cstr (__emit-table-body-html body))
                                                                   "\n</tbody>\n</table>"))))))))
 
-  (defn __emit-heading-html-int [n :int] #{Unsafe} :int
+  (defn __emit-heading-html-int [n : int] #{Unsafe} : int
     (let [lvl (__int->cstr (md-node-meta n))]
       (__cstr-as-int
         (__str-concat "<h" (__str-concat lvl (__str-concat ">"
           (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n)))
                         (__str-concat "</h" (__str-concat lvl ">")))))))))
 
-  (defn __emit-block-html-node-int [n :int] #{Unsafe} :int
+  (defn __emit-block-html-node-int [n : int] #{Unsafe} : int
     (let [tag (md-node-tag n)]
       (if (= tag (md-tag-document))
         (__emit-block-html-list (md-node-children n))
@@ -1895,7 +1895,7 @@
                             (__str-concat (__html-escape-math (md-node-text n)) "$$</span>")))
                         (__cstr-as-int "")))))))))))))
 
-  (defn md-emit-html [n :int] #{Unsafe} :cstr
+  (defn md-emit-html [n : int] #{Unsafe} : cstr
     (__int-as-cstr (__emit-block-html-node-int n)))
 
 ) ;; end defmodule notebook/cmark

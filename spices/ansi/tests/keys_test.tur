@@ -11,7 +11,7 @@
   ;; (+ ...) tree.  tap-record prints one TAP line and bumps the counter
   ;; on failure; tap-finish prints the plan + summary and returns 0/1.
 
-  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     /* __tur_include__: static int g_keys_fails = 0; */
     if (!ok) g_keys_fails++;
@@ -19,7 +19,7 @@
            (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-finish [count :int] #{Unsafe} :int
+  (defn tap-finish [count : int] #{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_keys_fails == 0) {
@@ -33,7 +33,7 @@
 
   ;; Decode a literal byte sequence (selected by test-id) and compare the
   ;; resulting key name against an expected name.
-  (defn decode-test [test-id :int expected :cstr] #{Unsafe} :bool
+  (defn decode-test [test-id : int expected : cstr] #{Unsafe} : bool
     ```c
     const char *bytes = NULL;
     int n = 0;
@@ -86,7 +86,7 @@
     return ok ? 1 : 0;
     ```)
 
-  (defn encode-test [test-id :int name :cstr] #{Unsafe} :bool
+  (defn encode-test [test-id : int name : cstr] #{Unsafe} : bool
     ```c
     const char *expected = NULL;
     int expected_len = 0;
@@ -121,21 +121,21 @@
     return ok ? 1 : 0;
     ```)
 
-  (defn mod-check [name :cstr ctrl :int shift :int alt :int] #{Unsafe} :bool
+  (defn mod-check [name : cstr ctrl : int shift : int alt : int] #{Unsafe} : bool
     (and (= (key-ctrl? name) ctrl)
          (and (= (key-shift? name) shift)
               (= (key-alt? name) alt))))
 
-  (defn run-decode [idx :int label :cstr tid :int expected :cstr] #{Unsafe} :void
+  (defn run-decode [idx : int label : cstr tid : int expected : cstr] #{Unsafe} : void
     (tap-record idx label (decode-test tid expected)))
 
-  (defn run-encode [idx :int label :cstr tid :int name :cstr] #{Unsafe} :void
+  (defn run-encode [idx : int label : cstr tid : int name : cstr] #{Unsafe} : void
     (tap-record idx label (encode-test tid name)))
 
-  (defn run-mod [idx :int label :cstr name :cstr c :int s :int a :int] #{Unsafe} :void
+  (defn run-mod [idx : int label : cstr name : cstr c : int s : int a : int] #{Unsafe} : void
     (tap-record idx label (mod-check name c s a)))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       ;; Decode tests
       (run-decode  1 "decode CSI A -> <Up>"           1 "<Up>")

@@ -20,9 +20,9 @@
   (import test/suite   :refer [describe it])
   (import test/runner  :refer [run-all])
 
-  (defn t-nil [] :int ```c return 0; ```)
+  (defn t-nil [] : int ```c return 0; ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -33,26 +33,26 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn cstr->int [s :cstr] :int
+  (defn cstr->int [s : cstr] : int
     ```c
     #include <stdint.h>
     return (int64_t)(intptr_t)s;
     ```)
 
-  (defn t-cstr= [a :cstr b :cstr] :bool
+  (defn t-cstr= [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)(intptr_t)a, (const char *)(intptr_t)b) == 0;
     ```)
 
-  (defn close? [x :float y :float] :bool
+  (defn close? [x : float y : float] : bool
     ```c
     double dx = x - y;
     if (dx < 0) dx = -dx;
     return dx < 1e-9;
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
     (describe "distinct"
       (it "removes duplicate rows by named key"
@@ -213,7 +213,7 @@
           (frame-free r) (frame-free f)
           (assert-true ok)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

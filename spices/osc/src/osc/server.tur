@@ -16,7 +16,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -24,7 +24,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -50,7 +50,7 @@
 ;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "server-new failed")))
 ;;;
 ;;; Since: OSC0
-(defn server-new [port :cstr proto :cstr] :ptr<void>
+(defn server-new [port : cstr proto : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <lo/lo.h>
@@ -79,7 +79,7 @@
 ;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "server-new-tcp failed")))
 ;;;
 ;;; Since: OSC0
-(defn server-new-tcp [port :cstr] :ptr<void>
+(defn server-new-tcp [port : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <lo/lo.h>
@@ -107,7 +107,7 @@
 ;;;   (server-free s)
 ;;;
 ;;; Since: OSC0
-(defn server-free [s :int] :void
+(defn server-free [s : int] : void
   ```c
   #include <lo/lo.h>
   lo_server_thread st = (lo_server_thread)(intptr_t)s;
@@ -135,7 +135,7 @@
 ;;;   (server-add-method s "/synth/freq" "f" 0)
 ;;;
 ;;; Since: OSC0
-(defn server-add-method [s :int path :cstr typespec :cstr handler :int] :void
+(defn server-add-method [s : int path : cstr typespec : cstr handler : int] : void
   ```c
   #include <lo/lo.h>
   /* Stub trampoline -- full Turmeric FFI callback support is deferred.
@@ -168,7 +168,7 @@
 ;;;   (server-recv s 100)  ; => 1
 ;;;
 ;;; Since: OSC0
-(defn server-recv [s :int timeout-ms :int] :int
+(defn server-recv [s : int timeout-ms : int] : int
   ```c
   #include <lo/lo.h>
   lo_server_thread st = (lo_server_thread)(intptr_t)s;
@@ -188,7 +188,7 @@
 ;;;   (server-recv-noblock s)  ; => 0
 ;;;
 ;;; Since: OSC0
-(defn server-recv-noblock [s :int] :int
+(defn server-recv-noblock [s : int] : int
   ```c
   #include <lo/lo.h>
   lo_server_thread st = (lo_server_thread)(intptr_t)s;

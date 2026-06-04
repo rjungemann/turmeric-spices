@@ -17,7 +17,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -25,7 +25,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -51,7 +51,7 @@
 ;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "create failed")))
 ;;;
 ;;; Since: PV0
-(defn surface-create [width :int height :int] :ptr<void>
+(defn surface-create [width : int height : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -79,7 +79,7 @@
 ;;;   (surface-create-from-data buf 64 64 (* 64 4))
 ;;;
 ;;; Since: PV0
-(defn surface-create-from-data [data :cstr width :int height :int stride :int] :ptr<void>
+(defn surface-create-from-data [data : cstr width : int height : int stride : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -103,7 +103,7 @@
 ;;;   (surface-destroy s)
 ;;;
 ;;; Since: PV0
-(defn surface-destroy [s :int] :void
+(defn surface-destroy [s : int] : void
   ```c
   #include <plutovg.h>
   if (s) plutovg_surface_destroy((plutovg_surface_t *)(intptr_t)s);
@@ -121,7 +121,7 @@
 ;;;   (println (surface-width s))
 ;;;
 ;;; Since: PV0
-(defn surface-width [s :int] :int
+(defn surface-width [s : int] : int
   ```c
   #include <plutovg.h>
   return (int64_t)plutovg_surface_get_width((plutovg_surface_t *)(intptr_t)s);
@@ -139,7 +139,7 @@
 ;;;   (println (surface-height s))
 ;;;
 ;;; Since: PV0
-(defn surface-height [s :int] :int
+(defn surface-height [s : int] : int
   ```c
   #include <plutovg.h>
   return (int64_t)plutovg_surface_get_height((plutovg_surface_t *)(intptr_t)s);
@@ -158,7 +158,7 @@
 ;;;   (println (surface-stride s))
 ;;;
 ;;; Since: PV0
-(defn surface-stride [s :int] :int
+(defn surface-stride [s : int] : int
   ```c
   #include <plutovg.h>
   return (int64_t)plutovg_surface_get_stride((plutovg_surface_t *)(intptr_t)s);
@@ -178,7 +178,7 @@
 ;;;   (let [buf (surface-data s)] ...)
 ;;;
 ;;; Since: PV0
-(defn surface-data [s :int] :cstr
+(defn surface-data [s : int] : cstr
   ```c
   #include <plutovg.h>
   return (char *)plutovg_surface_get_data((plutovg_surface_t *)(intptr_t)s);
@@ -202,7 +202,7 @@
 ;;;     (if (ok? r) (println "written") (println "failed")))
 ;;;
 ;;; Since: PV6
-(defn surface-write-png [s :int path :cstr] :ptr<void>
+(defn surface-write-png [s : int path : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -228,7 +228,7 @@
 ;;;   (surface-write-jpeg s "out.jpg" 90)
 ;;;
 ;;; Since: PV6
-(defn surface-write-jpeg [s :int path :cstr quality :int] :ptr<void>
+(defn surface-write-jpeg [s : int path : cstr quality : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>

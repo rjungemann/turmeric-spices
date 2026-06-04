@@ -59,7 +59,7 @@
 ;;;     (column-int32-at c 0))   ; => 1
 ;;;
 ;;; Since: FR0
-(defn column-int32 [vs :int nullable :int validity :int] :int
+(defn column-int32 [vs : int nullable : int validity : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -135,7 +135,7 @@
   ```)
 
 ;;; column-int64 -- build a column of int64 values. Since: FR0
-(defn column-int64 [vs :int nullable :int validity :int] :int
+(defn column-int64 [vs : int nullable : int validity : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -194,7 +194,7 @@
 ;;; so CSV inference and arithmetic kernels can produce float32 columns
 ;;; from a pre-packed buffer at FR3+.)
 ;;; Since: FR0
-(defn column-float32 [vs :int nullable :int validity :int] :int
+(defn column-float32 [vs : int nullable : int validity : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -257,7 +257,7 @@
 ;;; v0.1.0 reads cons values as int64 bit-patterns reinterpreted as double,
 ;;; matching the float32 constructor.
 ;;; Since: FR0
-(defn column-float64 [vs :int nullable :int validity :int] :int
+(defn column-float64 [vs : int nullable : int validity : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -314,7 +314,7 @@
 
 ;;; column-bool -- build a 1-bit-packed bool column from a cons list of 0/1 ints.
 ;;; Since: FR0
-(defn column-bool [vs :int nullable :int validity :int] :int
+(defn column-bool [vs : int nullable : int validity : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -371,7 +371,7 @@
 ;; ---------------------------------------------------------------------------
 
 ;;; __set-type-tag -- internal helper to retag a column.  Since: FR9
-(defn __set-type-tag [col :int t :int] :int
+(defn __set-type-tag [col : int t : int] : int
   ```c
   #include <stdint.h>
   struct __frame_col {
@@ -384,20 +384,20 @@
 
 ;;; column-date32 -- build a date32 column from a cons list of int days-since-epoch.
 ;;; Since: FR9
-(defn column-date32 [vs :int nullable :int validity :int] :int
+(defn column-date32 [vs : int nullable : int validity : int] : int
   (__set-type-tag (column-int32 vs nullable validity) 7))
 
 ;;; column-timestamp -- build a timestamp column from a cons list of int64
 ;;; microseconds-since-epoch.  Since: FR9
-(defn column-timestamp [vs :int nullable :int validity :int] :int
+(defn column-timestamp [vs : int nullable : int validity : int] : int
   (__set-type-tag (column-int64 vs nullable validity) 8))
 
 ;;; column-date32-at -- read a date32 cell as :int (days since epoch). Since: FR9
-(defn column-date32-at [col :int i :int] :int
+(defn column-date32-at [col : int i : int] : int
   (column-int32-at col i))
 
 ;;; column-timestamp-at -- read a timestamp cell as :int (us since epoch). Since: FR9
-(defn column-timestamp-at [col :int i :int] :int
+(defn column-timestamp-at [col : int i : int] : int
   (column-int64-at col i))
 
 ;; ---------------------------------------------------------------------------
@@ -405,7 +405,7 @@
 ;; ---------------------------------------------------------------------------
 
 ;;; column-type -- type tag of a column. Since: FR0
-(defn column-type [col :int] :int
+(defn column-type [col : int] : int
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -416,7 +416,7 @@
   ```)
 
 ;;; column-length -- number of elements in a column. Since: FR0
-(defn column-length [col :int] :int
+(defn column-length [col : int] : int
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -427,7 +427,7 @@
   ```)
 
 ;;; column-null-count -- number of null entries. Since: FR0
-(defn column-null-count [col :int] :int
+(defn column-null-count [col : int] : int
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -438,7 +438,7 @@
   ```)
 
 ;;; column-valid? -- true if row i of col is non-null. Since: FR0
-(defn column-valid? [col :int i :int] :bool
+(defn column-valid? [col : int i : int] : bool
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -457,7 +457,7 @@
 ;; ---------------------------------------------------------------------------
 
 ;;; column-int32-at -- read int32 element at row i. Since: FR0
-(defn column-int32-at [col :int i :int] :int
+(defn column-int32-at [col : int i : int] : int
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -468,7 +468,7 @@
   ```)
 
 ;;; column-int64-at -- read int64 element at row i. Since: FR0
-(defn column-int64-at [col :int i :int] :int
+(defn column-int64-at [col : int i : int] : int
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -479,7 +479,7 @@
   ```)
 
 ;;; column-float32-at -- read float32 element at row i as :float (double). Since: FR0
-(defn column-float32-at [col :int i :int] :float
+(defn column-float32-at [col : int i : int] : float
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -490,7 +490,7 @@
   ```)
 
 ;;; column-float64-at -- read float64 element at row i. Since: FR0
-(defn column-float64-at [col :int i :int] :float
+(defn column-float64-at [col : int i : int] : float
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -501,7 +501,7 @@
   ```)
 
 ;;; column-bool-at -- read 1-bit-packed bool element at row i; returns 0 or 1. Since: FR0
-(defn column-bool-at [col :int i :int] :int
+(defn column-bool-at [col : int i : int] : int
   ```c
   struct __frame_col {
     int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
@@ -521,7 +521,7 @@
 ;;; column-slice -- new column containing rows [offset, offset+length).
 ;;; For FR0 this is a copying slice; FR2 introduces zero-copy aliasing.
 ;;; Since: FR0
-(defn column-slice [col :int offset :int length :int] :int
+(defn column-slice [col : int offset : int length : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -669,7 +669,7 @@
 ;;;
 ;;; Decrements the refcount; frees the buffers and descriptor only when the
 ;;; refcount drops to zero.  No-op if col is 0.  Since: FR0 (refcount: FR2)
-(defn column-free [col :int] :void
+(defn column-free [col : int] : void
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -702,7 +702,7 @@
   ```)
 
 ;;; column-retain -- bump the refcount on a shared column handle. Since: FR2
-(defn column-retain [col :int] :int
+(defn column-retain [col : int] : int
   ```c
   #include <stdint.h>
   struct __frame_col {
@@ -732,7 +732,7 @@
 ;;; Layout: Arrow utf8 -- (validity_bitmap?, int32 offsets[n+1], data_bytes).
 ;;;
 ;;; Since: FR1
-(defn column-utf8 [vs :int nullable :int validity :int] :int
+(defn column-utf8 [vs : int nullable : int validity : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -831,7 +831,7 @@
 ;;; -- callers that need a long-lived copy must strdup.
 ;;;
 ;;; Since: FR1
-(defn column-utf8-at [col :int i :int] :cstr
+(defn column-utf8-at [col : int i : int] : cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -866,7 +866,7 @@
 
 ;;; column-builder -- create a new builder for the given type with an initial
 ;;; capacity hint (0 = use a small default).  Returns :int handle.  Since: FR1
-(defn column-builder [type-tag :int capacity :int] :int
+(defn column-builder [type-tag : int capacity : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -909,7 +909,7 @@
   ```)
 
 ;;; __builder-grow -- ensure capacity for one more row (internal). Since: FR1
-(defn __builder-grow [b :int] :void
+(defn __builder-grow [b : int] : void
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -948,7 +948,7 @@
   ```)
 
 ;;; builder-append-int32 -- append a value to an int32 builder. Since: FR1
-(defn builder-append-int32 [b :int v :int] :void
+(defn builder-append-int32 [b : int v : int] : void
   ```c
   #include <stdint.h>
   struct __frame_builder {
@@ -964,7 +964,7 @@
   ```)
 
 ;;; builder-append-int64 -- append a value to an int64 builder. Since: FR1
-(defn builder-append-int64 [b :int v :int] :void
+(defn builder-append-int64 [b : int v : int] : void
   ```c
   #include <stdint.h>
   struct __frame_builder {
@@ -980,7 +980,7 @@
   ```)
 
 ;;; builder-append-float64 -- append a double value to a float64 builder. Since: FR1
-(defn builder-append-float64 [b :int v :float] :void
+(defn builder-append-float64 [b : int v : float] : void
   ```c
   #include <stdint.h>
   struct __frame_builder {
@@ -996,7 +996,7 @@
   ```)
 
 ;;; builder-append-bool -- append 0/1 to a bool builder. Since: FR1
-(defn builder-append-bool [b :int v :int] :void
+(defn builder-append-bool [b : int v : int] : void
   ```c
   #include <stdint.h>
   struct __frame_builder {
@@ -1014,7 +1014,7 @@
   ```)
 
 ;;; builder-append-utf8 -- append a string to a utf8 builder. Since: FR1
-(defn builder-append-utf8 [b :int s :cstr] :void
+(defn builder-append-utf8 [b : int s : cstr] : void
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -1044,7 +1044,7 @@
 ;;; builder-append-null -- mark the next row as null and bump length.
 ;;; Writes a zero byte/slot so reading the slot has defined behavior even
 ;;; though it's logically null.  Since: FR1
-(defn builder-append-null [b :int] :void
+(defn builder-append-null [b : int] : void
   ```c
   #include <stdint.h>
   struct __frame_builder {
@@ -1068,7 +1068,7 @@
 
 ;;; builder-finish -- materialize the accumulated rows into a column and free
 ;;; the builder.  Returns the column handle (or 0 on OOM).  Since: FR1
-(defn builder-finish [b :int] :int
+(defn builder-finish [b : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -1177,7 +1177,7 @@
 ;; ---------------------------------------------------------------------------
 
 ;;; column-cast -- numeric->numeric conversion producing a new column. Since: FR9
-(defn column-cast [col :int target :int] :int
+(defn column-cast [col : int target : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>

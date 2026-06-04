@@ -21,7 +21,7 @@
 ;;; L: mat (lower triangular)
 ;;; b: vec
 ;;; Returns: vec (solution x)
-(defn fwd-sub [L b] :int
+(defn fwd-sub [L b] : int
   (let [n (mat-rows L)
         m (mat-cols L)]
     (when (or (not (mat-square? L)) (not= n (vec-len b)))
@@ -44,7 +44,7 @@
 ;;; U: mat (upper triangular)
 ;;; b: vec
 ;;; Returns: vec (solution x)
-(defn back-sub [U b] :int
+(defn back-sub [U b] : int
   (let [n (mat-rows U)
         m (mat-cols U)]
     (when (or (not (mat-square? U)) (not= n (vec-len b)))
@@ -70,7 +70,7 @@
 ;;; f: chol-factor (A = L L')
 ;;; b: vec
 ;;; Returns: vec (solution x)
-(defn chol-solve [f b] :int
+(defn chol-solve [f b] : int
   (let [L (chol-factor-L f)
         n (mat-rows L)]
     (when (not= n (vec-len b))
@@ -87,7 +87,7 @@
 ;;; f: lu-factor (PA = LU)
 ;;; b: vec
 ;;; Returns: vec (solution x)
-(defn lu-solve [f b] :int
+(defn lu-solve [f b] : int
   (let [L (lu-factor-L f)
         U (lu-factor-U f)
         piv (lu-factor-piv f)
@@ -116,7 +116,7 @@
 ;;; b: vec
 ;;; spd?: :int (1 if A is symmetric positive-definite, 0 otherwise)
 ;;; Returns: result<vec> or err
-(defn mat-solve [A b spd?] :int
+(defn mat-solve [A b spd?] : int
   (let [n (mat-rows A)]
     (when (or (not (mat-square? A)) (not= n (vec-len b)))
       (return (err "mat-solve: A must be square and same size as b")))
@@ -141,7 +141,7 @@
 ;;; mat-inv -- compute matrix inverse using LU decomposition
 ;;; A: mat (square, non-singular)
 ;;; Returns: result<mat> or err
-(defn mat-inv [A] :int
+(defn mat-inv [A] : int
   (let [n (mat-rows A)]
     (when (not (mat-square? A))
       (return (err "mat-inv: matrix must be square")))
@@ -174,7 +174,7 @@
 ;;; mat-det -- compute determinant using LU decomposition
 ;;; A: mat (square)
 ;;; Returns: result<:float> or err
-(defn mat-det [A] :float
+(defn mat-det [A] : float
   (let [n (mat-rows A)]
     (when (not (mat-square? A))
       (return (err "mat-det: matrix must be square")))
@@ -213,7 +213,7 @@
 ;;;
 ;;; For overdetermined systems (m > n), this finds the least-squares solution.
 ;;; For square systems (m = n), this is equivalent to direct solve.
-(defn qr-solve [f b] :int
+(defn qr-solve [f b] : int
   (let [Q (qr-factor-Q f)
         R (qr-factor-R f)
         m (mat-rows Q)

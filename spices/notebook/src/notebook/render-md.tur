@@ -19,23 +19,23 @@
           default-render-opts
           render-md-string render-md)
 
-  (defn __rmd-build-hint [] :int
+  (defn __rmd-build-hint [] : int
     ```c
     /* __tur_include__: #include <sys/stat.h> */
     return 0;
     ```)
 
-  (defn __rmd-nil-value [] #{Unsafe} :int
+  (defn __rmd-nil-value [] #{Unsafe} : int
     ```c
     return 0;
     ```)
 
-  (defn __rmd-list-nil? [lst :int] #{Unsafe} :bool
+  (defn __rmd-list-nil? [lst : int] #{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn __rmd-cons [value :int next :int] #{Unsafe} :int
+  (defn __rmd-cons [value : int next : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -43,21 +43,21 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn __rmd-head [lst :int] #{Unsafe} :int
+  (defn __rmd-head [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
     return cell->head;
     ```)
 
-  (defn __rmd-tail [lst :int] #{Unsafe} :int
+  (defn __rmd-tail [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
     return cell->tail;
     ```)
 
-  (defn __rmd-ok [value :int] #{Unsafe} :int
+  (defn __rmd-ok [value : int] #{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
     r->is_ok = true;
@@ -66,7 +66,7 @@
     return (int64_t)(intptr_t)r;
     ```)
 
-  (defn __rmd-err [value :cstr] #{Unsafe} :int
+  (defn __rmd-err [value : cstr] #{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
     r->is_ok = false;
@@ -75,48 +75,48 @@
     return (int64_t)(intptr_t)r;
     ```)
 
-  (defn __rmd-result-ok? [result :int] #{Unsafe} :bool
+  (defn __rmd-result-ok? [result : int] #{Unsafe} : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
     return r && r->is_ok;
     ```)
 
-  (defn __rmd-result-ok-val [result :int] #{Unsafe} :int
+  (defn __rmd-result-ok-val [result : int] #{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
     return r ? r->ok_val : 0;
     ```)
 
-  (defn __rmd-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn __rmd-cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn __rmd-cstr-empty? [s :cstr] #{Unsafe} :bool
+  (defn __rmd-cstr-empty? [s : cstr] #{Unsafe} : bool
     ```c
     const char *src = s ? (const char *)(intptr_t)s : "";
     return src[0] == '\0';
     ```)
 
-  (defn __rmd-cstr-as-int [s :cstr] #{Unsafe} :int
+  (defn __rmd-cstr-as-int [s : cstr] #{Unsafe} : int
     ```c
     return (int64_t)(intptr_t)s;
     ```)
 
-  (defn __rmd-int-as-cstr [value :int] #{Unsafe} :cstr
+  (defn __rmd-int-as-cstr [value : int] #{Unsafe} : cstr
     ```c
     return (const char *)(intptr_t)value;
     ```)
 
-  (defn __rmd-cstr-free [s :cstr] #{Unsafe} :void
+  (defn __rmd-cstr-free [s : cstr] #{Unsafe} : void
     ```c
     void *p = (void *)(intptr_t)s;
     if (p) free(p);
     ```)
 
-  (defn __rmd-str-concat [a :cstr b :cstr] #{Unsafe} :cstr
+  (defn __rmd-str-concat [a : cstr b : cstr] #{Unsafe} : cstr
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
@@ -128,22 +128,22 @@
     return out;
     ```)
 
-  (defn __rmd-join-blocks [a :cstr b :cstr] #{Unsafe} :cstr
+  (defn __rmd-join-blocks [a : cstr b : cstr] #{Unsafe} : cstr
     (if (__rmd-cstr-empty? a)
       b
       (if (__rmd-cstr-empty? b)
         a
         (__rmd-str-concat a (__rmd-str-concat "\n\n" b)))))
 
-  (defn __rmd-int->cstr [value :int] #{Unsafe} :cstr
+  (defn __rmd-int->cstr [value : int] #{Unsafe} : cstr
     ```c
     char buf[32];
     snprintf(buf, sizeof(buf), "%lld", (long long)value);
     return strdup(buf);
     ```)
 
-  (defn render-opts-make [output_dir :cstr use_cache :int include_source :int
-                          include_output :int fail_fast :int] #{Unsafe} :int
+  (defn render-opts-make [output_dir : cstr use_cache : int include_source : int
+                          include_output : int fail_fast : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *output_dir;
@@ -165,7 +165,7 @@
     return (int64_t)(intptr_t)opts;
     ```)
 
-  (defn render-opts-output-dir [opts :int] #{Unsafe} :cstr
+  (defn render-opts-output-dir [opts : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *output_dir;
@@ -178,7 +178,7 @@
     return o && o->output_dir ? o->output_dir : "";
     ```)
 
-  (defn render-opts-use-cache [opts :int] #{Unsafe} :int
+  (defn render-opts-use-cache [opts : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *output_dir;
@@ -191,7 +191,7 @@
     return o ? o->use_cache : 0;
     ```)
 
-  (defn render-opts-include-source [opts :int] #{Unsafe} :int
+  (defn render-opts-include-source [opts : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *output_dir;
@@ -204,7 +204,7 @@
     return o ? o->include_source : 1;
     ```)
 
-  (defn render-opts-include-output [opts :int] #{Unsafe} :int
+  (defn render-opts-include-output [opts : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *output_dir;
@@ -217,7 +217,7 @@
     return o ? o->include_output : 1;
     ```)
 
-  (defn render-opts-fail-fast [opts :int] #{Unsafe} :int
+  (defn render-opts-fail-fast [opts : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *output_dir;
@@ -231,7 +231,7 @@
     ```)
 
   ;;; render-opts-set-math-mode -- set math rendering mode on an opts value.
-  (defn render-opts-set-math-mode [opts :int mode :int] #{Unsafe} :int
+  (defn render-opts-set-math-mode [opts : int mode : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *output_dir;
@@ -248,7 +248,7 @@
     ```)
 
   ;;; render-opts-set-assets-mode -- set asset embedding mode (0=inline 1=sibling).
-  (defn render-opts-set-assets-mode [opts :int mode :int] #{Unsafe} :int
+  (defn render-opts-set-assets-mode [opts : int mode : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *output_dir;
@@ -264,10 +264,10 @@
     return opts;
     ```)
 
-  (defn default-render-opts [] #{Unsafe} :int
+  (defn default-render-opts [] #{Unsafe} : int
     (render-opts-make "" 0 1 1 1))
 
-  (defn __rmd-output-path [src_path :cstr output_dir :cstr] #{Unsafe} :cstr
+  (defn __rmd-output-path [src_path : cstr output_dir : cstr] #{Unsafe} : cstr
     ```c
     const char *src = src_path ? (const char *)(intptr_t)src_path : "";
     const char *out_dir = output_dir ? (const char *)(intptr_t)output_dir : "";
@@ -312,7 +312,7 @@
     return out;
     ```)
 
-  (defn __rmd-ensure-parent-dir [path :cstr] #{Unsafe} :int
+  (defn __rmd-ensure-parent-dir [path : cstr] #{Unsafe} : int
     ```c
     #include <sys/stat.h>
     const char *src = path ? (const char *)(intptr_t)path : "";
@@ -350,7 +350,7 @@
     return ret;
     ```)
 
-  (defn __rmd-write-file [path :cstr s :cstr] #{Unsafe} :int
+  (defn __rmd-write-file [path : cstr s : cstr] #{Unsafe} : int
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     const char *text = s ? (const char *)(intptr_t)s : "";
@@ -362,17 +362,17 @@
     return wrote == len ? 1 : 0;
     ```)
 
-  (defn __rmd-close-cache [cache :int] #{Unsafe} :int
+  (defn __rmd-close-cache [cache : int] #{Unsafe} : int
     (if (not (= cache 0))
       (do
         (cache-close cache)
         0)
       0))
 
-  (defn __rmd-lang-label [lang :int] #{Unsafe} :cstr
+  (defn __rmd-lang-label [lang : int] #{Unsafe} : cstr
     (if (= lang 0) "turmeric" "sweet-exp"))
 
-  (defn __rmd-render-attr-list [attrs :int] #{Unsafe} :cstr
+  (defn __rmd-render-attr-list [attrs : int] #{Unsafe} : cstr
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *name; char *value; } Attr;
@@ -402,12 +402,12 @@
     return out;
     ```)
 
-  (defn __rmd-render-attrs [attrs :int] #{Unsafe} :cstr
+  (defn __rmd-render-attrs [attrs : int] #{Unsafe} : cstr
     (if (__rmd-list-nil? attrs)
       ""
       (__rmd-str-concat " {" (__rmd-str-concat (__rmd-render-attr-list attrs) "}"))))
 
-  (defn __rmd-render-source-block [cell :int] #{Unsafe} :cstr
+  (defn __rmd-render-source-block [cell : int] #{Unsafe} : cstr
     (__rmd-str-concat
       "```"
       (__rmd-str-concat (__rmd-lang-label (cell-lang cell))
@@ -416,7 +416,7 @@
                                                             (__rmd-str-concat (cell-source cell)
                                                                               "\n```"))))))
 
-  (defn __rmd-output-fence [output :int] #{Unsafe} :cstr
+  (defn __rmd-output-fence [output : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *cell_id;
@@ -464,7 +464,7 @@
     return buf;
     ```)
 
-  (defn __rmd-render-cell-block [cell :int output :int opts :int] #{Unsafe} :cstr
+  (defn __rmd-render-cell-block [cell : int output : int opts : int] #{Unsafe} : cstr
     (let [source-part (if (and (= (render-opts-include-source opts) 1)
                                (= (attr-get-bool (cell-attrs cell) "echo" 1) 1))
                         (__rmd-render-source-block cell)
@@ -476,7 +476,7 @@
                         "")]
       (__rmd-join-blocks source-part output-part)))
 
-  (defn __rmd-render-state-make [text :cstr outputs :int] #{Unsafe} :int
+  (defn __rmd-render-state-make [text : cstr outputs : int] #{Unsafe} : int
     ```c
     typedef struct { char *text; int64_t outputs; } RenderState;
     RenderState *state = malloc(sizeof(*state));
@@ -485,21 +485,21 @@
     return (int64_t)(intptr_t)state;
     ```)
 
-  (defn __rmd-render-state-text [state :int] #{Unsafe} :cstr
+  (defn __rmd-render-state-text [state : int] #{Unsafe} : cstr
     ```c
     typedef struct { char *text; int64_t outputs; } RenderState;
     RenderState *s = (RenderState *)(intptr_t)state;
     return s && s->text ? s->text : "";
     ```)
 
-  (defn __rmd-render-state-outputs [state :int] #{Unsafe} :int
+  (defn __rmd-render-state-outputs [state : int] #{Unsafe} : int
     ```c
     typedef struct { char *text; int64_t outputs; } RenderState;
     RenderState *s = (RenderState *)(intptr_t)state;
     return s ? s->outputs : 0;
     ```)
 
-  (defn __rmd-render-nodes [nodes :int outputs :int opts :int] #{Unsafe} :int
+  (defn __rmd-render-nodes [nodes : int outputs : int opts : int] #{Unsafe} : int
     (if (__rmd-list-nil? nodes)
       (__rmd-render-state-make "" outputs)
       (let [node (__rmd-head nodes)]
@@ -518,7 +518,7 @@
                                  (__rmd-render-state-text rest))
               (__rmd-render-state-outputs rest)))))))
 
-  (defn __rmd-cells-from-nodes-rev [nodes :int acc :int] #{Unsafe} :int
+  (defn __rmd-cells-from-nodes-rev [nodes : int acc : int] #{Unsafe} : int
     (if (__rmd-list-nil? nodes)
       acc
       (let [node (__rmd-head nodes)]
@@ -528,26 +528,26 @@
             (__rmd-cons (node-cell node) acc)
             acc)))))
 
-  (defn __rmd-reverse [lst :int acc :int] #{Unsafe} :int
+  (defn __rmd-reverse [lst : int acc : int] #{Unsafe} : int
     (if (__rmd-list-nil? lst)
       acc
       (__rmd-reverse (__rmd-tail lst) (__rmd-cons (__rmd-head lst) acc))))
 
-  (defn __rmd-cells-from-nodes [nodes :int] #{Unsafe} :int
+  (defn __rmd-cells-from-nodes [nodes : int] #{Unsafe} : int
     (__rmd-reverse (__rmd-cells-from-nodes-rev nodes (__rmd-nil-value))
                    (__rmd-nil-value)))
 
-  (defn __rmd-list-length [lst :int] #{Unsafe} :int
+  (defn __rmd-list-length [lst : int] #{Unsafe} : int
     (if (__rmd-list-nil? lst)
       0
       (+ 1 (__rmd-list-length (__rmd-tail lst)))))
 
   ;;; render-md-string -- render a parsed notebook and its outputs to markdown.
-  (defn render-md-string [nodes :int outputs :int opts :int] #{Unsafe} :cstr
+  (defn render-md-string [nodes : int outputs : int opts : int] #{Unsafe} : cstr
     (__rmd-render-state-text (__rmd-render-nodes nodes outputs opts)))
 
   ;;; render-md -- evaluate a notebook file and write rendered markdown beside it.
-  (defn render-md [path :cstr opts :int] #{Unsafe} :int
+  (defn render-md [path : cstr opts : int] #{Unsafe} : int
     (let [parsed (parse-file path)]
       (if (not (__rmd-result-ok? parsed))
         (__rmd-err "failed to parse notebook file")

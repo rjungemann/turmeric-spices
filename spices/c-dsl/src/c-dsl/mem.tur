@@ -20,7 +20,7 @@
 ;;;   (c-addr "x")  ; => "(&x)"
 ;;;
 ;;; Since: P1
-(defn c-addr [expr :cstr] :cstr
+(defn c-addr [expr : cstr] : cstr
   (c-sprintf1 "(&%s)" expr))
 
 ;;; c-deref -- dereference a pointer expression.
@@ -35,7 +35,7 @@
 ;;;   (c-deref "ptr")  ; => "(*ptr)"
 ;;;
 ;;; Since: P1
-(defn c-deref [expr :cstr] :cstr
+(defn c-deref [expr : cstr] : cstr
   (c-sprintf1 "(*%s)" expr))
 
 ;;; c-index -- index into a pointer or array expression.
@@ -51,7 +51,7 @@
 ;;;   (c-index "arr" "i")  ; => "arr[i]"
 ;;;
 ;;; Since: P1
-(defn c-index [arr :cstr idx :cstr] :cstr
+(defn c-index [arr : cstr idx : cstr] : cstr
   (c-sprintf2 "%s[%s]" arr idx))
 
 ;;; c-cast -- emit a C type cast expression.
@@ -68,7 +68,7 @@
 ;;;   (c-cast "ptr" ":void*")   ; => "((void*)ptr)"
 ;;;
 ;;; Since: P1
-(defn c-cast [expr :cstr type :cstr] :cstr
+(defn c-cast [expr : cstr type : cstr] : cstr
   (c-sprintf2 "((%s)%s)" (c-type type) expr))
 
 ;;; c-malloc -- emit a malloc call.
@@ -84,7 +84,7 @@
 ;;;   ; => "malloc((n * sizeof(int32_t)))"
 ;;;
 ;;; Since: P1
-(defn c-malloc [size :cstr] :cstr
+(defn c-malloc [size : cstr] : cstr
   (c-sprintf1 "malloc(%s)" size))
 
 ;;; c-calloc -- emit a calloc call.
@@ -97,7 +97,7 @@
 ;;;   "calloc(n, size)"
 ;;;
 ;;; Since: P1
-(defn c-calloc [n :cstr size :cstr] :cstr
+(defn c-calloc [n : cstr size : cstr] : cstr
   (c-sprintf2 "calloc(%s, %s)" n size))
 
 ;;; c-realloc -- emit a realloc call.
@@ -110,7 +110,7 @@
 ;;;   "realloc(ptr, size)"
 ;;;
 ;;; Since: P1
-(defn c-realloc [ptr :cstr size :cstr] :cstr
+(defn c-realloc [ptr : cstr size : cstr] : cstr
   (c-sprintf2 "realloc(%s, %s)" ptr size))
 
 ;;; c-free -- emit a free statement.
@@ -125,7 +125,7 @@
 ;;;   (c-free "buf")  ; => "free(buf);"
 ;;;
 ;;; Since: P1
-(defn c-free [ptr :cstr] :cstr
+(defn c-free [ptr : cstr] : cstr
   (c-sprintf1 "free(%s);" ptr))
 
 ;;; c-alloca -- emit an alloca call (stack allocation).
@@ -137,7 +137,7 @@
 ;;;   "alloca(size)"
 ;;;
 ;;; Since: P1
-(defn c-alloca [size :cstr] :cstr
+(defn c-alloca [size : cstr] : cstr
   (c-sprintf1 "alloca(%s)" size))
 
 ;;; c-sizeof -- emit a sizeof expression.
@@ -152,7 +152,7 @@
 ;;;   (c-sizeof ":int")  ; => "sizeof(int32_t)"
 ;;;
 ;;; Since: P1
-(defn c-sizeof [type :cstr] :cstr
+(defn c-sizeof [type : cstr] : cstr
   (c-sprintf1 "sizeof(%s)" (c-type type)))
 
 ;;; c-alignof -- emit an alignof expression.
@@ -164,7 +164,7 @@
 ;;;   "alignof(C-type)"
 ;;;
 ;;; Since: P1
-(defn c-alignof [type :cstr] :cstr
+(defn c-alignof [type : cstr] : cstr
   (c-sprintf1 "alignof(%s)" (c-type type)))
 
 ;;; c-null -- emit a NULL pointer cast.
@@ -179,7 +179,7 @@
 ;;;   (c-null ":void*")  ; => "((void*)NULL)"
 ;;;
 ;;; Since: P1
-(defn c-null [type :cstr] :cstr
+(defn c-null [type : cstr] : cstr
   (c-sprintf1 "((%s)NULL)" (c-type type)))
 
 ;;; c-ptr-add -- emit pointer arithmetic addition.
@@ -195,7 +195,7 @@
 ;;;   (c-ptr-add "arr" "i")  ; => "(arr + i)"
 ;;;
 ;;; Since: P1
-(defn c-ptr-add [ptr :cstr offset :cstr] :cstr
+(defn c-ptr-add [ptr : cstr offset : cstr] : cstr
   (c-sprintf2 "(%s + %s)" ptr offset))
 
 ;;; c-ptr-sub -- emit pointer arithmetic subtraction.
@@ -208,7 +208,7 @@
 ;;;   "(ptr - offset)"
 ;;;
 ;;; Since: P1
-(defn c-ptr-sub [ptr :cstr offset :cstr] :cstr
+(defn c-ptr-sub [ptr : cstr offset : cstr] : cstr
   (c-sprintf2 "(%s - %s)" ptr offset))
 
 ;;; c-offsetof -- emit an offsetof expression.
@@ -224,7 +224,7 @@
 ;;;   (c-offsetof "Point" "x")  ; => "offsetof(Point, x)"
 ;;;
 ;;; Since: P1
-(defn c-offsetof [type :cstr field :cstr] :cstr
+(defn c-offsetof [type : cstr field : cstr] : cstr
   (c-sprintf2 "offsetof(%s, %s)" (c-type type) field))
 
 ) ;; end defmodule c-dsl/mem

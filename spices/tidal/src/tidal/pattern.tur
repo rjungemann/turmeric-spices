@@ -9,31 +9,31 @@
 
 ;; ---- minimal cons list primitives ----
 
-(defn nil-value [] #{Unsafe} :int
+(defn nil-value [] #{Unsafe} : int
   ```c
   return 0;
   ```)
 
-(defn list-nil? [lst :int] #{Unsafe} :bool
+(defn list-nil? [lst : int] #{Unsafe} : bool
   ```c
   return lst == 0;
   ```)
 
-(defn cons [value :int next :int] #{Unsafe} :int
+(defn cons [value : int next : int] #{Unsafe} : int
   ```c
   struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
   cell->value = value; cell->next = next;
   return (int64_t)(intptr_t)cell;
   ```)
 
-(defn head [lst :int] #{Unsafe} :int
+(defn head [lst : int] #{Unsafe} : int
   ```c
   struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
   if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
   return cell->value;
   ```)
 
-(defn tail [lst :int] #{Unsafe} :int
+(defn tail [lst : int] #{Unsafe} : int
   ```c
   struct { int64_t value; int64_t next; } *cell = (void*)(intptr_t)lst;
   if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
@@ -42,46 +42,46 @@
 
 ;; ---- minimal result primitives ----
 
-(defn tidal-ok [x :int] #{Unsafe} :ptr<void>
+(defn tidal-ok [x : int] #{Unsafe} : ptr<void>
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   r->is_ok = true; r->ok_val = x; r->err_val = 0;
   return (void*)r;
   ```)
 
-(defn tidal-err [e :int] #{Unsafe} :ptr<void>
+(defn tidal-err [e : int] #{Unsafe} : ptr<void>
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   r->is_ok = false; r->ok_val = 0; r->err_val = e;
   return (void*)r;
   ```)
 
-(defn tidal-ok? [r :ptr<void>] #{Unsafe} :bool
+(defn tidal-ok? [r : ptr<void>] #{Unsafe} : bool
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
   return res != NULL && res->is_ok;
   ```)
 
-(defn tidal-err? [r :ptr<void>] #{Unsafe} :bool
+(defn tidal-err? [r : ptr<void>] #{Unsafe} : bool
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
   return res == NULL || !res->is_ok;
   ```)
 
-(defn tidal-ok-val [r :ptr<void>] #{Unsafe} :int
+(defn tidal-ok-val [r : ptr<void>] #{Unsafe} : int
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
   return res->ok_val;
   ```)
 
-(defn tidal-err-val [r :ptr<void>] #{Unsafe} :int
+(defn tidal-err-val [r : ptr<void>] #{Unsafe} : int
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)r;
   return res->err_val;
   ```)
 
 ;; tidal-void -- no-op helper used as a void return placeholder.
-(defn tidal-void [] #{Unsafe} :void
+(defn tidal-void [] #{Unsafe} : void
   ```c
   return;
   ```)
@@ -94,7 +94,7 @@
 ;; ---- PatNode allocation helpers ----
 
 ;; tidal-pat-new1 -- allocate a PatNode of given kind with one child.
-(defn tidal-pat-new1 [kind :int child :int] #{Unsafe} :int
+(defn tidal-pat-new1 [kind : int child : int] #{Unsafe} : int
   ```c
   typedef enum {
     PAT_LEAF=0, PAT_SEQ=1, PAT_SUBSEQ=2, PAT_ALT=3, PAT_REPEAT=4,
@@ -119,7 +119,7 @@
   ```)
 
 ;; tidal-pat-new2 -- allocate a PatNode of given kind with two children.
-(defn tidal-pat-new2 [kind :int c1 :int c2 :int] #{Unsafe} :int
+(defn tidal-pat-new2 [kind : int c1 : int c2 : int] #{Unsafe} : int
   ```c
   typedef enum {
     PAT_LEAF=0, PAT_SEQ=1, PAT_SUBSEQ=2, PAT_ALT=3, PAT_REPEAT=4,
@@ -146,7 +146,7 @@
   ```)
 
 ;; tidal-pat-set-f -- set param_f on a pattern node.
-(defn tidal-pat-set-f [pat :int f :float] #{Unsafe} :void
+(defn tidal-pat-set-f [pat : int f : float] #{Unsafe} : void
   ```c
   typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
                    double *weights; void **children; int child_count; int child_cap;
@@ -156,7 +156,7 @@
   ```)
 
 ;; tidal-pat-set-n -- set param_n on a pattern node.
-(defn tidal-pat-set-n [pat :int n :int] #{Unsafe} :void
+(defn tidal-pat-set-n [pat : int n : int] #{Unsafe} : void
   ```c
   typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
                    double *weights; void **children; int child_count; int child_cap;
@@ -166,7 +166,7 @@
   ```)
 
 ;; tidal-pat-free-raw -- free a pattern node tree iteratively (no nested C functions).
-(defn tidal-pat-free-raw [pat :int] #{Unsafe} :void
+(defn tidal-pat-free-raw [pat : int] #{Unsafe} : void
   ```c
   typedef struct { int kind; char *value; double param_f; int param_n; int param_k;
                    double *weights; void **children; int child_count; int child_cap; } PatNode;
@@ -206,7 +206,7 @@
 ;;;   (pattern-fast p 2.0)
 ;;;
 ;;; Since: TD4
-(defn pattern-fast [p :int n :float] #{Unsafe} :int
+(defn pattern-fast [p : int n : float] #{Unsafe} : int
   (let [node (tidal-pat-new1 10 p)]
     (tidal-pat-set-f node n)
     node))
@@ -224,7 +224,7 @@
 ;;;   (pattern-slow p 2.0)
 ;;;
 ;;; Since: TD4
-(defn pattern-slow [p :int n :float] #{Unsafe} :int
+(defn pattern-slow [p : int n : float] #{Unsafe} : int
   (let [node (tidal-pat-new1 5 p)]
     (tidal-pat-set-f node n)
     node))
@@ -242,7 +242,7 @@
 ;;;   (pattern-stack p1 p2)
 ;;;
 ;;; Since: TD4
-(defn pattern-stack [p1 :int p2 :int] #{Unsafe} :int
+(defn pattern-stack [p1 : int p2 : int] #{Unsafe} : int
   (tidal-pat-new2 7 p1 p2))
 
 ;;; pattern-cat -- concatenate end-to-end (cycle through one per cycle).
@@ -258,7 +258,7 @@
 ;;;   (pattern-cat p1 p2)
 ;;;
 ;;; Since: TD4
-(defn pattern-cat [p1 :int p2 :int] #{Unsafe} :int
+(defn pattern-cat [p1 : int p2 : int] #{Unsafe} : int
   (tidal-pat-new2 8 p1 p2))
 
 ;;; pattern-rev -- reverse event order within a cycle.
@@ -273,7 +273,7 @@
 ;;;   (pattern-rev p)
 ;;;
 ;;; Since: TD4
-(defn pattern-rev [p :int] #{Unsafe} :int
+(defn pattern-rev [p : int] #{Unsafe} : int
   (tidal-pat-new1 9 p))
 
 ;;; pattern-every -- apply a transformation every nth cycle.
@@ -295,7 +295,7 @@
 ;;;     (pattern-every 4 fast-p p))
 ;;;
 ;;; Since: TD4
-(defn pattern-every [n :int f :int p :int] #{Unsafe} :int
+(defn pattern-every [n : int f : int p : int] #{Unsafe} : int
   (let [node (tidal-pat-new2 11 p f)]
     (tidal-pat-set-n node n)
     node))
@@ -313,7 +313,7 @@
 ;;;   (pattern-degrade p 0.5)
 ;;;
 ;;; Since: TD4
-(defn pattern-degrade [p :int prob :float] #{Unsafe} :int
+(defn pattern-degrade [p : int prob : float] #{Unsafe} : int
   (let [node (tidal-pat-new1 12 p)]
     (tidal-pat-set-f node prob)
     node))
@@ -327,5 +327,5 @@
 ;;;   (pattern-free p)
 ;;;
 ;;; Since: TD4
-(defn pattern-free [p :int] #{Unsafe} :void
+(defn pattern-free [p : int] #{Unsafe} : void
   (tidal-pat-free-raw p))

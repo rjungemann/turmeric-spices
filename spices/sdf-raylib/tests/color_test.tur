@@ -17,13 +17,13 @@
 
 ;; ---- helpers ----
 
-(defn approx= [a :float b :float] :bool
+(defn approx= [a : float b : float] : bool
   ```c
   double diff = a - b; if (diff < 0) diff = -diff;
   return diff < 0.01;
   ```)
 
-(defn assert! [cond :bool msg :cstr] :void
+(defn assert! [cond : bool msg : cstr] : void
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -35,7 +35,7 @@
 
 ;; ---- test 1: colored-sphere csdf-sdf evaluates correctly ----
 
-(defn test-colored-sphere [] :void
+(defn test-colored-sphere [] : void
   (let [cs (colored-sphere 0.0 0.0 0.0 1.0  1.0 0.0 0.0  1)
         sdf (csdf-sdf cs)
         ;; Point on surface (dist = 0)
@@ -51,7 +51,7 @@
 
 ;; ---- test 2: colored-union combined SDF is correct ----
 
-(defn test-colored-union-sdf [] :void
+(defn test-colored-union-sdf [] : void
   (let [a  (colored-sphere -1.5 0.0 0.0 0.8  1.0 0.0 0.0  1)
         b  (colored-sphere  1.5 0.0 0.0 0.8  0.0 0.0 1.0  2)
         u  (colored-union a b)
@@ -69,7 +69,7 @@
 
 ;; ---- test 3: colored-difference carves correctly ----
 
-(defn test-colored-difference-sdf [] :void
+(defn test-colored-difference-sdf [] : void
   (let [base  (colored-box -2.0 -2.0 -2.0  2.0 2.0 2.0  0.8 0.8 0.8  1)
         hole  (colored-sphere 0.0 0.0 0.0 1.0  0.0 0.0 0.0  2)
         diff  (colored-difference base hole)
@@ -87,7 +87,7 @@
 
 ;; ---- test 4: mc-extract-colored produces a non-empty mesh ----
 
-(defn test-mc-extract-colored [] :void
+(defn test-mc-extract-colored [] : void
   (let [scene (colored-sphere 0.0 0.0 0.0 1.0  1.0 0.5 0.0  1)
         mesh  (mc-extract-colored scene 16
                                   -2.0 -2.0 -2.0
@@ -107,7 +107,7 @@
 
 ;; ---- test 5: two-object union has correct per-vertex attribution ----
 
-(defn test-colored-union-attribution [] :void
+(defn test-colored-union-attribution [] : void
   (let [red-sphere  (colored-sphere -1.5 0.0 0.0 0.8  1.0 0.0 0.0  1)
         blue-sphere (colored-sphere  1.5 0.0 0.0 0.8  0.0 0.0 1.0  2)
         scene       (colored-union red-sphere blue-sphere)
@@ -127,7 +127,7 @@
 
 ;; ---- test 6: export-obj writes files (smoke test) ----
 
-(defn test-export-obj [] :void
+(defn test-export-obj [] : void
   (let [scene (colored-union
                 (colored-sphere -1.0 0.0 0.0 0.7  1.0 0.0 0.0  1)
                 (colored-sphere  1.0 0.0 0.0 0.7  0.0 1.0 0.0  2))
@@ -141,7 +141,7 @@
 
 ;; ---- test 7: colored-translate shifts the colored SDF ----
 
-(defn test-colored-translate [] :void
+(defn test-colored-translate [] : void
   (let [s  (colored-sphere 0.0 0.0 0.0 1.0  0.0 1.0 0.0  3)
         ts (colored-translate s 3.0 0.0 0.0)
         sdf (csdf-sdf ts)
@@ -155,7 +155,7 @@
 
 ;; ---- main ----
 
-(defn main [] :int
+(defn main [] : int
   (do
     (test-colored-sphere)
     (println "test-colored-sphere: PASS")

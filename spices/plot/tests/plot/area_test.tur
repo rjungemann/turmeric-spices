@@ -10,7 +10,7 @@
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
 
-  (defn quad [a :float b :float c :float d :float] :int
+  (defn quad [a : float b : float c : float d : float] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     union { double d; int64_t i; } ua, ub, uc, ud; ua.d = a; ub.d = b; uc.d = c; ud.d = d;
@@ -21,7 +21,7 @@
     return (int64_t)(intptr_t)c1;
     ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *c = malloc(sizeof(*c));
@@ -29,7 +29,7 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn s-cons [s :cstr n :int] :int
+  (defn s-cons [s : cstr n : int] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *c = malloc(sizeof(*c));
@@ -37,7 +37,7 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn cat [label :cstr height :float] :int
+  (defn cat [label : cstr height : float] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     union { double d; int64_t i; } uh; uh.d = height;
@@ -46,7 +46,7 @@
     return (int64_t)(intptr_t)p;
     ```)
 
-  (defn group [label :cstr vals :int] :int
+  (defn group [label : cstr vals : int] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -54,7 +54,7 @@
     return (int64_t)(intptr_t)p;
     ```)
 
-  (defn file-size [path :cstr] :int
+  (defn file-size [path : cstr] : int
     ```c
     #include <sys/stat.h>
     struct stat st;
@@ -62,35 +62,35 @@
     return (int64_t)st.st_size;
     ```)
 
-  (defn __f [x :float] :int
+  (defn __f [x : float] : int
     ```c
     union { double d; int64_t i; } u;
     u.d = x;
     return u.i;
     ```)
 
-  (defn rect-data [] :int
+  (defn rect-data [] : int
     (t-cons (quad -1.0 -0.5 0.0 1.0)
       (t-cons (quad 0.2 0.9 0.0 0.6) 0)))
 
-  (defn area-bars [] :int
+  (defn area-bars [] : int
     (t-cons (quad 0.0 0.5 0.0 1.0)
       (t-cons (quad 0.6 1.1 0.0 1.4) 0)))
 
-  (defn cat-bars [] :int
+  (defn cat-bars [] : int
     (t-cons (cat "A" 1.0)
       (t-cons (cat "B" 1.4)
         (t-cons (cat "C" 0.7) 0))))
 
-  (defn stack-groups [] :int
+  (defn stack-groups [] : int
     (t-cons (group "Q1" (t-cons (__f 1.0) (t-cons (__f 0.8) 0)))
       (t-cons (group "Q2" (t-cons (__f 1.2) (t-cons (__f 0.5) 0)))
         0)))
 
-  (defn stack-labels [] :int
+  (defn stack-labels [] : int
     (s-cons "one" (s-cons "two" 0)))
 
-  (defn area-renderers [fill :int fills :int] :int
+  (defn area-renderers [fill : int fills : int] : int
     (vec-of (rectangles (rect-data) fill "rects")
             (area-histogram (area-bars) fills "ah")
             (discrete-histogram (cat-bars) fill 0 "dh")
@@ -99,14 +99,14 @@
                                (stack-labels)
                                0)))
 
-  (defn write-area-png-ok [] :bool
+  (defn write-area-png-ok [] : bool
     (let [fill (default-fill-style)
           fills (t-cons fill (t-cons fill (t-cons fill 0)))
           rs   (area-renderers fill fills)]
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-area.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-area.png") 100)))))
 
-  (defn pixel-sanity-area [] :bool
+  (defn pixel-sanity-area [] : bool
     (let [fill  (default-fill-style)
           fills (t-cons fill (t-cons fill (t-cons fill 0)))
           rs    (area-renderers fill fills)
@@ -120,9 +120,9 @@
                (assert-true (>i ink 100))))
         (assert-true false))))
 
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn >i [a : int b : int] : bool ```c return (int)a > (int)b; ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (describe "plot/area"
       (it "renders rectangles and histograms"
         (write-area-png-ok))

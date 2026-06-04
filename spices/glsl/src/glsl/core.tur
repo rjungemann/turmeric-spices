@@ -28,7 +28,7 @@
 ;;;   (glsl-let "x" ":float" "1.0")  ; => "float x = 1.0;"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-let [name :cstr type :cstr init :cstr] :cstr
+(defn glsl-let [name : cstr type : cstr init : cstr] : cstr
   (glsl-sprintf3 "%s %s = %s;" (glsl-type type) name init))
 
 ;;; glsl-set! -- assign to a variable.
@@ -44,7 +44,7 @@
 ;;;   (glsl-set! "fragColor" "vec4(1.0)")  ; => "fragColor = vec4(1.0);"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-set! [name :cstr value :cstr] :cstr
+(defn glsl-set! [name : cstr value : cstr] : cstr
   (glsl-sprintf2 "%s = %s;" name value))
 
 ;;; glsl-return -- return statement.
@@ -59,7 +59,7 @@
 ;;;   (glsl-return "(x * x)")  ; => "return (x * x);"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-return [expr :cstr] :cstr
+(defn glsl-return [expr : cstr] : cstr
   (glsl-sprintf1 "return %s;" expr))
 
 ;;; glsl-discard -- discard the current fragment.
@@ -71,7 +71,7 @@
 ;;;   (glsl-discard)  ; => "discard;"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-discard [] :cstr "discard;")
+(defn glsl-discard [] : cstr "discard;")
 
 ;;; glsl-inc! -- post-increment statement.
 ;;;
@@ -85,7 +85,7 @@
 ;;;   (glsl-inc! "i")  ; => "i++;"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-inc! [name :cstr] :cstr
+(defn glsl-inc! [name : cstr] : cstr
   (glsl-sprintf1 "%s++;" name))
 
 ;;; glsl-dec! -- post-decrement statement.
@@ -100,7 +100,7 @@
 ;;;   (glsl-dec! "i")  ; => "i--;"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-dec! [name :cstr] :cstr
+(defn glsl-dec! [name : cstr] : cstr
   (glsl-sprintf1 "%s--;" name))
 
 ;;; glsl-binop -- binary infix operation.
@@ -117,7 +117,7 @@
 ;;;   (glsl-binop "+" "a" "b")  ; => "(a + b)"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-binop [op :cstr left :cstr right :cstr] :cstr
+(defn glsl-binop [op : cstr left : cstr right : cstr] : cstr
   (glsl-sprintf3 "(%s %s %s)" left op right))
 
 ;;; glsl-if -- if/else statement.
@@ -134,7 +134,7 @@
 ;;;   (glsl-if "(x > 0.0)" (glsl-return "1.0") (glsl-return "-1.0"))
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-if [cond :cstr then-body :cstr else-body :cstr] :cstr
+(defn glsl-if [cond : cstr then-body : cstr else-body : cstr] : cstr
   (let [head (glsl-sprintf1 "if (%s) {\n" cond)
         mid  (glsl-cat3 (glsl-indent then-body) "\n} else {\n" (glsl-indent else-body))]
     (glsl-cat3 head mid "\n}")))
@@ -152,7 +152,7 @@
 ;;;   (glsl-if-only "(alpha < 0.01)" (glsl-discard))
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-if-only [cond :cstr body :cstr] :cstr
+(defn glsl-if-only [cond : cstr body : cstr] : cstr
   (let [head (glsl-sprintf1 "if (%s) {\n" cond)]
     (glsl-cat3 head (glsl-indent body) "\n}")))
 
@@ -171,7 +171,7 @@
 ;;;   (glsl-for "int i = 0" "i < 4" "i++" (glsl-set! "sum" "(sum + arr[i])"))
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-for [init :cstr cond :cstr step :cstr body :cstr] :cstr
+(defn glsl-for [init : cstr cond : cstr step : cstr body : cstr] : cstr
   (let [head (glsl-sprintf3 "for (%s; %s; %s) {\n" init cond step)]
     (glsl-cat3 head (glsl-indent body) "\n}")))
 
@@ -192,7 +192,7 @@
 ;;;   (glsl-for1 "i" ":int" "0" "i < 4" "i++" body)
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-for1 [name :cstr type :cstr init :cstr cond :cstr step :cstr body :cstr] :cstr
+(defn glsl-for1 [name : cstr type : cstr init : cstr cond : cstr step : cstr body : cstr] : cstr
   (let [t    (glsl-type type)
         init-clause (glsl-sprintf3 "%s %s = %s" t name init)
         head (glsl-sprintf3 "for (%s; %s; %s) {\n" init-clause cond step)]
@@ -211,7 +211,7 @@
 ;;;   (glsl-param "normal" ":vec3")  ; => "vec3 normal"
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-param [name :cstr type :cstr] :cstr
+(defn glsl-param [name : cstr type : cstr] : cstr
   (glsl-sprintf2 "%s %s" (glsl-type type) name))
 
 ;;; glsl-defn -- define a GLSL function.
@@ -232,7 +232,7 @@
 ;;;     (glsl-return "(x * x)"))
 ;;;
 ;;; Since: v0.1.0
-(defn glsl-defn [name :cstr params :int ret :cstr body :cstr] :cstr
+(defn glsl-defn [name : cstr params : int ret : cstr body : cstr] : cstr
   (let [param-str (glsl-join ", " params)
         sig       (glsl-sprintf3 "%s %s(%s) {\n" (glsl-type ret) name param-str)]
     (glsl-cat3 sig (glsl-indent body) "\n}")))

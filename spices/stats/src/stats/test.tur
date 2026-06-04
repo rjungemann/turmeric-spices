@@ -36,18 +36,18 @@
 
 ;;; alt-two-sided -- alt-tag constant for two-sided tests.
 ;;; Since: ST5
-(defn alt-two-sided [] :int ```c return 0; ```)
+(defn alt-two-sided [] : int ```c return 0; ```)
 
 ;;; alt-less -- alt-tag constant for one-sided less tests.
 ;;; Since: ST5
-(defn alt-less [] :int ```c return 1; ```)
+(defn alt-less [] : int ```c return 1; ```)
 
 ;;; alt-greater -- alt-tag constant for one-sided greater tests.
 ;;; Since: ST5
-(defn alt-greater [] :int ```c return 2; ```)
+(defn alt-greater [] : int ```c return 2; ```)
 
 ;; Internal test-result struct layout.
-(defn __tr-alloc [] :int
+(defn __tr-alloc [] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -66,9 +66,9 @@
 
 ;;; make-test-result -- construct a test-result from components.
 ;;; Since: ST5
-(defn make-test-result [name :cstr statistic :float df1 :float df2 :float
-                         p-value :float alt-tag :int estimate :float
-                         ci-low :float ci-high :float conf-level :float] :int
+(defn make-test-result [name : cstr statistic : float df1 : float df2 : float
+                         p-value : float alt-tag : int estimate : float
+                         ci-low : float ci-high : float conf-level : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -87,39 +87,39 @@
 
 ;;; test-result-free -- free a test-result.
 ;;; Since: ST5
-(defn test-result-free [r :int] :void
+(defn test-result-free [r : int] : void
   ```c
   #include <stdlib.h>
   free((void *)(intptr_t)r);
   ```)
 
 ;; Accessors.
-(defn test-result-name       [r :int] :cstr  ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return (int64_t)(intptr_t)((__tr*)(intptr_t)r)->name; ```)
-(defn test-result-statistic  [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->s; ```)
-(defn test-result-df1        [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->d1; ```)
-(defn test-result-df2        [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->d2; ```)
-(defn test-result-p-value    [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->pv; ```)
-(defn test-result-alt-tag    [r :int] :int   ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->at; ```)
-(defn test-result-estimate   [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->e; ```)
-(defn test-result-ci-low     [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->cl; ```)
-(defn test-result-ci-high    [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->ch; ```)
-(defn test-result-conf-level [r :int] :float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->cf; ```)
+(defn test-result-name       [r : int] : cstr  ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return (int64_t)(intptr_t)((__tr*)(intptr_t)r)->name; ```)
+(defn test-result-statistic  [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->s; ```)
+(defn test-result-df1        [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->d1; ```)
+(defn test-result-df2        [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->d2; ```)
+(defn test-result-p-value    [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->pv; ```)
+(defn test-result-alt-tag    [r : int] : int   ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->at; ```)
+(defn test-result-estimate   [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->e; ```)
+(defn test-result-ci-low     [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->cl; ```)
+(defn test-result-ci-high    [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->ch; ```)
+(defn test-result-conf-level [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->cf; ```)
 
 ;; ---------------------------------------------------------------------------
 ;; p-value helpers.
 ;; p_two_sided(t, df) = 2 * pt(-|t|, df)
 ;; ---------------------------------------------------------------------------
 
-(defn __p-t-two [t :float df :float] :float
+(defn __p-t-two [t : float df : float] : float
   (let [at (if (< t 0.0) t (- 0.0 t))]
     (* 2.0 (pt at df))))
 
-(defn __p-t-sided [t :float df :float alt :int] :float
+(defn __p-t-sided [t : float df : float alt : int] : float
   (if (= alt 0) (__p-t-two t df)
     (if (= alt 1) (pt t df)
       (- 1.0 (pt t df)))))
 
-(defn __p-chi2-sided [chi :float df :float alt :int] :float
+(defn __p-chi2-sided [chi : float df : float alt : int] : float
   (if (= alt 0) (* 2.0 (min (pchi2 chi df) (- 1.0 (pchi2 chi df))))
     (if (= alt 2) (- 1.0 (pchi2 chi df))
       (pchi2 chi df))))
@@ -136,7 +136,7 @@
 ;;;   :int  test-result handle.
 ;;;
 ;;; Since: ST5
-(defn t-test-1samp [col :int mu :float alt-tag :int conf-level :float] :int
+(defn t-test-1samp [col : int mu : float alt-tag : int conf-level : float] : int
   (let [n    (col-count col)
         xbar (col-mean col)
         s    (col-sd col)
@@ -164,7 +164,7 @@
 ;;;   :int  test-result handle.
 ;;;
 ;;; Since: ST5
-(defn t-test-2samp [a :int b :int pooled :int alt-tag :int conf-level :float] :int
+(defn t-test-2samp [a : int b : int pooled : int alt-tag : int conf-level : float] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -283,7 +283,7 @@
 ;;;   :int  test-result handle.
 ;;;
 ;;; Since: ST5
-(defn t-test-paired [a :int b :int alt-tag :int conf-level :float] :int
+(defn t-test-paired [a : int b : int alt-tag : int conf-level : float] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -364,7 +364,7 @@
 ;;;   :int test-result with statistic=F, df1=na-1, df2=nb-1.
 ;;;
 ;;; Since: ST5
-(defn var-test [a :int b :int alt-tag :int conf-level :float] :int
+(defn var-test [a : int b : int alt-tag : int conf-level : float] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -445,7 +445,7 @@
 ;;;   :int test-result with estimate=r, statistic=t.
 ;;;
 ;;; Since: ST5
-(defn cor-test [a :int b :int alt-tag :int conf-level :float] :int
+(defn cor-test [a : int b : int alt-tag : int conf-level : float] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -526,7 +526,7 @@
 ;;;   :int  test-result with statistic=F, df1=k-1, df2=N-k.
 ;;;
 ;;; Since: ST6
-(defn anova-oneway [cols :int] :int
+(defn anova-oneway [cols : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -620,7 +620,7 @@
 ;;;   :int  test-result with statistic=chi^2, df=k-1.
 ;;;
 ;;; Since: ST6
-(defn chi2-gof [observed :int expected :int] :int
+(defn chi2-gof [observed : int expected : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -675,7 +675,7 @@
 ;;;   :int  test-result.
 ;;;
 ;;; Since: ST6
-(defn chi2-contingency [f :int] :int
+(defn chi2-contingency [f : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -749,7 +749,7 @@
 ;;;   :int  test-result with statistic=U.
 ;;;
 ;;; Since: ST6
-(defn mann-whitney [a :int b :int alt-tag :int] :int
+(defn mann-whitney [a : int b : int alt-tag : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -818,7 +818,7 @@
 ;;;   :int  test-result with statistic=W.
 ;;;
 ;;; Since: ST6
-(defn wilcoxon-signed-rank [a :int b :int alt-tag :int] :int
+(defn wilcoxon-signed-rank [a : int b : int alt-tag : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -886,7 +886,7 @@
 ;;;   :int  test-result with statistic=D.
 ;;;
 ;;; Since: ST6
-(defn ks-test-1samp [col :int d-dist :int alt-tag :int] :int
+(defn ks-test-1samp [col : int d-dist : int alt-tag : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -1012,7 +1012,7 @@
 ;;;   :int  test-result with statistic=D.
 ;;;
 ;;; Since: ST6
-(defn ks-test-2samp [a :int b :int alt-tag :int] :int
+(defn ks-test-2samp [a : int b : int alt-tag : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>

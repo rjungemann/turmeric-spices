@@ -8,8 +8,8 @@
   (import test/suite    :refer [describe it])
   (import test/runner   :refer [run-all])
 
-  (defn t-nil [] :int ```c return 0; ```)
-  (defn t-cons [v :int n :int] :int
+  (defn t-nil [] : int ```c return 0; ```)
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -20,7 +20,7 @@
     ```)
 
   ;; Build a float64 column directly in C.
-  (defn make-f64-col [a :float b :float c :float d :float e :float] :int
+  (defn make-f64-col [a : float b : float c : float d : float e : float] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -41,13 +41,13 @@
     return (int64_t)(intptr_t)fc;
     ```)
 
-  (defn approx= [x :float y :float tol :float] :bool
+  (defn approx= [x : float y : float tol : float] : bool
     ```c
     #include <math.h>
     return fabs(x - y) <= tol;
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
   (describe "stats/summary"
     (it "col-count returns number of elements"
@@ -98,7 +98,7 @@
             q3 (col-quantile c 0.75)]
         (assert-true (approx= iq (- q3 q1) 1e-9))))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

@@ -13,7 +13,7 @@
 
 ;; ---- helpers ----
 
-(defn assert! [cond :bool msg :cstr] :void
+(defn assert! [cond : bool msg : cstr] : void
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -23,13 +23,13 @@
   }
   ```)
 
-(defn cstr-len [s :cstr] :int
+(defn cstr-len [s : cstr] : int
   ```c
   #include <string.h>
   return s ? (int64_t)strlen((const char *)(intptr_t)s) : 0;
   ```)
 
-(defn cstr-contains [haystack :cstr needle :cstr] :bool
+(defn cstr-contains [haystack : cstr needle : cstr] : bool
   ```c
   #include <string.h>
   if (!haystack || !needle) return 0;
@@ -39,7 +39,7 @@
 
 ;; ---- test 1: single sphere emits sceneSDF with correct content ----
 
-(defn test-sphere-glsl [] :void
+(defn test-sphere-glsl [] : void
   (let [scene (colored-sphere 0.0 0.0 0.0 1.5  1.0 0.0 0.0  1)
         glsl  (csdf->glsl scene)]
     (assert! (> (cstr-len glsl) 0) "csdf->glsl should return non-empty string")
@@ -53,7 +53,7 @@
 
 ;; ---- test 2: box emits correct helper vars ----
 
-(defn test-box-glsl [] :void
+(defn test-box-glsl [] : void
   (let [scene (colored-box -1.0 -1.0 -1.0  1.0 1.0 1.0  0.0 1.0 0.0  2)
         glsl  (csdf->glsl scene)]
     (assert! (> (cstr-len glsl) 0) "box glsl should be non-empty")
@@ -64,7 +64,7 @@
 
 ;; ---- test 3: cylinder emits .xy swizzle ----
 
-(defn test-cylinder-glsl [] :void
+(defn test-cylinder-glsl [] : void
   (let [scene (colored-cylinder 0.0 0.0 0.0 0.5  0.0 0.0 1.0  3)
         glsl  (csdf->glsl scene)]
     (assert! (> (cstr-len glsl) 0) "cylinder glsl should be non-empty")
@@ -74,7 +74,7 @@
 
 ;; ---- test 4: union of two spheres emits both leaves and combining block ----
 
-(defn test-union-glsl [] :void
+(defn test-union-glsl [] : void
   (let [a    (colored-sphere -1.5 0.0 0.0 0.8  1.0 0.0 0.0  1)
         b    (colored-sphere  1.5 0.0 0.0 0.8  0.0 0.0 1.0  2)
         u    (colored-union a b)
@@ -88,7 +88,7 @@
 
 ;; ---- test 5: difference emits negated distance ----
 
-(defn test-difference-glsl [] :void
+(defn test-difference-glsl [] : void
   (let [base  (colored-box -2.0 -2.0 -2.0  2.0 2.0 2.0  0.8 0.8 0.8  1)
         hole  (colored-sphere 0.0 0.0 0.0 1.0  0.0 0.0 0.0  2)
         diff  (colored-difference base hole)
@@ -100,7 +100,7 @@
 
 ;; ---- test 6: translate emits p_ variable ----
 
-(defn test-translate-glsl [] :void
+(defn test-translate-glsl [] : void
   (let [s    (colored-sphere 0.0 0.0 0.0 1.0  0.0 1.0 0.0  1)
         ts   (colored-translate s 3.0 0.0 0.0)
         glsl (csdf->glsl ts)]
@@ -112,7 +112,7 @@
 
 ;; ---- main ----
 
-(defn main [] :int
+(defn main [] : int
   (do
     (test-sphere-glsl)
     (println "test-sphere-glsl: PASS")

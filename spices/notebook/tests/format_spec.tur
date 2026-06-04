@@ -4,29 +4,29 @@
   (import notebook/format :refer [parse-file parse-string node-tag node-prose node-cell
                                   nodes->str nodes-update-cell])
 
-  (defn test-list-nil? [lst :int] #{Unsafe} :bool
+  (defn test-list-nil? [lst : int] #{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn test-head [lst :int] #{Unsafe} :int
+  (defn test-head [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->head : 0;
     ```)
 
-  (defn test-tail [lst :int] #{Unsafe} :int
+  (defn test-tail [lst : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->tail : 0;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn test-md-node-tag [node :int] #{Unsafe} :int
+  (defn test-md-node-tag [node : int] #{Unsafe} : int
     ```c
     typedef struct { int kind; char *text; char *info; int meta; int start_line; int end_line;
                      int64_t *children; int child_count; int child_cap; } MdNode;
@@ -34,7 +34,7 @@
     return n ? n->kind : -1;
     ```)
 
-  (defn test-cell-id [cell :int] #{Unsafe} :cstr
+  (defn test-cell-id [cell : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *id;
@@ -48,7 +48,7 @@
     return c && c->id ? c->id : "";
     ```)
 
-  (defn test-cell-lang [cell :int] #{Unsafe} :int
+  (defn test-cell-lang [cell : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *id;
@@ -62,7 +62,7 @@
     return c ? c->lang : -1;
     ```)
 
-  (defn test-cell-source [cell :int] #{Unsafe} :cstr
+  (defn test-cell-source [cell : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *id;
@@ -76,7 +76,7 @@
     return c && c->source ? c->source : "";
     ```)
 
-  (defn test-cell-attrs [cell :int] #{Unsafe} :int
+  (defn test-cell-attrs [cell : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *id;
@@ -90,7 +90,7 @@
     return c ? c->attrs : 0;
     ```)
 
-  (defn test-attr-get [attrs :int name :cstr fallback :cstr] #{Unsafe} :cstr
+  (defn test-attr-get [attrs : int name : cstr fallback : cstr] #{Unsafe} : cstr
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *name; char *value; } Attr;
@@ -107,30 +107,30 @@
     return fallback_value;
     ```)
 
-  (defn test-ok? [r :int] #{Unsafe} :bool
+  (defn test-ok? [r : int] #{Unsafe} : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
     return res && res->is_ok;
     ```)
 
-  (defn test-ok-val [r :int] #{Unsafe} :int
+  (defn test-ok-val [r : int] #{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
     return res ? res->ok_val : 0;
     ```)
 
-  (defn test-err? [r :int] #{Unsafe} :bool
+  (defn test-err? [r : int] #{Unsafe} : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
     return !res || !res->is_ok;
     ```)
 
-  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+  (defn tap-plan [count : int fails : int] #{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -140,15 +140,15 @@
     }
     ```)
 
-  (defn bool->fail [ok :bool] :int
+  (defn bool->fail [ok : bool] : int
     (if ok 0 1))
 
-  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
     (do
       (tap-line idx name ok)
       (bool->fail ok)))
 
-  (defn __write-file [path :cstr s :cstr] #{Unsafe} :int
+  (defn __write-file [path : cstr s : cstr] #{Unsafe} : int
     ```c
     const char *p = (const char *)(intptr_t)path;
     const char *bs = (const char *)(intptr_t)s;
@@ -160,7 +160,7 @@
     return (wrote == len) ? 1 : 0;
     ```)
 
-  (defn test-parse-string [] #{Unsafe} :bool
+  (defn test-parse-string [] #{Unsafe} : bool
     (let [r (parse-string "# Title\n\nParagraph.\n\n```turmeric {id=load eval=false}\n(+ 1 2)\n```\n\nAfter.")
           nodes (test-ok-val r)
           n1 (test-head nodes)
@@ -179,19 +179,19 @@
                                               (and (= (node-tag n4) 0)
                                                    (cstr-eq? (test-attr-get (test-cell-attrs cell) "eval" "") "false"))))))))))))
 
-  (defn test-nodes->str [] #{Unsafe} :bool
+  (defn test-nodes->str [] #{Unsafe} : bool
     (let [source "# Title\n\nParagraph.\n\n```sweet-exp {echo=false}\nprintln(\"hi\")\n```\n\nAfter."
           r (parse-string source)]
       (and (test-ok? r)
            (cstr-eq? (nodes->str (test-ok-val r)) source))))
 
-  (defn test-update-cell [] #{Unsafe} :bool
+  (defn test-update-cell [] #{Unsafe} : bool
     (let [r (parse-string "```turmeric {id=load}\n(+ 1 2)\n```")
           updated (nodes-update-cell (test-ok-val r) "load" "(+ 2 3)")]
       (and (test-ok? updated)
            (cstr-eq? (nodes->str (test-ok-val updated)) "```turmeric {id=load}\n(+ 2 3)\n```"))))
 
-  (defn test-parse-file [] #{Unsafe} :bool
+  (defn test-parse-file [] #{Unsafe} : bool
     (let [path "/tmp/notebook-format-test.tur.md"
           _ (__write-file path "```turmeric {id=file}\n(+ 4 5)\n```")
           r (parse-file path)
@@ -201,12 +201,12 @@
            (and (= (node-tag node) 1)
                 (cstr-eq? (test-cell-id (node-cell node)) "file")))))
 
-  (defn test-update-miss [] #{Unsafe} :bool
+  (defn test-update-miss [] #{Unsafe} : bool
     (let [r (parse-string "```turmeric {id=load}\n(+ 1 2)\n```")
           updated (nodes-update-cell (test-ok-val r) "missing" "(+ 2 3)")]
       (test-err? updated)))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (let [f1 (run-case 1 "parses notebook strings into prose and cell nodes" (test-parse-string))
           f2 (run-case 2 "serializes notebook nodes back to markdown" (test-nodes->str))
           f3 (run-case 3 "updates named cells immutably" (test-update-cell))

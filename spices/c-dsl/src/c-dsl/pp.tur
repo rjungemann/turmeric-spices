@@ -18,7 +18,7 @@
 ;;;   (c-include "mylib.h")  ; => "#include \"mylib.h\""
 ;;;
 ;;; Since: P1
-(defn c-include [header :cstr] :cstr
+(defn c-include [header : cstr] : cstr
   (c-sprintf1 "#include \"%s\"" header))
 
 ;;; c-include-sys -- emit a #include directive for a system header.
@@ -33,7 +33,7 @@
 ;;;   (c-include-sys "stdio.h")  ; => "#include <stdio.h>"
 ;;;
 ;;; Since: P1
-(defn c-include-sys [header :cstr] :cstr
+(defn c-include-sys [header : cstr] : cstr
   (c-sprintf1 "#include <%s>" header))
 
 ;;; c-define -- emit a simple #define directive.
@@ -49,7 +49,7 @@
 ;;;   (c-define "PI" "3.14159f")  ; => "#define PI 3.14159f"
 ;;;
 ;;; Since: P1
-(defn c-define [name :cstr value :cstr] :cstr
+(defn c-define [name : cstr value : cstr] : cstr
   (c-sprintf2 "#define %s %s" name value))
 
 ;;; c-define-fn -- emit a function-like #define directive.
@@ -66,7 +66,7 @@
 ;;;   ; => "#define MAX(a,b) ((a)>(b)?(a):(b))"
 ;;;
 ;;; Since: P1
-(defn c-define-fn [signature :cstr body :cstr] :cstr
+(defn c-define-fn [signature : cstr body : cstr] : cstr
   (c-sprintf2 "#define %s %s" signature body))
 
 ;;; c-undef -- emit a #undef directive.
@@ -78,7 +78,7 @@
 ;;;   "#undef name"
 ;;;
 ;;; Since: P1
-(defn c-undef [name :cstr] :cstr
+(defn c-undef [name : cstr] : cstr
   (c-sprintf1 "#undef %s" name))
 
 ;;; c-ifdef -- emit an #ifdef / #endif guarded block.
@@ -94,7 +94,7 @@
 ;;;   (c-ifdef "DEBUG" (c-call-stmt "printf" ...))
 ;;;
 ;;; Since: P1
-(defn c-ifdef [guard :cstr body :cstr] :cstr
+(defn c-ifdef [guard : cstr body : cstr] : cstr
   (c-sprintf2 "#ifdef %s\n%s\n#endif" guard body))
 
 ;;; c-ifndef -- emit an #ifndef / #endif guarded block.
@@ -110,7 +110,7 @@
 ;;;   (c-ifndef "MY_HEADER_H" "#define MY_HEADER_H\n...")
 ;;;
 ;;; Since: P1
-(defn c-ifndef [guard :cstr body :cstr] :cstr
+(defn c-ifndef [guard : cstr body : cstr] : cstr
   (c-sprintf2 "#ifndef %s\n%s\n#endif" guard body))
 
 ;;; c-if-pp -- emit a #if / #endif guarded block.
@@ -123,7 +123,7 @@
 ;;;   "#if cond\nbody\n#endif"
 ;;;
 ;;; Since: P1
-(defn c-if-pp [cond :cstr body :cstr] :cstr
+(defn c-if-pp [cond : cstr body : cstr] : cstr
   (c-sprintf2 "#if %s\n%s\n#endif" cond body))
 
 ;;; c-static-assert -- emit a static_assert declaration.
@@ -139,7 +139,7 @@
 ;;;   (c-static-assert "sizeof(int32_t) == 4" "\"int32_t must be 4 bytes\"")
 ;;;
 ;;; Since: P1
-(defn c-static-assert [expr :cstr msg :cstr] :cstr
+(defn c-static-assert [expr : cstr msg : cstr] : cstr
   (c-sprintf2 "static_assert(%s, %s);" expr msg))
 
 ;;; c-pragma -- emit a #pragma directive.
@@ -154,7 +154,7 @@
 ;;;   (c-pragma "once")  ; => "#pragma once"
 ;;;
 ;;; Since: P1
-(defn c-pragma [args :cstr] :cstr
+(defn c-pragma [args : cstr] : cstr
   (c-sprintf1 "#pragma %s" args))
 
 ) ;; end defmodule c-dsl/pp

@@ -53,7 +53,7 @@
 
 ;;; vec2 constructor
 ;;; Returns: vec2
-(defn vec2 [x y] :vec2
+(defn vec2 [x y] : vec2
   (let [v (malloc (sizeof vec2))]
     (set! (vec2-x v) (float x))
     (set! (vec2-y v) (float y))
@@ -61,7 +61,7 @@
 
 ;;; vec3 constructor
 ;;; Returns: vec3
-(defn vec3 [x y z] :vec3
+(defn vec3 [x y z] : vec3
   (let [v (malloc (sizeof vec3))]
     (set! (vec3-x v) (float x))
     (set! (vec3-y v) (float y))
@@ -70,7 +70,7 @@
 
 ;;; vec4 constructor
 ;;; Returns: vec4
-(defn vec4 [x y z w] :vec4
+(defn vec4 [x y z w] : vec4
   (let [v (malloc (sizeof vec4))]
     (set! (vec4-x v) (float x))
     (set! (vec4-y v) (float y))
@@ -80,7 +80,7 @@
 
 ;;; mat2-identity -- create 2x2 identity matrix
 ;;; Returns: mat2
-(defn mat2-identity [] :mat2
+(defn mat2-identity [] : mat2
   (let [m (malloc (sizeof mat2))]
     (set! (mat2-m00 m) 1.0)
     (set! (mat2-m11 m) 1.0)
@@ -90,7 +90,7 @@
 
 ;;; mat3-identity -- create 3x3 identity matrix
 ;;; Returns: mat3
-(defn mat3-identity [] :mat3
+(defn mat3-identity [] : mat3
   (let [m (malloc (sizeof mat3))]
     (set! (mat3-m00 m) 1.0)
     (set! (mat3-m11 m) 1.0)
@@ -105,7 +105,7 @@
 
 ;;; mat4-identity -- create 4x4 identity matrix
 ;;; Returns: mat4
-(defn mat4-identity [] :mat4
+(defn mat4-identity [] : mat4
   (let [m (malloc (sizeof mat4))]
     (set! (mat4-m00 m) 1.0)
     (set! (mat4-m11 m) 1.0)
@@ -129,7 +129,7 @@
 ;;; a: vec2
 ;;; b: vec2
 ;;; Returns: :float
-(defn vec2-dot [a b] :float
+(defn vec2-dot [a b] : float
   (+ (* (vec2-x a) (vec2-x b))
      (* (vec2-y a) (vec2-y b))))
 
@@ -137,7 +137,7 @@
 ;;; a: vec3
 ;;; b: vec3
 ;;; Returns: :float
-(defn vec3-dot [a b] :float
+(defn vec3-dot [a b] : float
   (+ (* (vec3-x a) (vec3-x b))
      (* (vec3-y a) (vec3-y b))
      (* (vec3-z a) (vec3-z b))))
@@ -146,7 +146,7 @@
 ;;; a: vec3
 ;;; b: vec3
 ;;; Returns: vec3
-(defn vec3-cross [a b] :vec3
+(defn vec3-cross [a b] : vec3
   (vec3 (- (* (vec3-y a) (vec3-z b)) (* (vec3-z a) (vec3-y b)))
         (- (* (vec3-z a) (vec3-x b)) (* (vec3-x a) (vec3-z b)))
         (- (* (vec3-x a) (vec3-y b)) (* (vec3-y a) (vec3-x b)))))
@@ -154,7 +154,7 @@
 ;;; vec3-length -- length (norm) of a vec3
 ;;; v: vec3
 ;;; Returns: :float
-(defn vec3-length [v] :float
+(defn vec3-length [v] : float
   (sqrt (+ (* (vec3-x v) (vec3-x v))
            (* (vec3-y v) (vec3-y v))
            (* (vec3-z v) (vec3-z v)))))
@@ -162,7 +162,7 @@
 ;;; vec3-normalize -- normalize a vec3 to unit length
 ;;; v: vec3
 ;;; Returns: vec3
-(defn vec3-normalize [v] :vec3
+(defn vec3-normalize [v] : vec3
   (let [len (vec3-length v)]
     (when (< len 1e-6)
       (error "vec3-normalize: cannot normalize zero vector"))
@@ -175,7 +175,7 @@
 ;;; a: mat4
 ;;; b: mat4
 ;;; Returns: mat4
-(defn mat4-mul [a b] :mat4
+(defn mat4-mul [a b] : mat4
   (let [c (mat4-identity)]
     (set! (mat4-m00 c) (+ (+ (+ (* (mat4-m00 a) (mat4-m00 b))
                               (* (mat4-m01 a) (mat4-m10 b)))
@@ -250,7 +250,7 @@
 ;;; m: mat4
 ;;; v: vec4
 ;;; Returns: vec4
-(defn mat4-mul-vec4 [m v] :vec4
+(defn mat4-mul-vec4 [m v] : vec4
   (vec4 (+ (+ (+ (* (mat4-m00 m) (vec4-x v))
                 (* (mat4-m01 m) (vec4-y v)))
              (* (mat4-m02 m) (vec4-z v)))
@@ -274,7 +274,7 @@
 ;;; mat4-transpose -- transpose a mat4
 ;;; m: mat4
 ;;; Returns: mat4
-(defn mat4-transpose [m] :mat4
+(defn mat4-transpose [m] : mat4
   (let [t (mat4-identity)]
     (set! (mat4-m00 t) (mat4-m00 m))
     (set! (mat4-m01 t) (mat4-m10 m))
@@ -297,7 +297,7 @@
 ;;; mat4-inv -- compute inverse of a mat4
 ;;; m: mat4
 ;;; Returns: mat4 or error if singular
-(defn mat4-inv [m] :mat4
+(defn mat4-inv [m] : mat4
   (let [s0 (vec4 (mat4-m00 m) (mat4-m10 m) (mat4-m20 m) (mat4-m30 m))
         s1 (vec4 (mat4-m01 m) (mat4-m11 m) (mat4-m21 m) (mat4-m31 m))
         s2 (vec4 (mat4-m02 m) (mat4-m12 m) (mat4-m22 m) (mat4-m32 m))
@@ -338,13 +338,13 @@
         inv))))
 
 ;;; Helper: create vec4 from vec3 with w=1.0
-(defn vec3->vec4 [v] :vec4
+(defn vec3->vec4 [v] : vec4
   (vec4 (vec3-x v) (vec3-y v) (vec3-z v) 1.0))
 
 ;;; mat4-translate -- create translation matrix
 ;;; v: vec3 (translation vector)
 ;;; Returns: mat4
-(defn mat4-translate [v] :mat4
+(defn mat4-translate [v] : mat4
   (let [m (mat4-identity)]
     (set! (mat4-m30 m) (vec3-x v))
     (set! (mat4-m31 m) (vec3-y v))
@@ -354,7 +354,7 @@
 ;;; mat4-scale -- create scaling matrix
 ;;; v: vec3 (scale vector)
 ;;; Returns: mat4
-(defn mat4-scale [v] :mat4
+(defn mat4-scale [v] : mat4
   (let [m (mat4-identity)]
     (set! (mat4-m00 m) (vec3-x v))
     (set! (mat4-m11 m) (vec3-y v))
@@ -364,7 +364,7 @@
 ;;; mat4-rotate-x -- create rotation matrix around x-axis
 ;;; angle: rotation angle in radians
 ;;; Returns: mat4
-(defn mat4-rotate-x [angle] :mat4
+(defn mat4-rotate-x [angle] : mat4
   (let [m (mat4-identity)
         s (sin angle)
         c (cos angle)]
@@ -377,7 +377,7 @@
 ;;; mat4-rotate-y -- create rotation matrix around y-axis
 ;;; angle: rotation angle in radians
 ;;; Returns: mat4
-(defn mat4-rotate-y [angle] :mat4
+(defn mat4-rotate-y [angle] : mat4
   (let [m (mat4-identity)
         s (sin angle)
         c (cos angle)]
@@ -390,7 +390,7 @@
 ;;; mat4-rotate-z -- create rotation matrix around z-axis
 ;;; angle: rotation angle in radians
 ;;; Returns: mat4
-(defn mat4-rotate-z [angle] :mat4
+(defn mat4-rotate-z [angle] : mat4
   (let [m (mat4-identity)
         s (sin angle)
         c (cos angle)]
@@ -404,7 +404,7 @@
 ;;; axis: vec3 (normalized rotation axis)
 ;;; angle: rotation angle in radians
 ;;; Returns: mat4
-(defn mat4-rotate [axis angle] :mat4
+(defn mat4-rotate [axis angle] : mat4
   (let [x (vec3-x axis)
         y (vec3-y axis)
         z (vec3-z axis)
@@ -433,7 +433,7 @@
 ;;; near: near clipping plane
 ;;; far: far clipping plane
 ;;; Returns: mat4
-(defn mat4-perspective [fovy aspect near far] :mat4
+(defn mat4-perspective [fovy aspect near far] : mat4
   (let [m (mat4-identity)
         f (/ 1.0 (tan (/ fovy 2.0)))]
     (set! (mat4-m00 m) (/ f aspect))
@@ -452,7 +452,7 @@
 ;;; near: near clipping plane
 ;;; far: far clipping plane
 ;;; Returns: mat4
-(defn mat4-ortho [l r b t near far] :mat4
+(defn mat4-ortho [l r b t near far] : mat4
   (let [m (mat4-identity)
         w (/ (- r l))
         h (/ (- t b))
@@ -471,7 +471,7 @@
 ;;; center: vec3 (point to look at)
 ;;; up: vec3 (up direction)
 ;;; Returns: mat4
-(defn mat4-look-at [eye center up] :mat4
+(defn mat4-look-at [eye center up] : mat4
   (let [f (vec3-normalize (vec3-sub center eye))
         s (vec3-normalize (vec3-cross f (vec3-normalize up)))
         u (vec3-cross s f)
@@ -504,7 +504,7 @@
 ;;; a: vec3
 ;;; b: vec3
 ;;; Returns: vec3
-(defn vec3-sub [a b] :vec3
+(defn vec3-sub [a b] : vec3
   (vec3 (- (vec3-x a) (vec3-x b))
         (- (vec3-y a) (vec3-y b))
         (- (vec3-z a) (vec3-z b))))
@@ -517,7 +517,7 @@
 ;;; a: vec4
 ;;; b: vec4
 ;;; Returns: :float
-(defn vec4-dot [a b] :float
+(defn vec4-dot [a b] : float
   (+ (+ (+ (* (vec4-x a) (vec4-x b))
            (* (vec4-y a) (vec4-y b)))
         (* (vec4-z a) (vec4-z b)))
@@ -526,13 +526,13 @@
 ;;; mat4-ptr -- get pointer to mat4 data (for OpenGL uniform uploads)
 ;;; m: mat4
 ;;; Returns: :ptr (stack pointer; valid for call duration only)
-(defn mat4-ptr [m] :int
+(defn mat4-ptr [m] : int
   (int m))
 
 ;;; vec3-ptr -- get pointer to vec3 data
 ;;; v: vec3
 ;;; Returns: :ptr (stack pointer; valid for call duration only)
-(defn vec3-ptr [v] :int
+(defn vec3-ptr [v] : int
   (int v))
 
 ;;; inline-C helpers for math functions

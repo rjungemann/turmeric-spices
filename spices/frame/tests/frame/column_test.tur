@@ -21,9 +21,9 @@
 
   ;; Test-local cons builder.  Named t-* to avoid collision with the private
   ;; __nil / __cons helpers that frame/frame.tur emits into every importer.
-  (defn t-nil [] :int ```c return 0; ```)
+  (defn t-nil [] : int ```c return 0; ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -34,13 +34,13 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn t-cstr= [a :cstr b :cstr] :bool
+  (defn t-cstr= [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)(intptr_t)a, (const char *)(intptr_t)b) == 0;
     ```)
 
-  (defn t-aligned64? [p :int] :bool
+  (defn t-aligned64? [p : int] : bool
     ```c
     #include <stdint.h>
     return ((uintptr_t)p & (uintptr_t)63) == 0;
@@ -49,7 +49,7 @@
   ;; All describe/it blocks are wrapped in __all-tests so they actually run
   ;; (top-level forms inside defmodule are emitted as static decls only, not
   ;; executed; main has to invoke them).
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
   ;; ---------- frame/type ----------
 
@@ -244,7 +244,7 @@
         (frame-free f)
         (assert-true ok)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

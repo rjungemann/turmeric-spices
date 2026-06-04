@@ -33,7 +33,7 @@
 ;;;   (col-count c)  ; => 100
 ;;;
 ;;; Since: ST1
-(defn col-count [col :int] :int
+(defn col-count [col : int] : int
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -64,7 +64,7 @@
 ;;;   :float  sum (0.0 if all null / empty).
 ;;;
 ;;; Since: ST1
-(defn col-sum [col :int] :float
+(defn col-sum [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -96,7 +96,7 @@
 ;;;   :float  mean, or NaN if empty.
 ;;;
 ;;; Since: ST1
-(defn col-mean [col :int] :float
+(defn col-mean [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -128,7 +128,7 @@
 ;;;   :float  median, or NaN if empty.
 ;;;
 ;;; Since: ST1
-(defn col-median [col :int] :float
+(defn col-median [col : int] : float
   ```c
   #include <stdint.h>
   #include <stdlib.h>
@@ -176,7 +176,7 @@
 ;;;   :float  mode, or NaN if empty.
 ;;;
 ;;; Since: ST1
-(defn col-mode [col :int] :float
+(defn col-mode [col : int] : float
   ```c
   #include <stdint.h>
   #include <stdlib.h>
@@ -226,7 +226,7 @@
 ;;;   :float  variance, or NaN if fewer than 2 values.
 ;;;
 ;;; Since: ST1
-(defn col-var [col :int] :float
+(defn col-var [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -264,7 +264,7 @@
 ;;;   :float  standard deviation, or NaN if fewer than 2 values.
 ;;;
 ;;; Since: ST1
-(defn col-sd [col :int] :float
+(defn col-sd [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -301,7 +301,7 @@
 ;;;   :float  minimum, or NaN if empty.
 ;;;
 ;;; Since: ST1
-(defn col-min [col :int] :float
+(defn col-min [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -336,7 +336,7 @@
 ;;;   :float  maximum, or NaN if empty.
 ;;;
 ;;; Since: ST1
-(defn col-max [col :int] :float
+(defn col-max [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -370,7 +370,7 @@
 ;;;   :float  range, or NaN if empty.
 ;;;
 ;;; Since: ST1
-(defn col-range [col :int] :float
+(defn col-range [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -410,7 +410,7 @@
 ;;;   (col-quantile c 0.25)  ; => first quartile
 ;;;
 ;;; Since: ST1
-(defn col-quantile [col :int q :float] :float
+(defn col-quantile [col : int q : float] : float
   ```c
   #include <stdint.h>
   #include <stdlib.h>
@@ -463,7 +463,7 @@
 ;;;   :float  IQR, or NaN if empty.
 ;;;
 ;;; Since: ST1
-(defn col-iqr [col :int] :float
+(defn col-iqr [col : int] : float
   (let [q1 (col-quantile col 0.25)
         q3 (col-quantile col 0.75)]
     (- q3 q1)))
@@ -477,7 +477,7 @@
 ;;;   :float  skewness, or NaN if fewer than 3 values.
 ;;;
 ;;; Since: ST1
-(defn col-skewness [col :int] :float
+(defn col-skewness [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -519,7 +519,7 @@
 ;;;   :float  excess kurtosis, or NaN if fewer than 4 values.
 ;;;
 ;;; Since: ST1
-(defn col-kurtosis [col :int] :float
+(defn col-kurtosis [col : int] : float
   ```c
   #include <stdint.h>
   #include <math.h>
@@ -559,7 +559,7 @@
 ;; here (that would create a circular dep path if frame imports stats later).
 ;; ---------------------------------------------------------------------------
 
-(defn __frame-col-by-name [f :int name :cstr] :int
+(defn __frame-col-by-name [f : int name : cstr] : int
   ```c
   #include <stdint.h>
   #include <string.h>
@@ -592,7 +592,7 @@
 ;;;   :int  non-null count, or -1 if column not found.
 ;;;
 ;;; Since: ST1
-(defn frame-count [f :int name :cstr] :int
+(defn frame-count [f : int name : cstr] : int
   (let [col (__frame-col-by-name f name)]
     (if (= col -1)
       -1
@@ -601,91 +601,91 @@
 ;;; frame-sum -- sum of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-sum [f :int name :cstr] :float
+(defn frame-sum [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-sum col)))
 
 ;;; frame-mean -- mean of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-mean [f :int name :cstr] :float
+(defn frame-mean [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-mean col)))
 
 ;;; frame-median -- median of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-median [f :int name :cstr] :float
+(defn frame-median [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-median col)))
 
 ;;; frame-mode -- mode of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-mode [f :int name :cstr] :float
+(defn frame-mode [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-mode col)))
 
 ;;; frame-var -- sample variance of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-var [f :int name :cstr] :float
+(defn frame-var [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-var col)))
 
 ;;; frame-sd -- sample standard deviation of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-sd [f :int name :cstr] :float
+(defn frame-sd [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-sd col)))
 
 ;;; frame-min -- minimum of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-min [f :int name :cstr] :float
+(defn frame-min [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-min col)))
 
 ;;; frame-max -- maximum of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-max [f :int name :cstr] :float
+(defn frame-max [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-max col)))
 
 ;;; frame-range -- range (max-min) of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-range [f :int name :cstr] :float
+(defn frame-range [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-range col)))
 
 ;;; frame-quantile -- quantile of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-quantile [f :int name :cstr q :float] :float
+(defn frame-quantile [f : int name : cstr q : float] : float
   (let [col (__frame-col-by-name f name)]
     (col-quantile col q)))
 
 ;;; frame-iqr -- IQR of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-iqr [f :int name :cstr] :float
+(defn frame-iqr [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-iqr col)))
 
 ;;; frame-skewness -- skewness of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-skewness [f :int name :cstr] :float
+(defn frame-skewness [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-skewness col)))
 
 ;;; frame-kurtosis -- excess kurtosis of a named column.
 ;;;
 ;;; Since: ST1
-(defn frame-kurtosis [f :int name :cstr] :float
+(defn frame-kurtosis [f : int name : cstr] : float
   (let [col (__frame-col-by-name f name)]
     (col-kurtosis col)))
 
@@ -702,7 +702,7 @@
 ;;;   (describe my-frame)
 ;;;
 ;;; Since: ST1
-(defn describe [f :int] :int
+(defn describe [f : int] : int
   ```c
   #include <stdint.h>
   #include <stdlib.h>

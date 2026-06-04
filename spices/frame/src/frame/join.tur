@@ -29,9 +29,9 @@
 ;; Cons helpers (namespaced __j-*).
 ;; ---------------------------------------------------------------------------
 
-(defn __j-nil [] :int ```c return 0; ```)
+(defn __j-nil [] : int ```c return 0; ```)
 
-(defn __j-cons [v :int n :int] :int
+(defn __j-cons [v : int n : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -42,7 +42,7 @@
   return (int64_t)(intptr_t)c;
   ```)
 
-(defn __j-list-length [xs :int] :int
+(defn __j-list-length [xs : int] : int
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -51,7 +51,7 @@
   return n;
   ```)
 
-(defn __j-list-nth-cstr [xs :int i :int] :cstr
+(defn __j-list-nth-cstr [xs : int i : int] : cstr
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -62,7 +62,7 @@
   return (const char *)(intptr_t)"";
   ```)
 
-(defn __j-list-nth-int [xs :int i :int] :int
+(defn __j-list-nth-int [xs : int i : int] : int
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -73,7 +73,7 @@
   return 0;
   ```)
 
-(defn __j-list-has? [xs :int needle :int] :bool
+(defn __j-list-has? [xs : int needle : int] : bool
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -83,7 +83,7 @@
   return false;
   ```)
 
-(defn __j-list-has-cstr? [xs :int needle :cstr] :bool
+(defn __j-list-has-cstr? [xs : int needle : cstr] : bool
   ```c
   #include <string.h>
   #include <stdint.h>
@@ -116,8 +116,8 @@
 ;;;
 ;;; Returns:
 ;;;   :int  handle to __join_result; release with __j-result-free.  Since: FR6
-(defn __j-match [l :int r :int left-key-ixs :int right-key-ixs :int
-                 n-keys :int how :int] :int
+(defn __j-match [l : int r : int left-key-ixs : int right-key-ixs : int
+                 n-keys : int how : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -335,7 +335,7 @@
   return (int64_t)(intptr_t)res;
   ```)
 
-(defn __j-result-count [res :int] :int
+(defn __j-result-count [res : int] : int
   ```c
   #include <stdint.h>
   struct __join_result {
@@ -345,7 +345,7 @@
   return ((struct __join_result *)(intptr_t)res)->n;
   ```)
 
-(defn __j-result-left [res :int] :int
+(defn __j-result-left [res : int] : int
   ```c
   #include <stdint.h>
   struct __join_result {
@@ -354,7 +354,7 @@
   return (int64_t)(intptr_t)((struct __join_result *)(intptr_t)res)->left_ix;
   ```)
 
-(defn __j-result-right [res :int] :int
+(defn __j-result-right [res : int] : int
   ```c
   #include <stdint.h>
   struct __join_result {
@@ -363,7 +363,7 @@
   return (int64_t)(intptr_t)((struct __join_result *)(intptr_t)res)->right_ix;
   ```)
 
-(defn __j-result-free [res :int] :void
+(defn __j-result-free [res : int] : void
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -382,7 +382,7 @@
 ;;; __j-take-nullable -- build a new column by indexing into `col` with the
 ;;; int64_t[n] permutation `perm`.  Where perm[i] == -1, emit a null cell
 ;;; (and set the validity bit accordingly).  Since: FR6
-(defn __j-take-nullable [col :int perm :int n :int] :int
+(defn __j-take-nullable [col : int perm : int n : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -550,7 +550,7 @@
 ;; Turmeric driver code.
 ;; ---------------------------------------------------------------------------
 
-(defn __j-names-to-ixs [s :int names :int i :int acc :int] :int
+(defn __j-names-to-ixs [s : int names : int i : int acc : int] : int
   (if (< i 0)
     acc
     (let [nm (__j-list-nth-cstr names i)
@@ -563,18 +563,18 @@
 ;; cons list of columns produced from the left side's perm (= left_ix array
 ;; from the join result).  Each emitted column uses __j-take-nullable.
 
-(defn __j-clone-field-at [s :int i :int] :int
+(defn __j-clone-field-at [s : int i : int] : int
   (let [fd (schema-field-at s i)]
     (field (field-name fd) (field-type fd) (field-nullable fd))))
 
-(defn __j-build-side-cols [f :int ncols :int perm :int n :int
-                           i :int acc :int] :int
+(defn __j-build-side-cols [f : int ncols : int perm : int n : int
+                           i : int acc : int] : int
   (if (< i 0)
     acc
     (let [c (__j-take-nullable (frame-column-at f i) perm n)]
       (__j-build-side-cols f ncols perm n (- i 1) (__j-cons c acc)))))
 
-(defn __j-build-side-fields [s :int ncols :int i :int acc :int] :int
+(defn __j-build-side-fields [s : int ncols : int i : int acc : int] : int
   (if (< i 0)
     acc
     (__j-build-side-fields s ncols (- i 1)
@@ -584,23 +584,23 @@
 ;; Right-side handling: include only NON-key columns; rename collisions.
 ;; ---------------------------------------------------------------------------
 
-(defn __j-right-nonkey-ixs [s :int right-key-ixs :int ncols :int
-                             i :int acc :int] :int
+(defn __j-right-nonkey-ixs [s : int right-key-ixs : int ncols : int
+                             i : int acc : int] : int
   (if (< i 0)
     acc
     (if (__j-list-has? right-key-ixs i)
       (__j-right-nonkey-ixs s right-key-ixs ncols (- i 1) acc)
       (__j-right-nonkey-ixs s right-key-ixs ncols (- i 1) (__j-cons i acc)))))
 
-(defn __j-build-right-cols [f :int ixs :int n-keep :int perm :int n :int
-                             i :int acc :int] :int
+(defn __j-build-right-cols [f : int ixs : int n-keep : int perm : int n : int
+                             i : int acc : int] : int
   (if (< i 0)
     acc
     (let [src-ix (__j-list-nth-int ixs i)
           c      (__j-take-nullable (frame-column-at f src-ix) perm n)]
       (__j-build-right-cols f ixs n-keep perm n (- i 1) (__j-cons c acc)))))
 
-(defn __j-suffix [a :cstr b :cstr] :cstr
+(defn __j-suffix [a : cstr b : cstr] : cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -616,14 +616,14 @@
   return (const char *)(intptr_t)out;
   ```)
 
-(defn __j-cstr-as-int [s :cstr] :int
+(defn __j-cstr-as-int [s : cstr] : int
   ```c
   #include <stdint.h>
   return (int64_t)(intptr_t)s;
   ```)
 
-(defn __j-build-right-fields [s :int ixs :int left-names :int n-keep :int
-                               i :int acc :int] :int
+(defn __j-build-right-fields [s : int ixs : int left-names : int n-keep : int
+                               i : int acc : int] : int
   (if (< i 0)
     acc
     (let [src-ix (__j-list-nth-int ixs i)
@@ -638,14 +638,14 @@
                               (__j-cons fd acc)))))
 
 ;; Build a cons list of left column names (for collision detection on the right).
-(defn __j-left-names [s :int ncols :int i :int acc :int] :int
+(defn __j-left-names [s : int ncols : int i : int acc : int] : int
   (if (< i 0)
     acc
     (__j-left-names s ncols (- i 1)
                     (__j-cons (__j-cstr-as-int (field-name (schema-field-at s i)))
                               acc))))
 
-(defn __j-list-concat [a :int b :int] :int
+(defn __j-list-concat [a : int b : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -667,9 +667,9 @@
 ;; Public join entry points.
 ;; ---------------------------------------------------------------------------
 
-(defn __j-assemble [l :int r :int
-                    l-ixs :int r-ixs :int n-keys :int how :int
-                    keep-right? :bool] :int
+(defn __j-assemble [l : int r : int
+                    l-ixs : int r-ixs : int n-keys : int how : int
+                    keep-right? : bool] : int
   (let [lsch    (frame-schema l)
         rsch    (frame-schema r)
         res     (__j-match l r l-ixs r-ixs n-keys how)
@@ -695,8 +695,8 @@
             g          (frame (schema all-flds) all-cols)]
         (do (__j-result-free res) g)))))
 
-(defn __j-keyed-join [l :int r :int left-keys :int right-keys :int how :int
-                      keep-right? :bool] :int
+(defn __j-keyed-join [l : int r : int left-keys : int right-keys : int how : int
+                      keep-right? : bool] : int
   ;; keep-right? == true for inner/left/right/full; false for semi/anti.
   (let [lsch    (frame-schema l)
         rsch    (frame-schema r)
@@ -711,33 +711,33 @@
           (__j-assemble l r l-ixs r-ixs n-keys how keep-right?))))))
 
 ;;; inner-join -- standard inner join.  Since: FR6
-(defn inner-join [l :int r :int left-keys :int right-keys :int] :int
+(defn inner-join [l : int r : int left-keys : int right-keys : int] : int
   (__j-keyed-join l r left-keys right-keys 1 true))
 
 ;;; left-join -- keep all left rows; unmatched right is null.  Since: FR6
-(defn left-join [l :int r :int left-keys :int right-keys :int] :int
+(defn left-join [l : int r : int left-keys : int right-keys : int] : int
   (__j-keyed-join l r left-keys right-keys 2 true))
 
 ;;; right-join -- keep all right rows; unmatched left is null.  Since: FR6
-(defn right-join [l :int r :int left-keys :int right-keys :int] :int
+(defn right-join [l : int r : int left-keys : int right-keys : int] : int
   (__j-keyed-join l r left-keys right-keys 3 true))
 
 ;;; full-join -- keep all rows from both sides.  Since: FR6
-(defn full-join [l :int r :int left-keys :int right-keys :int] :int
+(defn full-join [l : int r : int left-keys : int right-keys : int] : int
   (__j-keyed-join l r left-keys right-keys 4 true))
 
 ;;; semi-join -- left rows that have at least one matching right row;
 ;;; output schema is the left schema.  Since: FR6
-(defn semi-join [l :int r :int left-keys :int right-keys :int] :int
+(defn semi-join [l : int r : int left-keys : int right-keys : int] : int
   (__j-keyed-join l r left-keys right-keys 5 false))
 
 ;;; anti-join -- left rows that have NO matching right row.  Since: FR6
-(defn anti-join [l :int r :int left-keys :int right-keys :int] :int
+(defn anti-join [l : int r : int left-keys : int right-keys : int] : int
   (__j-keyed-join l r left-keys right-keys 6 false))
 
 ;;; cross-join -- cartesian product.  No keys; output is n_left * n_right rows.
 ;;; Since: FR6
-(defn cross-join [l :int r :int] :int
+(defn cross-join [l : int r : int] : int
   (let [n-l    (frame-nrows l)
         n-r    (frame-nrows r)
         res    (__j-cross-result n-l n-r)
@@ -758,7 +758,7 @@
         g        (frame (schema all-flds) all-cols)]
     (do (__j-result-free res) g)))
 
-(defn __j-cross-right-fields [s :int left-names :int ncols :int i :int acc :int] :int
+(defn __j-cross-right-fields [s : int left-names : int ncols : int i : int acc : int] : int
   (if (< i 0)
     acc
     (let [fd-i (schema-field-at s i)
@@ -768,7 +768,7 @@
                  (field nm (field-type fd-i) (field-nullable fd-i)))]
       (__j-cross-right-fields s left-names ncols (- i 1) (__j-cons fd acc)))))
 
-(defn __j-cross-result [n-l :int n-r :int] :int
+(defn __j-cross-result [n-l : int n-r : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -801,7 +801,7 @@
 ;;;   how   -- :cstr one of "inner", "left", "right", "full", "semi", "anti"
 ;;;   keys  -- cons list of :cstr names that appear in both frames
 ;;;
-(defn __j-how-tag [s :cstr] :int
+(defn __j-how-tag [s : cstr] : int
   ```c
   #include <string.h>
   #include <stdint.h>
@@ -818,7 +818,7 @@
   ```)
 
 ;;; Since: FR6
-(defn join [l :int r :int how :cstr keys :int] :int
+(defn join [l : int r : int how : cstr keys : int] : int
   (let [how-tag (__j-how-tag how)]
     (if (= how-tag 7)
       (cross-join l r)

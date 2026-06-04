@@ -8,7 +8,7 @@
                            box-tl-round box-tr-round box-bl-round box-br-round
                            box-draw box-fill box-title])
 
-  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     /* __tur_include__: static int g_box_fails = 0; */
     if (!ok) g_box_fails++;
@@ -16,7 +16,7 @@
            (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-finish [count :int] #{Unsafe} :int
+  (defn tap-finish [count : int] #{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_box_fails == 0) {
@@ -29,7 +29,7 @@
     ```)
 
   ;; Glyph constant assertions: each returns a 3-byte UTF-8 codepoint.
-  (defn glyph-eq? [test-id :int got :cstr] #{Unsafe} :bool
+  (defn glyph-eq? [test-id : int got : cstr] #{Unsafe} : bool
     ```c
     const char *exp = NULL;
     switch ((int)test_id) {
@@ -55,7 +55,7 @@
     ```)
 
   ;; Stdout-capture machinery (same pattern as cursor/color/style tests).
-  (defn __capture-begin [] #{Unsafe} :void
+  (defn __capture-begin [] #{Unsafe} : void
     ```c
     /* __tur_include__: static int g_box_saved_fd = -1; */
     /* __tur_include__: static int g_box_pipe_r = -1; */
@@ -73,7 +73,7 @@
 
   ;; Compares the captured stdout against a hand-crafted expected sequence
   ;; selected by test-id.
-  (defn __capture-check [test-id :int] #{Unsafe} :bool
+  (defn __capture-check [test-id : int] #{Unsafe} : bool
     ```c
     fflush(stdout);
     if (g_box_saved_fd < 0) return 0;
@@ -157,23 +157,23 @@
     return memcmp(buf, exp, elen) == 0 ? 1 : 0;
     ```)
 
-  (defn run-glyph [idx :int label :cstr tid :int glyph :cstr] #{Unsafe} :void
+  (defn run-glyph [idx : int label : cstr tid : int glyph : cstr] #{Unsafe} : void
     (tap-record idx label (glyph-eq? tid glyph)))
 
-  (defn t-box-draw-single [] #{Unsafe} :bool
+  (defn t-box-draw-single [] #{Unsafe} : bool
     (do (__capture-begin) (box-draw 1 1 3 4 0) (__capture-check 100)))
-  (defn t-box-fill [] #{Unsafe} :bool
+  (defn t-box-fill [] #{Unsafe} : bool
     (do (__capture-begin) (box-fill 1 1 3 5 120) (__capture-check 101)))
-  (defn t-box-title-short [] #{Unsafe} :bool
+  (defn t-box-title-short [] #{Unsafe} : bool
     (do (__capture-begin) (box-title 1 1 12 " Hi ") (__capture-check 102)))
-  (defn t-box-title-long [] #{Unsafe} :bool
+  (defn t-box-title-long [] #{Unsafe} : bool
     (do (__capture-begin) (box-title 1 1 10 "abcdefghijklmnopqrst") (__capture-check 103)))
-  (defn t-box-draw-double-2x2 [] #{Unsafe} :bool
+  (defn t-box-draw-double-2x2 [] #{Unsafe} : bool
     (do (__capture-begin) (box-draw 5 5 2 2 1) (__capture-check 104)))
-  (defn t-box-draw-noop [] #{Unsafe} :bool
+  (defn t-box-draw-noop [] #{Unsafe} : bool
     (do (__capture-begin) (box-draw 1 1 1 5 0) (__capture-check 105)))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       ;; Glyph constants
       (run-glyph  1 "box-tl-single"  1 (box-tl-single))

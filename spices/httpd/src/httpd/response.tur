@@ -41,7 +41,7 @@
 
 ;; -- Internal: allocate an empty Response with a given status -----------
 
-(defn __resp-new [status :int body :cstr] :int
+(defn __resp-new [status : int body : cstr] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -80,7 +80,7 @@
 ;;;       (with-header "X-Hello" "world"))
 ;;;
 ;;; Since: H4
-(defn with-header [resp :int key :cstr val :cstr] :int
+(defn with-header [resp : int key : cstr val : cstr] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -119,7 +119,7 @@
 ;;;   (-> (ok "text/plain" "") (with-body "later"))
 ;;;
 ;;; Since: H4
-(defn with-body [resp :int body :cstr] :int
+(defn with-body [resp : int body : cstr] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -151,7 +151,7 @@
 ;;;   (-> (ok "text/plain" "no") (with-status 503))
 ;;;
 ;;; Since: H4
-(defn with-status [resp :int status :int] :int
+(defn with-status [resp : int status : int] : int
   ```c
   struct __httpd_resp {
     int    status; char  *body; int body_len;
@@ -174,7 +174,7 @@
 ;;;   (free-response r)
 ;;;
 ;;; Since: H4
-(defn free-response [resp :int] :void
+(defn free-response [resp : int] : void
   ```c
   #include <stdlib.h>
   struct __httpd_resp {
@@ -210,7 +210,7 @@
 ;;;   (response 201 "application/json" "{\"id\":1}")
 ;;;
 ;;; Since: H4
-(defn response [status :int content-type :cstr body :cstr] :int
+(defn response [status : int content-type : cstr body : cstr] : int
   (with-header (__resp-new status body) "Content-Type" content-type))
 
 ;;; resp-ok -- build a 200 OK response.
@@ -229,7 +229,7 @@
 ;;;   (resp-ok "text/plain" "Hello, world!")
 ;;;
 ;;; Since: H4
-(defn resp-ok [content-type :cstr body :cstr] :int
+(defn resp-ok [content-type : cstr body : cstr] : int
   (response 200 content-type body))
 
 ;;; not-found -- build a 404 Not Found response with a text/plain body.
@@ -244,7 +244,7 @@
 ;;;   (not-found "no such resource")
 ;;;
 ;;; Since: H4
-(defn not-found [body :cstr] :int
+(defn not-found [body : cstr] : int
   (response 404 "text/plain" body))
 
 ;;; bad-request -- build a 400 Bad Request response with a text/plain body.
@@ -259,7 +259,7 @@
 ;;;   (bad-request "missing id parameter")
 ;;;
 ;;; Since: H4
-(defn bad-request [body :cstr] :int
+(defn bad-request [body : cstr] : int
   (response 400 "text/plain" body))
 
 ) ;; end defmodule httpd/response

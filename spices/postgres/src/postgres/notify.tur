@@ -22,7 +22,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -30,7 +30,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -42,7 +42,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __listen-sql -- build "LISTEN channel" as a heap-allocated cstr.
-(defn __listen-sql [channel :cstr] :cstr
+(defn __listen-sql [channel : cstr] : cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -57,7 +57,7 @@
   ```)
 
 ;;; __unlisten-sql -- build "UNLISTEN channel" as a heap-allocated cstr.
-(defn __unlisten-sql [channel :cstr] :cstr
+(defn __unlisten-sql [channel : cstr] : cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -76,7 +76,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __pq-exec-raw -- execute SQL with no params; returns 1 on success, 0 on failure.
-(defn __pq-exec-raw [conn :int sql :cstr] :int
+(defn __pq-exec-raw [conn : int sql : cstr] : int
   ```c
   #include <libpq-fe.h>
   PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
@@ -87,14 +87,14 @@
   ```)
 
 ;;; __pq-consume-input -- call PQconsumeInput; returns 1 on success, 0 on error.
-(defn __pq-consume-input [conn :int] :int
+(defn __pq-consume-input [conn : int] : int
   ```c
   #include <libpq-fe.h>
   return (int64_t)PQconsumeInput((PGconn *)(intptr_t)conn);
   ```)
 
 ;;; __pq-notifies -- call PQnotifies; returns PGnotify* as :int (0 if none pending).
-(defn __pq-notifies [conn :int] :int
+(defn __pq-notifies [conn : int] : int
   ```c
   #include <libpq-fe.h>
   PGnotify *n = PQnotifies((PGconn *)(intptr_t)conn);
@@ -118,7 +118,7 @@
 ;;;   (notify-listen conn "my_channel")
 ;;;
 ;;; Since: PG3
-(defn notify-listen [conn :int channel :cstr] :ptr<void>
+(defn notify-listen [conn : int channel : cstr] : ptr<void>
   (let [sql (__listen-sql channel)
         rc  (__pq-exec-raw conn sql)]
     (if (not= rc 0) (__ok 0) (__err 0))))
@@ -136,7 +136,7 @@
 ;;;   (notify-unlisten conn "my_channel")
 ;;;
 ;;; Since: PG3
-(defn notify-unlisten [conn :int channel :cstr] :ptr<void>
+(defn notify-unlisten [conn : int channel : cstr] : ptr<void>
   (let [sql (__unlisten-sql channel)
         rc  (__pq-exec-raw conn sql)]
     (if (not= rc 0) (__ok 0) (__err 0))))
@@ -162,7 +162,7 @@
 ;;;       (println "poll error")))
 ;;;
 ;;; Since: PG3
-(defn notify-poll [conn :int] :ptr<void>
+(defn notify-poll [conn : int] : ptr<void>
   (let [ci (__pq-consume-input conn)]
     (if (= ci 0)
       (__err 0)
@@ -180,7 +180,7 @@
 ;;;   (notification-channel notif)  ; => "my_channel"
 ;;;
 ;;; Since: PG3
-(defn notification-channel [n :int] :cstr
+(defn notification-channel [n : int] : cstr
   ```c
   #include <libpq-fe.h>
   PGnotify *notif = (PGnotify *)(intptr_t)n;
@@ -199,7 +199,7 @@
 ;;;   (notification-payload notif)  ; => "hello"
 ;;;
 ;;; Since: PG3
-(defn notification-payload [n :int] :cstr
+(defn notification-payload [n : int] : cstr
   ```c
   #include <libpq-fe.h>
   PGnotify *notif = (PGnotify *)(intptr_t)n;

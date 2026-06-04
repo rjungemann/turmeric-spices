@@ -12,7 +12,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -20,7 +20,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -47,7 +47,7 @@
 ;;;     (if (ok? r) (let [c (ok-val r)] ...) (println "connect failed")))
 ;;;
 ;;; Since: VK0
-(defn client-connect [host :cstr port :int] :ptr<void>
+(defn client-connect [host : cstr port : int] : ptr<void>
   ```c
   #include <hiredis/hiredis.h>
   redisContext *ctx = redisConnect((const char *)host, (int)port);
@@ -73,7 +73,7 @@
 ;;;     (if (ok? r) (let [c (ok-val r)] ...) (println "connect failed")))
 ;;;
 ;;; Since: VK0
-(defn client-connect-unix [path :cstr] :ptr<void>
+(defn client-connect-unix [path : cstr] : ptr<void>
   ```c
   #include <hiredis/hiredis.h>
   redisContext *ctx = redisConnectUnix((const char *)path);
@@ -98,7 +98,7 @@
 ;;;   (client-close c)
 ;;;
 ;;; Since: VK0
-(defn client-close [c :int] :void
+(defn client-close [c : int] : void
   ```c
   #include <hiredis/hiredis.h>
   redisFree((redisContext *)(intptr_t)c);
@@ -117,7 +117,7 @@
 ;;;     (if (ok? r) (println "pong") (println "ping failed")))
 ;;;
 ;;; Since: VK0
-(defn client-ping [c :int] :ptr<void>
+(defn client-ping [c : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>

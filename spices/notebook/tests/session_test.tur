@@ -6,17 +6,17 @@
                                    cell-output-status cell-output-stdout
                                    cell-output-value-repr cell-output-error-msg])
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+  (defn tap-plan [count : int fails : int] #{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -26,15 +26,15 @@
     }
     ```)
 
-  (defn bool->fail [ok :bool] :int
+  (defn bool->fail [ok : bool] : int
     (if ok 0 1))
 
-  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
     (do
       (tap-line idx name ok)
       (bool->fail ok)))
 
-  (defn test-persistent-env [] #{Unsafe} :bool
+  (defn test-persistent-env [] #{Unsafe} : bool
     (let [s (session-open)
           _ (session-eval s "(def answer 41)" 0)
           out (session-eval s "(+ answer 1)" 0)]
@@ -43,7 +43,7 @@
         (and (= (cell-output-status out) (output-status-ok))
              (cstr-eq? (cell-output-value-repr out) "42")))))
 
-  (defn test-reset [] #{Unsafe} :bool
+  (defn test-reset [] #{Unsafe} : bool
     (let [s (session-open)
           _ (session-eval s "(def answer 41)" 0)]
       (do
@@ -53,7 +53,7 @@
           (and (= (cell-output-status out) (output-status-error))
                (not (cstr-eq? (cell-output-error-msg out) "")))))))
 
-  (defn test-stdout-capture [] #{Unsafe} :bool
+  (defn test-stdout-capture [] #{Unsafe} : bool
     (let [s (session-open)
           out (session-eval s "(do (println \"hi\") 7)" 0)]
       (do
@@ -62,7 +62,7 @@
              (and (cstr-eq? (cell-output-value-repr out) "7")
                   (not (cstr-eq? (cell-output-stdout out) "")))))))
 
-  (defn test-sweet-exp [] #{Unsafe} :bool
+  (defn test-sweet-exp [] #{Unsafe} : bool
     (let [s (session-open)
           out (session-eval s "+(5 3)" 1)]
       (do
@@ -70,7 +70,7 @@
         (and (= (cell-output-status out) (output-status-ok))
              (cstr-eq? (cell-output-value-repr out) "8")))))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (let [f1 (run-case 1 "persists definitions across eval calls" (test-persistent-env))
           f2 (run-case 2 "resets the embedded session" (test-reset))
           f3 (run-case 3 "captures stdout and value repr" (test-stdout-capture))

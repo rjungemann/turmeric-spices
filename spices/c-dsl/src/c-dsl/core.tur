@@ -26,7 +26,7 @@
 ;;;   (c-let1 "x" ":int" "42")  ; => "int32_t x = 42;"
 ;;;
 ;;; Since: P1
-(defn c-let1 [name :cstr type :cstr init :cstr] :cstr
+(defn c-let1 [name : cstr type : cstr init : cstr] : cstr
   (c-sprintf3 "%s %s = %s;" (c-type type) name init))
 
 ;;; c-let1-uninit -- declare a single uninitialized local variable.
@@ -42,7 +42,7 @@
 ;;;   (c-let1-uninit "ptr" ":[:int]")  ; => "int32_t* ptr;"
 ;;;
 ;;; Since: P1
-(defn c-let1-uninit [name :cstr type :cstr] :cstr
+(defn c-let1-uninit [name : cstr type : cstr] : cstr
   (c-sprintf2 "%s %s;" (c-type type) name))
 
 ;;; c-const1 -- declare a single const variable.
@@ -59,7 +59,7 @@
 ;;;   (c-const1 "MAX_SIZE" ":int" "100")  ; => "const int32_t MAX_SIZE = 100;"
 ;;;
 ;;; Since: P1
-(defn c-const1 [name :cstr type :cstr init :cstr] :cstr
+(defn c-const1 [name : cstr type : cstr init : cstr] : cstr
   (c-sprintf3 "const %s %s = %s;" (c-type type) name init))
 
 ;;; c-set! -- emit an assignment statement.
@@ -76,7 +76,7 @@
 ;;;   (c-set! "arr[i]" "v")  ; => "arr[i] = v;"
 ;;;
 ;;; Since: P1
-(defn c-set! [lhs :cstr rhs :cstr] :cstr
+(defn c-set! [lhs : cstr rhs : cstr] : cstr
   (c-sprintf2 "%s = %s;" lhs rhs))
 
 ;;; c-return -- emit a return statement.
@@ -91,7 +91,7 @@
 ;;;   (c-return "x + 1")  ; => "return x + 1;"
 ;;;
 ;;; Since: P1
-(defn c-return [expr :cstr] :cstr
+(defn c-return [expr : cstr] : cstr
   (c-sprintf1 "return %s;" expr))
 
 ;;; c-return-void -- emit a bare "return;" statement.
@@ -100,7 +100,7 @@
 ;;;   "return;"
 ;;;
 ;;; Since: P1
-(defn c-return-void [] :cstr "return;")
+(defn c-return-void [] : cstr "return;")
 
 ;;; c-break -- emit a break statement.
 ;;;
@@ -108,7 +108,7 @@
 ;;;   "break;"
 ;;;
 ;;; Since: P1
-(defn c-break [] :cstr "break;")
+(defn c-break [] : cstr "break;")
 
 ;;; c-continue -- emit a continue statement.
 ;;;
@@ -116,7 +116,7 @@
 ;;;   "continue;"
 ;;;
 ;;; Since: P1
-(defn c-continue [] :cstr "continue;")
+(defn c-continue [] : cstr "continue;")
 
 ;;; c-inc! -- emit a post-increment statement.
 ;;;
@@ -130,7 +130,7 @@
 ;;;   (c-inc! "i")  ; => "i++;"
 ;;;
 ;;; Since: P1
-(defn c-inc! [var :cstr] :cstr
+(defn c-inc! [var : cstr] : cstr
   (c-sprintf1 "%s++;" var))
 
 ;;; c-dec! -- emit a post-decrement statement.
@@ -142,7 +142,7 @@
 ;;;   "var--;"
 ;;;
 ;;; Since: P1
-(defn c-dec! [var :cstr] :cstr
+(defn c-dec! [var : cstr] : cstr
   (c-sprintf1 "%s--;" var))
 
 ;;; c-if -- emit an if/else statement.
@@ -160,7 +160,7 @@
 ;;;   ; => "if (x > 0) {\n    y = 1;\n} else {\n    y = -1;\n}"
 ;;;
 ;;; Since: P1
-(defn c-if [cond-expr :cstr then-body :cstr else-body :cstr] :cstr
+(defn c-if [cond-expr : cstr then-body : cstr else-body : cstr] : cstr
   (c-sprintf3 "if (%s) {\n%s\n} else {\n%s\n}"
               cond-expr
               (c-indent then-body)
@@ -176,7 +176,7 @@
 ;;;   "if (cond) {\n    body\n}"
 ;;;
 ;;; Since: P1
-(defn c-if-only [cond-expr :cstr then-body :cstr] :cstr
+(defn c-if-only [cond-expr : cstr then-body : cstr] : cstr
   (c-sprintf2 "if (%s) {\n%s\n}"
               cond-expr
               (c-indent then-body)))
@@ -194,7 +194,7 @@
 ;;;   (c-while "i < len" (c-inc! "i"))
 ;;;
 ;;; Since: P1
-(defn c-while [cond-expr :cstr body :cstr] :cstr
+(defn c-while [cond-expr : cstr body : cstr] : cstr
   (c-sprintf2 "while (%s) {\n%s\n}"
               cond-expr
               (c-indent body)))
@@ -209,7 +209,7 @@
 ;;;   "do {\n    body\n} while (cond);"
 ;;;
 ;;; Since: P1
-(defn c-do-while [body :cstr cond-expr :cstr] :cstr
+(defn c-do-while [body : cstr cond-expr : cstr] : cstr
   (c-sprintf2 "do {\n%s\n} while (%s);"
               (c-indent body)
               cond-expr))
@@ -231,7 +231,7 @@
 ;;;   (c-for1 "i" ":int" "0" "i < 10" "i++" (c-call "printf" ...))
 ;;;
 ;;; Since: P1
-(defn c-for1 [var :cstr type :cstr init :cstr cond :cstr step :cstr body :cstr] :cstr
+(defn c-for1 [var : cstr type : cstr init : cstr cond : cstr step : cstr body : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -261,7 +261,7 @@
 ;;;   "for (init; cond; step) {\n    body\n}"
 ;;;
 ;;; Since: P1
-(defn c-for-raw [init :cstr cond :cstr step :cstr body :cstr] :cstr
+(defn c-for-raw [init : cstr cond : cstr step : cstr body : cstr] : cstr
   (c-sprintf4 "for (%s; %s; %s) {\n%s\n}" init cond step (c-indent body)))
 
 ;;; c-case -- emit a single switch case fragment.
@@ -277,7 +277,7 @@
 ;;;   (c-case "1" (c-break))  ; => "case 1:\n    break;"
 ;;;
 ;;; Since: P1
-(defn c-case [val :cstr body :cstr] :cstr
+(defn c-case [val : cstr body : cstr] : cstr
   (c-sprintf2 "case %s:\n%s" val (c-indent body)))
 
 ;;; c-default-case -- emit the default switch case.
@@ -289,7 +289,7 @@
 ;;;   "default:\n    body"
 ;;;
 ;;; Since: P1
-(defn c-default-case [body :cstr] :cstr
+(defn c-default-case [body : cstr] : cstr
   (c-cat2 "default:\n" (c-indent body)))
 
 ;;; c-switch -- emit a switch statement.
@@ -305,7 +305,7 @@
 ;;;   (c-switch "x" (cons (c-case "0" "break;") (cons (c-default-case "break;") 0)))
 ;;;
 ;;; Since: P1
-(defn c-switch [expr :cstr cases :int] :cstr
+(defn c-switch [expr : cstr cases : int] : cstr
   (c-sprintf2 "switch (%s) {\n%s\n}" expr (c-join cases "\n")))
 
 ;;; c-label -- emit a C label.
@@ -317,7 +317,7 @@
 ;;;   "name:"
 ;;;
 ;;; Since: P1
-(defn c-label [name :cstr] :cstr
+(defn c-label [name : cstr] : cstr
   (c-sprintf1 "%s:" name))
 
 ;;; c-goto -- emit a goto statement.
@@ -329,7 +329,7 @@
 ;;;   "goto name;"
 ;;;
 ;;; Since: P1
-(defn c-goto [name :cstr] :cstr
+(defn c-goto [name : cstr] : cstr
   (c-sprintf1 "goto %s;" name))
 
 ;;; c-binop -- emit a binary expression wrapped in parentheses.
@@ -347,7 +347,7 @@
 ;;;   (c-binop "<" "i" "10")  ; => "(i < 10)"
 ;;;
 ;;; Since: P1
-(defn c-binop [op :cstr a :cstr b :cstr] :cstr
+(defn c-binop [op : cstr a : cstr b : cstr] : cstr
   (c-sprintf3 "(%s %s %s)" a op b))
 
 ;;; c-unop -- emit a prefix unary expression.
@@ -363,7 +363,7 @@
 ;;;   (c-unop "!" "flag")  ; => "(!flag)"
 ;;;
 ;;; Since: P1
-(defn c-unop [op :cstr expr :cstr] :cstr
+(defn c-unop [op : cstr expr : cstr] : cstr
   (c-sprintf2 "(%s%s)" op expr))
 
 ;;; c-ternary -- emit a ternary conditional expression.
@@ -380,7 +380,7 @@
 ;;;   (c-ternary "x > 0" "1" "-1")  ; => "(x > 0 ? 1 : -1)"
 ;;;
 ;;; Since: P1
-(defn c-ternary [cond-expr :cstr then-expr :cstr else-expr :cstr] :cstr
+(defn c-ternary [cond-expr : cstr then-expr : cstr else-expr : cstr] : cstr
   (c-sprintf3 "(%s ? %s : %s)" cond-expr then-expr else-expr))
 
 ) ;; end defmodule c-dsl/core

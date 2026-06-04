@@ -13,7 +13,7 @@
   (import plot/style :refer [plot-opts-width plot-opts-height])
 
   ;;; __ok -- create an ok result wrapping integer value v.
-  (defn __ok [v :int] :ptr<void>
+  (defn __ok [v : int] : ptr<void>
     ```c
     #include <stdlib.h>
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -21,7 +21,7 @@
     ```)
 
   ;;; __err -- create an err result wrapping integer error value e.
-  (defn __err [e :int] :ptr<void>
+  (defn __err [e : int] : ptr<void>
     ```c
     #include <stdlib.h>
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -29,31 +29,31 @@
     ```)
 
   ;;; __ok? -- predicate for the local :ptr<void> result envelope.
-  (defn __ok? [r :ptr<void>] :bool
+  (defn __ok? [r : ptr<void>] : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
     return res && res->is_ok;
     ```)
 
   ;;; __ok-val -- extract the ok payload from the local :ptr<void> result envelope.
-  (defn __ok-val [r :ptr<void>] :int
+  (defn __ok-val [r : ptr<void>] : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
     return res ? res->ok_val : 0;
     ```)
 
   ;;; __err-val -- extract the err payload from the local :ptr<void> result envelope.
-  (defn __err-val [r :ptr<void>] :int
+  (defn __err-val [r : ptr<void>] : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
     return res ? res->err_val : 0;
     ```)
 
   ;;; __make-renderer -- allocate the generic opaque renderer handle used by all plot modules.
-  (defn __make-renderer [kind :int
-                         style1 :int style2 :int
-                         data1 :int data2 :int data3 :int data4 :int data5 :int
-                         label :cstr text :cstr] :int
+  (defn __make-renderer [kind : int
+                         style1 : int style2 : int
+                         data1 : int data2 : int data3 : int data4 : int data5 : int
+                         label : cstr text : cstr] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -96,8 +96,8 @@
     ```)
 
   ;;; __renderer-floats -- attach the six generic float payload slots to a renderer.
-  (defn __renderer-floats [renderer :int
-                           f1 :float f2 :float f3 :float f4 :float f5 :float f6 :float] :int
+  (defn __renderer-floats [renderer : int
+                           f1 : float f2 : float f3 : float f4 : float f5 : float f6 : float] : int
     ```c
     typedef struct __plot_renderer {
       int64_t kind;
@@ -116,7 +116,7 @@
     ```)
 
   ;;; __renderer-ints -- attach the four generic integer payload slots to a renderer.
-  (defn __renderer-ints [renderer :int i1 :int i2 :int i3 :int i4 :int] :int
+  (defn __renderer-ints [renderer : int i1 : int i2 : int i3 : int i4 : int] : int
     ```c
     typedef struct __plot_renderer {
       int64_t kind;
@@ -135,7 +135,7 @@
     ```)
 
   ;;; __renderer-bounds -- attach explicit bounds hints to a renderer.
-  (defn __renderer-bounds [renderer :int x-min :float x-max :float y-min :float y-max :float] :int
+  (defn __renderer-bounds [renderer : int x-min : float x-max : float y-min : float y-max : float] : int
     ```c
     typedef struct __plot_renderer {
       int64_t kind;
@@ -154,7 +154,7 @@
     ```)
 
   ;;; __surface-create -- allocate a new plutovg surface.
-  (defn __surface-create [width :int height :int] :ptr<void>
+  (defn __surface-create [width : int height : int] : ptr<void>
     ```c
     typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     extern void* plutovg_surface_create(int width, int height);
@@ -167,14 +167,14 @@
     ```)
 
   ;;; __surface-destroy -- destroy a plutovg surface.
-  (defn __surface-destroy [surface :int] :void
+  (defn __surface-destroy [surface : int] : void
     ```c
     extern void plutovg_surface_destroy(void* surface);
     if (surface) plutovg_surface_destroy((void *)(intptr_t)surface);
     ```)
 
   ;;; __surface-write-png -- write a plutovg surface to a PNG file.
-  (defn __surface-write-png [surface :int path :cstr] :ptr<void>
+  (defn __surface-write-png [surface : int path : cstr] : ptr<void>
     ```c
     typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     extern bool plutovg_surface_write_to_png(const void* surface, const char* filename);
@@ -188,7 +188,7 @@
     ```)
 
   ;;; __canvas-create -- allocate a canvas for an existing surface.
-  (defn __canvas-create [surface :int] :ptr<void>
+  (defn __canvas-create [surface : int] : ptr<void>
     ```c
     typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     extern void* plutovg_canvas_create(void* surface);
@@ -201,14 +201,14 @@
     ```)
 
   ;;; __canvas-destroy -- destroy a plutovg canvas.
-  (defn __canvas-destroy [canvas :int] :void
+  (defn __canvas-destroy [canvas : int] : void
     ```c
     extern void plutovg_canvas_destroy(void* canvas);
     if (canvas) plutovg_canvas_destroy((void *)(intptr_t)canvas);
     ```)
 
   ;;; __surface-width -- width of a plutovg surface in pixels.
-  (defn __surface-width [surface :int] :int
+  (defn __surface-width [surface : int] : int
     ```c
     extern int plutovg_surface_get_width(const void* surface);
     if (!surface) return 0;
@@ -216,7 +216,7 @@
     ```)
 
   ;;; __surface-height -- height of a plutovg surface in pixels.
-  (defn __surface-height [surface :int] :int
+  (defn __surface-height [surface : int] : int
     ```c
     extern int plutovg_surface_get_height(const void* surface);
     if (!surface) return 0;
@@ -229,7 +229,7 @@
   ;;; little-endian platforms. `channel` selects the byte within the pixel:
   ;;;   0 -- B, 1 -- G, 2 -- R, 3 -- A.
   ;;; Returns -1 if (x, y) is out of bounds.
-  (defn __surface-pixel-byte [surface :int x :int y :int channel :int] :int
+  (defn __surface-pixel-byte [surface : int x : int y : int channel : int] : int
     ```c
     extern unsigned char* plutovg_surface_get_data(const void* surface);
     extern int plutovg_surface_get_width(const void* surface);
@@ -250,9 +250,9 @@
   ;;;
   ;;; Useful for "this renderer produced *some* ink in this region" assertions
   ;;; without pinning a specific pixel.
-  (defn __count-non-background [surface :int
-                                x0 :int y0 :int
-                                x1 :int y1 :int] :int
+  (defn __count-non-background [surface : int
+                                x0 : int y0 : int
+                                x1 : int y1 : int] : int
     ```c
     extern unsigned char* plutovg_surface_get_data(const void* surface);
     extern int plutovg_surface_get_width(const void* surface);
@@ -285,7 +285,7 @@
   ;;;
   ;;; Useful for "this region was not drawn over" assertions. The plot
   ;;; background is `fill_rect` with rgba(1,1,1,1).
-  (defn __pixel-is-background? [surface :int x :int y :int] :bool
+  (defn __pixel-is-background? [surface : int x : int y : int] : bool
     ```c
     extern unsigned char* plutovg_surface_get_data(const void* surface);
     extern int plutovg_surface_get_width(const void* surface);
@@ -328,12 +328,12 @@
   ;;;   initial-samples -- baseline uniform sample count (clamped to >= 2)
   ;;;
   ;;; Since: plot-v0.1.0
-  (defn __plot-sample-adaptive [renderer :int canvas :int
-                                bx-min :float bx-max :float
-                                by-min :float by-max :float
-                                left :int top :int
-                                plot-w :int plot-h :int
-                                initial-samples :int] :void
+  (defn __plot-sample-adaptive [renderer : int canvas : int
+                                bx-min : float bx-max : float
+                                by-min : float by-max : float
+                                left : int top : int
+                                plot-w : int plot-h : int
+                                initial-samples : int] : void
     ```c
     extern double cos(double);
     extern double sin(double);
@@ -477,9 +477,9 @@
     ```)
 
   ;;; data->viewport -- map data coordinates to viewport coordinates.
-  (defn data->viewport [x :float y :float bx-min :float bx-max :float
-                        by-min :float by-max :float
-                        px :int py :int pw :int ph :int] :int
+  (defn data->viewport [x : float y : float bx-min : float bx-max : float
+                        by-min : float by-max : float
+                        px : int py : int pw : int ph : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -493,9 +493,9 @@
     ```)
 
   ;;; viewport->data -- map viewport coordinates back to data coordinates.
-  (defn viewport->data [vx :float vy :float bx-min :float bx-max :float
-                        by-min :float by-max :float
-                        px :int py :int pw :int ph :int] :int
+  (defn viewport->data [vx : float vy : float bx-min : float bx-max : float
+                        by-min : float by-max : float
+                        px : int py : int pw : int ph : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -514,8 +514,8 @@
   ;;; not a cons list. Internal renderer payload data (e.g. lists of point
   ;;; pairs inside each renderer) is still cons-shaped -- only the top-level
   ;;; sequence of renderers is a Vec.
-  (defn plot-into-canvas [canvas :int renderers :int opts :int
-                          px :int py :int pw :int ph :int] :ptr<void>
+  (defn plot-into-canvas [canvas : int renderers : int opts : int
+                          px : int py : int pw : int ph : int] : ptr<void>
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -1424,7 +1424,7 @@
   ;;;
   ;;; renderers is a Vec[Renderer] (build with vec-of, or vec-new + vec-push!).
   ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
-  (defn plot [renderers :int opts :int] :ptr<void>
+  (defn plot [renderers : int opts : int] : ptr<void>
     (let [w (if (> (plot-opts-width opts) 0) (plot-opts-width opts) 600)
           h (if (> (plot-opts-height opts) 0) (plot-opts-height opts) 450)
           sr (__surface-create w h)]
@@ -1447,7 +1447,7 @@
   ;;;
   ;;; renderers is a Vec[Renderer] (build with vec-of, or vec-new + vec-push!).
   ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
-  (defn plot-write-png [renderers :int opts :int path :cstr] :ptr<void>
+  (defn plot-write-png [renderers : int opts : int path : cstr] : ptr<void>
     (let [r (plot renderers opts)]
       (if (__ok? r)
         (let [s (__ok-val r)

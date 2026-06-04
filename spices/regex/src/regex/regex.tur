@@ -10,7 +10,7 @@
   (export regex-compile regex-free regex-match regex-match-all regex-replace)
 
 ;; Private result helpers matching stdlib/result.tur layout
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
@@ -19,7 +19,7 @@
   return r;
   ```)
 
-(defn __err [msg :cstr] :ptr<void>
+(defn __err [msg : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
@@ -29,7 +29,7 @@
   ```)
 
 ;; Private cons helpers matching stdlib/list.tur layout
-(defn __cons [v :int n :int] :int
+(defn __cons [v : int n : int] : int
   ```c
   #include <stdlib.h>
   struct __lc { int64_t value; int64_t next; };
@@ -53,7 +53,7 @@
 ;;;     (when (ok? r) (regex-match (ok-val r) "abc123")))
 ;;;
 ;;; Since: P6
-(defn regex-compile [pattern :cstr flags :int] :ptr<void>
+(defn regex-compile [pattern : cstr flags : int] : ptr<void>
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -92,7 +92,7 @@
 ;;;   (regex-free (ok-val r))
 ;;;
 ;;; Since: P6
-(defn regex-free [re :int] :void
+(defn regex-free [re : int] : void
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -117,7 +117,7 @@
 ;;;     (when (ok? m) (capture-at (ok-val m) 0)))
 ;;;
 ;;; Since: P6
-(defn regex-match [re :int subject :cstr] :ptr<void>
+(defn regex-match [re : int subject : cstr] : ptr<void>
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -181,7 +181,7 @@
 ;;;     (for [m ms] (println (capture-at m 0))))
 ;;;
 ;;; Since: P6
-(defn regex-match-all [re :int subject :cstr] :int
+(defn regex-match-all [re : int subject : cstr] : int
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -255,7 +255,7 @@
 ;;;   (regex-replace re "aaa" "b" 1)              ; replace all
 ;;;
 ;;; Since: P6
-(defn regex-replace [re :int subject :cstr replacement :cstr global :int] :ptr<void>
+(defn regex-replace [re : int subject : cstr replacement : cstr global : int] : ptr<void>
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>

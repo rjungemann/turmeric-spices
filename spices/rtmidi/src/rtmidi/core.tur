@@ -15,7 +15,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -23,7 +23,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -35,7 +35,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __parse-midi-api -- map a keyword string to an rtmidi_api_t value.
-(defn __parse-midi-api [api :cstr] :int
+(defn __parse-midi-api [api : cstr] : int
   ```c
   #include <string.h>
   #include <rtmidi/rtmidi_c.h>
@@ -68,7 +68,7 @@
 ;;;     (if (ok? r) (let [mi (ok-val r)] ...) (println "midi-in init failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-in-new [api :cstr] :ptr<void>
+(defn midi-in-new [api : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
@@ -100,7 +100,7 @@
 ;;;     (if (ok? r) (let [mo (ok-val r)] ...) (println "midi-out init failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-out-new [api :cstr] :ptr<void>
+(defn midi-out-new [api : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
@@ -128,7 +128,7 @@
 ;;;   (midi-in-free mi)
 ;;;
 ;;; Since: RM0
-(defn midi-in-free [mi :int] :void
+(defn midi-in-free [mi : int] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_in_free((RtMidiInPtr)(intptr_t)mi);
@@ -146,7 +146,7 @@
 ;;;   (midi-out-free mo)
 ;;;
 ;;; Since: RM0
-(defn midi-out-free [mo :int] :void
+(defn midi-out-free [mo : int] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_out_free((RtMidiOutPtr)(intptr_t)mo);
@@ -164,7 +164,7 @@
 ;;;   (println (midi-in-port-count mi))
 ;;;
 ;;; Since: RM0
-(defn midi-in-port-count [mi :int] :int
+(defn midi-in-port-count [mi : int] : int
   ```c
   #include <rtmidi/rtmidi_c.h>
   return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mi);
@@ -182,7 +182,7 @@
 ;;;   (println (midi-out-port-count mo))
 ;;;
 ;;; Since: RM0
-(defn midi-out-port-count [mo :int] :int
+(defn midi-out-port-count [mo : int] : int
   ```c
   #include <rtmidi/rtmidi_c.h>
   return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mo);
@@ -201,7 +201,7 @@
 ;;;   (println (midi-in-port-name mi 0))
 ;;;
 ;;; Since: RM0
-(defn midi-in-port-name [mi :int i :int] :cstr
+(defn midi-in-port-name [mi : int i : int] : cstr
   ```c
   #include <rtmidi/rtmidi_c.h>
   int len = 0;
@@ -221,7 +221,7 @@
 ;;;   (println (midi-out-port-name mo 0))
 ;;;
 ;;; Since: RM0
-(defn midi-out-port-name [mo :int i :int] :cstr
+(defn midi-out-port-name [mo : int i : int] : cstr
   ```c
   #include <rtmidi/rtmidi_c.h>
   int len = 0;

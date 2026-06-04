@@ -18,8 +18,8 @@
   (import test/suite    :refer [describe it])
   (import test/runner   :refer [run-all])
 
-  (defn t-nil [] :int ```c return 0; ```)
-  (defn t-cons [v :int n :int] :int
+  (defn t-nil [] : int ```c return 0; ```)
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -29,23 +29,23 @@
     c->value = v; c->next = n;
     return (int64_t)(intptr_t)c;
     ```)
-  (defn t-cstr= [a :cstr b :cstr] :bool
+  (defn t-cstr= [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)(intptr_t)a, (const char *)(intptr_t)b) == 0;
     ```)
-  (defn t-cstr-contains? [hay :cstr needle :cstr] :bool
+  (defn t-cstr-contains? [hay : cstr needle : cstr] : bool
     ```c
     #include <string.h>
     return strstr((const char *)(intptr_t)hay, (const char *)(intptr_t)needle) != NULL;
     ```)
-  (defn close? [x :float y :float] :bool
+  (defn close? [x : float y : float] : bool
     ```c
     double dx = x - y; if (dx < 0) dx = -dx;
     return dx < 1e-9;
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
     (describe "type-date32 / type-timestamp"
       (it "type-date32 is tag 7 named \"date32\""
@@ -169,7 +169,7 @@
           (frame-free a) (frame-free b)
           (assert-true ok)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

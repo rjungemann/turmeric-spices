@@ -23,9 +23,9 @@
   (import frame/frame  :refer [frame frame-nrows frame-ncols frame-schema
                                 frame-column-at])
 
-(defn __rh-nil [] :int ```c return 0; ```)
+(defn __rh-nil [] : int ```c return 0; ```)
 
-(defn __rh-cons [v :int n :int] :int
+(defn __rh-cons [v : int n : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -36,7 +36,7 @@
   return (int64_t)(intptr_t)c;
   ```)
 
-(defn __rh-list-has-cstr? [xs :int needle :cstr] :bool
+(defn __rh-list-has-cstr? [xs : int needle : cstr] : bool
   ```c
   #include <string.h>
   #include <stdint.h>
@@ -49,7 +49,7 @@
   return false;
   ```)
 
-(defn __rh-list-length [xs :int] :int
+(defn __rh-list-length [xs : int] : int
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -58,7 +58,7 @@
   return n;
   ```)
 
-(defn __rh-list-nth-int [xs :int i :int] :int
+(defn __rh-list-nth-int [xs : int i : int] : int
   ```c
   #include <stdint.h>
   struct __cons { int64_t value; int64_t next; };
@@ -69,7 +69,7 @@
   return 0;
   ```)
 
-(defn __rh-clone-field-at [s :int i :int] :int
+(defn __rh-clone-field-at [s : int i : int] : int
   (let [fd (schema-field-at s i)]
     (field (field-name fd) (field-type fd) (field-nullable fd))))
 
@@ -77,7 +77,7 @@
 ;; Compute non-id column indices in original column order.
 ;; ---------------------------------------------------------------------------
 
-(defn __rh-non-id-ixs [s :int id-names :int ncols :int i :int acc :int] :int
+(defn __rh-non-id-ixs [s : int id-names : int ncols : int i : int acc : int] : int
   (if (< i 0)
     acc
     (let [fd (schema-field-at s i)
@@ -86,7 +86,7 @@
         (__rh-non-id-ixs s id-names ncols (- i 1) acc)
         (__rh-non-id-ixs s id-names ncols (- i 1) (__rh-cons i acc))))))
 
-(defn __rh-id-ixs [s :int id-names :int ncols :int i :int acc :int] :int
+(defn __rh-id-ixs [s : int id-names : int ncols : int i : int acc : int] : int
   (if (< i 0)
     acc
     (let [fd (schema-field-at s i)
@@ -100,7 +100,7 @@
 ;; `b` whose type matches src.  Nulls handled.
 ;; ---------------------------------------------------------------------------
 
-(defn __rh-append-cell [b :int src :int r :int t :int] :void
+(defn __rh-append-cell [b : int src : int r : int t : int] : void
   (if (not (column-valid? src r))
     (builder-append-null b)
     (if (= t 2)
@@ -119,8 +119,8 @@
 
 ;; For each id column ix, build an output column of length n_out = n_non_id * n_rows
 ;; by reading row r%n_rows of src column for row r out.
-(defn __rh-build-id-col [f :int col-ix :int n-rows :int n-non-id :int
-                          out-row :int b :int n-out :int] :int
+(defn __rh-build-id-col [f : int col-ix : int n-rows : int n-non-id : int
+                          out-row : int b : int n-out : int] : int
   (if (>= out-row n-out)
     (builder-finish b)
     (let [r (__rh-mod out-row n-rows)]
@@ -128,24 +128,24 @@
         (__rh-append-cell b (frame-column-at f col-ix) r (column-type (frame-column-at f col-ix)))
         (__rh-build-id-col f col-ix n-rows n-non-id (+ out-row 1) b n-out)))))
 
-(defn __rh-mod [a :int b :int] :int
+(defn __rh-mod [a : int b : int] : int
   ```c
   return a % b;
   ```)
 
-(defn __rh-mul [a :int b :int] :int
+(defn __rh-mul [a : int b : int] : int
   ```c
   return a * b;
   ```)
 
-(defn __rh-div [a :int b :int] :int
+(defn __rh-div [a : int b : int] : int
   ```c
   return a / b;
   ```)
 
 ;; var-name column: outer loop is non-id col, inner loop is original row.
-(defn __rh-build-var-col [f :int non-id-ixs :int n-non-id :int n-rows :int
-                           out-row :int b :int n-out :int] :int
+(defn __rh-build-var-col [f : int non-id-ixs : int n-non-id : int n-rows : int
+                           out-row : int b : int n-out : int] : int
   (if (>= out-row n-out)
     (builder-finish b)
     (let [c-off (__rh-div out-row n-rows)
@@ -157,8 +157,8 @@
 
 ;; value column: outer = non-id col, inner = original row.
 ;; All non-id columns must share the same type tag.
-(defn __rh-build-val-col [f :int non-id-ixs :int n-non-id :int n-rows :int
-                           value-type :int out-row :int b :int n-out :int] :int
+(defn __rh-build-val-col [f : int non-id-ixs : int n-non-id : int n-rows : int
+                           value-type : int out-row : int b : int n-out : int] : int
   (if (>= out-row n-out)
     (builder-finish b)
     (let [c-off  (__rh-div out-row n-rows)
@@ -174,7 +174,7 @@
 ;; type tag, or 0 if non-id-ixs is empty / types differ.
 ;; ---------------------------------------------------------------------------
 
-(defn __rh-common-type [f :int non-id-ixs :int n-non-id :int i :int acc :int] :int
+(defn __rh-common-type [f : int non-id-ixs : int n-non-id : int i : int acc : int] : int
   (if (< i 0)
     acc
     (let [src-ix (__rh-list-nth-int non-id-ixs i)
@@ -189,7 +189,7 @@
 ;; Build output schema fields: id fields + var (utf8) + value (common-type).
 ;; ---------------------------------------------------------------------------
 
-(defn __rh-build-id-fields [f :int id-ixs :int n-id :int i :int acc :int] :int
+(defn __rh-build-id-fields [f : int id-ixs : int n-id : int i : int acc : int] : int
   (if (< i 0)
     acc
     (let [src-ix (__rh-list-nth-int id-ixs i)
@@ -197,8 +197,8 @@
           fd     (field (field-name fd-i) (field-type fd-i) (field-nullable fd-i))]
       (__rh-build-id-fields f id-ixs n-id (- i 1) (__rh-cons fd acc)))))
 
-(defn __rh-build-id-cols [f :int id-ixs :int n-id :int n-rows :int n-non-id :int
-                           n-out :int i :int acc :int] :int
+(defn __rh-build-id-cols [f : int id-ixs : int n-id : int n-rows : int n-non-id : int
+                           n-out : int i : int acc : int] : int
   (if (< i 0)
     acc
     (let [src-ix (__rh-list-nth-int id-ixs i)
@@ -208,7 +208,7 @@
       (__rh-build-id-cols f id-ixs n-id n-rows n-non-id n-out (- i 1)
                            (__rh-cons col acc)))))
 
-(defn __rh-list-concat [a :int b :int] :int
+(defn __rh-list-concat [a : int b : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -241,7 +241,7 @@
 ;;; Non-id columns must share a single type tag; returns 0 otherwise.
 ;;;
 ;;; Since: FR7
-(defn melt [f :int id-names :int var-name :cstr value-name :cstr] :int
+(defn melt [f : int id-names : int var-name : cstr value-name : cstr] : int
   (let [s        (frame-schema f)
         ncols    (frame-ncols f)
         n-rows   (frame-nrows f)

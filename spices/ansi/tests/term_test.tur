@@ -5,13 +5,13 @@
   (import ansi/term :refer [term-size term-color-support term-no-color?
                             term-image-protocol term-read-key])
 
-  (defn tap-line [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok",
            (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count :int fails :int] #{Unsafe} :void
+  (defn tap-plan [count : int fails : int] #{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -21,52 +21,52 @@
     }
     ```)
 
-  (defn bool->fail [ok :bool] :int (if ok 0 1))
+  (defn bool->fail [ok : bool] : int (if ok 0 1))
 
-  (defn run-case [idx :int name :cstr ok :bool] #{Unsafe} :int
+  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
     (do (tap-line idx name ok) (bool->fail ok)))
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn putenv-key [key :cstr val :cstr] #{Unsafe} :void
+  (defn putenv-key [key : cstr val : cstr] #{Unsafe} : void
     ```c
     setenv((const char *)key, (const char *)val, 1);
     ```)
 
-  (defn unsetenv-key [key :cstr] #{Unsafe} :void
+  (defn unsetenv-key [key : cstr] #{Unsafe} : void
     ```c
     unsetenv((const char *)key);
     ```)
 
-  (defn cons-head [p :int] #{Unsafe} :int
+  (defn cons-head [p : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *c = (void *)(intptr_t)p;
     return c ? c->head : 0;
     ```)
 
-  (defn cons-tail [p :int] #{Unsafe} :int
+  (defn cons-tail [p : int] #{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *c = (void *)(intptr_t)p;
     return c ? c->tail : 0;
     ```)
 
   ;; term-size returns a cons with positive rows and cols.
-  (defn test-term-size [] #{Unsafe} :bool
+  (defn test-term-size [] #{Unsafe} : bool
     (let [p (term-size)
           r (cons-head p)
           c (cons-tail p)]
       (and (> r 0) (> c 0))))
 
   ;; term-color-support is in [0, 3].
-  (defn test-color-support-range [] #{Unsafe} :bool
+  (defn test-color-support-range [] #{Unsafe} : bool
     (let [c (term-color-support)]
       (and (>= c 0) (<= c 3))))
 
   ;; NO_COLOR=1 forces term-no-color? to 1 and term-color-support to 0.
-  (defn test-no-color [] #{Unsafe} :bool
+  (defn test-no-color [] #{Unsafe} : bool
     (do
       (putenv-key "NO_COLOR" "1")
       (let [nc (term-no-color?)
@@ -76,13 +76,13 @@
           (and (= nc 1) (= cs 0))))))
 
   ;; term-image-protocol is in [0, 3].
-  (defn test-image-protocol-range [] #{Unsafe} :bool
+  (defn test-image-protocol-range [] #{Unsafe} : bool
     (let [p (term-image-protocol)]
       (and (>= p 0) (<= p 3))))
 
   ;; Scripted keys: TUR_ANSI_TEST_KEYS queues newline-separated key names;
   ;; term-read-key returns them in order.
-  (defn test-scripted-keys [] #{Unsafe} :bool
+  (defn test-scripted-keys [] #{Unsafe} : bool
     (do
       (putenv-key "TUR_ANSI_TEST_KEYS" "<Up>\n<Down>\n<Enter>")
       (let [a (term-read-key)
@@ -94,7 +94,7 @@
                (and (cstr-eq? b "<Down>")
                     (cstr-eq? c "<Enter>")))))))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (let [f1 (run-case 1 "term-size returns positive rows and cols"
                         (test-term-size))
           f2 (run-case 2 "term-color-support is in [0, 3]"

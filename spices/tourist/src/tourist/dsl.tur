@@ -27,7 +27,7 @@
 
 ;; -- Internal: allocate a Route struct from already-compiled pieces --------
 
-(defn __route-alloc [method :cstr pat :int handler :int] :int
+(defn __route-alloc [method : cstr pat : int handler : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -44,7 +44,7 @@
 
 ;; -- Internal: free the struct only (pattern already freed separately) -----
 
-(defn __route-free-struct [r :int] :void
+(defn __route-free-struct [r : int] : void
   ```c
   #include <stdlib.h>
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
@@ -75,7 +75,7 @@
 ;;;   (route-new "GET" (router-compile "/hello") my-handler)
 ;;;
 ;;; Since: v0.1.0
-(defn route-new [method :cstr pat :int handler :int] :int
+(defn route-new [method : cstr pat : int handler : int] : int
   (__route-alloc method pat handler))
 
 ;; -- Accessors -------------------------------------------------------------
@@ -89,7 +89,7 @@
 ;;;   :cstr -- e.g. "GET", "POST", or "" for any
 ;;;
 ;;; Since: v0.1.0
-(defn route-method [r :int] :cstr
+(defn route-method [r : int] : cstr
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   return ((struct __tourist_route *)(intptr_t)r)->method;
@@ -104,7 +104,7 @@
 ;;;   :int -- compiled pattern handle (from router-compile)
 ;;;
 ;;; Since: v0.1.0
-(defn route-pattern [r :int] :int
+(defn route-pattern [r : int] : int
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   return ((struct __tourist_route *)(intptr_t)r)->pattern;
@@ -119,7 +119,7 @@
 ;;;   :int -- Turmeric function value; call via route-call-handler
 ;;;
 ;;; Since: v0.1.0
-(defn route-handler [r :int] :int
+(defn route-handler [r : int] : int
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   return ((struct __tourist_route *)(intptr_t)r)->handler;
@@ -141,7 +141,7 @@
 ;;;   (route-call-handler route req)
 ;;;
 ;;; Since: v0.1.0
-(defn route-call-handler [r :int req :int] :int
+(defn route-call-handler [r : int req : int] : int
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   struct __tourist_route *rt = (struct __tourist_route *)(intptr_t)r;
@@ -160,7 +160,7 @@
 ;;;   (route-free r)
 ;;;
 ;;; Since: v0.1.0
-(defn route-free [r :int] :void
+(defn route-free [r : int] : void
   (when (not= r 0)
     (do
       (router-free (route-pattern r))
@@ -182,7 +182,7 @@
 ;;;     (fn [req] (text "hi")))
 ;;;
 ;;; Since: v0.1.0
-(defn get! [pattern :cstr handler :int] :int
+(defn get! [pattern : cstr handler : int] : int
   (route-new "GET" (router-compile pattern) handler))
 
 ;;; post! -- declare a POST route.
@@ -195,7 +195,7 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn post! [pattern :cstr handler :int] :int
+(defn post! [pattern : cstr handler : int] : int
   (route-new "POST" (router-compile pattern) handler))
 
 ;;; put! -- declare a PUT route.
@@ -208,7 +208,7 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn put! [pattern :cstr handler :int] :int
+(defn put! [pattern : cstr handler : int] : int
   (route-new "PUT" (router-compile pattern) handler))
 
 ;;; delete! -- declare a DELETE route.
@@ -221,7 +221,7 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn delete! [pattern :cstr handler :int] :int
+(defn delete! [pattern : cstr handler : int] : int
   (route-new "DELETE" (router-compile pattern) handler))
 
 ;;; any! -- declare a route matching any HTTP method.
@@ -237,7 +237,7 @@
 ;;;   (any! "/catch-all" (fn [req] (text "ok")))
 ;;;
 ;;; Since: v0.1.0
-(defn any! [pattern :cstr handler :int] :int
+(defn any! [pattern : cstr handler : int] : int
   (route-new "" (router-compile pattern) handler))
 
 ) ;; end defmodule tourist/dsl

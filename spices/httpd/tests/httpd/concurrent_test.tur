@@ -25,14 +25,14 @@
   ;; Helpers
   ;; ---------------------------------------------------------------------
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return 0;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
@@ -40,7 +40,7 @@
 
   ;; Atomic counter: opcode 0 reset, 1 increment-and-return-new, 2 read.
   ;; Static state shared across calls -- same pattern as test/suite's __ts.
-  (defn __cnt [op :int] :int
+  (defn __cnt [op : int] : int
     ```c
     static int counter = 0;
     switch ((int)op) {
@@ -51,7 +51,7 @@
     }
     ```)
 
-  (defn null-ptr [] :ptr<void>
+  (defn null-ptr [] : ptr<void>
     ```c
     return NULL;
     ```)
@@ -60,7 +60,7 @@
   ;; Server-side: 200 OK after a short sleep so the pool actually saturates.
   ;; ---------------------------------------------------------------------
 
-  (defn slow-handler [req :int] :int
+  (defn slow-handler [req : int] : int
     (do
       (sleep-ms 40)
       (resp-ok "text/plain" "ok")))
@@ -70,7 +70,7 @@
   ;; Signature matches pthread entry: void *(*)(void *).
   ;; ---------------------------------------------------------------------
 
-  (defn client-task [arg :ptr<void>] :ptr<void>
+  (defn client-task [arg : ptr<void>] : ptr<void>
     (let [r (http-get "http://127.0.0.1:18084/work")]
       (if (__cr-ok? r)
         (if (= 200 (response-status (__cr-val r)))
@@ -83,7 +83,7 @@
   ;; Test driver
   ;; ---------------------------------------------------------------------
 
-  (defn main [] :int
+  (defn main [] : int
     (let [srv (server-start-pool 18084 slow-handler 4)]
       (do
         (sleep-ms 50)

@@ -11,13 +11,13 @@
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
 
-  (defn file-exists? [path :cstr] :bool
+  (defn file-exists? [path : cstr] : bool
     ```c
     #include <unistd.h>
     return access((const char *)(intptr_t)path, F_OK) == 0;
     ```)
 
-  (defn file-size [path :cstr] :int
+  (defn file-size [path : cstr] : int
     ```c
     #include <sys/stat.h>
     struct stat st;
@@ -25,18 +25,18 @@
     return (int64_t)st.st_size;
     ```)
 
-  (defn unlink-file [path :cstr] :void
+  (defn unlink-file [path : cstr] : void
     ```c
     #include <unistd.h>
     unlink((const char *)(intptr_t)path);
     ```)
 
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn >i [a : int b : int] : bool ```c return (int)a > (int)b; ```)
 
-  (defn core-renderers [] :int
+  (defn core-renderers [] : int
     (vec-of (tick-grid) (axes)))
 
-  (defn render-blank-ok [] :bool
+  (defn render-blank-ok [] : bool
     (let [rr (plot (core-renderers) (default-plot-opts))]
       (if (__ok? rr)
         (do (__surface-destroy (__ok-val rr)) (assert-true true))
@@ -46,7 +46,7 @@
   ;; background, and the surface has the expected dimensions. Catches
   ;; "all-zero pixels" / "transparent canvas" regressions that file-size alone
   ;; cannot.
-  (defn pixel-sanity-blank [] :bool
+  (defn pixel-sanity-blank [] : bool
     (let [rr (plot (core-renderers) (default-plot-opts))]
       (if (__ok? rr)
         (let [s   (__ok-val rr)
@@ -60,7 +60,7 @@
                (assert-true bg?)))
         (assert-true false))))
 
-  (defn write-core-png-ok [] :bool
+  (defn write-core-png-ok [] : bool
     (let [out "/tmp/tur-plot-core.png"
           wr  (do
                 (unlink-file out)
@@ -71,7 +71,7 @@
            (assert-true (file-exists? out))
            (assert-true (>i (file-size out) 100)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (describe "plot/core"
       (it "renders a blank plot surface"
         (render-blank-ok))

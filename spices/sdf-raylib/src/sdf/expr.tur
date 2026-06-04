@@ -52,10 +52,10 @@
 ;;;   (sdf--make-leaf SDF_SPHERE 0.0 0.0 0.0  0.0 0.0 0.0  1.0 0.0)
 ;;;
 ;;; Since: Phase 1
-(defn sdf--make-leaf [tag :int
-                      v0x :float v0y :float v0z :float
-                      v1x :float v1y :float v1z :float
-                      s0 :float s1 :float] :int
+(defn sdf--make-leaf [tag : int
+                      v0x : float v0y : float v0z : float
+                      v1x : float v1y : float v1z : float
+                      s0 : float s1 : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -85,7 +85,7 @@
 ;;;   Opaque :int handle to heap-allocated sdf_node.
 ;;;
 ;;; Since: Phase 1
-(defn sdf--make-node [tag :int left :int right :int s0 :float s1 :float] :int
+(defn sdf--make-node [tag : int left : int right : int s0 : float s1 : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -113,7 +113,7 @@
 ;;;   Opaque :int handle to heap-allocated sdf_node.
 ;;;
 ;;; Since: Phase 1
-(defn sdf--make-unary [tag :int child :int s0 :float s1 :float] :int
+(defn sdf--make-unary [tag : int child : int s0 : float s1 : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -133,14 +133,14 @@
 ;; ---- Accessors ----
 
 ;;; sdf-tag -- read the tag field of an SdfExpr. Since: Phase 1
-(defn sdf-tag [e :int] :int
+(defn sdf-tag [e : int] : int
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->tag : -1;
   ```)
 
 ;;; sdf-left -- left child handle (0 for leaves). Since: Phase 1
-(defn sdf-left [e :int] :int
+(defn sdf-left [e : int] : int
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   if (!e) return 0;
@@ -148,7 +148,7 @@
   ```)
 
 ;;; sdf-right -- right child handle (0 for leaves and unaries). Since: Phase 1
-(defn sdf-right [e :int] :int
+(defn sdf-right [e : int] : int
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   if (!e) return 0;
@@ -156,56 +156,56 @@
   ```)
 
 ;;; sdf-v0x -- v0.x component. Since: Phase 1
-(defn sdf-v0x [e :int] :float
+(defn sdf-v0x [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->v0x : 0.0;
   ```)
 
 ;;; sdf-v0y -- v0.y component. Since: Phase 1
-(defn sdf-v0y [e :int] :float
+(defn sdf-v0y [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->v0y : 0.0;
   ```)
 
 ;;; sdf-v0z -- v0.z component. Since: Phase 1
-(defn sdf-v0z [e :int] :float
+(defn sdf-v0z [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->v0z : 0.0;
   ```)
 
 ;;; sdf-v1x -- v1.x component. Since: Phase 1
-(defn sdf-v1x [e :int] :float
+(defn sdf-v1x [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->v1x : 0.0;
   ```)
 
 ;;; sdf-v1y -- v1.y component. Since: Phase 1
-(defn sdf-v1y [e :int] :float
+(defn sdf-v1y [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->v1y : 0.0;
   ```)
 
 ;;; sdf-v1z -- v1.z component. Since: Phase 1
-(defn sdf-v1z [e :int] :float
+(defn sdf-v1z [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->v1z : 0.0;
   ```)
 
 ;;; sdf-s0 -- primary scalar (radius, blend-k, offset, etc.). Since: Phase 1
-(defn sdf-s0 [e :int] :float
+(defn sdf-s0 [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->s0 : 0.0;
   ```)
 
 ;;; sdf-s1 -- secondary scalar. Since: Phase 1
-(defn sdf-s1 [e :int] :float
+(defn sdf-s1 [e : int] : float
   ```c
   typedef struct sdf_node { int64_t tag; double v0x,v0y,v0z,v1x,v1y,v1z,s0,s1; void *left,*right; } sdf_node;
   return e ? ((sdf_node *)(intptr_t)e)->s1 : 0.0;
@@ -227,10 +227,10 @@
 ;;;   Opaque :int handle to heap-allocated sdf_node.
 ;;;
 ;;; Since: Phase 5
-(defn sdf--make-unary-full [tag :int child :int
-                             v0x :float v0y :float v0z :float
-                             v1x :float v1y :float v1z :float
-                             s0 :float s1 :float] :int
+(defn sdf--make-unary-full [tag : int child : int
+                             v0x : float v0y : float v0z : float
+                             v1x : float v1y : float v1z : float
+                             s0 : float s1 : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -258,7 +258,7 @@
 ;;;   (sdf-free scene)
 ;;;
 ;;; Since: Phase 1
-(defn sdf-free [e :int] :void
+(defn sdf-free [e : int] : void
   ```c
   #include <stdlib.h>
   #include <stdint.h>

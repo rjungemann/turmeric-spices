@@ -21,7 +21,7 @@
 ;;;   (c-type ":void")   ; => "void"
 ;;;
 ;;; Since: P1
-(defn c-type [t :cstr] :cstr
+(defn c-type [t : cstr] : cstr
   ```c
   #include <string.h>
   const char *s = (const char*)(intptr_t)t;
@@ -64,7 +64,7 @@
 ;;;   (c-ptr-type ":void")  ; => "void*"
 ;;;
 ;;; Since: P1
-(defn c-ptr-type [inner :cstr] :cstr
+(defn c-ptr-type [inner : cstr] : cstr
   (c-cat2 (c-type inner) "*"))
 
 ;;; c-arr-type -- create a C fixed-size array type fragment.
@@ -80,7 +80,7 @@
 ;;;   (c-arr-type ":uint8" 16)  ; => "uint8_t[16]"
 ;;;
 ;;; Since: P1
-(defn c-arr-type [inner :cstr n :int] :cstr
+(defn c-arr-type [inner : cstr n : int] : cstr
   (c-cat3 (c-type inner) "[" (c-cat2 (c-int->str n) "]")))
 
 ;;; c-fn-type -- create a C function-pointer type string.
@@ -98,7 +98,7 @@
 ;;;   ; => "int32_t(*)(int32_t, int32_t)"
 ;;;
 ;;; Since: P1
-(defn c-fn-type [param-types :int ret :cstr] :cstr
+(defn c-fn-type [param-types : int ret : cstr] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -139,7 +139,7 @@
 ;;;   (c-const-type "char*")  ; => "const char*"
 ;;;
 ;;; Since: P1
-(defn c-const-type [t :cstr] :cstr
+(defn c-const-type [t : cstr] : cstr
   (c-cat2 "const " t))
 
 ;;; c-volatile-type -- prepend "volatile " to a type string.
@@ -151,7 +151,7 @@
 ;;;   "volatile <t>"
 ;;;
 ;;; Since: P1
-(defn c-volatile-type [t :cstr] :cstr
+(defn c-volatile-type [t : cstr] : cstr
   (c-cat2 "volatile " t))
 
 ) ;; end defmodule c-dsl/types

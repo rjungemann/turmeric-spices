@@ -9,19 +9,19 @@
           plot-opts-width plot-opts-height)
 
   ;;; __nan -- quiet NaN sentinel for auto bounds.
-  (defn __nan [] :float
+  (defn __nan [] : float
     ```c
     return 0.0 / 0.0;
     ```)
 
   ;;; __null-cstr -- typed nil cstr sentinel.
-  (defn __null-cstr [] :cstr
+  (defn __null-cstr [] : cstr
     ```c
     return (char *)(intptr_t)0;
     ```)
 
   ;;; line-style -- allocate a line-style value.
-  (defn line-style [color :int width :float dash :int alpha :float] :int
+  (defn line-style [color : int width : float dash : int alpha : float] : int
     ```c
     typedef struct { int64_t color; double width; int64_t dash; double alpha; } LineStyle;
     LineStyle *s = malloc(sizeof(*s));
@@ -30,7 +30,7 @@
     ```)
 
   ;;; point-style -- allocate a point-style value.
-  (defn point-style [color :int fill-color :int sym :int size :float alpha :float] :int
+  (defn point-style [color : int fill-color : int sym : int size : float alpha : float] : int
     ```c
     typedef struct { int64_t color; int64_t fill_color; int64_t sym; double size; double alpha; } PointStyle;
     PointStyle *s = malloc(sizeof(*s));
@@ -39,7 +39,7 @@
     ```)
 
   ;;; fill-style -- allocate a fill-style value.
-  (defn fill-style [color :int alpha :float line-color :int line-width :float] :int
+  (defn fill-style [color : int alpha : float line-color : int line-width : float] : int
     ```c
     typedef struct { int64_t color; double alpha; int64_t line_color; double line_width; } FillStyle;
     FillStyle *s = malloc(sizeof(*s));
@@ -48,9 +48,9 @@
     ```)
 
   ;;; plot-opts -- allocate a plot-opts value.
-  (defn plot-opts [width :int height :int title :cstr x-label :cstr y-label :cstr
-                   x-min :float x-max :float y-min :float y-max :float
-                   legend-pos :int] :int
+  (defn plot-opts [width : int height : int title : cstr x-label : cstr y-label : cstr
+                   x-min : float x-max : float y-min : float y-max : float
+                   legend-pos : int] : int
     ```c
     typedef struct {
       int64_t width; int64_t height;
@@ -69,7 +69,7 @@
     ```)
 
   ;;; plot-opts-width -- read the configured output width.
-  (defn plot-opts-width [opts :int] :int
+  (defn plot-opts-width [opts : int] : int
     ```c
     typedef struct {
       int64_t width; int64_t height;
@@ -81,7 +81,7 @@
     ```)
 
   ;;; plot-opts-height -- read the configured output height.
-  (defn plot-opts-height [opts :int] :int
+  (defn plot-opts-height [opts : int] : int
     ```c
     typedef struct {
       int64_t width; int64_t height;
@@ -93,50 +93,50 @@
     ```)
 
   ;;; default-line-style -- default line style with auto color.
-  (defn default-line-style [] :int
+  (defn default-line-style [] : int
     (line-style -1 0.0 0 0.0))
 
   ;;; default-point-style -- default point style with auto color.
-  (defn default-point-style [] :int
+  (defn default-point-style [] : int
     (point-style -1 -1 0 0.0 0.0))
 
   ;;; default-fill-style -- default fill style with auto color.
-  (defn default-fill-style [] :int
+  (defn default-fill-style [] : int
     (fill-style -1 0.0 -1 0.0))
 
   ;;; default-plot-opts -- default plot options.
-  (defn default-plot-opts [] :int
+  (defn default-plot-opts [] : int
     (plot-opts 0 0 (__null-cstr) (__null-cstr) (__null-cstr)
                (__nan) (__nan) (__nan) (__nan) 1))
 
   ;;; dash-solid -- solid stroke constant.
-  (defn dash-solid [] :int 0)
+  (defn dash-solid [] : int 0)
   ;;; dash-dash -- dashed stroke constant.
-  (defn dash-dash [] :int 1)
+  (defn dash-dash [] : int 1)
   ;;; dash-dot -- dotted stroke constant.
-  (defn dash-dot [] :int 2)
+  (defn dash-dot [] : int 2)
   ;;; dash-dash-dot -- dash-dot stroke constant.
-  (defn dash-dash-dot [] :int 3)
+  (defn dash-dash-dot [] : int 3)
 
   ;;; sym-circle -- circle point symbol constant.
-  (defn sym-circle [] :int 0)
+  (defn sym-circle [] : int 0)
   ;;; sym-square -- square point symbol constant.
-  (defn sym-square [] :int 1)
+  (defn sym-square [] : int 1)
   ;;; sym-triangle -- triangle point symbol constant.
-  (defn sym-triangle [] :int 2)
+  (defn sym-triangle [] : int 2)
   ;;; sym-cross -- cross point symbol constant.
-  (defn sym-cross [] :int 3)
+  (defn sym-cross [] : int 3)
   ;;; sym-plus -- plus point symbol constant.
-  (defn sym-plus [] :int 4)
+  (defn sym-plus [] : int 4)
   ;;; sym-diamond -- diamond point symbol constant.
-  (defn sym-diamond [] :int 5)
+  (defn sym-diamond [] : int 5)
 
   ;;; palette-size -- number of built-in palette entries.
-  (defn palette-size [] :int
+  (defn palette-size [] : int
     8)
 
   ;;; palette-color -- return (r g b) for palette index idx.
-  (defn palette-color [idx :int] :int
+  (defn palette-color [idx : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -157,7 +157,7 @@
     ```)
 
   ;;; color-seq -- interpolate between palette anchors and return nearest palette indices.
-  (defn color-seq [start-idx :int end-idx :int n :int] :int
+  (defn color-seq [start-idx : int end-idx : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>

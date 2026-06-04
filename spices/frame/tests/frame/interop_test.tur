@@ -15,8 +15,8 @@
   (import test/suite    :refer [describe it])
   (import test/runner   :refer [run-all])
 
-  (defn t-nil [] :int ```c return 0; ```)
-  (defn t-cons [v :int n :int] :int
+  (defn t-nil [] : int ```c return 0; ```)
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -26,25 +26,25 @@
     c->value = v; c->next = n;
     return (int64_t)(intptr_t)c;
     ```)
-  (defn t-cstr= [a :cstr b :cstr] :bool
+  (defn t-cstr= [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)(intptr_t)a, (const char *)(intptr_t)b) == 0;
     ```)
 
-  (defn cons-first  [xs :int] :int ```c
+  (defn cons-first  [xs : int] : int ```c
     #include <stdint.h>
     struct __cons { int64_t value; int64_t next; };
     return ((struct __cons *)(intptr_t)xs)->value;
     ```)
-  (defn cons-second [xs :int] :int ```c
+  (defn cons-second [xs : int] : int ```c
     #include <stdint.h>
     struct __cons { int64_t value; int64_t next; };
     struct __cons *p = (struct __cons *)(intptr_t)xs;
     return ((struct __cons *)(intptr_t)p->next)->value;
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
     (describe "arrow-export-column / arrow-import-column"
       (it "round-trips an int64 column"
@@ -134,7 +134,7 @@
           (frame-free f1) (frame-free f2)
           (assert-true ok)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

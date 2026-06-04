@@ -4,19 +4,19 @@
   (import template/env    :refer [env-new env-set env-free])
   (import template/render :refer [render-file]))
 
-(defn cstr-eq? [a :cstr b :cstr] :bool
+(defn cstr-eq? [a : cstr b : cstr] : bool
   ```c
   #include <string.h>
   return strcmp((const char *)a, (const char *)b) == 0;
   ```)
 
-(defn cstr-free [p :cstr] :void
+(defn cstr-free [p : cstr] : void
   ```c
   #include <stdlib.h>
   if (p) free((void *)(intptr_t)p);
   ```)
 
-(defn read-file [path :cstr] :cstr
+(defn read-file [path : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -32,28 +32,28 @@
   return buf;
   ```)
 
-(defn ok-val-cstr [r :int] :cstr
+(defn ok-val-cstr [r : int] : cstr
   ```c
   struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
   struct __res *rr = (struct __res *)(intptr_t)r;
   return (char *)(intptr_t)rr->ok_val;
   ```)
 
-(defn is-ok? [r :int] :bool
+(defn is-ok? [r : int] : bool
   ```c
   struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
   struct __res *rr = (struct __res *)(intptr_t)r;
   return rr && rr->is_ok;
   ```)
 
-(defn tap [n :int name :cstr ok :bool] :void
+(defn tap [n : int name : cstr ok : bool] : void
   ```c
   #include <stdio.h>
   printf("%s %lld - %s\n", ok ? "ok" : "not ok",
          (long long)n, (const char *)name);
   ```)
 
-(defn main [] :int
+(defn main [] : int
   (let [e (env-new)
         path "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/escaping/template.html.tur"
         expected-path "/Users/rjungemann/Projects/turmeric-spices/spices/template/tests/fixtures/escaping/expected.txt"]

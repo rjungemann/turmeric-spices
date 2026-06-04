@@ -11,53 +11,53 @@
 
   ;;; __nan -- quiet NaN sentinel for "auto" bounds.
   ;;; Inline-C avoids the runtime div-by-zero trap on `(/ 0.0 0.0)`.
-  (defn __nan [] :float
+  (defn __nan [] : float
     ```c return 0.0 / 0.0; ```)
 
   ;;; x-axis -- horizontal axis at y=0.
-  (defn x-axis [] :int
+  (defn x-axis [] : int
     (__make-renderer 1 0 0 0 0 0 0 0 "" ""))
 
   ;;; y-axis -- vertical axis at x=0.
-  (defn y-axis [] :int
+  (defn y-axis [] : int
     (__make-renderer 2 0 0 0 0 0 0 0 "" ""))
 
   ;;; axes -- both x-axis and y-axis.
-  (defn axes [] :int
+  (defn axes [] : int
     (__make-renderer 3 0 0 0 0 0 0 0 "" ""))
 
   ;;; x-tick-lines -- vertical grid lines at x ticks.
-  (defn x-tick-lines [] :int
+  (defn x-tick-lines [] : int
     (__make-renderer 4 0 0 0 0 0 0 0 "" ""))
 
   ;;; y-tick-lines -- horizontal grid lines at y ticks.
-  (defn y-tick-lines [] :int
+  (defn y-tick-lines [] : int
     (__make-renderer 5 0 0 0 0 0 0 0 "" ""))
 
   ;;; tick-grid -- both x and y tick lines.
-  (defn tick-grid [] :int
+  (defn tick-grid [] : int
     (__make-renderer 6 0 0 0 0 0 0 0 "" ""))
 
   ;;; hrule-styled -- horizontal reference line with explicit style.
-  (defn hrule-styled [y :float style :int] :int
+  (defn hrule-styled [y : float style : int] : int
     (let [r (__make-renderer 7 style 0 0 0 0 0 0 "" "")]
       (__renderer-bounds (__renderer-floats r y 0.0 0.0 0.0 0.0 0.0) (__nan) (__nan) y y)))
 
   ;;; hrule -- horizontal reference line.
-  (defn hrule [y :float] :int
+  (defn hrule [y : float] : int
     (hrule-styled y (default-line-style)))
 
   ;;; vrule-styled -- vertical reference line with explicit style.
-  (defn vrule-styled [x :float style :int] :int
+  (defn vrule-styled [x : float style : int] : int
     (let [r (__make-renderer 8 style 0 0 0 0 0 0 "" "")]
       (__renderer-bounds (__renderer-floats r x 0.0 0.0 0.0 0.0 0.0) x x (__nan) (__nan))))
 
   ;;; vrule -- vertical reference line.
-  (defn vrule [x :float] :int
+  (defn vrule [x : float] : int
     (vrule-styled x (default-line-style)))
 
   ;;; point-label-styled -- styled label text anchored to a data point.
-  (defn point-label-styled [x :float y :float text :cstr anchor :int style :int] :int
+  (defn point-label-styled [x : float y : float text : cstr anchor : int style : int] : int
     (__renderer-bounds
       (__renderer-floats
         (__make-renderer 9 style 0 0 0 0 0 0 "" text)
@@ -65,7 +65,7 @@
       x x y y))
 
   ;;; point-label -- label text anchored to a data point.
-  (defn point-label [x :float y :float text :cstr anchor :int] :int
+  (defn point-label [x : float y : float text : cstr anchor : int] : int
     (point-label-styled x y text anchor (default-line-style)))
 
 ) ;; end defmodule plot/decor

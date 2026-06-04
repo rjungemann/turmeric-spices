@@ -13,7 +13,7 @@
   (import ansi/cursor :refer [cursor-move-to])
   (import ansi/style :refer [style-bold style-reset])
 
-  (defn header [] #{Unsafe} :void
+  (defn header [] #{Unsafe} : void
     (do
       (screen-clear)
       (cursor-move-to 1 1)
@@ -22,26 +22,26 @@
       (style-reset)
       ```c printf("Exit with Ctrl-C, Ctrl-D, or two Escapes in a row.\r\n\r\n"); ```))
 
-  (defn print-key [k :cstr] #{Unsafe} :void
+  (defn print-key [k : cstr] #{Unsafe} : void
     ```c
     printf("  %s\r\n", (const char *)k);
     fflush(stdout);
     ```)
 
-  (defn key-eq [k :cstr name :cstr] #{Unsafe} :bool
+  (defn key-eq [k : cstr name : cstr] #{Unsafe} : bool
     (= (key=? k name) 1))
 
-  (defn quit? [k :cstr last-was-esc :int] #{Unsafe} :int
+  (defn quit? [k : cstr last-was-esc : int] #{Unsafe} : int
     (if (key-eq k "<C-c>") 1
       (if (key-eq k "<C-d>") 1
         (if (key-eq k "<EOF>") 1
           (if (and (= last-was-esc 1) (key-eq k "<Escape>")) 1
             0)))))
 
-  (defn was-esc? [k :cstr] #{Unsafe} :int
+  (defn was-esc? [k : cstr] #{Unsafe} : int
     (if (key-eq k "<Escape>") 1 0))
 
-  (defn loop-body [last-esc :int] #{Unsafe} :int
+  (defn loop-body [last-esc : int] #{Unsafe} : int
     (let [k (term-read-key)]
       (do
         (print-key k)
@@ -49,7 +49,7 @@
           1
           (loop-body (was-esc? k))))))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       (header)
       (term-enable-raw)

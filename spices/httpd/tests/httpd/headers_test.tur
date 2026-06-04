@@ -19,20 +19,20 @@
   ;; Helpers
   ;; ---------------------------------------------------------------------
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return 0;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
@@ -42,25 +42,25 @@
   ;; rely on stdlib/result here because the request handle's result struct
   ;; layout is shared (bool/int64/int64) but the type elaborator gets
   ;; confused when stdlib's polymorphic ok? meets a bare :int handle.
-  (defn __hdr-ok? [r :int] :bool
+  (defn __hdr-ok? [r : int] : bool
     ```c
     if (!r) return 0;
     struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __r *)(intptr_t)r)->is_ok;
     ```)
 
-  (defn __hdr-val [r :int] :cstr
+  (defn __hdr-val [r : int] : cstr
     ```c
     struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (const char *)(intptr_t)((struct __r *)(intptr_t)r)->ok_val;
     ```)
 
-  (defn nil-cons [] :int
+  (defn nil-cons [] : int
     ```c
     return (int64_t)0;
     ```)
 
-  (defn cons-pair [k :cstr v :cstr next :int] :int
+  (defn cons-pair [k : cstr v : cstr next : int] : int
     ```c
     #include <stdlib.h>
     struct __cons { int64_t value; int64_t next; };
@@ -77,7 +77,7 @@
   ;; Handler: copy X-Echo from request -> X-Echo-Reply on response.
   ;; ---------------------------------------------------------------------
 
-  (defn headers-handler [req :int] :int
+  (defn headers-handler [req : int] : int
     (let [h (req-header req "X-Echo")]
       (if (__hdr-ok? h)
         (with-header (resp-ok "text/plain" "ok") "X-Echo-Reply" (__hdr-val h))
@@ -87,7 +87,7 @@
   ;; Test driver
   ;; ---------------------------------------------------------------------
 
-  (defn main [] :int
+  (defn main [] : int
     (let [srv (server-start 18082 headers-handler)]
       (do
         (sleep-ms 50)

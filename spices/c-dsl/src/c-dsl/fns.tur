@@ -21,12 +21,12 @@
 ;;;   (c-param "s" ":cstr")   ; => "char* s"
 ;;;
 ;;; Since: P1
-(defn c-param [name :cstr type :cstr] :cstr
+(defn c-param [name : cstr type : cstr] : cstr
   (c-sprintf2 "%s %s" (c-type type) name))
 
 ;;; __c-defn-impl -- build a function definition with an optional prefix.
 ;;; prefix: "" for normal, "static " for static, "static inline " for inline.
-(defn __c-defn-impl [prefix :cstr name :cstr params :int ret :cstr body :cstr] :cstr
+(defn __c-defn-impl [prefix : cstr name : cstr params : int ret : cstr body : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <string.h>
@@ -102,7 +102,7 @@
 ;;;   ; => "int32_t square(int32_t x) {\n    return (x * x);\n}"
 ;;;
 ;;; Since: P1
-(defn c-defn [name :cstr params :int ret :cstr body :cstr] :cstr
+(defn c-defn [name : cstr params : int ret : cstr body : cstr] : cstr
   (__c-defn-impl "" name params (c-type ret) body))
 
 ;;; c-defn-static -- emit a static C function definition.
@@ -114,7 +114,7 @@
 ;;;   body   -- function body string
 ;;;
 ;;; Since: P1
-(defn c-defn-static [name :cstr params :int ret :cstr body :cstr] :cstr
+(defn c-defn-static [name : cstr params : int ret : cstr body : cstr] : cstr
   (__c-defn-impl "static " name params (c-type ret) body))
 
 ;;; c-defn-inline -- emit a static inline C function definition.
@@ -126,7 +126,7 @@
 ;;;   body   -- function body string
 ;;;
 ;;; Since: P1
-(defn c-defn-inline [name :cstr params :int ret :cstr body :cstr] :cstr
+(defn c-defn-inline [name : cstr params : int ret : cstr body : cstr] : cstr
   (__c-defn-impl "static inline " name params (c-type ret) body))
 
 ;;; c-call -- emit a C function call expression.
@@ -143,7 +143,7 @@
 ;;;   ; => "printf(\"%d\\n\", x)"
 ;;;
 ;;; Since: P1
-(defn c-call [fn-name :cstr args :int] :cstr
+(defn c-call [fn-name : cstr args : int] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -193,7 +193,7 @@
 ;;;   ; => "int32_t add(int32_t, int32_t);"
 ;;;
 ;;; Since: P1
-(defn c-declare [ret :cstr name :cstr params :int] :cstr
+(defn c-declare [ret : cstr name : cstr params : int] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -241,7 +241,7 @@
 ;;;   "extern ret name(params);"
 ;;;
 ;;; Since: P1
-(defn c-extern [ret :cstr name :cstr params :int] :cstr
+(defn c-extern [ret : cstr name : cstr params : int] : cstr
   (c-cat2 "extern " (c-declare ret name params)))
 
 ) ;; end defmodule c-dsl/fns

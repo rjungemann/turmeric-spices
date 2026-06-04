@@ -10,7 +10,7 @@
   (import linalg/vec :refer [vec vec-len vec-data vec-get]))
 
 ;;; Private helper: format a float with given precision
-(defn fmt--float->str [x prec] :cstr
+(defn fmt--float->str [x prec] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -22,14 +22,14 @@
   ```)
 
 ;;; Private helper: free a string allocated by fmt--float->str
-(defn fmt--str-free [s] :void
+(defn fmt--str-free [s] : void
   ```c
   #include <stdlib.h>
   free((void*)(intptr_t)s);
   ```)
 
 ;;; Private helper: compute max width needed for a column
-(defn fmt--mat-col-width [m c prec] :int
+(defn fmt--mat-col-width [m c prec] : int
   (let [rows (mat-rows m)
         mdata (mat-data m)
         max-width 1]
@@ -43,7 +43,7 @@
     max-width))
 
 ;;; Private helper: format a matrix row
-(defn fmt--mat-row->str [m r prec] :cstr
+(defn fmt--mat-row->str [m r prec] : cstr
   (let [cols (mat-cols m)
         mdata (mat-data m)
         buf-size 256
@@ -71,14 +71,14 @@
 ;;; mat->str -- convert matrix to string
 ;;; m: mat
 ;;; Returns: :cstr (caller must free)
-(defn mat->str [m] :cstr
+(defn mat->str [m] : cstr
   (mat->str-prec m 4))
 
 ;;; mat->str-prec -- convert matrix to string with precision control
 ;;; m: mat
 ;;; prec: number of decimal places
 ;;; Returns: :cstr (caller must free)
-(defn mat->str-prec [m prec] :cstr
+(defn mat->str-prec [m prec] : cstr
   (let [rows (mat-rows m)
         cols (mat-cols m)
         ;; Calculate column widths
@@ -117,14 +117,14 @@
 ;;; mat-print -- print matrix to stdout
 ;;; m: mat
 ;;; Returns: :void
-(defn mat-print [m] :void
+(defn mat-print [m] : void
   (mat-print-prec m 4))
 
 ;;; mat-print-prec -- print matrix to stdout with precision control
 ;;; m: mat
 ;;; prec: number of decimal places
 ;;; Returns: :void
-(defn mat-print-prec [m prec] :void
+(defn mat-print-prec [m prec] : void
   (let [s (mat->str-prec m prec)]
     (println s)
     (free s)))
@@ -132,14 +132,14 @@
 ;;; vec->str -- convert vector to string
 ;;; v: vec
 ;;; Returns: :cstr (caller must free)
-(defn vec->str [v] :cstr
+(defn vec->str [v] : cstr
   (vec->str-prec v 4))
 
 ;;; vec->str-prec -- convert vector to string with precision control
 ;;; v: vec
 ;;; prec: number of decimal places
 ;;; Returns: :cstr (caller must free)
-(defn vec->str-prec [v prec] :cstr
+(defn vec->str-prec [v prec] : cstr
   (let [n (vec-len v)
         vdata (vec-data v)
         ;; Calculate total size needed
@@ -173,14 +173,14 @@
 ;;; vec-print -- print vector to stdout
 ;;; v: vec
 ;;; Returns: :void
-(defn vec-print [v] :void
+(defn vec-print [v] : void
   (vec-print-prec v 4))
 
 ;;; vec-print-prec -- print vector to stdout with precision control
 ;;; v: vec
 ;;; prec: number of decimal places
 ;;; Returns: :void
-(defn vec-print-prec [v prec] :void
+(defn vec-print-prec [v prec] : void
   (let [s (vec->str-prec v prec)]
     (println s)
     (free s)))

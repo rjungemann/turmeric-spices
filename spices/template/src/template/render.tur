@@ -25,7 +25,7 @@
 ;;;   (render-ast (parse (lex "<%= x %>")) e)
 ;;;
 ;;; Since: 0.1.0
-(defn render-ast [root :int env :int] :cstr
+(defn render-ast [root : int env : int] : cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -219,7 +219,7 @@
 ;;;   (render "Hello, <%= name %>!" e)
 ;;;
 ;;; Since: 0.1.0
-(defn render [src :cstr env :int] :cstr
+(defn render [src : cstr env : int] : cstr
   (let [tk (lex src)
         nd (parse tk)
         out (render-ast nd env)]
@@ -229,7 +229,7 @@
       out)))
 
 ;;; __read-file -- read a file's contents into a fresh malloc'd cstr (0 on fail).
-(defn __read-file [path :cstr] :int
+(defn __read-file [path : cstr] : int
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -247,26 +247,26 @@
   ```)
 
 ;;; __free-cstr -- free a heap cstr (used internally for file buffers).
-(defn __free-cstr [p :int] :void
+(defn __free-cstr [p : int] : void
   ```c
   #include <stdlib.h>
   if (p) free((void *)(intptr_t)p);
   ```)
 
 ;;; __cstr-from-int -- coerce an :int pointer back to :cstr for render.
-(defn __cstr-from-int [p :int] :cstr
+(defn __cstr-from-int [p : int] : cstr
   ```c
   return (char *)(intptr_t)p;
   ```)
 
 ;;; __cstr->int -- coerce a :cstr back to :int (heap pointer).
-(defn __cstr->int [p :cstr] :int
+(defn __cstr->int [p : cstr] : int
   ```c
   return (int64_t)(intptr_t)p;
   ```)
 
 ;;; __err-msg -- allocate a heap cstr containing an error message.
-(defn __err-msg [msg :cstr] :int
+(defn __err-msg [msg : cstr] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -277,7 +277,7 @@
   ```)
 
 ;;; __ok-result -- build an ok result wrapping a cstr-pointer payload.
-(defn __ok-result [p :int] :int
+(defn __ok-result [p : int] : int
   ```c
   #include <stdlib.h>
   struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
@@ -287,7 +287,7 @@
   ```)
 
 ;;; __err-result -- build an err result wrapping a cstr message.
-(defn __err-result [p :int] :int
+(defn __err-result [p : int] : int
   ```c
   #include <stdlib.h>
   struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
@@ -311,7 +311,7 @@
 ;;;     (if (ok? r) (println (ok-val r)) (println (err-val r))))
 ;;;
 ;;; Since: 0.1.0
-(defn render-file [path :cstr env :int] :int
+(defn render-file [path : cstr env : int] : int
   (let [raw (__read-file path)]
     (if (= raw 0)
       (__err-result (__err-msg "render-file: cannot read file"))

@@ -24,7 +24,7 @@
 ;; ---- string builder ----
 
 ;;; sb-new -- allocate a fresh string builder. Since: Phase 3
-(defn sb-new [] :int
+(defn sb-new [] : int
   ```c
   #include <stdlib.h>
   typedef struct { char *buf; int len; int cap; } sb_t;
@@ -38,7 +38,7 @@
   ```)
 
 ;;; sb-write -- append a C string to the builder. Since: Phase 3
-(defn sb-write [sb :int s :cstr] :void
+(defn sb-write [sb : int s : cstr] : void
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -57,7 +57,7 @@
   ```)
 
 ;;; sb-str -- return a pointer into the builder's buffer. Since: Phase 3
-(defn sb-str [sb :int] :cstr
+(defn sb-str [sb : int] : cstr
   ```c
   typedef struct { char *buf; int len; int cap; } sb_t;
   if (!sb) return (const char *)(intptr_t)"";
@@ -65,7 +65,7 @@
   ```)
 
 ;;; sb-free -- free the builder and its buffer. Since: Phase 3
-(defn sb-free [sb :int] :void
+(defn sb-free [sb : int] : void
   ```c
   #include <stdlib.h>
   typedef struct { char *buf; int len; int cap; } sb_t;
@@ -77,7 +77,7 @@
 ;; ---- counter ----
 
 ;;; ctr-new -- allocate an integer counter starting at 0. Since: Phase 3
-(defn ctr-new [] :int
+(defn ctr-new [] : int
   ```c
   #include <stdlib.h>
   int *p = (int *)calloc(1, sizeof(int));
@@ -85,7 +85,7 @@
   ```)
 
 ;;; ctr-next -- post-increment: returns current value then advances. Since: Phase 3
-(defn ctr-next [ctr :int] :int
+(defn ctr-next [ctr : int] : int
   ```c
   if (!ctr) return 0;
   int *p = (int *)(intptr_t)ctr;
@@ -93,7 +93,7 @@
   ```)
 
 ;;; ctr-free -- free a counter. Since: Phase 3
-(defn ctr-free [ctr :int] :void
+(defn ctr-free [ctr : int] : void
   ```c
   #include <stdlib.h>
   if (ctr) free((void *)(intptr_t)ctr);
@@ -102,7 +102,7 @@
 ;; ---- formatting helpers (static buffers -- use immediately) ----
 
 ;;; glsl-f -- format a float as a GLSL literal (static buffer). Since: Phase 3
-(defn glsl-f [x :float] :cstr
+(defn glsl-f [x : float] : cstr
   ```c
   #include <stdio.h>
   static char _fb[64];
@@ -111,7 +111,7 @@
   ```)
 
 ;;; glsl-i -- format an int as a decimal string (static buffer). Since: Phase 3
-(defn glsl-i [n :int] :cstr
+(defn glsl-i [n : int] : cstr
   ```c
   #include <stdio.h>
   static char _ib[32];
@@ -120,7 +120,7 @@
   ```)
 
 ;;; pvar-name -- return "p" for idx 0, "p_N" otherwise (static buffer). Since: Phase 3
-(defn pvar-name [idx :int] :cstr
+(defn pvar-name [idx : int] : cstr
   ```c
   #include <stdio.h>
   static char _pv[32];
@@ -137,8 +137,8 @@
 ;; Returns N.
 
 ;;; csdf--emit-sphere -- emit GLSL for a sphere leaf. Since: Phase 3
-(defn csdf--emit-sphere [sdf :int pv-idx :int cr :float cg :float cb :float
-                          objid :int sb :int N :int] :void
+(defn csdf--emit-sphere [sdf : int pv-idx : int cr : float cg : float cb : float
+                          objid : int sb : int N : int] : void
   (let [cx (sdf-v0x sdf) cy (sdf-v0y sdf) cz (sdf-v0z sdf)
         r  (sdf-s0 sdf)]
     (sb-write sb "  float d_") (sb-write sb (glsl-i N))
@@ -157,8 +157,8 @@
     (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
 
 ;;; csdf--emit-box -- emit GLSL for a box leaf. Since: Phase 3
-(defn csdf--emit-box [sdf :int pv-idx :int cr :float cg :float cb :float
-                       objid :int sb :int N :int] :void
+(defn csdf--emit-box [sdf : int pv-idx : int cr : float cg : float cb : float
+                       objid : int sb : int N : int] : void
   (let [lx (sdf-v0x sdf) ly (sdf-v0y sdf) lz (sdf-v0z sdf)
         hx (sdf-v1x sdf) hy (sdf-v1y sdf) hz (sdf-v1z sdf)
         cx (/ (+ lx hx) 2.0) cy (/ (+ ly hy) 2.0) cz (/ (+ lz hz) 2.0)
@@ -188,8 +188,8 @@
     (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
 
 ;;; csdf--emit-cylinder -- emit GLSL for an infinite XY-plane cylinder. Since: Phase 3
-(defn csdf--emit-cylinder [sdf :int pv-idx :int cr :float cg :float cb :float
-                             objid :int sb :int N :int] :void
+(defn csdf--emit-cylinder [sdf : int pv-idx : int cr : float cg : float cb : float
+                             objid : int sb : int N : int] : void
   (let [cx (sdf-v0x sdf) cy (sdf-v0y sdf)
         r  (sdf-s0 sdf)]
     (sb-write sb "  float d_") (sb-write sb (glsl-i N))
@@ -207,8 +207,8 @@
     (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
 
 ;;; csdf--emit-plane -- emit GLSL for an infinite plane. Since: Phase 3
-(defn csdf--emit-plane [sdf :int pv-idx :int cr :float cg :float cb :float
-                         objid :int sb :int N :int] :void
+(defn csdf--emit-plane [sdf : int pv-idx : int cr : float cg : float cb : float
+                         objid : int sb : int N : int] : void
   (let [nx (sdf-v0x sdf) ny (sdf-v0y sdf) nz (sdf-v0z sdf)
         d  (sdf-s0 sdf)]
     (sb-write sb "  float d_") (sb-write sb (glsl-i N))
@@ -226,8 +226,8 @@
     (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
 
 ;;; csdf--emit-torus -- emit GLSL for a torus leaf (ring in XZ plane). Since: Phase 5
-(defn csdf--emit-torus [sdf :int pv-idx :int cr :float cg :float cb :float
-                         objid :int sb :int N :int] :void
+(defn csdf--emit-torus [sdf : int pv-idx : int cr : float cg : float cb : float
+                         objid : int sb : int N : int] : void
   (let [cx (sdf-v0x sdf) cy (sdf-v0y sdf) cz (sdf-v0z sdf)
         big-r (sdf-s0 sdf) small-r (sdf-s1 sdf)]
     (sb-write sb "  vec2 tq_") (sb-write sb (glsl-i N))
@@ -248,8 +248,8 @@
     (sb-write sb (glsl-f cb)) (sb-write sb ");\n")))
 
 ;;; csdf--emit-capsule -- emit GLSL for a capsule leaf (A to B with radius r). Since: Phase 5
-(defn csdf--emit-capsule [sdf :int pv-idx :int cr :float cg :float cb :float
-                           objid :int sb :int N :int] :void
+(defn csdf--emit-capsule [sdf : int pv-idx : int cr : float cg : float cb : float
+                           objid : int sb : int N : int] : void
   (let [ax (sdf-v0x sdf) ay (sdf-v0y sdf) az (sdf-v0z sdf)
         bx (sdf-v1x sdf) by (sdf-v1y sdf) bz (sdf-v1z sdf)
         r  (sdf-s0 sdf)]
@@ -287,7 +287,7 @@
 ;;; Returns the index N of the result temporaries d_N / id_N / col_N.
 ;;;
 ;;; Since: Phase 3
-(defn csdf--emit-node [cn :int pv-idx :int sb :int ctr :int] :int
+(defn csdf--emit-node [cn : int pv-idx : int sb : int ctr : int] : int
   (if (= cn 0)
     -1
     (let [obj-id (csdf-object-id cn)]
@@ -510,7 +510,7 @@
                   N)))))))))
 
 ;;; glsl--strdup -- heap-duplicate a C string. Since: Phase 3
-(defn glsl--strdup [s :cstr] :cstr
+(defn glsl--strdup [s : cstr] : cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -543,7 +543,7 @@
 ;;;   (let [src (csdf->glsl scene)] (println src) (csdf-glsl-free src))
 ;;;
 ;;; Since: Phase 3
-(defn csdf->glsl [csdf :int] :cstr
+(defn csdf->glsl [csdf : int] : cstr
   (let [sb  (sb-new)
         ctr (ctr-new)]
     (sb-write sb "float sceneSDF(vec3 p, out int objId, out vec3 col) {\n")
@@ -564,7 +564,7 @@
           dup)))))
 
 ;;; csdf-glsl-free -- free a GLSL source string returned by csdf->glsl. Since: Phase 3
-(defn csdf-glsl-free [s :cstr] :void
+(defn csdf-glsl-free [s : cstr] : void
   ```c
   #include <stdlib.h>
   if (s) free((void *)(intptr_t)s);

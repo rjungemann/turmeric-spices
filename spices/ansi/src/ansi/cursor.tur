@@ -17,7 +17,7 @@
   ;;;   (cursor-move-to 1 1)  ; home the cursor
   ;;;
   ;;; Since: tur-ansi AN0
-  (defn cursor-move-to [row :int col :int] #{Unsafe} :void
+  (defn cursor-move-to [row : int col : int] #{Unsafe} : void
     ```c
     if (row < 1) row = 1;
     if (col < 1) col = 1;
@@ -26,7 +26,7 @@
     ```)
 
   ;;; cursor-up -- move the cursor up n rows (clamped at top of screen).
-  (defn cursor-up [n :int] #{Unsafe} :void
+  (defn cursor-up [n : int] #{Unsafe} : void
     ```c
     if (n < 1) return;
     printf("\033[%lldA", (long long)n);
@@ -34,7 +34,7 @@
     ```)
 
   ;;; cursor-down -- move the cursor down n rows (clamped at bottom).
-  (defn cursor-down [n :int] #{Unsafe} :void
+  (defn cursor-down [n : int] #{Unsafe} : void
     ```c
     if (n < 1) return;
     printf("\033[%lldB", (long long)n);
@@ -42,7 +42,7 @@
     ```)
 
   ;;; cursor-right -- move the cursor right n columns (clamped at right edge).
-  (defn cursor-right [n :int] #{Unsafe} :void
+  (defn cursor-right [n : int] #{Unsafe} : void
     ```c
     if (n < 1) return;
     printf("\033[%lldC", (long long)n);
@@ -50,7 +50,7 @@
     ```)
 
   ;;; cursor-left -- move the cursor left n columns (clamped at left edge).
-  (defn cursor-left [n :int] #{Unsafe} :void
+  (defn cursor-left [n : int] #{Unsafe} : void
     ```c
     if (n < 1) return;
     printf("\033[%lldD", (long long)n);
@@ -58,7 +58,7 @@
     ```)
 
   ;;; cursor-col -- move to a column on the current row (CSI <n> G).
-  (defn cursor-col [col :int] #{Unsafe} :void
+  (defn cursor-col [col : int] #{Unsafe} : void
     ```c
     if (col < 1) col = 1;
     printf("\033[%lldG", (long long)col);
@@ -66,28 +66,28 @@
     ```)
 
   ;;; cursor-show -- make the cursor visible (DECTCEM h).
-  (defn cursor-show [] #{Unsafe} :void
+  (defn cursor-show [] #{Unsafe} : void
     ```c
     fputs("\033[?25h", stdout);
     fflush(stdout);
     ```)
 
   ;;; cursor-hide -- hide the cursor (DECTCEM l).
-  (defn cursor-hide [] #{Unsafe} :void
+  (defn cursor-hide [] #{Unsafe} : void
     ```c
     fputs("\033[?25l", stdout);
     fflush(stdout);
     ```)
 
   ;;; cursor-save -- save current cursor position (DEC SC, ESC 7).
-  (defn cursor-save [] #{Unsafe} :void
+  (defn cursor-save [] #{Unsafe} : void
     ```c
     fputs("\0337", stdout);
     fflush(stdout);
     ```)
 
   ;;; cursor-restore -- restore previously saved cursor position (DEC RC, ESC 8).
-  (defn cursor-restore [] #{Unsafe} :void
+  (defn cursor-restore [] #{Unsafe} : void
     ```c
     fputs("\0338", stdout);
     fflush(stdout);

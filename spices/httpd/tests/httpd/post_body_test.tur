@@ -20,20 +20,20 @@
   ;; Helpers
   ;; ---------------------------------------------------------------------
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return 0;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
@@ -43,7 +43,7 @@
   ;; Handler: 200 OK; body = request body (or "<empty>" if there was none).
   ;; ---------------------------------------------------------------------
 
-  (defn empty-or [s :cstr fallback :cstr] :cstr
+  (defn empty-or [s : cstr fallback : cstr] : cstr
     ```c
     #include <string.h>
     const char *p = (const char *)s;
@@ -51,14 +51,14 @@
     return p;
     ```)
 
-  (defn body-echo-handler [req :int] :int
+  (defn body-echo-handler [req : int] : int
     (resp-ok "text/plain" (empty-or (req-body req) "<empty>")))
 
   ;; ---------------------------------------------------------------------
   ;; Test driver
   ;; ---------------------------------------------------------------------
 
-  (defn main [] :int
+  (defn main [] : int
     (let [srv (server-start 18083 body-echo-handler)]
       (do
         (sleep-ms 50)

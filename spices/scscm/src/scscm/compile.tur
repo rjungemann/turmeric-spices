@@ -16,7 +16,7 @@
 
 ;; ---- file I/O helper ----
 
-(defn scscm-read-file [path :cstr] #{Unsafe} :int
+(defn scscm-read-file [path : cstr] #{Unsafe} : int
   ```c
   const char *p = (const char*)(intptr_t)path;
   FILE *f = fopen(p, "rb");
@@ -33,7 +33,7 @@
   ```)
 
 ;; Cast :int (cstr pointer) to :cstr.
-(defn scscm-int-as-cstr [n :int] #{Unsafe} :cstr
+(defn scscm-int-as-cstr [n : int] #{Unsafe} : cstr
   ```c
   return (const char *)(intptr_t)n;
   ```)
@@ -52,7 +52,7 @@
 ;;;     (if (lex-ok? r) (lex-ok-val r) "error"))
 ;;;
 ;;; Since: SC4
-(defn compile-text [source :cstr] #{Unsafe} :ptr<void>
+(defn compile-text [source : cstr] #{Unsafe} : ptr<void>
   (let [lex-res (tokenize source)]
     (if (lex-err? lex-res)
       lex-res
@@ -81,7 +81,7 @@
 ;;;     (if (lex-ok? r) (lex-ok-val r) "error"))
 ;;;
 ;;; Since: SC4
-(defn compile-file [path :cstr] #{Unsafe} :ptr<void>
+(defn compile-file [path : cstr] #{Unsafe} : ptr<void>
   (let [buf (scscm-read-file path)]
     (if (= buf 0)
       (lex-err 0)

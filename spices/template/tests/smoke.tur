@@ -4,26 +4,26 @@
   (import template/env    :refer [env-new env-set env-set-list env-free])
   (import template/render :refer [render])
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn cstr-free [p :cstr] :void
+  (defn cstr-free [p : cstr] : void
     ```c
     #include <stdlib.h>
     if (p) free((void *)(intptr_t)p);
     ```)
 
-  (defn tap [idx :int name :cstr ok :bool] :void
+  (defn tap [idx : int name : cstr ok : bool] : void
     ```c
     #include <stdio.h>
     printf("%s %lld - %s\n", ok ? "ok" : "not ok",
            (long long)idx, (const char *)name);
     ```)
 
-  (defn cons2 [a :cstr b :cstr] :int
+  (defn cons2 [a : cstr b : cstr] : int
     ```c
     #include <stdlib.h>
     struct __c { int64_t head; int64_t tail; };
@@ -34,7 +34,7 @@
     return (int64_t)(intptr_t)c1;
     ```)
 
-  (defn cons3 [a :cstr b :cstr c :cstr] :int
+  (defn cons3 [a : cstr b : cstr c : cstr] : int
     ```c
     #include <stdlib.h>
     struct __c { int64_t head; int64_t tail; };
@@ -47,7 +47,7 @@
     return (int64_t)(intptr_t)c1;
     ```)
 
-  (defn test1-basic [] :bool
+  (defn test1-basic [] : bool
     (let [e (env-new)]
       (do
         (env-set e "name" "World")
@@ -55,7 +55,7 @@
               ok (cstr-eq? out "Hello, World!")]
           (do (cstr-free out) (env-free e) ok)))))
 
-  (defn test2-if-true [] :bool
+  (defn test2-if-true [] : bool
     (let [e (env-new)]
       (do
         (env-set e "flag" "yes")
@@ -63,7 +63,7 @@
               ok (cstr-eq? out "on")]
           (do (cstr-free out) (env-free e) ok)))))
 
-  (defn test3-if-false [] :bool
+  (defn test3-if-false [] : bool
     (let [e (env-new)]
       (do
         (env-set e "flag" "")
@@ -71,7 +71,7 @@
               ok (cstr-eq? out "off")]
           (do (cstr-free out) (env-free e) ok)))))
 
-  (defn test4-for [] :bool
+  (defn test4-for [] : bool
     (let [e (env-new)]
       (do
         (env-set-list e "items" (cons3 "a" "b" "c"))
@@ -79,13 +79,13 @@
               ok (cstr-eq? out "a;b;c;")]
           (do (cstr-free out) (env-free e) ok)))))
 
-  (defn test5-escape [] :bool
+  (defn test5-escape [] : bool
     (let [e (env-new)]
       (let [out (render "code: <%% if x %>" e)
             ok (cstr-eq? out "code: <% if x %>")]
         (do (cstr-free out) (env-free e) ok))))
 
-  (defn test6-comment [] :bool
+  (defn test6-comment [] : bool
     (let [e (env-new)]
       (do
         (env-set e "x" "X")
@@ -93,13 +93,13 @@
               ok (cstr-eq? out "ABX")]
           (do (cstr-free out) (env-free e) ok)))))
 
-  (defn test7-let [] :bool
+  (defn test7-let [] : bool
     (let [e (env-new)]
       (let [out (render "<% let [g \"Hi\"] %><%= g %><% end %>!" e)
             ok (cstr-eq? out "Hi!")]
         (do (cstr-free out) (env-free e) ok))))
 
-  (defn test8-nested-for-if [] :bool
+  (defn test8-nested-for-if [] : bool
     (let [e (env-new)]
       (do
         (env-set-list e "items" (cons3 "a" "" "c"))
@@ -108,13 +108,13 @@
               ok (cstr-eq? out "[a][c]")]
           (do (cstr-free out) (env-free e) ok)))))
 
-  (defn plan-line [n :int] :void
+  (defn plan-line [n : int] : void
     ```c
     #include <stdio.h>
     printf("1..%lld\n", (long long)n);
     ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (do
       (plan-line 8)
       (tap 1 "basic interpolation" (test1-basic))

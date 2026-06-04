@@ -15,26 +15,26 @@
   (import test/assert        :refer [assert-eq assert-true])
   (import test/runner        :refer [run-all])
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return false;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
     ```)
 
-  (defn sleep-ms [ms :int] #{Unsafe} :void
+  (defn sleep-ms [ms : int] #{Unsafe} : void
     ```c
     #include <unistd.h>
     if (ms > 0) usleep((useconds_t)ms * 1000u);
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
@@ -42,29 +42,29 @@
 
   ;; Outer middleware tags every response by short-circuiting nothing
   ;; (returns the (none) option, 0); it just observes the request.
-  (defn tag-mw [req :int] :int
+  (defn tag-mw [req : int] : int
     ;; (none) is the integer 0 -- continue dispatch.
     0)
 
   ;; Two leaf handlers
-  (defn users-handler [ctx :int] :int (text (req-path ctx)))
-  (defn items-handler [ctx :int] :int (text (req-path ctx)))
-  (defn legacy-handler [ctx :int] :int (text "legacy-v1"))
+  (defn users-handler [ctx : int] : int (text (req-path ctx)))
+  (defn items-handler [ctx : int] : int (text (req-path ctx)))
+  (defn legacy-handler [ctx : int] : int (text "legacy-v1"))
 
   ;; v2 sub-app: url-map! with two prefixes
-  (defn v2-app [] :int
+  (defn v2-app [] : int
     (url-map! (mount! "/users" (get! "/" users-handler))
               (mount! "/items" (get! "/" items-handler))))
 
   ;; v1 sub-app: returns "legacy-v1" for any /legacy path; otherwise no match.
-  (defn v1-app [] :int
+  (defn v1-app [] : int
     (get! "/legacy" legacy-handler))
 
   ;; api: cascade v2-app over v1-app, so v2's 404s fall through to v1.
-  (defn api-app [] :int
+  (defn api-app [] : int
     (cascade! (v2-app) (v1-app)))
 
-  (defn main [] :int
+  (defn main [] : int
     (let [srv (tourist 18122
                 (use! tag-mw)
                 (url-map! (mount! "/api" (api-app))

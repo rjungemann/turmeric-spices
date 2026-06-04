@@ -31,7 +31,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -39,7 +39,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -60,7 +60,7 @@
 ;;;   (let [r (path-create)] (if (ok? r) (let [p (ok-val r)] ...)))
 ;;;
 ;;; Since: PV2
-(defn path-create [] :ptr<void>
+(defn path-create [] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -83,7 +83,7 @@
 ;;;   (path-destroy p)
 ;;;
 ;;; Since: PV2
-(defn path-destroy [p :int] :void
+(defn path-destroy [p : int] : void
   ```c
   #include <plutovg.h>
   if (p) plutovg_path_destroy((plutovg_path_t *)(intptr_t)p);
@@ -102,7 +102,7 @@
 ;;;   (path-move-to p 10.0 10.0)
 ;;;
 ;;; Since: PV2
-(defn path-move-to [p :int x :float y :float] :void
+(defn path-move-to [p : int x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_move_to((plutovg_path_t *)(intptr_t)p, (float)x, (float)y);
@@ -111,7 +111,7 @@
 ;;; path-line-to -- append a straight line to (x, y).
 ;;;
 ;;; Since: PV2
-(defn path-line-to [p :int x :float y :float] :void
+(defn path-line-to [p : int x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_line_to((plutovg_path_t *)(intptr_t)p, (float)x, (float)y);
@@ -120,7 +120,7 @@
 ;;; path-quad-to -- append a quadratic Bezier to (x, y) via control (x1, y1).
 ;;;
 ;;; Since: PV2
-(defn path-quad-to [p :int x1 :float y1 :float x :float y :float] :void
+(defn path-quad-to [p : int x1 : float y1 : float x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_quad_to((plutovg_path_t *)(intptr_t)p,
@@ -130,8 +130,8 @@
 ;;; path-cubic-to -- append a cubic Bezier with controls (x1,y1)/(x2,y2).
 ;;;
 ;;; Since: PV2
-(defn path-cubic-to [p :int x1 :float y1 :float x2 :float y2 :float
-                     x :float y :float] :void
+(defn path-cubic-to [p : int x1 : float y1 : float x2 : float y2 : float
+                     x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_cubic_to((plutovg_path_t *)(intptr_t)p,
@@ -153,9 +153,9 @@
 ;;;   y           -- destination y
 ;;;
 ;;; Since: PV2
-(defn path-arc-to [p :int rx :float ry :float rotation :float
-                   large-arc? :bool sweep? :bool
-                   x :float y :float] :void
+(defn path-arc-to [p : int rx : float ry : float rotation : float
+                   large-arc? : bool sweep? : bool
+                   x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_arc_to((plutovg_path_t *)(intptr_t)p,
@@ -167,7 +167,7 @@
 ;;; path-close -- close the current subpath with a straight line to its origin.
 ;;;
 ;;; Since: PV2
-(defn path-close [p :int] :void
+(defn path-close [p : int] : void
   ```c
   #include <plutovg.h>
   plutovg_path_close((plutovg_path_t *)(intptr_t)p);
@@ -180,7 +180,7 @@
 ;;; path-add-rect -- append an axis-aligned rectangle as a closed subpath.
 ;;;
 ;;; Since: PV2
-(defn path-add-rect [p :int x :float y :float w :float h :float] :void
+(defn path-add-rect [p : int x : float y : float w : float h : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_add_rect((plutovg_path_t *)(intptr_t)p,
@@ -199,8 +199,8 @@
 ;;;   ry -- vertical corner radius
 ;;;
 ;;; Since: PV2
-(defn path-add-round-rect [p :int x :float y :float w :float h :float
-                           rx :float ry :float] :void
+(defn path-add-round-rect [p : int x : float y : float w : float h : float
+                           rx : float ry : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_add_round_rect((plutovg_path_t *)(intptr_t)p,
@@ -211,7 +211,7 @@
 ;;; path-add-ellipse -- append an axis-aligned ellipse as a closed subpath.
 ;;;
 ;;; Since: PV2
-(defn path-add-ellipse [p :int cx :float cy :float rx :float ry :float] :void
+(defn path-add-ellipse [p : int cx : float cy : float rx : float ry : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_add_ellipse((plutovg_path_t *)(intptr_t)p,
@@ -222,7 +222,7 @@
 ;;; path-add-circle -- convenience: append a circle subpath.
 ;;;
 ;;; Since: PV2
-(defn path-add-circle [p :int cx :float cy :float r :float] :void
+(defn path-add-circle [p : int cx : float cy : float r : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_add_circle((plutovg_path_t *)(intptr_t)p,
@@ -246,8 +246,8 @@
 ;;; with arc-to.
 ;;;
 ;;; Since: PV2
-(defn path-add-arc [p :int cx :float cy :float r :float
-                    start-angle :float sweep-angle :float] :void
+(defn path-add-arc [p : int cx : float cy : float r : float
+                    start-angle : float sweep-angle : float] : void
   ```c
   #include <plutovg.h>
   plutovg_path_add_arc((plutovg_path_t *)(intptr_t)p,
@@ -266,7 +266,7 @@
 ;;;   (ok handle) on success; (err 0) on allocation failure.
 ;;;
 ;;; Since: PV2
-(defn path-clone [p :int] :ptr<void>
+(defn path-clone [p : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -286,7 +286,7 @@
 ;;;   (ok handle) on success; (err 0) on allocation failure.
 ;;;
 ;;; Since: PV2
-(defn path-clone-flatten [p :int] :ptr<void>
+(defn path-clone-flatten [p : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -318,7 +318,7 @@
 ;;;     (dash-array-destroy da))
 ;;;
 ;;; Since: PV6
-(defn path-clone-dashed [p :int offset :float dashes :int] :ptr<void>
+(defn path-clone-dashed [p : int offset : float dashes : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -348,7 +348,7 @@
 ;;;   (path-parse p "M 0 0 L 4 0 L 4 4 Z")
 ;;;
 ;;; Since: PV2
-(defn path-parse [p :int svg :cstr] :ptr<void>
+(defn path-parse [p : int svg : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -383,7 +383,7 @@
 ;;;       (rect-destroy box)))
 ;;;
 ;;; Since: PV2
-(defn path-extents [p :int] :ptr<void>
+(defn path-extents [p : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -408,7 +408,7 @@
 ;;;   (println (path-length p))
 ;;;
 ;;; Since: PV2
-(defn path-length [p :int] :float
+(defn path-length [p : int] : float
   ```c
   #include <plutovg.h>
   return (double)plutovg_path_length((plutovg_path_t *)(intptr_t)p);
@@ -417,7 +417,7 @@
 ;;; rect-destroy -- release a rect allocated by path-extents / text-extents.
 ;;;
 ;;; Since: PV2
-(defn rect-destroy [box :int] :void
+(defn rect-destroy [box : int] : void
   ```c
   #include <stdlib.h>
   if (box) free((void *)(intptr_t)box);
@@ -425,28 +425,28 @@
 
 ;;; rect-x -- read the x component of a rect.
 ;;; Since: PV2
-(defn rect-x [box :int] :float
+(defn rect-x [box : int] : float
   ```c
   return (double)((float *)(intptr_t)box)[0];
   ```)
 
 ;;; rect-y -- read the y component of a rect.
 ;;; Since: PV2
-(defn rect-y [box :int] :float
+(defn rect-y [box : int] : float
   ```c
   return (double)((float *)(intptr_t)box)[1];
   ```)
 
 ;;; rect-w -- read the width of a rect.
 ;;; Since: PV2
-(defn rect-w [box :int] :float
+(defn rect-w [box : int] : float
   ```c
   return (double)((float *)(intptr_t)box)[2];
   ```)
 
 ;;; rect-h -- read the height of a rect.
 ;;; Since: PV2
-(defn rect-h [box :int] :float
+(defn rect-h [box : int] : float
   ```c
   return (double)((float *)(intptr_t)box)[3];
   ```)

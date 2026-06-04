@@ -58,7 +58,7 @@
 ;;;   (let [d (dist-normal 0.0 1.0)] (pdf d 0.0))  ; => ~0.3989
 ;;;
 ;;; Since: ST3
-(defn dist-normal [mu :float sigma :float] :int
+(defn dist-normal [mu : float sigma : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -98,7 +98,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST3
-(defn dist-t [df :float] :int
+(defn dist-t [df : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -119,7 +119,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST3
-(defn dist-chi2 [df :float] :int
+(defn dist-chi2 [df : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -141,7 +141,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST3
-(defn dist-f [df1 :float df2 :float] :int
+(defn dist-f [df1 : float df2 : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -163,7 +163,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST4
-(defn dist-uniform [a :float b :float] :int
+(defn dist-uniform [a : float b : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -185,7 +185,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST4
-(defn dist-binomial [n :int p :float] :int
+(defn dist-binomial [n : int p : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -206,7 +206,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST4
-(defn dist-poisson [lambda :float] :int
+(defn dist-poisson [lambda : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -227,7 +227,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST4
-(defn dist-exponential [rate :float] :int
+(defn dist-exponential [rate : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -249,7 +249,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST4
-(defn dist-beta [alpha :float beta :float] :int
+(defn dist-beta [alpha : float beta : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -271,7 +271,7 @@
 ;;;   :int  dist handle.
 ;;;
 ;;; Since: ST4
-(defn dist-gamma [shape :float rate :float] :int
+(defn dist-gamma [shape : float rate : float] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -286,7 +286,7 @@
 ;;; dist-free -- free a distribution object.
 ;;;
 ;;; Since: ST3
-(defn dist-free [d :int] :void
+(defn dist-free [d : int] : void
   ```c
   #include <stdlib.h>
   free((void *)(intptr_t)d);
@@ -306,7 +306,7 @@
 ;;;   :float density / PMF value.
 ;;;
 ;;; Since: ST3
-(defn pdf [d :int x :float] :float
+(defn pdf [d : int x : float] : float
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -401,7 +401,7 @@
 ;;;   :float  P(X <= x) in [0, 1].
 ;;;
 ;;; Since: ST3
-(defn cdf [d :int x :float] :float
+(defn cdf [d : int x : float] : float
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -539,7 +539,7 @@
 ;;;   :float  x such that CDF(x) ~= p.
 ;;;
 ;;; Since: ST3
-(defn quantile [d :int p :float] :float
+(defn quantile [d : int p : float] : float
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -721,7 +721,7 @@
 ;;;   :float  one sample.
 ;;;
 ;;; Since: ST3
-(defn random [d :int rng :int] :float
+(defn random [d : int rng : int] : float
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -851,7 +851,7 @@
 ;;;   :int  new float64 column of length n.  Caller frees.
 ;;;
 ;;; Since: ST3
-(defn random-n [d :int rng :int n :int] :int
+(defn random-n [d : int rng : int n : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -970,7 +970,7 @@
 
 ;;; dnorm -- normal density at x.
 ;;; Since: ST4
-(defn dnorm [x :float mu :float sigma :float] :float
+(defn dnorm [x : float mu : float sigma : float] : float
   (let [d (dist-normal mu sigma)
         v (pdf d x)]
     (dist-free d)
@@ -978,7 +978,7 @@
 
 ;;; pnorm -- normal CDF at x.
 ;;; Since: ST4
-(defn pnorm [x :float mu :float sigma :float] :float
+(defn pnorm [x : float mu : float sigma : float] : float
   (let [d (dist-normal mu sigma)
         v (cdf d x)]
     (dist-free d)
@@ -986,7 +986,7 @@
 
 ;;; qnorm -- normal quantile at p.
 ;;; Since: ST4
-(defn qnorm [p :float mu :float sigma :float] :float
+(defn qnorm [p : float mu : float sigma : float] : float
   (let [d (dist-normal mu sigma)
         v (quantile d p)]
     (dist-free d)
@@ -994,7 +994,7 @@
 
 ;;; rnorm -- n normal samples.
 ;;; Since: ST4
-(defn rnorm [rng :int n :int mu :float sigma :float] :int
+(defn rnorm [rng : int n : int mu : float sigma : float] : int
   (let [d (dist-normal mu sigma)
         v (random-n d rng n)]
     (dist-free d)
@@ -1002,182 +1002,182 @@
 
 ;;; dt -- t density.
 ;;; Since: ST4
-(defn dt [x :float df :float] :float
+(defn dt [x : float df : float] : float
   (let [d (dist-t df) v (pdf d x)] (dist-free d) v))
 
 ;;; pt -- t CDF.
 ;;; Since: ST4
-(defn pt [x :float df :float] :float
+(defn pt [x : float df : float] : float
   (let [d (dist-t df) v (cdf d x)] (dist-free d) v))
 
 ;;; qt -- t quantile.
 ;;; Since: ST4
-(defn qt [p :float df :float] :float
+(defn qt [p : float df : float] : float
   (let [d (dist-t df) v (quantile d p)] (dist-free d) v))
 
 ;;; rt -- n t samples.
 ;;; Since: ST4
-(defn rt [rng :int n :int df :float] :int
+(defn rt [rng : int n : int df : float] : int
   (let [d (dist-t df) v (random-n d rng n)] (dist-free d) v))
 
 ;;; dchi2 -- chi-squared density.
 ;;; Since: ST4
-(defn dchi2 [x :float df :float] :float
+(defn dchi2 [x : float df : float] : float
   (let [d (dist-chi2 df) v (pdf d x)] (dist-free d) v))
 
 ;;; pchi2 -- chi-squared CDF.
 ;;; Since: ST4
-(defn pchi2 [x :float df :float] :float
+(defn pchi2 [x : float df : float] : float
   (let [d (dist-chi2 df) v (cdf d x)] (dist-free d) v))
 
 ;;; qchi2 -- chi-squared quantile.
 ;;; Since: ST4
-(defn qchi2 [p :float df :float] :float
+(defn qchi2 [p : float df : float] : float
   (let [d (dist-chi2 df) v (quantile d p)] (dist-free d) v))
 
 ;;; rchi2 -- n chi-squared samples.
 ;;; Since: ST4
-(defn rchi2 [rng :int n :int df :float] :int
+(defn rchi2 [rng : int n : int df : float] : int
   (let [d (dist-chi2 df) v (random-n d rng n)] (dist-free d) v))
 
 ;;; df-dist -- F density.
 ;;; Since: ST4
-(defn df-dist [x :float df1 :float df2 :float] :float
+(defn df-dist [x : float df1 : float df2 : float] : float
   (let [d (dist-f df1 df2) v (pdf d x)] (dist-free d) v))
 
 ;;; pf-dist -- F CDF.
 ;;; Since: ST4
-(defn pf-dist [x :float df1 :float df2 :float] :float
+(defn pf-dist [x : float df1 : float df2 : float] : float
   (let [d (dist-f df1 df2) v (cdf d x)] (dist-free d) v))
 
 ;;; qf-dist -- F quantile.
 ;;; Since: ST4
-(defn qf-dist [p :float df1 :float df2 :float] :float
+(defn qf-dist [p : float df1 : float df2 : float] : float
   (let [d (dist-f df1 df2) v (quantile d p)] (dist-free d) v))
 
 ;;; rf-dist -- n F samples.
 ;;; Since: ST4
-(defn rf-dist [rng :int n :int df1 :float df2 :float] :int
+(defn rf-dist [rng : int n : int df1 : float df2 : float] : int
   (let [d (dist-f df1 df2) v (random-n d rng n)] (dist-free d) v))
 
 ;;; dunif -- uniform density.
 ;;; Since: ST4
-(defn dunif [x :float a :float b :float] :float
+(defn dunif [x : float a : float b : float] : float
   (let [d (dist-uniform a b) v (pdf d x)] (dist-free d) v))
 
 ;;; punif -- uniform CDF.
 ;;; Since: ST4
-(defn punif [x :float a :float b :float] :float
+(defn punif [x : float a : float b : float] : float
   (let [d (dist-uniform a b) v (cdf d x)] (dist-free d) v))
 
 ;;; qunif -- uniform quantile.
 ;;; Since: ST4
-(defn qunif [p :float a :float b :float] :float
+(defn qunif [p : float a : float b : float] : float
   (let [d (dist-uniform a b) v (quantile d p)] (dist-free d) v))
 
 ;;; runif -- n uniform samples.
 ;;; Since: ST4
-(defn runif [rng :int n :int a :float b :float] :int
+(defn runif [rng : int n : int a : float b : float] : int
   (let [d (dist-uniform a b) v (random-n d rng n)] (dist-free d) v))
 
 ;;; dbinom -- binomial PMF.
 ;;; Since: ST4
-(defn dbinom [x :float n :int p :float] :float
+(defn dbinom [x : float n : int p : float] : float
   (let [d (dist-binomial n p) v (pdf d x)] (dist-free d) v))
 
 ;;; pbinom -- binomial CDF.
 ;;; Since: ST4
-(defn pbinom [x :float n :int p :float] :float
+(defn pbinom [x : float n : int p : float] : float
   (let [d (dist-binomial n p) v (cdf d x)] (dist-free d) v))
 
 ;;; qbinom -- binomial quantile.
 ;;; Since: ST4
-(defn qbinom [p :float n :int pp :float] :float
+(defn qbinom [p : float n : int pp : float] : float
   (let [d (dist-binomial n pp) v (quantile d p)] (dist-free d) v))
 
 ;;; rbinom -- n binomial samples.
 ;;; Since: ST4
-(defn rbinom [rng :int n-samp :int n-trials :int p :float] :int
+(defn rbinom [rng : int n-samp : int n-trials : int p : float] : int
   (let [d (dist-binomial n-trials p) v (random-n d rng n-samp)] (dist-free d) v))
 
 ;;; dpois -- Poisson PMF.
 ;;; Since: ST4
-(defn dpois [x :float lambda :float] :float
+(defn dpois [x : float lambda : float] : float
   (let [d (dist-poisson lambda) v (pdf d x)] (dist-free d) v))
 
 ;;; ppois -- Poisson CDF.
 ;;; Since: ST4
-(defn ppois [x :float lambda :float] :float
+(defn ppois [x : float lambda : float] : float
   (let [d (dist-poisson lambda) v (cdf d x)] (dist-free d) v))
 
 ;;; qpois -- Poisson quantile.
 ;;; Since: ST4
-(defn qpois [p :float lambda :float] :float
+(defn qpois [p : float lambda : float] : float
   (let [d (dist-poisson lambda) v (quantile d p)] (dist-free d) v))
 
 ;;; rpois -- n Poisson samples.
 ;;; Since: ST4
-(defn rpois [rng :int n :int lambda :float] :int
+(defn rpois [rng : int n : int lambda : float] : int
   (let [d (dist-poisson lambda) v (random-n d rng n)] (dist-free d) v))
 
 ;;; dexp -- exponential density.
 ;;; Since: ST4
-(defn dexp [x :float rate :float] :float
+(defn dexp [x : float rate : float] : float
   (let [d (dist-exponential rate) v (pdf d x)] (dist-free d) v))
 
 ;;; pexp -- exponential CDF.
 ;;; Since: ST4
-(defn pexp [x :float rate :float] :float
+(defn pexp [x : float rate : float] : float
   (let [d (dist-exponential rate) v (cdf d x)] (dist-free d) v))
 
 ;;; qexp -- exponential quantile.
 ;;; Since: ST4
-(defn qexp [p :float rate :float] :float
+(defn qexp [p : float rate : float] : float
   (let [d (dist-exponential rate) v (quantile d p)] (dist-free d) v))
 
 ;;; rexp -- n exponential samples.
 ;;; Since: ST4
-(defn rexp [rng :int n :int rate :float] :int
+(defn rexp [rng : int n : int rate : float] : int
   (let [d (dist-exponential rate) v (random-n d rng n)] (dist-free d) v))
 
 ;;; dbeta -- beta density.
 ;;; Since: ST4
-(defn dbeta [x :float alpha :float beta :float] :float
+(defn dbeta [x : float alpha : float beta : float] : float
   (let [d (dist-beta alpha beta) v (pdf d x)] (dist-free d) v))
 
 ;;; pbeta -- beta CDF.
 ;;; Since: ST4
-(defn pbeta [x :float alpha :float beta :float] :float
+(defn pbeta [x : float alpha : float beta : float] : float
   (let [d (dist-beta alpha beta) v (cdf d x)] (dist-free d) v))
 
 ;;; qbeta -- beta quantile.
 ;;; Since: ST4
-(defn qbeta [p :float alpha :float beta :float] :float
+(defn qbeta [p : float alpha : float beta : float] : float
   (let [d (dist-beta alpha beta) v (quantile d p)] (dist-free d) v))
 
 ;;; rbeta -- n beta samples.
 ;;; Since: ST4
-(defn rbeta [rng :int n :int alpha :float beta :float] :int
+(defn rbeta [rng : int n : int alpha : float beta : float] : int
   (let [d (dist-beta alpha beta) v (random-n d rng n)] (dist-free d) v))
 
 ;;; dgamma -- gamma density.
 ;;; Since: ST4
-(defn dgamma [x :float shape :float rate :float] :float
+(defn dgamma [x : float shape : float rate : float] : float
   (let [d (dist-gamma shape rate) v (pdf d x)] (dist-free d) v))
 
 ;;; pgamma -- gamma CDF.
 ;;; Since: ST4
-(defn pgamma [x :float shape :float rate :float] :float
+(defn pgamma [x : float shape : float rate : float] : float
   (let [d (dist-gamma shape rate) v (cdf d x)] (dist-free d) v))
 
 ;;; qgamma -- gamma quantile.
 ;;; Since: ST4
-(defn qgamma [p :float shape :float rate :float] :float
+(defn qgamma [p : float shape : float rate : float] : float
   (let [d (dist-gamma shape rate) v (quantile d p)] (dist-free d) v))
 
 ;;; rgamma -- n gamma samples.
 ;;; Since: ST4
-(defn rgamma [rng :int n :int shape :float rate :float] :int
+(defn rgamma [rng : int n : int shape : float rate : float] : int
   (let [d (dist-gamma shape rate) v (random-n d rng n)] (dist-free d) v))
 
 ) ;; end defmodule stats/dist

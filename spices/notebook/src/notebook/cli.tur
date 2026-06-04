@@ -21,103 +21,103 @@
   ;; to file scope for the inline-C watcher, has been removed.  Watching is
   ;; now provided by the tur-watch spice and the headers travel with it.)
 
-  (defn __cli-nil-value [] #{Unsafe} :int
+  (defn __cli-nil-value [] #{Unsafe} : int
     ```c
     return 0;
     ```)
 
-  (defn __cli-null-cstr [] #{Unsafe} :cstr
+  (defn __cli-null-cstr [] #{Unsafe} : cstr
     ```c
     return (const char *)(intptr_t)0;
     ```)
 
-  (defn __cli-list-nil? [lst :int] #{Unsafe} :bool
+  (defn __cli-list-nil? [lst : int] #{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn __cli-head [lst :int] #{Unsafe} :cstr
+  (defn __cli-head [lst : int] #{Unsafe} : cstr
     ```c
     int64_t *cell = (int64_t *)(intptr_t)lst;
     return cell ? (const char *)(intptr_t)cell[0] : 0;
     ```)
 
-  (defn __cli-tail [lst :int] #{Unsafe} :int
+  (defn __cli-tail [lst : int] #{Unsafe} : int
     ```c
     int64_t *cell = (int64_t *)(intptr_t)lst;
     return cell ? cell[1] : 0;
     ```)
 
-  (defn __cli-cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn __cli-cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn __cli-cstr-null? [s :cstr] #{Unsafe} :bool
+  (defn __cli-cstr-null? [s : cstr] #{Unsafe} : bool
     ```c
     return ((const void *)(intptr_t)s) == NULL;
     ```)
 
-  (defn __cli-cstr-empty? [s :cstr] #{Unsafe} :bool
+  (defn __cli-cstr-empty? [s : cstr] #{Unsafe} : bool
     ```c
     const char *src = s ? (const char *)(intptr_t)s : "";
     return src[0] == '\0';
     ```)
 
-  (defn __cli-puts [s :cstr] #{Unsafe} :int
+  (defn __cli-puts [s : cstr] #{Unsafe} : int
     ```c
     const char *text = s ? (const char *)(intptr_t)s : "";
     printf("%s\n", text);
     return 0;
     ```)
 
-  (defn __cli-eputs [s :cstr] #{Unsafe} :int
+  (defn __cli-eputs [s : cstr] #{Unsafe} : int
     ```c
     const char *text = s ? (const char *)(intptr_t)s : "";
     fprintf(stderr, "%s\n", text);
     return 0;
     ```)
 
-  (defn __cli-result-ok? [result :int] #{Unsafe} :bool
+  (defn __cli-result-ok? [result : int] #{Unsafe} : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
     return r && r->is_ok;
     ```)
 
-  (defn __cli-result-ok-cstr [result :int] #{Unsafe} :cstr
+  (defn __cli-result-ok-cstr [result : int] #{Unsafe} : cstr
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
     return (r && r->is_ok) ? (const char *)(intptr_t)r->ok_val : "";
     ```)
 
-  (defn __cli-result-ok-int [result :int] #{Unsafe} :int
+  (defn __cli-result-ok-int [result : int] #{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
     return (r && r->is_ok) ? r->ok_val : 0;
     ```)
 
-  (defn __cli-result-err-cstr [result :int] #{Unsafe} :cstr
+  (defn __cli-result-err-cstr [result : int] #{Unsafe} : cstr
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
     return (r && !r->is_ok) ? (const char *)(intptr_t)r->err_val : "";
     ```)
 
-  (defn __cli-pos-count [lst :int] #{Unsafe} :int
+  (defn __cli-pos-count [lst : int] #{Unsafe} : int
     (if (__cli-list-nil? lst)
       0
       (+ 1 (__cli-pos-count (__cli-tail lst)))))
 
-  (defn __cli-pos-first [lst :int] #{Unsafe} :cstr
+  (defn __cli-pos-first [lst : int] #{Unsafe} : cstr
     (if (__cli-list-nil? lst) (__cli-null-cstr) (__cli-head lst)))
 
-  (defn __cli-pos-second [lst :int] #{Unsafe} :cstr
+  (defn __cli-pos-second [lst : int] #{Unsafe} : cstr
     (if (__cli-list-nil? lst)
       (__cli-null-cstr)
       (__cli-pos-first (__cli-tail lst))))
 
-  (defn __cli-parse-state-make [] #{Unsafe} :int
+  (defn __cli-parse-state-make [] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -152,7 +152,7 @@
     return (int64_t)(intptr_t)st;
     ```)
 
-  (defn __cli-state-command [state :int] #{Unsafe} :cstr
+  (defn __cli-state-command [state : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *command;
@@ -170,7 +170,7 @@
     return st && st->command ? st->command : "";
     ```)
 
-  (defn __cli-state-target [state :int] #{Unsafe} :cstr
+  (defn __cli-state-target [state : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *command;
@@ -188,7 +188,7 @@
     return st && st->target ? st->target : "";
     ```)
 
-  (defn __cli-state-path [state :int] #{Unsafe} :cstr
+  (defn __cli-state-path [state : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *command;
@@ -206,7 +206,7 @@
     return st && st->path ? st->path : "";
     ```)
 
-  (defn __cli-state-out [state :int] #{Unsafe} :cstr
+  (defn __cli-state-out [state : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *command;
@@ -224,7 +224,7 @@
     return st && st->out ? st->out : "";
     ```)
 
-  (defn __cli-state-error [state :int] #{Unsafe} :cstr
+  (defn __cli-state-error [state : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *command;
@@ -242,7 +242,7 @@
     return st && st->error_msg ? st->error_msg : "";
     ```)
 
-  (defn __cli-state-use-cache [state :int] #{Unsafe} :int
+  (defn __cli-state-use-cache [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -260,7 +260,7 @@
     return st ? st->use_cache : 0;
     ```)
 
-  (defn __cli-state-watch [state :int] #{Unsafe} :int
+  (defn __cli-state-watch [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -278,7 +278,7 @@
     return st ? st->watch : 0;
     ```)
 
-  (defn __cli-state-no-output [state :int] #{Unsafe} :int
+  (defn __cli-state-no-output [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -296,7 +296,7 @@
     return st ? st->no_output : 0;
     ```)
 
-  (defn __cli-state-no-source [state :int] #{Unsafe} :int
+  (defn __cli-state-no-source [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -314,7 +314,7 @@
     return st ? st->no_source : 0;
     ```)
 
-  (defn __cli-state-help [state :int] #{Unsafe} :int
+  (defn __cli-state-help [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -332,7 +332,7 @@
     return st ? st->help : 0;
     ```)
 
-  (defn __cli-state-set-command [state :int value :cstr] #{Unsafe} :int
+  (defn __cli-state-set-command [state : int value : cstr] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -353,7 +353,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-target [state :int value :cstr] #{Unsafe} :int
+  (defn __cli-state-set-target [state : int value : cstr] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -374,7 +374,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-path [state :int value :cstr] #{Unsafe} :int
+  (defn __cli-state-set-path [state : int value : cstr] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -395,7 +395,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-out [state :int value :cstr] #{Unsafe} :int
+  (defn __cli-state-set-out [state : int value : cstr] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -416,7 +416,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-error [state :int value :cstr] #{Unsafe} :int
+  (defn __cli-state-set-error [state : int value : cstr] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -437,7 +437,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-use-cache [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-use-cache [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -456,7 +456,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-watch [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-watch [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -475,7 +475,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-no-output [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-no-output [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -494,7 +494,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-no-source [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-no-source [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -513,7 +513,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-help [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-help [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -532,7 +532,7 @@
     return state;
     ```)
 
-  (defn __cli-state-keybindings-file [state :int] #{Unsafe} :cstr
+  (defn __cli-state-keybindings-file [state : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *command;
@@ -552,7 +552,7 @@
     return (st && st->keybindings_file) ? st->keybindings_file : "";
     ```)
 
-  (defn __cli-state-set-keybindings-file [state :int value :cstr] #{Unsafe} :int
+  (defn __cli-state-set-keybindings-file [state : int value : cstr] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -575,7 +575,7 @@
     return state;
     ```)
 
-  (defn __cli-state-no-color [state :int] #{Unsafe} :int
+  (defn __cli-state-no-color [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -595,7 +595,7 @@
     return st ? st->no_color : 0;
     ```)
 
-  (defn __cli-state-set-no-color [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-no-color [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command;
@@ -616,7 +616,7 @@
     return state;
     ```)
 
-  (defn __cli-prefix-value [token :cstr prefix :cstr] #{Unsafe} :cstr
+  (defn __cli-prefix-value [token : cstr prefix : cstr] #{Unsafe} : cstr
     ```c
     const char *tok = token ? (const char *)(intptr_t)token : "";
     const char *pre = prefix ? (const char *)(intptr_t)prefix : "";
@@ -625,7 +625,7 @@
     return (const char *)(intptr_t)(tok + n);
     ```)
 
-  (defn __cli-state-cell-id [state :int] #{Unsafe} :cstr
+  (defn __cli-state-cell-id [state : int] #{Unsafe} : cstr
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -637,7 +637,7 @@
     return st && st->cell_id ? st->cell_id : "";
     ```)
 
-  (defn __cli-state-exec-all [state :int] #{Unsafe} :int
+  (defn __cli-state-exec-all [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -649,7 +649,7 @@
     return st ? st->exec_all : 0;
     ```)
 
-  (defn __cli-state-set-cell-id [state :int value :cstr] #{Unsafe} :int
+  (defn __cli-state-set-cell-id [state : int value : cstr] #{Unsafe} : int
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -664,7 +664,7 @@
     return state;
     ```)
 
-  (defn __cli-state-set-exec-all [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-exec-all [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -678,7 +678,7 @@
     return state;
     ```)
 
-  (defn __cli-state-math-mode [state :int] #{Unsafe} :int
+  (defn __cli-state-math-mode [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -690,7 +690,7 @@
     return st ? st->math_mode : 0;
     ```)
 
-  (defn __cli-state-set-math-mode [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-math-mode [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -703,7 +703,7 @@
     return state;
     ```)
 
-  (defn __cli-state-assets-mode [state :int] #{Unsafe} :int
+  (defn __cli-state-assets-mode [state : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -715,7 +715,7 @@
     return st ? st->assets_mode : 0;
     ```)
 
-  (defn __cli-state-set-assets-mode [state :int value :int] #{Unsafe} :int
+  (defn __cli-state-set-assets-mode [state : int value : int] #{Unsafe} : int
     ```c
     typedef struct {
       char *command; char *target; char *path; char *out; char *error_msg;
@@ -728,7 +728,7 @@
     return state;
     ```)
 
-  (defn __cli-math-mode-parse [value :cstr] #{Unsafe} :int
+  (defn __cli-math-mode-parse [value : cstr] #{Unsafe} : int
     ```c
     const char *v = value ? (const char *)(intptr_t)value : "";
     if (strcmp(v, "always") == 0) return 1;
@@ -736,14 +736,14 @@
     return 0; /* auto */
     ```)
 
-  (defn __cli-assets-mode-parse [value :cstr] #{Unsafe} :int
+  (defn __cli-assets-mode-parse [value : cstr] #{Unsafe} : int
     ```c
     const char *v = value ? (const char *)(intptr_t)value : "";
     if (strcmp(v, "sibling") == 0) return 1;
     return 0; /* inline */
     ```)
 
-  (defn __cli-output-opts [state :int] #{Unsafe} :int
+  (defn __cli-output-opts [state : int] #{Unsafe} : int
     (render-opts-set-assets-mode
       (render-opts-set-math-mode
         (render-opts-make
@@ -755,7 +755,7 @@
         (__cli-state-math-mode state))
       (__cli-state-assets-mode state)))
 
-  (defn __cli-print-help [] #{Unsafe} :int
+  (defn __cli-print-help [] #{Unsafe} : int
     ```c
     printf("Usage: tur-nb <subcommand> [options] <args>\n\n");
     printf("Subcommands:\n");
@@ -767,7 +767,7 @@
     return 0;
     ```)
 
-  (defn __cli-render-once [path :cstr target :cstr opts :int] #{Unsafe} :int
+  (defn __cli-render-once [path : cstr target : cstr opts : int] #{Unsafe} : int
     (let [result (if (__cli-cstr-eq? target "html")
                    (render-html path opts)
                    (render-md path opts))]
@@ -795,7 +795,7 @@
   ;; --------------------------------------------------------------------
 
   ;;; __cli-watch-loop -- block until the target changes, rerender, repeat.
-  (defn __cli-watch-loop [watcher :int path :cstr target :cstr opts :int] #{Unsafe} :int
+  (defn __cli-watch-loop [watcher : int path : cstr target : cstr opts : int] #{Unsafe} : int
     (let [ev (watch-next watcher -1)]
       (if (= ev 0)
         1
@@ -807,7 +807,7 @@
               code))))))
 
   ;;; __cli-render-or-watch -- one-shot render, or render + watch + rerender.
-  (defn __cli-render-or-watch [path :cstr target :cstr opts :int watch? :bool] #{Unsafe} :int
+  (defn __cli-render-or-watch [path : cstr target : cstr opts : int watch? : bool] #{Unsafe} : int
     (if watch?
       (let [watcher (watch-open-one path 0)]
         (if (= watcher 0)
@@ -825,7 +825,7 @@
                 code)))))
       (__cli-render-once path target opts)))
 
-  (defn __cli-parse-positional [rest :int state :int tok :cstr] #{Unsafe} :int
+  (defn __cli-parse-positional [rest : int state : int tok : cstr] #{Unsafe} : int
     (if (__cli-cstr-empty? (__cli-state-command state))
       (if (or (__cli-cstr-eq? tok "render")
               (or (__cli-cstr-eq? tok "export")
@@ -858,7 +858,7 @@
                 (__cli-state-set-error state "new accepts exactly one file path"))
               (__cli-state-set-error state "unknown subcommand"))))))))
 
-  (defn __cli-parse-args [tokens :int state :int pending :cstr] #{Unsafe} :int
+  (defn __cli-parse-args [tokens : int state : int pending : cstr] #{Unsafe} : int
     (if (or (not (__cli-cstr-empty? (__cli-state-error state)))
             (__cli-list-nil? tokens))
       (if (and (__cli-list-nil? tokens) (not (__cli-cstr-empty? pending)))
@@ -921,7 +921,7 @@
                                                      (__cli-state-set-error state "unknown option")
                                                      (__cli-parse-args rest (__cli-parse-positional rest state tok) ""))))))))))))))))))))))))))))
 
-  (defn __cli-handle-render [state :int] #{Unsafe} :int
+  (defn __cli-handle-render [state : int] #{Unsafe} : int
     (let [path (__cli-state-path state)
           target (if (__cli-cstr-empty? (__cli-state-target state))
                   "md"
@@ -938,7 +938,7 @@
             1)
           (__cli-render-or-watch path target opts (= (__cli-state-watch state) 1))))))
 
-  (defn __cli-handle-export [state :int] #{Unsafe} :int
+  (defn __cli-handle-export [state : int] #{Unsafe} : int
     (let [path (__cli-state-path state)
           fmt (__cli-state-target state)
           opts (__cli-output-opts state)]
@@ -953,7 +953,7 @@
             1)
           (__cli-render-or-watch path fmt opts (= (__cli-state-watch state) 1))))))
 
-  (defn __cli-handle-tui [state :int] #{Unsafe} :int
+  (defn __cli-handle-tui [state : int] #{Unsafe} : int
     (let [path (__cli-state-path state)
           opts (tui-opts-make
                  (if (= (__cli-state-no-color state) 1) 0 1)
@@ -971,7 +971,7 @@
              (__cli-eputs (__cli-result-err-cstr result))
              1))))))
 
-  (defn __cli-cells-from-nodes [nodes :int] #{Unsafe} :int
+  (defn __cli-cells-from-nodes [nodes : int] #{Unsafe} : int
     ```c
     typedef struct { int64_t head; int64_t tail; } __NbCons;
     typedef struct { int64_t tag; int64_t prose; int64_t cell; } __NbNode;
@@ -1000,7 +1000,7 @@
     return (int64_t)rev;
     ```)
 
-  (defn __cli-print-outputs [outputs :int] #{Unsafe} :int
+  (defn __cli-print-outputs [outputs : int] #{Unsafe} : int
     ```c
     typedef struct { int64_t head; int64_t tail; } __NbCons;
     typedef struct {
@@ -1031,14 +1031,14 @@
     return (int64_t)rc;
     ```)
 
-  (defn __cli-file-exists? [path :cstr] #{Unsafe} :int
+  (defn __cli-file-exists? [path : cstr] #{Unsafe} : int
     ```c
     FILE *f = fopen((char*)path, "r");
     if (f) { fclose(f); return 1; }
     return 0;
     ```)
 
-  (defn __cli-write-file [path :cstr contents :cstr] #{Unsafe} :int
+  (defn __cli-write-file [path : cstr contents : cstr] #{Unsafe} : int
     ```c
     FILE *f = fopen((char*)path, "w");
     if (!f) return 1;
@@ -1047,7 +1047,7 @@
     return 0;
     ```)
 
-  (defn __cli-handle-exec [state :int] #{Unsafe} :int
+  (defn __cli-handle-exec [state : int] #{Unsafe} : int
     (let [path (__cli-state-path state)
           cell-id (__cli-state-cell-id state)
           exec-all (__cli-state-exec-all state)]
@@ -1078,7 +1078,7 @@
                       (session-close session)
                       (__cli-print-outputs outputs)))))))))))
 
-  (defn __cli-handle-new [state :int] #{Unsafe} :int
+  (defn __cli-handle-new [state : int] #{Unsafe} : int
     (let [path (__cli-state-path state)]
       (if (__cli-cstr-empty? path)
         (do
@@ -1099,7 +1099,7 @@
                 1)))))))
 
   ;;; cli-main -- parse notebook CLI args and execute the chosen subcommand.
-  (defn cli-main [argv :int] #{Unsafe} :int
+  (defn cli-main [argv : int] #{Unsafe} : int
     (let [args (if (and (not (__cli-list-nil? argv))
                        (__cli-cstr-eq? (__cli-head argv) "nb"))
                  (__cli-tail argv)

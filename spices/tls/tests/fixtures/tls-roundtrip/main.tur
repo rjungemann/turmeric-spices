@@ -37,7 +37,7 @@
   ;; bytes back. Returns 0 on a clean exchange, non-zero on any failure.
   ;; Buffer is malloc'd via inline-C since tls-read/write take :int
   ;; pointers; we don't expose a Turmeric-side buffer type for v0.1.0.
-  (defn echo-once [conn :int] :int
+  (defn echo-once [conn : int] : int
     ```c
     /* __tur_include__: #include <stdlib.h> */
     unsigned char *buf = (unsigned char *)malloc(64);
@@ -55,7 +55,7 @@
   ;; echo one record, shutdown, free everything. Returns 0 on success
   ;; or a non-zero step-id on failure. Pure Turmeric -- exercises every
   ;; tls/ctx and tls/conn entry point through the public API.
-  (defn server-side [fd :int cert-path :cstr key-path :cstr] :int
+  (defn server-side [fd : int cert-path : cstr key-path : cstr] : int
     (let [ctx (tls-ctx-new)]
       (if (= ctx 0)
         1
@@ -81,7 +81,7 @@
   ;; (defined in run-roundtrip's inline-C); unpacks it, calls
   ;; server-side, writes the result back into the struct so the main
   ;; thread can inspect it after pthread_join.
-  (defn server-thread-fn [arg :ptr<void>] :ptr<void>
+  (defn server-thread-fn [arg : ptr<void>] : ptr<void>
     ```c
     struct rt_args { int fd; const char *cert; const char *key; int err; };
     struct rt_args *sa = (struct rt_args *)arg;
@@ -96,7 +96,7 @@
   ;;   1..9    -- failure in setup (socketpair, pthread_create, ...)
   ;;   100+    -- client-side mbedTLS failure (200..299) or echo mismatch
   ;;   1000+   -- server-thread failure (1000 + step-id from server-side)
-  (defn run-roundtrip [cert-path :cstr key-path :cstr msg :cstr msg-len :int] :int
+  (defn run-roundtrip [cert-path : cstr key-path : cstr msg : cstr msg-len : int] : int
     ```c
     /* __tur_include__: #include <stdio.h> */
     /* __tur_include__: #include <stdlib.h> */
@@ -195,7 +195,7 @@ cleanup:
     return 0;
     ```)
 
-  (defn main [] :int
+  (defn main [] : int
     ;; Touch the autolink hint so the mbedtls link flags reach the cc
     ;; line even when only Turmeric-via-inline-C uses mbedtls.
     (tls-autolink-hint)

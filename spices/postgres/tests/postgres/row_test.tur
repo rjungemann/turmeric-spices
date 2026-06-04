@@ -17,14 +17,14 @@
   ;; verifying that the module loads, all symbols are exported, and the
   ;; functions do not crash when called with a null/zero handle where safe.
 
-  (defn __safe-rows-count [] :int
+  (defn __safe-rows-count [] : int
     ```c
     #include <libpq-fe.h>
     // PQntuples(NULL) returns 0 in libpq -- safe to call.
     return (int64_t)PQntuples(NULL);
     ```)
 
-  (defn __safe-col-count [] :int
+  (defn __safe-col-count [] : int
     ```c
     #include <libpq-fe.h>
     return (int64_t)PQnfields(NULL);
@@ -54,6 +54,6 @@
       (assert-eq 1 1)))
 
 
-  (defn main [] :int
+  (defn main [] : int
     (run-all)
     0))

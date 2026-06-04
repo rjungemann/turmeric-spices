@@ -18,9 +18,9 @@
   (import test/runner   :refer [run-all])
 
   ;; Test-local cons / cstr helpers.
-  (defn t-nil [] :int ```c return 0; ```)
+  (defn t-nil [] : int ```c return 0; ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -32,19 +32,19 @@
     ```)
 
   ;; cstr->int casts a :cstr to an int slot so t-cons can carry it.
-  (defn cstr->int [s :cstr] :int
+  (defn cstr->int [s : cstr] : int
     ```c
     #include <stdint.h>
     return (int64_t)(intptr_t)s;
     ```)
 
-  (defn t-cstr= [a :cstr b :cstr] :bool
+  (defn t-cstr= [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)(intptr_t)a, (const char *)(intptr_t)b) == 0;
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
     ;; ---------- frame/column utf8 ----------
 
@@ -204,7 +204,7 @@
             (column-free c)
             (assert-true ok))))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

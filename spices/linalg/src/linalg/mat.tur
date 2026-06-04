@@ -17,16 +17,16 @@
   data  :int)
 
 ;;; Private helper: allocate float array
-(defn mat--alloc-data [n] :int
+(defn mat--alloc-data [n] : int
   (malloc (* n 8)))
 
 ;;; Private helper: free float array
-(defn mat--free-data [data] :void
+(defn mat--free-data [data] : void
   (free data))
 
 ;;; mat-new -- create an uninitialized m x n matrix
 ;;; Returns: mat
-(defn mat-new [rows cols] :int
+(defn mat-new [rows cols] : int
   (let [m (malloc (sizeof mat))
         data (mat--alloc-data (* rows cols))]
     (set! (mat-rows m) rows)
@@ -36,7 +36,7 @@
 
 ;;; mat-new-zeroed -- create an m x n matrix filled with zeros
 ;;; Returns: mat
-(defn mat-new-zeroed [rows cols] :int
+(defn mat-new-zeroed [rows cols] : int
   (let [m (mat-new rows cols)
         data (mat-data m)
         n (* rows cols)]
@@ -46,7 +46,7 @@
 
 ;;; mat-identity -- create an n x n identity matrix
 ;;; Returns: mat
-(defn mat-identity [n] :int
+(defn mat-identity [n] : int
   (let [m (mat-new-zeroed n n)
         data (mat-data m)]
     (dotimes [i n]
@@ -56,7 +56,7 @@
 ;;; mat-diag -- create a diagonal matrix from a vector
 ;;; v: vec (column vector)
 ;;; Returns: mat (n x n diagonal matrix)
-(defn mat-diag [v] :int
+(defn mat-diag [v] : int
   (let [n (vec-len v)
         m (mat-new-zeroed n n)
         data (mat-data m)
@@ -70,7 +70,7 @@
 ;;; cols: number of columns
 ;;; data: cons list of floats (must have rows*cols elements)
 ;;; Returns: mat or err
-(defn mat-from-list [rows cols data] :int
+(defn mat-from-list [rows cols data] : int
   (let [n (* rows cols)
         m (mat-new rows cols)
         mdata (mat-data m)]
@@ -89,7 +89,7 @@
 ;;; mat-copy -- create a deep copy of a matrix
 ;;; m: mat
 ;;; Returns: mat
-(defn mat-copy [m] :int
+(defn mat-copy [m] : int
   (let [rows (mat-rows m)
         cols (mat-cols m)
         copy (mat-new rows cols)
@@ -103,24 +103,24 @@
 ;;; mat-free -- free a matrix
 ;;; m: mat
 ;;; Returns: :void
-(defn mat-free [m] :void
+(defn mat-free [m] : void
   (mat--free-data (mat-data m))
   (free m))
 
 ;;; mat-rows -- get number of rows
 ;;; m: mat
 ;;; Returns: :int
-(defn mat-rows [m] :int (mat-rows m))
+(defn mat-rows [m] : int (mat-rows m))
 
 ;;; mat-cols -- get number of columns
 ;;; m: mat
 ;;; Returns: :int
-(defn mat-cols [m] :int (mat-cols m))
+(defn mat-cols [m] : int (mat-cols m))
 
 ;;; mat-shape -- get matrix shape as (cons rows cols)
 ;;; m: mat
 ;;; Returns: cons of (:int . :int)
-(defn mat-shape [m] :int
+(defn mat-shape [m] : int
   (cons (mat-rows m) (mat-cols m)))
 
 ;;; mat-get -- get element at (r, c) with bounds checking
@@ -128,7 +128,7 @@
 ;;; r: row index
 ;;; c: column index
 ;;; Returns: :float or raises error
-(defn mat-get [m r c] :float
+(defn mat-get [m r c] : float
   (let [rows (mat-rows m)
         cols (mat-cols m)]
     (when (or (< r 0) (>= r rows) (< c 0) (>= c cols))
@@ -141,7 +141,7 @@
 ;;; c: column index
 ;;; v: value
 ;;; Returns: :void
-(defn mat-set! [m r c v] :void
+(defn mat-set! [m r c v] : void
   (let [rows (mat-rows m)
         cols (mat-cols m)]
     (when (or (< r 0) (>= r rows) (< c 0) (>= c cols))
@@ -152,7 +152,7 @@
 ;;; m: mat
 ;;; r: row index
 ;;; Returns: vec
-(defn mat-row [m r] :int
+(defn mat-row [m r] : int
   (let [cols (mat-cols m)
         mdata (mat-data m)
         v (vec-new cols)
@@ -165,7 +165,7 @@
 ;;; m: mat
 ;;; c: column index
 ;;; Returns: vec
-(defn mat-col [m c] :int
+(defn mat-col [m c] : int
   (let [rows (mat-rows m)
         cols (mat-cols m)
         mdata (mat-data m)
@@ -182,7 +182,7 @@
 ;;; r1: end row (exclusive)
 ;;; c1: end column (exclusive)
 ;;; Returns: mat
-(defn mat-submat [m r0 c0 r1 c1] :int
+(defn mat-submat [m r0 c0 r1 c1] : int
   (let [rows (mat-rows m)
         cols (mat-cols m)]
     (when (or (< r0 0) (>= r0 rows) (> r1 rows) (< r1 r0)
@@ -205,7 +205,7 @@
 ;;; a: mat
 ;;; b: mat (must have same dimensions as a)
 ;;; Returns: mat
-(defn mat-add [a b] :int
+(defn mat-add [a b] : int
   (let [arows (mat-rows a)
         acols (mat-cols a)
         brows (mat-rows b)
@@ -225,7 +225,7 @@
 ;;; a: mat
 ;;; b: mat (must have same dimensions as a)
 ;;; Returns: mat
-(defn mat-sub [a b] :int
+(defn mat-sub [a b] : int
   (let [arows (mat-rows a)
         acols (mat-cols a)
         brows (mat-rows b)
@@ -245,7 +245,7 @@
 ;;; m: mat
 ;;; s: scalar (:float)
 ;;; Returns: mat
-(defn mat-scale [m s] :int
+(defn mat-scale [m s] : int
   (let [rows (mat-rows m)
         cols (mat-cols m)
         c (mat-new rows cols)
@@ -260,7 +260,7 @@
 ;;; a: mat (m x n)
 ;;; b: mat (n x p)
 ;;; Returns: mat (m x p)
-(defn mat-mul [a b] :int
+(defn mat-mul [a b] : int
   (let [arows (mat-rows a)
         acols (mat-cols a)
         brows (mat-rows b)
@@ -284,7 +284,7 @@
 ;;; m: mat (m x n)
 ;;; v: vec (length n)
 ;;; Returns: vec (length m)
-(defn mat-mul-vec [m v] :int
+(defn mat-mul-vec [m v] : int
   (let [mrows (mat-rows m)
         mcols (mat-cols m)
         vlen (vec-len v)]
@@ -305,7 +305,7 @@
 ;;; mat-transpose -- transpose a matrix
 ;;; m: mat (m x n)
 ;;; Returns: mat (n x m)
-(defn mat-transpose [m] :int
+(defn mat-transpose [m] : int
   (let [rows (mat-rows m)
         cols (mat-cols m)
         t (mat-new cols rows)
@@ -320,7 +320,7 @@
 ;;; mat-trace -- sum of diagonal elements (for square matrices)
 ;;; m: mat (must be square)
 ;;; Returns: :float
-(defn mat-trace [m] :float
+(defn mat-trace [m] : float
   (let [rows (mat-rows m)
         cols (mat-cols m)]
     (when (not= rows cols)
@@ -334,7 +334,7 @@
 ;;; mat-norm-fro -- Frobenius norm (sqrt of sum of squares of all elements)
 ;;; m: mat
 ;;; Returns: :float
-(defn mat-norm-fro [m] :float
+(defn mat-norm-fro [m] : float
   (let [rows (mat-rows m)
         cols (mat-cols m)
         mdata (mat-data m)
@@ -348,7 +348,7 @@
 ;;; mat-norm-max -- maximum absolute element
 ;;; m: mat
 ;;; Returns: :float
-(defn mat-norm-max [m] :float
+(defn mat-norm-max [m] : float
   (let [rows (mat-rows m)
         cols (mat-cols m)
         mdata (mat-data m)
@@ -364,7 +364,7 @@
 ;;; mat-square? -- check if matrix is square
 ;;; m: mat
 ;;; Returns: :int (1 if square, 0 otherwise)
-(defn mat-square? [m] :int
+(defn mat-square? [m] : int
   (if (= (mat-rows m) (mat-cols m)) 1 0))
 
 ;;; mat-approx-eq? -- check if two matrices are approximately equal
@@ -372,7 +372,7 @@
 ;;; b: mat
 ;;; tol: tolerance (max absolute difference allowed)
 ;;; Returns: :int (1 if approximately equal, 0 otherwise)
-(defn mat-approx-eq? [a b tol] :int
+(defn mat-approx-eq? [a b tol] : int
   (let [arows (mat-rows a)
         acols (mat-cols a)
         brows (mat-rows b)

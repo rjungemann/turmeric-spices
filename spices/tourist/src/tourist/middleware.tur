@@ -22,14 +22,14 @@
 ;; -- Internal: cons list accessors -----------------------------------------
 
 ;;; __mw-cons-head -- head of a Turmeric cons list cell.
-(defn __mw-cons-head [lst :int] :int
+(defn __mw-cons-head [lst : int] : int
   ```c
   typedef struct { int64_t head; int64_t tail; } __tur_cons;
   return ((__tur_cons *)(intptr_t)lst)->head;
   ```)
 
 ;;; __mw-cons-tail -- tail of a Turmeric cons list cell.
-(defn __mw-cons-tail [lst :int] :int
+(defn __mw-cons-tail [lst : int] : int
   ```c
   typedef struct { int64_t head; int64_t tail; } __tur_cons;
   return ((__tur_cons *)(intptr_t)lst)->tail;
@@ -55,7 +55,7 @@
 ;;;           (none)))
 ;;;
 ;;; Since: v0.1.0
-(defn use! [fn :int] :int
+(defn use! [fn : int] : int
   (route-new "__mw" 0 fn))
 
 ;; -- Internal helpers for tourist/app --------------------------------------
@@ -72,7 +72,7 @@
 ;;;   :bool
 ;;;
 ;;; Since: v0.1.0
-(defn mw-item? [item :int] :bool
+(defn mw-item? [item : int] : bool
   ```c
   #include <string.h>
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
@@ -90,7 +90,7 @@
 ;;;   :int -- option<Response>: 0 = none (continue), non-zero = some(resp)
 ;;;
 ;;; Since: v0.1.0
-(defn mw-call [mw :int req :int] :int
+(defn mw-call [mw : int req : int] : int
   (route-call-handler mw req))
 
 ;;; mw-chain-run -- run a cons list of middleware handles in order.
@@ -111,7 +111,7 @@
 ;;;     (when (not= opt 0) ...))
 ;;;
 ;;; Since: v0.1.0
-(defn mw-chain-run [mws :int req :int] :int
+(defn mw-chain-run [mws : int req : int] : int
   (if (= mws 0)
     0
     (let [result (mw-call (__mw-cons-head mws) req)]

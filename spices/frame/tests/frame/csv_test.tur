@@ -15,25 +15,25 @@
   (import test/suite   :refer [describe it])
   (import test/runner  :refer [run-all])
 
-  (defn t-cstr= [a :cstr b :cstr] :bool
+  (defn t-cstr= [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)(intptr_t)a, (const char *)(intptr_t)b) == 0;
     ```)
 
-  (defn t-cstr-contains? [hay :cstr needle :cstr] :bool
+  (defn t-cstr-contains? [hay : cstr needle : cstr] : bool
     ```c
     #include <string.h>
     return strstr((const char *)(intptr_t)hay, (const char *)(intptr_t)needle) != NULL;
     ```)
 
-  (defn t-strlen [s :cstr] :int
+  (defn t-strlen [s : cstr] : int
     ```c
     #include <string.h>
     return (int64_t)strlen((const char *)(intptr_t)s);
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
     (describe "read-csv-string"
       (it "parses a simple header + two-row int CSV"
@@ -155,7 +155,7 @@
           (frame-free a) (frame-free b)
           (assert-true ok)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

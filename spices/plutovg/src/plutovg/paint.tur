@@ -27,7 +27,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -35,7 +35,7 @@
   ```)
 
 ;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e :int] :ptr<void>
+(defn __err [e : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
@@ -67,7 +67,7 @@
 ;;;   (paint-create-color 1.0 0.0 0.0 1.0)  ; opaque red
 ;;;
 ;;; Since: PV3
-(defn paint-create-color [r :float g :float b :float a :float] :ptr<void>
+(defn paint-create-color [r : float g : float b : float a : float] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -91,7 +91,7 @@
 ;;;   (paint-create-color-hex "#ff0000")
 ;;;
 ;;; Since: PV3
-(defn paint-create-color-hex [hex :cstr] :ptr<void>
+(defn paint-create-color-hex [hex : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -119,7 +119,7 @@
 ;;;   void
 ;;;
 ;;; Since: PV3
-(defn paint-destroy [paint :int] :void
+(defn paint-destroy [paint : int] : void
   ```c
   #include <plutovg.h>
   if (paint) plutovg_paint_destroy((plutovg_paint_t *)(intptr_t)paint);
@@ -148,7 +148,7 @@
 ;;;     (when (ok? s) (gradient-stops-destroy (ok-val s))))
 ;;;
 ;;; Since: PV3
-(defn gradient-stops-create [] :ptr<void>
+(defn gradient-stops-create [] : ptr<void>
   ```c
   #include <stdlib.h>
   /* Header { int cap; int count; } + initial 8 stops (40 floats). */
@@ -181,8 +181,8 @@
 ;;;   (gradient-stops-add s 1.0 0.0 0.0 1.0 1.0)
 ;;;
 ;;; Since: PV3
-(defn gradient-stops-add [stops :int offset :float r :float g :float
-                          b :float a :float] :void
+(defn gradient-stops-add [stops : int offset : float r : float g : float
+                          b : float a : float] : void
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -219,7 +219,7 @@
 ;;; gradient-stops-count -- return how many stops have been added.
 ;;;
 ;;; Since: PV3
-(defn gradient-stops-count [stops :int] :int
+(defn gradient-stops-count [stops : int] : int
   ```c
   char *buf = (char *)(intptr_t)stops;
   if (!buf) return 0;
@@ -229,7 +229,7 @@
 ;;; gradient-stops-destroy -- release a stops buffer.
 ;;;
 ;;; Since: PV3
-(defn gradient-stops-destroy [stops :int] :void
+(defn gradient-stops-destroy [stops : int] : void
   ```c
   #include <stdlib.h>
   if (stops) free((void *)(intptr_t)stops);
@@ -264,8 +264,8 @@
 ;;;       (paint-destroy p)))
 ;;;
 ;;; Since: PV3
-(defn paint-create-linear-gradient [x1 :float y1 :float x2 :float y2 :float
-                                    spread :cstr stops :int] :ptr<void>
+(defn paint-create-linear-gradient [x1 : float y1 : float x2 : float y2 : float
+                                    spread : cstr stops : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -307,9 +307,9 @@
 ;;;   (ok paint-handle) on success; (err 0) on allocation failure.
 ;;;
 ;;; Since: PV3
-(defn paint-create-radial-gradient [cx :float cy :float cr :float
-                                    fx :float fy :float fr :float
-                                    spread :cstr stops :int] :ptr<void>
+(defn paint-create-radial-gradient [cx : float cy : float cr : float
+                                    fx : float fy : float fr : float
+                                    spread : cstr stops : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -355,7 +355,7 @@
 ;;;   (paint-create-texture s ":plain" 1.0)
 ;;;
 ;;; Since: PV3
-(defn paint-create-texture [surface :int tex-type :cstr opacity :float] :ptr<void>
+(defn paint-create-texture [surface : int tex-type : cstr opacity : float] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -391,7 +391,7 @@
 ;;;   (canvas-set-source c my-paint)
 ;;;
 ;;; Since: PV3
-(defn canvas-set-source [c :int paint :int] :void
+(defn canvas-set-source [c : int paint : int] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_paint((plutovg_canvas_t *)(intptr_t)c,

@@ -8,20 +8,20 @@
   (import test/suite   :refer [describe it])
   (import test/runner  :refer [run-all])
 
-  (defn approx= [x :float y :float tol :float] :bool
+  (defn approx= [x : float y : float tol : float] : bool
     ```c
     #include <math.h>
     return fabs(x - y) <= tol;
     ```)
 
-  (defn ok? [r :int] :bool
+  (defn ok? [r : int] : bool
     ```c
     struct __cons { int64_t value; int64_t next; };
     struct __cons *c = (struct __cons *)(intptr_t)r;
     return c && c->value == 0;
     ```)
 
-  (defn tr-ci-low [r :int] :float
+  (defn tr-ci-low [r : int] : float
     ```c
     typedef struct {
       const char *name; double statistic; double df1; double df2;
@@ -31,7 +31,7 @@
     return ((__test_result_t *)(intptr_t)r)->ci_low;
     ```)
 
-  (defn tr-ci-high [r :int] :float
+  (defn tr-ci-high [r : int] : float
     ```c
     typedef struct {
       const char *name; double statistic; double df1; double df2;
@@ -41,7 +41,7 @@
     return ((__test_result_t *)(intptr_t)r)->ci_high;
     ```)
 
-  (defn tr-statistic [r :int] :float
+  (defn tr-statistic [r : int] : float
     ```c
     typedef struct {
       const char *name; double statistic; double df1; double df2;
@@ -51,7 +51,7 @@
     return ((__test_result_t *)(intptr_t)r)->statistic;
     ```)
 
-  (defn tr-pvalue [r :int] :float
+  (defn tr-pvalue [r : int] : float
     ```c
     typedef struct {
       const char *name; double statistic; double df1; double df2;
@@ -61,7 +61,7 @@
     return ((__test_result_t *)(intptr_t)r)->p_value;
     ```)
 
-  (defn make-col10 [] :int
+  (defn make-col10 [] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -79,7 +79,7 @@
     return (int64_t)(intptr_t)fc;
     ```)
 
-  (defn list-len [xs :int] :int
+  (defn list-len [xs : int] : int
     ```c
     struct __cons { int64_t value; int64_t next; };
     int64_t n=0;
@@ -88,14 +88,14 @@
     return n;
     ```)
 
-  (defn frame-nrows [f :int] :int
+  (defn frame-nrows [f : int] : int
     ```c
     struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
     return ((struct __frame *)(intptr_t)f)->nrows;
     ```)
 
   ;; A trivial frame with one float64 column of 20 rows.
-  (defn make-frame20 [] :int
+  (defn make-frame20 [] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -124,7 +124,7 @@
     return (int64_t)(intptr_t)fr;
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
   (describe "stats/sample bootstrap"
     (it "bootstrap returns non-zero result"
@@ -175,7 +175,7 @@
         (rng-free r)
         (assert-true (ok? res))))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

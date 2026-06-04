@@ -30,7 +30,7 @@
 ;;; Cell values longer than 32 characters are truncated with an ellipsis.
 ;;;
 ;;; Since: FR0
-(defn print-frame [f :int] :void
+(defn print-frame [f : int] : void
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -215,7 +215,7 @@
 ;;; cstr-free helper).  For FR0 this re-runs the formatter into a malloc'd
 ;;; buffer rather than wiring up captured stdio.
 ;;; Since: FR0
-(defn frame->str [f :int] :cstr
+(defn frame->str [f : int] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -385,9 +385,9 @@
 ;; FR7 -- describe
 ;; ---------------------------------------------------------------------------
 
-(defn __ds-nil [] :int ```c return 0; ```)
+(defn __ds-nil [] : int ```c return 0; ```)
 
-(defn __ds-cons [v :int n :int] :int
+(defn __ds-cons [v : int n : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -402,7 +402,7 @@
 ;;; opaque handle (int).  Layout: int64_t count followed by 7 doubles
 ;;; (mean, std, min, q25, median, q75, max).  Caller must free with __ds-free.
 ;;; Returns 0 if the column has no non-null values.
-(defn __ds-stats [col :int] :int
+(defn __ds-stats [col : int] : int
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -481,21 +481,21 @@
   return (int64_t)(intptr_t)ds;
   ```)
 
-(defn __ds-count [h :int] :int  ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->count; ```)
-(defn __ds-mean  [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mean; ```)
-(defn __ds-std   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->std; ```)
-(defn __ds-mn    [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mn; ```)
-(defn __ds-q25   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->q25; ```)
-(defn __ds-med   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->med; ```)
-(defn __ds-q75   [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->q75; ```)
-(defn __ds-mx    [h :int] :float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mx; ```)
-(defn __ds-free  [h :int] :void  ```c #include <stdlib.h> #include <stdint.h> if (h) free((void *)(intptr_t)h); ```)
+(defn __ds-count [h : int] : int  ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->count; ```)
+(defn __ds-mean  [h : int] : float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mean; ```)
+(defn __ds-std   [h : int] : float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->std; ```)
+(defn __ds-mn    [h : int] : float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mn; ```)
+(defn __ds-q25   [h : int] : float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->q25; ```)
+(defn __ds-med   [h : int] : float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->med; ```)
+(defn __ds-q75   [h : int] : float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->q75; ```)
+(defn __ds-mx    [h : int] : float ```c struct __ds { int64_t count; double mean,std,mn,q25,med,q75,mx; }; return ((struct __ds *)(intptr_t)h)->mx; ```)
+(defn __ds-free  [h : int] : void  ```c #include <stdlib.h> #include <stdint.h> if (h) free((void *)(intptr_t)h); ```)
 
-(defn __ds-is-numeric? [tt :int] :bool
+(defn __ds-is-numeric? [tt : int] : bool
   ;; tag 1=int32, 2=int64, 3=float32, 4=float64
   (or (= tt 1) (or (= tt 2) (or (= tt 3) (= tt 4)))))
 
-(defn __ds-name [sch :int c :int] :cstr
+(defn __ds-name [sch : int c : int] : cstr
   ```c
   #include <stdint.h>
   struct __frame_schema { int64_t n_fields; int64_t *fields; };
@@ -504,9 +504,9 @@
   return (const char *)(intptr_t)((struct __frame_field *)(intptr_t)sc->fields[c])->name;
   ```)
 
-(defn __ds-fill [f :int sch :int ncols :int c :int
-                 b-var :int b-count :int b-mean :int b-std :int
-                 b-min :int b-q25 :int b-med :int b-q75 :int b-max :int] :void
+(defn __ds-fill [f : int sch : int ncols : int c : int
+                 b-var : int b-count : int b-mean : int b-std : int
+                 b-min : int b-q25 : int b-med : int b-q75 : int b-max : int] : void
   (if (>= c ncols)
     nil
     (let [col (frame-column-at f c)
@@ -541,7 +541,7 @@
 ;;; float32 / float64).  Non-numeric columns are skipped silently.
 ;;;
 ;;; Since: FR7
-(defn frame-describe [f :int] :int
+(defn frame-describe [f : int] : int
   (let [sch    (frame-schema f)
         ncols  (frame-ncols f)
         b-var   (column-builder (type-utf8)    ncols)

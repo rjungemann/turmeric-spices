@@ -29,7 +29,7 @@
 ;; -- Internal: build pattern string "<prefix>/*" ----------------------------
 
 ;;; __static-pat-join -- build "<prefix>/*" by concatenating two cstrs.
-(defn __static-pat-join [prefix :cstr] :cstr
+(defn __static-pat-join [prefix : cstr] : cstr
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -46,7 +46,7 @@
 ;; -- Internal: allocate the extended static-route struct --------------------
 
 ;;; __static-route-alloc -- allocate a __tourist_static_route struct.
-(defn __static-route-alloc [prefix :cstr fs-root :cstr pat :int] :int
+(defn __static-route-alloc [prefix : cstr fs-root : cstr pat : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -86,7 +86,7 @@
 ;;;   (serve-static! "/assets" "./public")
 ;;;
 ;;; Since: v0.1.0
-(defn serve-static! [url-prefix :cstr fs-root :cstr] :int
+(defn serve-static! [url-prefix : cstr fs-root : cstr] : int
   (let [pat-str (__static-pat-join url-prefix)
         pat     (router-compile pat-str)]
     (__static-route-alloc url-prefix fs-root pat)))
@@ -103,7 +103,7 @@
 ;;;   :bool
 ;;;
 ;;; Since: v0.1.0
-(defn static-item? [item :int] :bool
+(defn static-item? [item : int] : bool
   ```c
   #include <string.h>
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
@@ -121,7 +121,7 @@
 ;;;   :cstr -- absolute or relative path to the served directory
 ;;;
 ;;; Since: v0.1.0
-(defn static-route-fs-root [route :int] :cstr
+(defn static-route-fs-root [route : int] : cstr
   ```c
   struct __tourist_static_route {
     char *method; int64_t pattern; int64_t handler;
@@ -147,7 +147,7 @@
 ;;;   :int -- Response handle (200 + body) on success, 0 on miss
 ;;;
 ;;; Since: v0.1.0
-(defn static-serve [fs-root :cstr rel-raw :int] :int
+(defn static-serve [fs-root : cstr rel-raw : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>

@@ -10,10 +10,10 @@
   (import test/suite   :refer [describe it])
   (import test/runner  :refer [run-all])
 
-  (defn saddle [x :float y :float] :float
+  (defn saddle [x : float y : float] : float
     (- (* x x) (* y y)))
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *c = malloc(sizeof(*c));
@@ -21,10 +21,10 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn colorize [x :float y :float] :int
+  (defn colorize [x : float y : float] : int
     (if (> (+ x y) 0.0) 1 0))
 
-  (defn file-size [path :cstr] :int
+  (defn file-size [path : cstr] : int
     ```c
     #include <sys/stat.h>
     struct stat st;
@@ -32,21 +32,21 @@
     return (int64_t)st.st_size;
     ```)
 
-  (defn contour-renderers [] :int
+  (defn contour-renderers [] : int
     (let [fills (t-cons (default-fill-style) (t-cons (default-fill-style) (t-cons (default-fill-style) 0)))]
       (vec-of (color-field colorize -2.0 2.0 -2.0 2.0 32 0.35)
               (contour-intervals saddle -2.0 2.0 -2.0 2.0 32 3 fills "bands")
               (contours saddle -2.0 2.0 -2.0 2.0 32 4 0 "contours")
               (isoline saddle -2.0 2.0 -2.0 2.0 32 0.0 (default-line-style) "zero"))))
 
-  (defn write-contour-png-ok [] :bool
+  (defn write-contour-png-ok [] : bool
     (let [rs (contour-renderers)]
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-contour.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-contour.png") 100)))))
 
   ;; Contour / color-field renderers should fill or stroke a large portion of
   ;; the plot interior. A blank image would have a much lower count.
-  (defn pixel-sanity-contour [] :bool
+  (defn pixel-sanity-contour [] : bool
     (let [rs (contour-renderers)
           rr (plot rs (default-plot-opts))]
       (if (__ok? rr)
@@ -58,9 +58,9 @@
                (assert-true (>i ink 500))))
         (assert-true false))))
 
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn >i [a : int b : int] : bool ```c return (int)a > (int)b; ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (describe "plot/contour"
       (it "renders contour-like plots"
         (write-contour-png-ok))

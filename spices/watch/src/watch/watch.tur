@@ -48,7 +48,7 @@
           watch-tree-dir-count watch-tree-dir-at)
 
   ;;; watch-supported? -- 1 if a real backend is compiled in.
-  (defn watch-supported? [] #{Unsafe} :int
+  (defn watch-supported? [] #{Unsafe} : int
     (backend-supported?))
 
   ;; --------------------------------------------------------------------
@@ -56,9 +56,9 @@
   ;; --------------------------------------------------------------------
 
   ;;; __watcher-make -- internal: allocate a watcher record around a backend.
-  (defn __watcher-make [backend :int dir :cstr base :cstr full-path :cstr
-                        debounce-ms :int coalesce :int attrib :int
-                        follow-moves :int] #{Unsafe} :int
+  (defn __watcher-make [backend : int dir : cstr base : cstr full-path : cstr
+                        debounce-ms : int coalesce : int attrib : int
+                        follow-moves : int] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <sys/stat.h> */
     /* __tur_include__: #include <stdlib.h> */
@@ -93,32 +93,32 @@
     return (int64_t)(intptr_t)w;
     ```)
 
-  (defn __watcher-backend [watcher :int] #{Unsafe} :int
+  (defn __watcher-backend [watcher : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     return w ? w->backend : 0;
     ```)
 
-  (defn __watcher-dir [watcher :int] #{Unsafe} :cstr
+  (defn __watcher-dir [watcher : int] #{Unsafe} : cstr
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     return (const char *)(w ? w->dir : "");
     ```)
 
-  (defn __watcher-full-path [watcher :int] #{Unsafe} :cstr
+  (defn __watcher-full-path [watcher : int] #{Unsafe} : cstr
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     return (const char *)(w ? w->full_path : "");
     ```)
 
-  (defn __watcher-debounce-ms [watcher :int] #{Unsafe} :int
+  (defn __watcher-debounce-ms [watcher : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     return w ? (int64_t)w->debounce_ms : 0;
     ```)
 
   ;;; __watcher-sleep-ms -- sleep for ms milliseconds.
-  (defn __watcher-sleep-ms [ms :int] #{Unsafe} :void
+  (defn __watcher-sleep-ms [ms : int] #{Unsafe} : void
     ```c
     /* __tur_include__: #include <unistd.h> */
     int v = (int)ms;
@@ -131,7 +131,7 @@
   ;;;   0 (watch-kind-none) if nothing material changed since the last
   ;;;   snapshot.  Otherwise one of watch-kind-write/create/delete/rename.
   ;;;   Updates the snapshot in place.
-  (defn __watcher-reclassify [watcher :int] #{Unsafe} :int
+  (defn __watcher-reclassify [watcher : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w) return 0;
@@ -175,7 +175,7 @@
 
   ;;; __watcher-split-dir -- return malloc'd dir component of an absolute or
   ;;; relative path.  Returns "." if path has no slash.
-  (defn __watcher-split-dir [path :cstr] #{Unsafe} :cstr
+  (defn __watcher-split-dir [path : cstr] #{Unsafe} : cstr
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     const char *slash = strrchr(p, '/');
@@ -197,7 +197,7 @@
     ```)
 
   ;;; __watcher-split-base -- return malloc'd basename component.
-  (defn __watcher-split-base [path :cstr] #{Unsafe} :cstr
+  (defn __watcher-split-base [path : cstr] #{Unsafe} : cstr
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     const char *slash = strrchr(p, '/');
@@ -205,7 +205,7 @@
     ```)
 
   ;;; __watcher-free-cstr -- release a string returned by the splitters.
-  (defn __watcher-free-cstr [s :cstr] #{Unsafe} :void
+  (defn __watcher-free-cstr [s : cstr] #{Unsafe} : void
     ```c
     char *p = (char *)(intptr_t)s;
     if (p) free(p);
@@ -222,7 +222,7 @@
   ;;;   opts -- options handle from watch/opts (may be 0 for defaults)
   ;;;
   ;;; Returns: watcher handle, or 0 on failure.
-  (defn watch-open-one [path :cstr opts :int] #{Unsafe} :int
+  (defn watch-open-one [path : cstr opts : int] #{Unsafe} : int
     (let [dir   (__watcher-split-dir  path)
           base  (__watcher-split-base path)
           back  (backend-open dir base)]
@@ -243,7 +243,7 @@
             w)))))
 
   ;;; __watcher-path-is-dir? -- 1 if `path` exists and is a directory.
-  (defn __watcher-path-is-dir? [path :cstr] #{Unsafe} :int
+  (defn __watcher-path-is-dir? [path : cstr] #{Unsafe} : int
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     if (!p[0]) return 0;
@@ -255,7 +255,7 @@
   ;; resolution issues in the type checker.)
 
   ;;; __watcher-release-storage -- free strings + struct (without backend).
-  (defn __watcher-release-storage [watcher :int] #{Unsafe} :void
+  (defn __watcher-release-storage [watcher : int] #{Unsafe} : void
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w) return;
@@ -292,7 +292,7 @@
   ;; --------------------------------------------------------------------
 
   ;;; __watcher-mode -- 0 for single-file, 1 for tree.
-  (defn __watcher-mode [watcher :int] #{Unsafe} :int
+  (defn __watcher-mode [watcher : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     return w ? (int64_t)w->mode : 0;
@@ -304,8 +304,8 @@
   ;;; initial walk.  Per-target stat snapshots are not maintained; tree mode
   ;;; emits opaque "directory changed" events and lets the caller decide
   ;;; what to do with them.
-  (defn __watcher-make-tree [root :cstr debounce-ms :int coalesce :int
-                             attrib :int follow-moves :int] #{Unsafe} :int
+  (defn __watcher-make-tree [root : cstr debounce-ms : int coalesce : int
+                             attrib : int follow-moves : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)calloc(1, sizeof(*w));
     if (!w) return 0;
@@ -323,7 +323,7 @@
 
   ;;; __watcher-tree-add-dir -- register a directory with the tree watcher.
   ;;; Returns the resulting count, or -1 if backend-open failed for `dir`.
-  (defn __watcher-tree-add-dir [watcher :int dir :cstr] #{Unsafe} :int
+  (defn __watcher-tree-add-dir [watcher : int dir : cstr] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1) return -1;
@@ -360,7 +360,7 @@
   ;;;
   ;;; Skips symlinks (no cycle following) and hidden entries.  Caps depth
   ;;; at 32 levels to keep pathological inputs bounded.
-  (defn __watcher-tree-walk [watcher :int dir :cstr depth :int] #{Unsafe} :int
+  (defn __watcher-tree-walk [watcher : int dir : cstr depth : int] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <dirent.h> */
     /* __tur_include__: #include <limits.h> */
@@ -403,7 +403,7 @@
   ;;;
   ;;; Returns:
   ;;;   index of the first ready backend (>= 0), or -1 on timeout / error.
-  (defn __watcher-tree-poll-fired [watcher :int timeout-ms :int] #{Unsafe} :int
+  (defn __watcher-tree-poll-fired [watcher : int timeout-ms : int] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <poll.h> */
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
@@ -428,7 +428,7 @@
 
   ;;; watch-tree-dir-count -- number of directories under tree-mode watch.
   ;;; Returns 0 for single-file watchers.
-  (defn watch-tree-dir-count [watcher :int] #{Unsafe} :int
+  (defn watch-tree-dir-count [watcher : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1) return 0;
@@ -436,7 +436,7 @@
     ```)
 
   ;;; watch-tree-dir-at -- get the i-th registered directory (read-only borrow).
-  (defn watch-tree-dir-at [watcher :int idx :int] #{Unsafe} :cstr
+  (defn watch-tree-dir-at [watcher : int idx : int] #{Unsafe} : cstr
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     int i = (int)idx;
@@ -445,7 +445,7 @@
     ```)
 
   ;;; __watcher-tree-dir-backend -- the backend handle for the i-th dir.
-  (defn __watcher-tree-dir-backend [watcher :int idx :int] #{Unsafe} :int
+  (defn __watcher-tree-dir-backend [watcher : int idx : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     int i = (int)idx;
@@ -455,7 +455,7 @@
 
   ;;; watch-close -- release a watcher.  Safe on 0.
   ;;; Closes the underlying backend(s) before freeing storage.
-  (defn watch-close [watcher :int] #{Unsafe} :void
+  (defn watch-close [watcher : int] #{Unsafe} : void
     (do
       (if (= (__watcher-mode watcher) 1)
         (__tree-close-backends watcher)
@@ -463,7 +463,7 @@
       (__watcher-release-storage watcher)))
 
   ;;; __tree-close-backends -- close every backend handle in a tree watcher.
-  (defn __tree-close-backends [watcher :int] #{Unsafe} :void
+  (defn __tree-close-backends [watcher : int] #{Unsafe} : void
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1) return;
@@ -486,7 +486,7 @@
   ;;;
   ;;; Called after the initial walk and after watch-refresh.  Frees any
   ;;; pre-existing snapshots before allocating new ones.
-  (defn __watcher-tree-snap-init [watcher :int] #{Unsafe} :void
+  (defn __watcher-tree-snap-init [watcher : int] #{Unsafe} : void
     ```c
     /* __tur_include__: typedef struct { char name[256]; long long ino; long long size; int is_dir; } TurSnapEntry; */
     /* __tur_include__: typedef struct { TurSnapEntry *entries; int n; int cap; } TurDirSnapshot; */
@@ -518,7 +518,7 @@
   ;;; new directory is created inside the tree.
   ;;;
   ;;; Returns a watcher handle, or 0 on failure.
-  (defn watch-open-tree [root :cstr opts :int] #{Unsafe} :int
+  (defn watch-open-tree [root : cstr opts : int] #{Unsafe} : int
     (let [w (__watcher-make-tree root
                                  (if (= opts 0) 150 (watch-opts-debounce-ms  opts))
                                  (if (= opts 0) 1   (watch-opts-coalesce     opts))
@@ -539,7 +539,7 @@
   ;;; If `path` resolves to a directory and `opts.recursive == 1`, opens a
   ;;; tree watcher.  Otherwise opens a single-file watcher.  Pass 0 for
   ;;; opts to use default-watch-opts (single-file, non-recursive).
-  (defn watch-open [path :cstr opts :int] #{Unsafe} :int
+  (defn watch-open [path : cstr opts : int] #{Unsafe} : int
     (if (and (not (= opts 0))
              (and (= (watch-opts-recursive opts) 1)
                   (= (__watcher-path-is-dir? path) 1)))
@@ -547,21 +547,21 @@
       (watch-open-one path opts)))
 
   ;;; watch-add-path -- v0.1.0 stub.  Multi-path explicit list lands with v0.2.
-  (defn watch-add-path [watcher :int path :cstr] #{Unsafe} :int
+  (defn watch-add-path [watcher : int path : cstr] #{Unsafe} : int
     ```c
     (void)watcher; (void)path;
     return -1;
     ```)
 
   ;;; watch-remove-path -- v0.1.0 stub.  Multi-path explicit list lands with v0.2.
-  (defn watch-remove-path [watcher :int path :cstr] #{Unsafe} :int
+  (defn watch-remove-path [watcher : int path : cstr] #{Unsafe} : int
     ```c
     (void)watcher; (void)path;
     return -1;
     ```)
 
   ;;; __watcher-tree-root -- tree-mode root path (read-only borrow).
-  (defn __watcher-tree-root [watcher :int] #{Unsafe} :cstr
+  (defn __watcher-tree-root [watcher : int] #{Unsafe} : cstr
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     return (const char *)((w && w->mode == 1 && w->root) ? w->root : "");
@@ -570,7 +570,7 @@
   ;;; watch-refresh -- re-walk a tree-mode watcher's root and register any
   ;;; new subdirectories that have appeared since open.  No-op on
   ;;; single-file watchers.  Returns the new directory count, or -1 on error.
-  (defn watch-refresh [watcher :int] #{Unsafe} :int
+  (defn watch-refresh [watcher : int] #{Unsafe} : int
     (if (= (__watcher-mode watcher) 1)
       (do
         (__watcher-tree-walk watcher (__watcher-tree-root watcher) 0)
@@ -587,7 +587,7 @@
   ;; --------------------------------------------------------------------
 
   ;;; __watcher-pending-push -- append an event to the tail of the pending queue.
-  (defn __watcher-pending-push [watcher :int ev :int] #{Unsafe} :void
+  (defn __watcher-pending-push [watcher : int ev : int] #{Unsafe} : void
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || ev == 0) return;
@@ -605,7 +605,7 @@
     ```)
 
   ;;; __watcher-pending-pop -- remove and return the oldest event (FIFO), or 0.
-  (defn __watcher-pending-pop [watcher :int] #{Unsafe} :int
+  (defn __watcher-pending-pop [watcher : int] #{Unsafe} : int
     ```c
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->pending_n == 0) return 0;
@@ -626,8 +626,8 @@
   ;;; Computes full_path = dir + "/" + name (or just dir when name is ""),
   ;;; then strips the root + "/" prefix to produce the relative path stored
   ;;; in watch-event-path.
-  (defn __watcher-tree-mk-event [root :cstr dir :cstr name :cstr
-                                 kind :int is-dir :int cookie :int] #{Unsafe} :int
+  (defn __watcher-tree-mk-event [root : cstr dir : cstr name : cstr
+                                 kind : int is-dir : int cookie : int] #{Unsafe} : int
     ```c
     const char *r = root ? (const char *)(intptr_t)root : "";
     const char *d = dir  ? (const char *)(intptr_t)dir  : "";
@@ -665,7 +665,7 @@
   ;;;
   ;;; Both paths call __watcher-tree-mk-event to build events, then push
   ;;; them onto w->pending_evs via inline realloc logic.
-  (defn __watcher-tree-produce-events [watcher :int idx :int root :cstr] #{Unsafe} :void
+  (defn __watcher-tree-produce-events [watcher : int idx : int root : cstr] #{Unsafe} : void
     ```c
     /* __tur_include__: #if defined(__linux__) */
     /* __tur_include__: #include <sys/inotify.h> */
@@ -823,13 +823,13 @@
   ;;;   4. drain again
   ;;;   5. re-stat the target and classify the change
   ;;;   6. emit a watch-event for the classified kind
-  (defn watch-next [watcher :int timeout-ms :int] #{Unsafe} :int
+  (defn watch-next [watcher : int timeout-ms : int] #{Unsafe} : int
     (if (= (__watcher-mode watcher) 1)
       (__watch-next-tree   watcher timeout-ms)
       (__watch-next-single watcher timeout-ms)))
 
   ;;; __watch-next-single -- the single-file case.
-  (defn __watch-next-single [watcher :int timeout-ms :int] #{Unsafe} :int
+  (defn __watch-next-single [watcher : int timeout-ms : int] #{Unsafe} : int
     (let [back (__watcher-backend watcher)]
       (if (= back 0)
         0
@@ -859,7 +859,7 @@
   ;;; polls all backend fds.  When a backend fires, drains its evbuf and
   ;;; calls __watcher-tree-produce-events to push per-file events onto the
   ;;; pending queue, then pops and returns the first.
-  (defn __watch-next-tree [watcher :int timeout-ms :int] #{Unsafe} :int
+  (defn __watch-next-tree [watcher : int timeout-ms : int] #{Unsafe} : int
     (let [queued (__watcher-pending-pop watcher)]
       (if (not (= queued 0))
         queued
@@ -882,7 +882,7 @@
                     (__watcher-pending-pop watcher)))))))))
 
   ;;; __watch-make-cons -- internal: wrap a single event handle in a cons cell.
-  (defn __watch-make-cons [head :int] #{Unsafe} :int
+  (defn __watch-make-cons [head : int] #{Unsafe} : int
     ```c
     /* __tur_include__: typedef struct __tur_cons_s { int64_t head; int64_t tail; } __tur_cons_cell; */
     if (head == 0) return 0;
@@ -901,7 +901,7 @@
   ;;; deduplicates bursts of saves to the same file.
   ;;;
   ;;; Returns a Turmeric cons-list (use list head/tail accessors).
-  (defn watch-drain [watcher :int timeout-ms :int debounce-ms :int] #{Unsafe} :int
+  (defn watch-drain [watcher : int timeout-ms : int debounce-ms : int] #{Unsafe} : int
     ;; debounce-ms is honored implicitly by watch-next's internal sleep;
     ;; multi-element batches arrive with WT6 / WTNF4.
     (let [_ debounce-ms

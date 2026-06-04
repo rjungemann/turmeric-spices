@@ -6,13 +6,13 @@
   (import test/suite    :refer [describe it])
   (import test/runner   :refer [run-all])
 
-  (defn approx= [x :float y :float tol :float] :bool
+  (defn approx= [x : float y : float tol : float] : bool
     ```c
     #include <math.h>
     return fabs(x - y) <= tol;
     ```)
 
-  (defn ok? [r :int] :bool
+  (defn ok? [r : int] : bool
     ```c
     #include <stdint.h>
     struct __cons { int64_t value; int64_t next; };
@@ -20,7 +20,7 @@
     return c && c->value == 0;
     ```)
 
-  (defn unwrap [r :int] :int
+  (defn unwrap [r : int] : int
     ```c
     #include <stdint.h>
     struct __cons { int64_t value; int64_t next; };
@@ -29,7 +29,7 @@
     return inner->value;
     ```)
 
-  (defn lmfit-coef [fit :int i :int] :float
+  (defn lmfit-coef [fit : int i : int] : float
     ```c
     #include <stdint.h>
     typedef struct {
@@ -48,7 +48,7 @@
     return ((double *)cc->values)[i];
     ```)
 
-  (defn lmfit-r2 [fit :int] :float
+  (defn lmfit-r2 [fit : int] : float
     ```c
     #include <stdint.h>
     typedef struct {
@@ -63,7 +63,7 @@
     ```)
 
   ;; Make float64 column from raw values.
-  (defn make-col [a :float b :float c :float d :float e :float] :int
+  (defn make-col [a : float b : float c : float d : float e : float] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -81,7 +81,7 @@
     return (int64_t)(intptr_t)fc;
     ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     #include <stdlib.h>
     #include <stdint.h>
@@ -90,9 +90,9 @@
     c->value = v; c->next = n;
     return (int64_t)(intptr_t)c;
     ```)
-  (defn t-nil [] :int ```c return 0; ```)
+  (defn t-nil [] : int ```c return 0; ```)
 
-  (defn col-at [col :int i :int] :float
+  (defn col-at [col : int i : int] : float
     ```c
     #include <stdint.h>
     struct __frame_col {
@@ -103,21 +103,21 @@
     return ((double *)fc->values)[i];
     ```)
 
-  (defn frame-nrows [f :int] :int
+  (defn frame-nrows [f : int] : int
     ```c
     #include <stdint.h>
     struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
     return ((struct __frame *)(intptr_t)f)->nrows;
     ```)
 
-  (defn frame-ncols [f :int] :int
+  (defn frame-ncols [f : int] : int
     ```c
     #include <stdint.h>
     struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
     return ((struct __frame *)(intptr_t)f)->ncols;
     ```)
 
-  (defn __all-tests [] :void
+  (defn __all-tests [] : void
 
   (describe "stats/regress ols"
     (it "perfect linear fit: y = 2x + 1"
@@ -161,7 +161,7 @@
             ok  (and (= nr 5) (= nc 5))]
         (assert-true ok)))))
 
-  (defn main [] :int
+  (defn main [] : int
     (__all-tests)
     (run-all)
     0))

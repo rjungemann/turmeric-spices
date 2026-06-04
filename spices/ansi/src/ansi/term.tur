@@ -21,7 +21,7 @@
   ;;;   (let [sz (term-size)] ...)  ; head/tail extract rows/cols
   ;;;
   ;;; Since: tur-ansi AN0
-  (defn term-size [] #{Unsafe} :int
+  (defn term-size [] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <sys/ioctl.h> */
     /* __tur_include__: #include <unistd.h> */
@@ -40,7 +40,7 @@
   ;;; term-no-color? -- 1 when $NO_COLOR is set and non-empty, 0 otherwise.
   ;;;
   ;;; See https://no-color.org/ for the convention.
-  (defn term-no-color? [] #{Unsafe} :int
+  (defn term-no-color? [] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <stdlib.h> */
     const char *nc = getenv("NO_COLOR");
@@ -54,7 +54,7 @@
   ;;;   1 = 4-bit (16 colors)
   ;;;   2 = 8-bit (256-color palette)
   ;;;   3 = 24-bit true-color
-  (defn term-color-support [] #{Unsafe} :int
+  (defn term-color-support [] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <string.h> */
     const char *nc = getenv("NO_COLOR");
@@ -78,7 +78,7 @@
   ;;;
   ;;; Detection is conservative; callers may still fall back to a text
   ;;; placeholder when a non-zero result fails at runtime.
-  (defn term-image-protocol [] #{Unsafe} :int
+  (defn term-image-protocol [] #{Unsafe} : int
     ```c
     const char *term = getenv("TERM");
     const char *prog = getenv("TERM_PROGRAM");
@@ -102,7 +102,7 @@
   ;;; Idempotent: a second call while already in raw mode is a no-op.  If
   ;;; stdin is not a tty (e.g. under a test harness with $TUR_ANSI_TEST_KEYS)
   ;;; the call is also a no-op so scripted tests don't try to ioctl a pipe.
-  (defn term-enable-raw [] #{Unsafe} :void
+  (defn term-enable-raw [] #{Unsafe} : void
     ```c
     /* __tur_include__: #include <termios.h> */
     /* __tur_include__: #include <signal.h> */
@@ -157,7 +157,7 @@
   ;;; term-disable-raw -- restore cooked mode and tear down the SIGWINCH self-pipe.
   ;;;
   ;;; Idempotent: safe to call without a matching term-enable-raw.
-  (defn term-disable-raw [] #{Unsafe} :void
+  (defn term-disable-raw [] #{Unsafe} : void
     ```c
     const char *scripted = getenv("TUR_ANSI_TEST_KEYS");
     if (scripted && scripted[0]) return;
@@ -182,7 +182,7 @@
   ;;; The callback fires from inside term-read-key (after the resize byte
   ;;; has been drained from the self-pipe and before "<Resize>" is returned),
   ;;; so it runs in normal process context, not from the signal handler.
-  (defn term-on-resize [callback :ptr<void>] #{Unsafe} :void
+  (defn term-on-resize [callback : ptr<void>] #{Unsafe} : void
     ```c
     g_ansi_resize_cb = (void (*)(void))callback;
     ```)
@@ -207,7 +207,7 @@
   ;;   -1 = scripted-input path (TUR_ANSI_TEST_KEYS)
   ;;    0 = timeout
   ;;   >0 = number of bytes written to g_ansi_keybuf
-  (defn __ansi-collect [timeout-ms :int] #{Unsafe} :int
+  (defn __ansi-collect [timeout-ms : int] #{Unsafe} : int
     ```c
     /* __tur_include__: #include <sys/select.h> */
     /* __tur_include__: static unsigned char g_ansi_keybuf[32]; */
@@ -283,7 +283,7 @@
     ```)
 
   ;; Pop the next scripted key from $TUR_ANSI_TEST_KEYS, advancing the offset.
-  (defn __ansi-scripted-pop [] #{Unsafe} :cstr
+  (defn __ansi-scripted-pop [] #{Unsafe} : cstr
     ```c
     if (!g_ansi_script_cache || !g_ansi_script_cache[g_ansi_script_off]) {
       return strdup("<EOF>");
@@ -300,24 +300,24 @@
     ```)
 
   ;; Pointer to the static byte buffer filled by __ansi-collect.
-  (defn __ansi-keybuf-ptr [] #{Unsafe} :cstr
+  (defn __ansi-keybuf-ptr [] #{Unsafe} : cstr
     ```c return (const char *)g_ansi_keybuf; ```)
 
-  (defn __ansi-strdup-cstr [s :cstr] #{Unsafe} :cstr
+  (defn __ansi-strdup-cstr [s : cstr] #{Unsafe} : cstr
     ```c return strdup((const char *)s); ```)
 
   ;;; term-read-key -- block until one keypress; return a normalized key string.
   ;;;
   ;;; Returns one of: a single-character cstr ("a", "A", " "), a bracketed
   ;;; key name ("<Enter>", "<Up>", "<Resize>"), or "<EOF>" when stdin closes.
-  (defn term-read-key [] #{Unsafe} :cstr
+  (defn term-read-key [] #{Unsafe} : cstr
     (__ansi-read-key-impl -1))
 
   ;;; term-read-key-timeout -- like term-read-key but returns "" after ms millis.
-  (defn term-read-key-timeout [ms :int] #{Unsafe} :cstr
+  (defn term-read-key-timeout [ms : int] #{Unsafe} : cstr
     (__ansi-read-key-impl ms))
 
-  (defn __ansi-read-key-impl [timeout-ms :int] #{Unsafe} :cstr
+  (defn __ansi-read-key-impl [timeout-ms : int] #{Unsafe} : cstr
     (let [r (__ansi-collect timeout-ms)]
       (if (= r -3) (__ansi-strdup-cstr "<Resize>")
         (if (= r -2) (__ansi-strdup-cstr "<EOF>")

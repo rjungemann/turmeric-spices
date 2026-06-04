@@ -10,13 +10,13 @@
 (import sdf/eval       :refer [sdf-eval])
 (import sdf/expr       :refer [sdf-free])
 
-(defn approx= [a :float b :float] :bool
+(defn approx= [a : float b : float] : bool
   ```c
   double diff = a - b; if (diff < 0) diff = -diff;
   return diff < 0.02;
   ```)
 
-(defn print-and-check [label :cstr pass :int total :int] :int
+(defn print-and-check [label : cstr pass : int total : int] : int
   ```c
   #include <stdio.h>
   printf("%s: %d/%d passed\n", (const char*)(intptr_t)label, (int)pass, (int)total);
@@ -25,7 +25,7 @@
 
 ;; ---- union ----
 
-(defn test-union-inside-both [] :int
+(defn test-union-inside-both [] : int
   (let [a (sdf-sphere -0.5 0.0 0.0 1.0)
         b (sdf-sphere  0.5 0.0 0.0 1.0)
         u (sdf-union a b)
@@ -33,7 +33,7 @@
     (sdf-free u)
     (if (< d 0.0) 1 0)))
 
-(defn test-union-inside-one [] :int
+(defn test-union-inside-one [] : int
   (let [a (sdf-sphere -2.0 0.0 0.0 0.5)
         b (sdf-sphere  2.0 0.0 0.0 0.5)
         u (sdf-union a b)
@@ -43,7 +43,7 @@
 
 ;; ---- intersection ----
 
-(defn test-intersection-overlap [] :int
+(defn test-intersection-overlap [] : int
   (let [a (sdf-sphere -0.2 0.0 0.0 1.0)
         b (sdf-sphere  0.2 0.0 0.0 1.0)
         i (sdf-intersection a b)
@@ -51,7 +51,7 @@
     (sdf-free i)
     (if (< d 0.0) 1 0)))
 
-(defn test-intersection-outside [] :int
+(defn test-intersection-outside [] : int
   (let [a (sdf-sphere -2.0 0.0 0.0 1.0)
         b (sdf-sphere  2.0 0.0 0.0 1.0)
         i (sdf-intersection a b)
@@ -61,7 +61,7 @@
 
 ;; ---- difference ----
 
-(defn test-difference-carved [] :int
+(defn test-difference-carved [] : int
   (let [a (sdf-sphere 0.0 0.0 0.0 2.0)
         b (sdf-sphere 0.0 0.0 0.0 1.0)
         d (sdf-difference a b)
@@ -69,7 +69,7 @@
     (sdf-free d)
     (if (> v 0.0) 1 0)))
 
-(defn test-difference-outside [] :int
+(defn test-difference-outside [] : int
   (let [a (sdf-sphere 0.0 0.0 0.0 2.0)
         b (sdf-sphere 0.0 0.0 0.0 1.0)
         d (sdf-difference a b)
@@ -79,7 +79,7 @@
 
 ;; ---- translate ----
 
-(defn test-translate [] :int
+(defn test-translate [] : int
   (let [s (sdf-sphere 0.0 0.0 0.0 1.0)
         t (sdf-translate s 5.0 0.0 0.0)
         d (sdf-eval t 5.0 0.0 0.0)]
@@ -88,7 +88,7 @@
 
 ;; ---- offset ----
 
-(defn test-offset-grow [] :int
+(defn test-offset-grow [] : int
   (let [s (sdf-sphere 0.0 0.0 0.0 1.0)
         o (sdf-offset s 0.5)
         d (sdf-eval o 1.5 0.0 0.0)]
@@ -97,7 +97,7 @@
 
 ;; ---- smooth union ----
 
-(defn test-smooth-union-between [] :int
+(defn test-smooth-union-between [] : int
   (let [a (sdf-sphere -1.0 0.0 0.0 1.2)
         b (sdf-sphere  1.0 0.0 0.0 1.2)
         u (sdf-smooth-union a b 0.5)
@@ -107,7 +107,7 @@
 
 ;; ---- runner ----
 
-(defn main [] :int
+(defn main [] : int
   (let [pass (+ (test-union-inside-both)
                 (+ (test-union-inside-one)
                    (+ (test-intersection-overlap)

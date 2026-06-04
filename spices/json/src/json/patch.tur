@@ -11,7 +11,7 @@
   (export json-get-in json-set-in json-merge)
 
 ;; Private: result helpers matching stdlib/result.tur layout
-(defn __ok [v :int] :ptr<void>
+(defn __ok [v : int] : ptr<void>
   ```c
   #include <stdlib.h>
   struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
@@ -20,7 +20,7 @@
   return r;
   ```)
 
-(defn __err [msg :cstr] :ptr<void>
+(defn __err [msg : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
@@ -42,7 +42,7 @@
 ;;;   (json-get-in doc "user.name")  ; => "\"Alice\""
 ;;;
 ;;; Since: P4
-(defn json-get-in [doc :int path :cstr] :cstr
+(defn json-get-in [doc : int path : cstr] : cstr
   ```c
   #include <yyjson.h>
   #include <stdlib.h>
@@ -89,7 +89,7 @@
 ;;;     (when (ok? r) (println (json-emit (ok-val r)))))
 ;;;
 ;;; Since: P4
-(defn json-set-in [doc :int path :cstr value :cstr] :ptr<void>
+(defn json-set-in [doc : int path : cstr value : cstr] : ptr<void>
   ```c
   #include <yyjson.h>
   #include <stdlib.h>
@@ -190,7 +190,7 @@
 ;;;     (when (ok? r) (println (json-emit (ok-val r)))))
 ;;;
 ;;; Since: P4
-(defn json-merge [base :int overlay :int] :ptr<void>
+(defn json-merge [base : int overlay : int] : ptr<void>
   ```c
   #include <yyjson.h>
   #include <stdlib.h>

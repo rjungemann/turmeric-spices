@@ -32,7 +32,7 @@
 ;; ---- AST node allocators (inline-C) ----
 
 ;;; scscm-ast-leaf -- allocate a leaf AST node with a value string.
-(defn scscm-ast-leaf [kind :int value :cstr] #{Unsafe} :int
+(defn scscm-ast-leaf [kind : int value : cstr] #{Unsafe} : int
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = malloc(sizeof(*n));
@@ -43,7 +43,7 @@
   ```)
 
 ;;; scscm-ast-list-node -- allocate a composite AST node (list or vector).
-(defn scscm-ast-list-node [kind :int] #{Unsafe} :int
+(defn scscm-ast-list-node [kind : int] #{Unsafe} : int
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = malloc(sizeof(*n));
@@ -55,7 +55,7 @@
   ```)
 
 ;;; scscm-ast-add-child -- append a child handle to a composite node.
-(defn scscm-ast-add-child [node :int child :int] #{Unsafe} :void
+(defn scscm-ast-add-child [node : int child : int] #{Unsafe} : void
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = (ASTNode*)(intptr_t)node;
@@ -81,7 +81,7 @@
 ;;;   (ast-kind node)  ; => ":symbol"
 ;;;
 ;;; Since: SC1
-(defn ast-kind [node :int] #{Unsafe} :cstr
+(defn ast-kind [node : int] #{Unsafe} : cstr
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   static const char *names[] = {
@@ -105,7 +105,7 @@
 ;;;   (ast-symbol-name node)  ; => "foo-bar"
 ;;;
 ;;; Since: SC1
-(defn ast-symbol-name [node :int] #{Unsafe} :cstr
+(defn ast-symbol-name [node : int] #{Unsafe} : cstr
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = (ASTNode*)(intptr_t)node;
@@ -124,7 +124,7 @@
 ;;;   (ast-number-value node)  ; => "440"
 ;;;
 ;;; Since: SC1
-(defn ast-number-value [node :int] #{Unsafe} :cstr
+(defn ast-number-value [node : int] #{Unsafe} : cstr
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = (ASTNode*)(intptr_t)node;
@@ -143,7 +143,7 @@
 ;;;   (ast-string-value node)  ; => "hello"
 ;;;
 ;;; Since: SC1
-(defn ast-string-value [node :int] #{Unsafe} :cstr
+(defn ast-string-value [node : int] #{Unsafe} : cstr
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = (ASTNode*)(intptr_t)node;
@@ -162,7 +162,7 @@
 ;;;   (ast-list-len node)  ; => 3
 ;;;
 ;;; Since: SC1
-(defn ast-list-len [node :int] #{Unsafe} :int
+(defn ast-list-len [node : int] #{Unsafe} : int
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = (ASTNode*)(intptr_t)node;
@@ -182,7 +182,7 @@
 ;;;   (ast-list-get node 0)  ; => first child handle
 ;;;
 ;;; Since: SC1
-(defn ast-list-get [node :int i :int] #{Unsafe} :int
+(defn ast-list-get [node : int i : int] #{Unsafe} : int
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = (ASTNode*)(intptr_t)node;
@@ -191,7 +191,7 @@
   ```)
 
 ;; Generic value accessor (for atoms, keywords, symbols, numbers, strings).
-(defn scscm-ast-value [node :int] #{Unsafe} :cstr
+(defn scscm-ast-value [node : int] #{Unsafe} : cstr
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   ASTNode *n = (ASTNode*)(intptr_t)node;
@@ -207,7 +207,7 @@
 ;;;   (ast-free node)
 ;;;
 ;;; Since: SC1
-(defn ast-free [node :int] #{Unsafe} :void
+(defn ast-free [node : int] #{Unsafe} : void
   ```c
   typedef struct { int kind; char *value; int64_t *children; int child_count; int child_cap; } ASTNode;
   typedef struct { int64_t value; int64_t next; } Cons;
@@ -238,7 +238,7 @@
 ;;;   (ast-free-all top-level-forms)
 ;;;
 ;;; Since: SC1
-(defn ast-free-all [nodes :int] #{Unsafe} :void
+(defn ast-free-all [nodes : int] #{Unsafe} : void
   ```c
   typedef struct { int64_t value; int64_t next; } Cons;
   Cons *cell = (Cons*)(intptr_t)nodes;
@@ -272,7 +272,7 @@
 ;; Parse items into node until closing token type close-ttyp is seen.
 ;; Returns lex-ok(cons(node remaining)) or lex-err.
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
-(defn scscm-parse-list-body [tokens :int node :int close-ttyp :cstr] #{Unsafe} :ptr<void>
+(defn scscm-parse-list-body [tokens : int node : int close-ttyp : cstr] #{Unsafe} : ptr<void>
   (if (list-nil? tokens)
     (lex-err 2)
     (let [tok   (head tokens)
@@ -291,7 +291,7 @@
 ;; Parse a wrapper node (quote / quasiquote / unquote / unquote-splice).
 ;; kind is the AST node kind; wraps the next parsed form.
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
-(defn scscm-parse-wrapper [kind :int tokens :int] #{Unsafe} :ptr<void>
+(defn scscm-parse-wrapper [kind : int tokens : int] #{Unsafe} : ptr<void>
   (if (list-nil? tokens)
     (lex-err 3)
     (let [res (scscm-parse-form tokens)]
@@ -306,7 +306,7 @@
 
 ;; Parse all top-level forms, collecting into a cons list (in order).
 ;; scscm-parse-form is a forward reference here (1 int arg -> ptr<void>).
-(defn scscm-parse-all [tokens :int acc :int] #{Unsafe} :ptr<void>
+(defn scscm-parse-all [tokens : int acc : int] #{Unsafe} : ptr<void>
   (if (list-nil? tokens)
     (lex-ok (scscm-list-rev acc (nil-value)))
     (let [res (scscm-parse-form tokens)]
@@ -320,7 +320,7 @@
 ;; parse-form: parse one form from tokens.
 ;; Returns lex-ok(cons(node remaining-tokens)) or lex-err(cstr-msg).
 ;; scscm-parse-list-body and scscm-parse-wrapper are defined above.
-(defn scscm-parse-form [tokens :int] #{Unsafe} :ptr<void>
+(defn scscm-parse-form [tokens : int] #{Unsafe} : ptr<void>
   (if (list-nil? tokens)
     (lex-err 0)
     (let [tok  (head tokens)
@@ -367,7 +367,7 @@
 ;;;     (if (lex-ok? r) (parse (lex-ok-val r)) (lex-err-val r)))
 ;;;
 ;;; Since: SC1
-(defn parse [tokens :int] #{Unsafe} :ptr<void>
+(defn parse [tokens : int] #{Unsafe} : ptr<void>
   (scscm-parse-all tokens (nil-value)))
 
 ) ;; end defmodule scscm/parser

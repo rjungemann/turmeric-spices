@@ -44,7 +44,7 @@
 ;;; The Cholesky-Banachiewicz algorithm computes the lower triangular matrix L
 ;;; such that A = L * L'. A must be symmetric positive-definite.
 ;;; The algorithm detects non-SPD matrices by checking for non-positive pivots.
-(defn chol [A] :int
+(defn chol [A] : int
   (let [n (mat-rows A)]
     (when (not (mat-square? A))
       (return (err "chol: matrix must be square")))
@@ -85,7 +85,7 @@
 ;;; chol-free -- free a Cholesky factor
 ;;; f: chol-factor
 ;;; Returns: :void
-(defn chol-free [f] :void
+(defn chol-free [f] : void
   (mat-free (chol-factor-L f))
   (free f))
 
@@ -94,7 +94,7 @@
 ;;; lu -- LU decomposition: PA = LU with partial pivoting
 ;;; A: mat (must be square, non-singular)
 ;;; Returns: result<lu-factor> or err
-(defn lu [A] :int
+(defn lu [A] : int
   (let [n (mat-rows A)]
     (when (not (mat-square? A))
       (return (err "lu: matrix must be square")))
@@ -167,7 +167,7 @@
 ;;; lu-free -- free an LU factor
 ;;; f: lu-factor
 ;;; Returns: :void
-(defn lu-free [f] :void
+(defn lu-free [f] : void
   (mat-free (lu-factor-L f))
   (mat-free (lu-factor-U f))
   (free (lu-factor-piv f))
@@ -182,7 +182,7 @@
 ;;; Uses Householder reflections to compute Q (orthogonal) and R (upper triangular).
 ;;; Q is computed as a product of Householder matrices and is m x m.
 ;;; R is m x n and upper triangular.
-(defn qr [A] :int
+(defn qr [A] : int
   (let [m (mat-rows A)
         n (mat-cols A)]
     
@@ -280,7 +280,7 @@
 ;;; qr-free -- free a QR factor
 ;;; f: qr-factor
 ;;; Returns: :void
-(defn qr-free [f] :void
+(defn qr-free [f] : void
   (mat-free (qr-factor-Q f))
   (mat-free (qr-factor-R f))
   (free f))

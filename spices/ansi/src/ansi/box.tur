@@ -14,26 +14,26 @@
           box-draw box-fill box-title)
 
   ;; Single-line border glyphs.
-  (defn box-tl-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x8c"); ```)
-  (defn box-tr-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x90"); ```)
-  (defn box-bl-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x94"); ```)
-  (defn box-br-single [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x98"); ```)
-  (defn box-h-single  [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x80"); ```)
-  (defn box-v-single  [] #{Unsafe} :cstr ```c return strdup("\xe2\x94\x82"); ```)
+  (defn box-tl-single [] #{Unsafe} : cstr ```c return strdup("\xe2\x94\x8c"); ```)
+  (defn box-tr-single [] #{Unsafe} : cstr ```c return strdup("\xe2\x94\x90"); ```)
+  (defn box-bl-single [] #{Unsafe} : cstr ```c return strdup("\xe2\x94\x94"); ```)
+  (defn box-br-single [] #{Unsafe} : cstr ```c return strdup("\xe2\x94\x98"); ```)
+  (defn box-h-single  [] #{Unsafe} : cstr ```c return strdup("\xe2\x94\x80"); ```)
+  (defn box-v-single  [] #{Unsafe} : cstr ```c return strdup("\xe2\x94\x82"); ```)
 
   ;; Double-line border glyphs.
-  (defn box-tl-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x94"); ```)
-  (defn box-tr-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x97"); ```)
-  (defn box-bl-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x9a"); ```)
-  (defn box-br-double [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x9d"); ```)
-  (defn box-h-double  [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x90"); ```)
-  (defn box-v-double  [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\x91"); ```)
+  (defn box-tl-double [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\x94"); ```)
+  (defn box-tr-double [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\x97"); ```)
+  (defn box-bl-double [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\x9a"); ```)
+  (defn box-br-double [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\x9d"); ```)
+  (defn box-h-double  [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\x90"); ```)
+  (defn box-v-double  [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\x91"); ```)
 
   ;; Round-corner glyphs (horizontal/vertical reuse single-line).
-  (defn box-tl-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xad"); ```)
-  (defn box-tr-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xae"); ```)
-  (defn box-bl-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xb0"); ```)
-  (defn box-br-round [] #{Unsafe} :cstr ```c return strdup("\xe2\x95\xaf"); ```)
+  (defn box-tl-round [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\xad"); ```)
+  (defn box-tr-round [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\xae"); ```)
+  (defn box-bl-round [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\xb0"); ```)
+  (defn box-br-round [] #{Unsafe} : cstr ```c return strdup("\xe2\x95\xaf"); ```)
 
   ;;; box-draw -- draw a bordered rectangle at (row col) of size height x width.
   ;;;
@@ -46,7 +46,7 @@
   ;;; no-ops.
   ;;;
   ;;; Since: tur-ansi AN3
-  (defn box-draw [row :int col :int height :int width :int style :int] #{Unsafe} :void
+  (defn box-draw [row : int col : int height : int width : int style : int] #{Unsafe} : void
     ```c
     int s = (int)style;
     int H = (int)height, W = (int)width;
@@ -94,7 +94,7 @@
   ;;;                              values fall back to space (32).
   ;;;
   ;;; Use box-fill BEFORE box-draw so the border isn't overwritten by the fill.
-  (defn box-fill [row :int col :int height :int width :int ch :int] #{Unsafe} :void
+  (defn box-fill [row : int col : int height : int width : int ch : int] #{Unsafe} : void
     ```c
     int H = (int)height, W = (int)width;
     int R = (int)row, C = (int)col;
@@ -122,7 +122,7 @@
   ;;;
   ;;; box-title should be called AFTER box-draw so it overwrites the top
   ;;; border with the title text.
-  (defn box-title [row :int col :int width :int title :cstr] #{Unsafe} :void
+  (defn box-title [row : int col : int width : int title : cstr] #{Unsafe} : void
     ```c
     int W = (int)width;
     int R = (int)row, C = (int)col;

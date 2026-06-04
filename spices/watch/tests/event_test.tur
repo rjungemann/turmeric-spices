@@ -10,7 +10,7 @@
                               watch-event-is-dir watch-event-cookie
                               watch-kind->cstr])
 
-  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     /* __tur_include__: #include <stdio.h> */
     /* __tur_include__: #include <string.h> */
@@ -20,7 +20,7 @@
            (long long)idx, (const char *)(intptr_t)name);
     ```)
 
-  (defn tap-finish [count :int] #{Unsafe} :int
+  (defn tap-finish [count : int] #{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_event_fails == 0) {
@@ -32,14 +32,14 @@
     return 1;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     const char *sa = (const char *)(intptr_t)a;
     const char *sb = (const char *)(intptr_t)b;
     return strcmp(sa ? sa : "", sb ? sb : "") == 0;
     ```)
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       ;; Kind constants are stable, contiguous, and distinct.
       (tap-record 1 "watch-kind-none = 0"     (= (watch-kind-none)     0))

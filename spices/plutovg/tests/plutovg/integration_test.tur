@@ -31,20 +31,20 @@
   (import plutovg/font    :refer [font-face-load-from-file font-face-destroy
                                   canvas-set-font canvas-fill-text])
 
-  (defn surface-byte [s :int n :int] :int
+  (defn surface-byte [s : int n : int] : int
     ```c
     #include <plutovg.h>
     unsigned char *p = plutovg_surface_get_data((plutovg_surface_t *)(intptr_t)s);
     return (int64_t)p[(int)n];
     ```)
 
-  (defn file-exists? [path :cstr] :bool
+  (defn file-exists? [path : cstr] : bool
     ```c
     #include <unistd.h>
     return access((const char *)(intptr_t)path, F_OK) == 0;
     ```)
 
-  (defn file-size [path :cstr] :int
+  (defn file-size [path : cstr] : int
     ```c
     #include <sys/stat.h>
     struct stat st;
@@ -52,13 +52,13 @@
     return (int64_t)st.st_size;
     ```)
 
-  (defn unlink-file [path :cstr] :void
+  (defn unlink-file [path : cstr] : void
     ```c
     #include <unistd.h>
     unlink((const char *)(intptr_t)path);
     ```)
 
-  (defn probe-font-path [] :cstr
+  (defn probe-font-path [] : cstr
     ```c
     #include <unistd.h>
     static const char *candidates[] = {
@@ -75,14 +75,14 @@
     return NULL;
     ```)
 
-  (defn have-font? [p :cstr] :bool
+  (defn have-font? [p : cstr] : bool
     ```c
     return p != NULL && ((const char *)(intptr_t)p)[0] != '\0';
     ```)
 
   ;; Helper: paint a horizontal red->blue linear gradient over the whole
   ;; surface and then fill an opaque rounded rect on top.  Returns void.
-  (defn paint-gradient-background [c :int w :float h :float] :void
+  (defn paint-gradient-background [c : int w : float h : float] : void
     (unsafe
       (let [stops (result-val (gradient-stops-create))]
         (gradient-stops-add stops 0.0  1.0 0.0 0.0 1.0)  ; red
@@ -169,9 +169,9 @@
           (unlink-file png)
           (surface-destroy s)))))
 
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
-  (defn >f [a :float b :float] :bool ```c return (double)a > (double)b; ```)
+  (defn >i [a : int b : int] : bool ```c return (int)a > (int)b; ```)
+  (defn >f [a : float b : float] : bool ```c return (double)a > (double)b; ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (run-all)
     0))

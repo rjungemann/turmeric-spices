@@ -15,7 +15,7 @@
                               image-placeholder])
   (import ansi/style :refer [style-bold style-reset])
 
-  (defn print-proto [p :int] #{Unsafe} :void
+  (defn print-proto [p : int] #{Unsafe} : void
     ```c
     const char *names[] = {"none (placeholder)", "kitty", "iterm2", "sixel"};
     int pp = (int)p;
@@ -23,41 +23,41 @@
     printf("detected image protocol: %d  (%s)\n", (int)p, names[pp]);
     ```)
 
-  (defn env-path [] #{Unsafe} :cstr
+  (defn env-path [] #{Unsafe} : cstr
     ```c
     const char *v = getenv("IMAGE_DEMO_PATH");
     return strdup(v ? v : "");
     ```)
 
-  (defn empty? [s :cstr] #{Unsafe} :bool
+  (defn empty? [s : cstr] #{Unsafe} : bool
     ```c return (s == NULL || ((const char *)s)[0] == 0) ? 1 : 0; ```)
 
-  (defn section [label :cstr] #{Unsafe} :void
+  (defn section [label : cstr] #{Unsafe} : void
     ```c printf("\n-- %s --\n", (const char *)label); ```)
 
-  (defn newline [] #{Unsafe} :void
+  (defn newline [] #{Unsafe} : void
     ```c printf("\n"); fflush(stdout); ```)
 
-  (defn demo-base64 [] #{Unsafe} :void
+  (defn demo-base64 [] #{Unsafe} : void
     (do
       (section "image-display-base64 (4-byte sample = b64(\"Man\") = \"TWFu\")")
       (image-display-base64 "TWFu")
       (newline)))
 
-  (defn demo-placeholder [] #{Unsafe} :void
+  (defn demo-placeholder [] #{Unsafe} : void
     (do
       (section "image-placeholder")
       (image-placeholder "examples/logo.png")
       (newline)))
 
-  (defn demo-file [path :cstr] #{Unsafe} :void
+  (defn demo-file [path : cstr] #{Unsafe} : void
     (do
       (section "image-display (best available protocol)")
       ```c printf("path: %s\n", (const char *)path); ```
       (image-display path)
       (newline)))
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       (style-bold)
       ```c printf("tur-ansi image-demo\n"); ```

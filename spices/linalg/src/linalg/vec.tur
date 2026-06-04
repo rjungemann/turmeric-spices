@@ -14,17 +14,17 @@
   data  :int)
 
 ;;; Private helper: allocate float array
-(defn vec--alloc-data [n] :int
+(defn vec--alloc-data [n] : int
   (malloc (* n 8)))
 
 ;;; Private helper: free float array
-(defn vec--free-data [data] :void
+(defn vec--free-data [data] : void
   (free data))
 
 ;;; vec-new -- create an uninitialized vector of length n
 ;;; n: length
 ;;; Returns: vec
-(defn vec-new [n] :int
+(defn vec-new [n] : int
   (let [v (malloc (sizeof vec))
         data (vec--alloc-data n)]
     (set! (vec-len v) n)
@@ -34,7 +34,7 @@
 ;;; vec-new-zeroed -- create a zero-initialized vector of length n
 ;;; n: length
 ;;; Returns: vec
-(defn vec-new-zeroed [n] :int
+(defn vec-new-zeroed [n] : int
   (let [v (vec-new n)
         data (vec-data v)]
     (dotimes [i n]
@@ -44,7 +44,7 @@
 ;;; vec-from-list -- create a vector from a cons list of floats
 ;;; xs: cons list of floats
 ;;; Returns: vec or err
-(defn vec-from-list [xs] :int
+(defn vec-from-list [xs] : int
   (let [n (length xs)
         v (vec-new n)
         vdata (vec-data v)]
@@ -63,7 +63,7 @@
 ;;; vec-copy -- create a deep copy of a vector
 ;;; v: vec
 ;;; Returns: vec
-(defn vec-copy [v] :int
+(defn vec-copy [v] : int
   (let [n (vec-len v)
         copy (vec-new n)
         cdata (vec-data copy)
@@ -75,7 +75,7 @@
 ;;; vec-free -- free a vector
 ;;; v: vec
 ;;; Returns: :void
-(defn vec-free [v] :void
+(defn vec-free [v] : void
   (vec--free-data (vec-data v))
   (free v))
 
@@ -83,7 +83,7 @@
 ;;; v: vec
 ;;; i: index
 ;;; Returns: :float or raises error
-(defn vec-get [v i] :float
+(defn vec-get [v i] : float
   (let [n (vec-len v)]
     (when (or (< i 0) (>= i n))
       (error "vec-get: index %d out of bounds for vector of length %d" i n))
@@ -94,7 +94,7 @@
 ;;; i: index
 ;;; x: value
 ;;; Returns: :void
-(defn vec-set! [v i x] :void
+(defn vec-set! [v i x] : void
   (let [n (vec-len v)]
     (when (or (< i 0) (>= i n))
       (error "vec-set!: index %d out of bounds for vector of length %d" i n))
@@ -103,7 +103,7 @@
 ;;; vec-len -- get vector length
 ;;; v: vec
 ;;; Returns: :int
-(defn vec-len [v] :int (vec-len v))
+(defn vec-len [v] : int (vec-len v))
 
 ;;; LA1 -- Arithmetic operations
 
@@ -111,7 +111,7 @@
 ;;; a: vec
 ;;; b: vec (must have same length as a)
 ;;; Returns: vec
-(defn vec-add [a b] :int
+(defn vec-add [a b] : int
   (let [an (vec-len a)
         bn (vec-len b)]
     (when (not= an bn)
@@ -128,7 +128,7 @@
 ;;; a: vec
 ;;; b: vec (must have same length as a)
 ;;; Returns: vec
-(defn vec-sub [a b] :int
+(defn vec-sub [a b] : int
   (let [an (vec-len a)
         bn (vec-len b)]
     (when (not= an bn)
@@ -145,7 +145,7 @@
 ;;; v: vec
 ;;; s: scalar (:float)
 ;;; Returns: vec
-(defn vec-scale [v s] :int
+(defn vec-scale [v s] : int
   (let [n (vec-len v)
         c (vec-new n)
         cdata (vec-data c)
@@ -158,7 +158,7 @@
 ;;; a: vec
 ;;; b: vec (must have same length as a)
 ;;; Returns: :float
-(defn vec-dot [a b] :float
+(defn vec-dot [a b] : float
   (let [an (vec-len a)
         bn (vec-len b)]
     (when (not= an bn)
@@ -174,7 +174,7 @@
 ;;; a: vec (length m)
 ;;; b: vec (length n)
 ;;; Returns: mat (m x n)
-(defn vec-outer [a b] :int
+(defn vec-outer [a b] : int
   (let [am (vec-len a)
         bn (vec-len b)
         c (mat-new am bn)
@@ -190,7 +190,7 @@
 ;;; vec-norm -- Euclidean norm (L2 norm)
 ;;; v: vec
 ;;; Returns: :float
-(defn vec-norm [v] :float
+(defn vec-norm [v] : float
   (let [n (vec-len v)
         vdata (vec-data v)
         sum-sq 0.0]
@@ -202,7 +202,7 @@
 ;;; vec-norm-1 -- L1 norm (sum of absolute values)
 ;;; v: vec
 ;;; Returns: :float
-(defn vec-norm-1 [v] :float
+(defn vec-norm-1 [v] : float
   (let [n (vec-len v)
         vdata (vec-data v)
         sum 0.0]
@@ -213,7 +213,7 @@
 ;;; vec-norm-inf -- L-infinity norm (maximum absolute value)
 ;;; v: vec
 ;;; Returns: :float
-(defn vec-norm-inf [v] :float
+(defn vec-norm-inf [v] : float
   (let [n (vec-len v)
         vdata (vec-data v)
         max-abs 0.0]
@@ -226,7 +226,7 @@
 ;;; vec-normalize -- normalize vector to unit length
 ;;; v: vec
 ;;; Returns: vec (unit vector) or error if zero vector
-(defn vec-normalize [v] :int
+(defn vec-normalize [v] : int
   (let [n (vec-len v)
         norm (vec-norm v)]
     (when (< norm 1e-12)
@@ -244,7 +244,7 @@
 ;;; b: vec
 ;;; tol: tolerance (max absolute difference allowed)
 ;;; Returns: :int (1 if approximately equal, 0 otherwise)
-(defn vec-approx-eq? [a b tol] :int
+(defn vec-approx-eq? [a b tol] : int
   (let [an (vec-len a)
         bn (vec-len b)]
     (when (not= an bn)

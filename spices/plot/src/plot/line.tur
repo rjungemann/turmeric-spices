@@ -13,14 +13,14 @@
 
   ;;; __nan -- quiet NaN sentinel for "auto y bound" on function-style renderers.
   ;;; Inline-C avoids the runtime div-by-zero trap on `(/ 0.0 0.0)`.
-  (defn __nan [] :float
+  (defn __nan [] : float
     ```c return 0.0 / 0.0; ```)
 
   ;;; function -- sample y=f(x) over [x-min, x-max].
   ;;; `samples` is the uniform baseline count; the renderer subdivides further
   ;;; in high-curvature regions and around NaN boundaries via plot/core's
   ;;; adaptive sampler.
-  (defn function [f x-min :float x-max :float samples :int style :int label :cstr] :int
+  (defn function [f x-min : float x-max : float samples : int style : int label : cstr] : int
     (__renderer-bounds
       (__renderer-ints
         (__renderer-floats (__make-renderer 21 style 0 f 0 0 0 0 label "")
@@ -31,13 +31,13 @@
   ;;; lines -- draw a polyline through a cons list of (cons x y) points.
   ;;; Pre-sampled input; the renderer plots the points as given and breaks the
   ;;; polyline on NaN coordinates so callers can encode explicit gaps.
-  (defn lines [vs :int style :int label :cstr] :int
+  (defn lines [vs : int style : int label : cstr] : int
     (__make-renderer 20 style 0 vs 0 0 0 0 label ""))
 
   ;;; parametric -- sample f(t) -> (cons x y).
   ;;; `samples` is the uniform baseline; segments are adaptively subdivided
   ;;; when they turn sharply or cross NaN boundaries.
-  (defn parametric [f t-min :float t-max :float samples :int style :int label :cstr] :int
+  (defn parametric [f t-min : float t-max : float samples : int style : int label : cstr] : int
     (__renderer-ints
       (__renderer-floats (__make-renderer 22 style 0 f 0 0 0 0 label "")
                          t-min t-max 0.0 0.0 0.0 0.0)
@@ -46,7 +46,7 @@
   ;;; polar -- sample radius=f(theta).
   ;;; `samples` is the uniform baseline; segments are adaptively subdivided in
   ;;; high-curvature regions.
-  (defn polar [f theta-min :float theta-max :float samples :int style :int label :cstr] :int
+  (defn polar [f theta-min : float theta-max : float samples : int style : int label : cstr] : int
     (__renderer-ints
       (__renderer-floats (__make-renderer 23 style 0 f 0 0 0 0 label "")
                          theta-min theta-max 0.0 0.0 0.0 0.0)
@@ -55,14 +55,14 @@
   ;;; inverse -- sample x=f(y) over [y-min, y-max].
   ;;; `samples` is the uniform baseline; segments are adaptively subdivided
   ;;; when they turn sharply or cross NaN boundaries (e.g. log-domain edges).
-  (defn inverse [f y-min :float y-max :float samples :int style :int label :cstr] :int
+  (defn inverse [f y-min : float y-max : float samples : int style : int label : cstr] : int
     (__renderer-ints
       (__renderer-floats (__make-renderer 24 style 0 f 0 0 0 0 label "")
                          y-min y-max 0.0 0.0 0.0 0.0)
       samples 0 0 0))
 
   ;;; density -- kernel density estimate from a cons list of samples.
-  (defn density [vs :int bandwidth :float samples :int style :int label :cstr] :int
+  (defn density [vs : int bandwidth : float samples : int style : int label : cstr] : int
     (__renderer-ints
       (__renderer-floats (__make-renderer 25 style 0 vs 0 0 0 0 label "")
                          bandwidth 0.0 0.0 0.0 0.0 0.0)

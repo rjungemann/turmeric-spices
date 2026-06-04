@@ -14,27 +14,27 @@
   (import test/assert      :refer [assert-eq assert-true])
   (import test/runner      :refer [run-all])
 
-  (defn __cr-ok? [r :ptr<void>] :bool
+  (defn __cr-ok? [r : ptr<void>] : bool
     ```c
     if (!r) return false;
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return ((struct __cr *)r)->is_ok;
     ```)
 
-  (defn __cr-val [r :ptr<void>] :int
+  (defn __cr-val [r : ptr<void>] : int
     ```c
     struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
     return (int64_t)((struct __cr *)r)->ok_val;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] :bool
+  (defn cstr-eq? [a : cstr b : cstr] : bool
     ```c
     #include <string.h>
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
   ;; cstr-contains? -- true if haystack contains needle
-  (defn cstr-contains? [haystack :cstr needle :cstr] :bool
+  (defn cstr-contains? [haystack : cstr needle : cstr] : bool
     ```c
     #include <string.h>
     return strstr((const char *)haystack, (const char *)needle) != NULL;
@@ -42,7 +42,7 @@
 
   ;; __setup-template-dir -- write test template to /tmp/tourist-template-test/
   ;; Returns the path to the view file.
-  (defn __setup-template-dir [] :cstr
+  (defn __setup-template-dir [] : cstr
     ```c
     #include <stdlib.h>
     #include <stdio.h>
@@ -58,7 +58,7 @@
     return (int64_t)(intptr_t)path;
     ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (let [tpl-path (__setup-template-dir)
           srv      (tourist 18106
                      (get! "/greet/:name"

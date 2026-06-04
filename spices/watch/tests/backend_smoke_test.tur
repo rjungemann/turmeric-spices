@@ -12,7 +12,7 @@
                                 backend-last-overflow?
                                 backend-dir backend-base])
 
-  (defn tap-record [idx :int name :cstr ok :bool] #{Unsafe} :void
+  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
     ```c
     /* __tur_include__: static int g_backend_fails = 0; */
     if (!ok) g_backend_fails++;
@@ -20,7 +20,7 @@
            (long long)idx, (const char *)(intptr_t)name);
     ```)
 
-  (defn tap-finish [count :int] #{Unsafe} :int
+  (defn tap-finish [count : int] #{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_backend_fails == 0) {
@@ -33,7 +33,7 @@
     return 1;
     ```)
 
-  (defn cstr-eq? [a :cstr b :cstr] #{Unsafe} :bool
+  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
     ```c
     /* __tur_include__: #include <string.h> */
     const char *sa = (const char *)(intptr_t)a;
@@ -41,7 +41,7 @@
     return strcmp(sa ? sa : "", sb ? sb : "") == 0;
     ```)
 
-  (defn main [] #{Unsafe} :int
+  (defn main [] #{Unsafe} : int
     (do
       (tap-record 1 "backend-supported? on Linux or Darwin"
                   (= (backend-supported?) 1))

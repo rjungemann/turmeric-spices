@@ -12,7 +12,7 @@
   (import test/runner   :refer [run-all])
 
   ;; Local pair constructor (shadows stdlib `pair`).
-  (defn xy-pair [x :float y :float] :int
+  (defn xy-pair [x : float y : float] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *p = malloc(sizeof(*p));
@@ -20,7 +20,7 @@
     p->head = ux.i; p->tail = uy.i; return (int64_t)(intptr_t)p;
     ```)
 
-  (defn t-cons [v :int n :int] :int
+  (defn t-cons [v : int n : int] : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     Cons *c = malloc(sizeof(*c));
@@ -28,7 +28,7 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn file-size [path :cstr] :int
+  (defn file-size [path : cstr] : int
     ```c
     #include <sys/stat.h>
     struct stat st;
@@ -36,17 +36,17 @@
     return (int64_t)st.st_size;
     ```)
 
-  (defn >i [a :int b :int] :bool ```c return (int)a > (int)b; ```)
+  (defn >i [a : int b : int] : bool ```c return (int)a > (int)b; ```)
 
   ;; Curve callbacks (renderer wants typed function pointers, not `fn` literals).
-  (defn iv-lo [x :float] :float ```c return (double)x * (double)x; ```)
-  (defn iv-hi [x :float] :float ```c return (double)x * (double)x + 0.5; ```)
-  (defn iv-plo [t :float] :int (xy-pair t (* 0.5 t)))
-  (defn iv-phi [t :float] :int (xy-pair t (+ (* 0.5 t) 0.3)))
-  (defn iv-rlo [t :float] :float ```c return 0.4; ```)
-  (defn iv-rhi [t :float] :float ```c return 0.8; ```)
+  (defn iv-lo [x : float] : float ```c return (double)x * (double)x; ```)
+  (defn iv-hi [x : float] : float ```c return (double)x * (double)x + 0.5; ```)
+  (defn iv-plo [t : float] : int (xy-pair t (* 0.5 t)))
+  (defn iv-phi [t : float] : int (xy-pair t (+ (* 0.5 t) 0.3)))
+  (defn iv-rlo [t : float] : float ```c return 0.4; ```)
+  (defn iv-rhi [t : float] : float ```c return 0.8; ```)
 
-  (defn interval-renderers [fill :int line :int] :int
+  (defn interval-renderers [fill : int line : int] : int
     (vec-of (axes)
             (function-interval iv-lo iv-hi -1.5 1.5 96 fill line "fi")
             (lines-interval (t-cons (xy-pair -1.0 -0.5) (t-cons (xy-pair 0.0 0.0) (t-cons (xy-pair 1.0 0.5) 0)))
@@ -55,14 +55,14 @@
             (parametric-interval iv-plo iv-phi -1.0 1.0 72 fill line "pi")
             (polar-interval iv-rlo iv-rhi -1.0 1.0 72 fill line "po")))
 
-  (defn write-interval-png-ok [] :bool
+  (defn write-interval-png-ok [] : bool
     (let [fill (default-fill-style)
           line (default-line-style)
           rs   (interval-renderers fill line)]
       (and (assert-ok (plot-write-png rs (default-plot-opts) "/tmp/tur-plot-interval.png"))
            (assert-true (>i (file-size "/tmp/tur-plot-interval.png") 100)))))
 
-  (defn pixel-sanity-interval [] :bool
+  (defn pixel-sanity-interval [] : bool
     (let [fill (default-fill-style)
           line (default-line-style)
           rs   (interval-renderers fill line)
@@ -76,7 +76,7 @@
                (assert-true (>i ink 100))))
         (assert-true false))))
 
-  (defn main [] :int
+  (defn main [] : int
     (describe "plot/interval"
       (it "renders interval fills"
         (write-interval-png-ok))

@@ -48,7 +48,7 @@
 ;;;
 ;;; Parses "k1=v1&k2=v2" in place; writes malloc'd copies of keys and
 ;;; values into the ctx's qp_keys / qp_vals fields.
-(defn __parse-qp [ctx :int] :void
+(defn __parse-qp [ctx : int] : void
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -108,7 +108,7 @@
 ;;;   :int -- captures handle (may be 0)
 ;;;
 ;;; Since: v0.1.0
-(defn tourist-ctx-caps [ctx :int] :int
+(defn tourist-ctx-caps [ctx : int] : int
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -139,7 +139,7 @@
 ;;;   :cstr -- previous ctx->path value; pass it back in to restore.
 ;;;
 ;;; Since: v0.2.0
-(defn tourist-ctx-strip-path [ctx :int new-path :cstr] :cstr
+(defn tourist-ctx-strip-path [ctx : int new-path : cstr] : cstr
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -172,7 +172,7 @@
 ;;;   (req-full-path ctx)  ;; => "/api/users"
 ;;;
 ;;; Since: v0.2.0
-(defn req-full-path [ctx :int] :cstr
+(defn req-full-path [ctx : int] : cstr
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -209,12 +209,12 @@
 ;;;     ...)
 ;;;
 ;;; Since: v0.1.0
-(defn tourist-ctx-new [req :int caps :int] :int
+(defn tourist-ctx-new [req : int caps : int] : int
   (let [ctx (__tourist-ctx-alloc req caps)]
     (__parse-qp ctx)
     ctx))
 
-(defn __tourist-ctx-alloc [req :int caps :int] :int
+(defn __tourist-ctx-alloc [req : int caps : int] : int
   ```c
   #include <stdlib.h>
 
@@ -268,14 +268,14 @@
 ;;;   (tourist-ctx-free ctx)
 ;;;
 ;;; Since: v0.1.0
-(defn tourist-ctx-free [ctx :int] :void
+(defn tourist-ctx-free [ctx : int] : void
   (when (not= ctx 0)
     (do
       (captures-free (tourist-ctx-caps ctx))
       (__ctx-free-qp ctx)
       (__ctx-free-struct ctx))))
 
-(defn __ctx-free-qp [ctx :int] :void
+(defn __ctx-free-qp [ctx : int] : void
   ```c
   #include <stdlib.h>
   struct __tourist_ctx {
@@ -295,7 +295,7 @@
   free(c->qp_vals);
   ```)
 
-(defn __ctx-free-struct [ctx :int] :void
+(defn __ctx-free-struct [ctx : int] : void
   ```c
   #include <stdlib.h>
   if (ctx != 0) free((void *)(intptr_t)ctx);
@@ -321,7 +321,7 @@
 ;;;     (when (ok? r) (ok-val r)))
 ;;;
 ;;; Since: v0.1.0
-(defn param [ctx :int key :cstr] :int
+(defn param [ctx : int key : cstr] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -367,7 +367,7 @@
 ;;;     (when (ok? r) (ok-val r)))
 ;;;
 ;;; Since: v0.1.0
-(defn capture [ctx :int name :cstr] :int
+(defn capture [ctx : int name : cstr] : int
   (captures-get (tourist-ctx-caps ctx) name))
 
 ) ;; end defmodule tourist/param

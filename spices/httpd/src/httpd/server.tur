@@ -69,7 +69,7 @@
 ;; Low-level POSIX socket primitives (inline-C, local to this module)
 ;; =============================================================================
 
-(defn srv-make-listener [port :int] :int
+(defn srv-make-listener [port : int] : int
   ```c
   #include <stdio.h>
   #include <string.h>
@@ -97,7 +97,7 @@
   return (int64_t)fd;
   ```)
 
-(defn srv-accept-one [listen-fd :int] :int
+(defn srv-accept-one [listen-fd : int] : int
   ```c
   #include <sys/socket.h>
   #include <errno.h>
@@ -111,14 +111,14 @@
   }
   ```)
 
-(defn srv-close-fd [fd :int] :void
+(defn srv-close-fd [fd : int] : void
   ```c
   #include <unistd.h>
   int f = (int)fd;
   if (f >= 0) close(f);
   ```)
 
-(defn srv-shutdown-fd [fd :int] :void
+(defn srv-shutdown-fd [fd : int] : void
   ```c
   #include <sys/socket.h>
   int f = (int)fd;
@@ -129,7 +129,7 @@
 ;; Returns a handle to { char *bytes; int len; }, or 0 on read/parse error.
 ;; Stops as soon as we've consumed CRLF CRLF + Content-Length bytes (or the
 ;; peer half-closes).
-(defn srv-recv-request [client-fd :int] :int
+(defn srv-recv-request [client-fd : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -207,19 +207,19 @@
   return (int64_t)(intptr_t)r;
   ```)
 
-(defn srv-raw-bytes [raw :int] :cstr
+(defn srv-raw-bytes [raw : int] : cstr
   ```c
   struct __httpd_rawreq { char *bytes; int len; };
   return ((struct __httpd_rawreq *)(intptr_t)raw)->bytes;
   ```)
 
-(defn srv-raw-len [raw :int] :int
+(defn srv-raw-len [raw : int] : int
   ```c
   struct __httpd_rawreq { char *bytes; int len; };
   return (int64_t)((struct __httpd_rawreq *)(intptr_t)raw)->len;
   ```)
 
-(defn srv-raw-free [raw :int] :void
+(defn srv-raw-free [raw : int] : void
   ```c
   #include <stdlib.h>
   struct __httpd_rawreq { char *bytes; int len; };
@@ -231,7 +231,7 @@
 
 ;; Loop write(2) until all bytes are sent or an error occurs.  Returns 0 on
 ;; success, -1 on error.  EPIPE / EINTR retried as appropriate.
-(defn srv-write-all [fd :int buf :cstr len :int] :int
+(defn srv-write-all [fd : int buf : cstr len : int] : int
   ```c
   #include <unistd.h>
   #include <errno.h>
@@ -252,7 +252,7 @@
   ```)
 
 ;; Invoke a handler function pointer: handler(req) -> resp.
-(defn srv-call-handler [handler :ptr<void> req :int] :int
+(defn srv-call-handler [handler : ptr<void> req : int] : int
   ```c
   typedef int64_t (*handler_fn)(int64_t);
   return ((handler_fn)handler)((int64_t)req);
@@ -263,7 +263,7 @@
 ;; Entry: a malloc'd __httpd_warg { client_fd, handler }, ownership transferred.
 ;; =============================================================================
 
-(defn srv-worker-loop [arg :ptr<void>] :ptr<void>
+(defn srv-worker-loop [arg : ptr<void>] : ptr<void>
   ```c
   #include <stdlib.h>
   struct __httpd_warg { int client_fd; void *handler; };
@@ -291,36 +291,36 @@
 
 ;; WorkerArg accessors -- the worker is a Turmeric function so we expose the
 ;; arg struct fields through accessors instead of mutating C locals.
-(defn srv-warg->int [arg :ptr<void>] :int
+(defn srv-warg->int [arg : ptr<void>] : int
   ```c
   return (int64_t)(intptr_t)arg;
   ```)
 
-(defn srv-warg-fd [arg :int] :int
+(defn srv-warg-fd [arg : int] : int
   ```c
   struct __httpd_warg { int client_fd; void *handler; };
   return (int64_t)((struct __httpd_warg *)(intptr_t)arg)->client_fd;
   ```)
 
-(defn srv-warg-handler [arg :int] :ptr<void>
+(defn srv-warg-handler [arg : int] : ptr<void>
   ```c
   struct __httpd_warg { int client_fd; void *handler; };
   return ((struct __httpd_warg *)(intptr_t)arg)->handler;
   ```)
 
-(defn srv-warg-free [arg :int] :void
+(defn srv-warg-free [arg : int] : void
   ```c
   #include <stdlib.h>
   free((void *)(intptr_t)arg);
   ```)
 
-(defn srv-null-ptr [] :ptr<void>
+(defn srv-null-ptr [] : ptr<void>
   ```c
   return NULL;
   ```)
 
 ;; Spawn a detached worker thread for one connection.
-(defn srv-spawn-worker [handler :ptr<void> client-fd :int] :void
+(defn srv-spawn-worker [handler : ptr<void> client-fd : int] : void
   ```c
   #include <stdlib.h>
   #include <unistd.h>
@@ -348,7 +348,7 @@
 ;; Server state + listener thread
 ;; =============================================================================
 
-(defn srv-state-new [listen-fd :int handler :ptr<void>] :ptr<void>
+(defn srv-state-new [listen-fd : int handler : ptr<void>] : ptr<void>
   ```c
   #include <stdlib.h>
   struct __httpd_server {
@@ -367,12 +367,12 @@
   return (void *)s;
   ```)
 
-(defn srv-state->int [s :ptr<void>] :int
+(defn srv-state->int [s : ptr<void>] : int
   ```c
   return (int64_t)(intptr_t)s;
   ```)
 
-(defn srv-state-listen-fd [s :int] :int
+(defn srv-state-listen-fd [s : int] : int
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -381,7 +381,7 @@
   return (int64_t)((struct __httpd_server *)(intptr_t)s)->listen_fd;
   ```)
 
-(defn srv-state-handler-ptr [s :int] :ptr<void>
+(defn srv-state-handler-ptr [s : int] : ptr<void>
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -390,7 +390,7 @@
   return ((struct __httpd_server *)(intptr_t)s)->handler;
   ```)
 
-(defn srv-state-stopping? [s :int] :int
+(defn srv-state-stopping? [s : int] : int
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -400,7 +400,7 @@
   return ((struct __httpd_server *)(intptr_t)s)->stop_flag ? 1 : 0;
   ```)
 
-(defn srv-state-mark-stopping [s :ptr<void>] :void
+(defn srv-state-mark-stopping [s : ptr<void>] : void
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -411,7 +411,7 @@
   __sync_synchronize();
   ```)
 
-(defn srv-state-close-listen [s :ptr<void>] :void
+(defn srv-state-close-listen [s : ptr<void>] : void
   ```c
   #include <sys/socket.h>
   #include <unistd.h>
@@ -427,7 +427,7 @@
   }
   ```)
 
-(defn srv-state-set-thread [s :ptr<void> tid :ptr<void>] :void
+(defn srv-state-set-thread [s : ptr<void> tid : ptr<void>] : void
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -436,7 +436,7 @@
   ((struct __httpd_server *)s)->listener_thread = tid;
   ```)
 
-(defn srv-state-get-thread [s :ptr<void>] :ptr<void>
+(defn srv-state-get-thread [s : ptr<void>] : ptr<void>
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -445,7 +445,7 @@
   return ((struct __httpd_server *)s)->listener_thread;
   ```)
 
-(defn srv-state-set-pool [s :ptr<void> pool :ptr<void>] :void
+(defn srv-state-set-pool [s : ptr<void> pool : ptr<void>] : void
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -454,7 +454,7 @@
   ((struct __httpd_server *)s)->pool = (void *)pool;
   ```)
 
-(defn srv-state-pool [s :int] :ptr<void>
+(defn srv-state-pool [s : int] : ptr<void>
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -463,7 +463,7 @@
   return ((struct __httpd_server *)(intptr_t)s)->pool;
   ```)
 
-(defn srv-state-pool-int [s :int] :int
+(defn srv-state-pool-int [s : int] : int
   ```c
   struct __httpd_server {
     int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
@@ -472,14 +472,14 @@
   return (int64_t)(intptr_t)((struct __httpd_server *)(intptr_t)s)->pool;
   ```)
 
-(defn srv-state-free [s :ptr<void>] :void
+(defn srv-state-free [s : ptr<void>] : void
   ```c
   #include <stdlib.h>
   free(s);
   ```)
 
 ;; The listener-loop entry: arg = struct __httpd_server *.
-(defn srv-listener-loop [arg :ptr<void>] :ptr<void>
+(defn srv-listener-loop [arg : ptr<void>] : ptr<void>
   (let [s-int (srv-state->int arg)
         listen-fd (srv-state-listen-fd s-int)
         handler (srv-state-handler-ptr s-int)]
@@ -492,7 +492,7 @@
             (pool-enqueue (srv-state-pool s-int) client-fd))))))
   (srv-null-ptr))
 
-(defn srv-spawn-listener [s :ptr<void>] :ptr<void>
+(defn srv-spawn-listener [s : ptr<void>] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <pthread.h>
@@ -506,7 +506,7 @@
   return (void *)tid;
   ```)
 
-(defn srv-join-listener [tid :ptr<void>] :void
+(defn srv-join-listener [tid : ptr<void>] : void
   ```c
   #include <stdlib.h>
   #include <pthread.h>
@@ -522,7 +522,7 @@
 
 ;; Default pool size used by `server-start`.  Kept as a defn rather than a
 ;; toplevel def so it can be tweaked without touching the call sites.
-(defn srv-default-pool-size [] :int 8)
+(defn srv-default-pool-size [] : int 8)
 
 ;;; server-start -- bind a TCP listener on `port` and dispatch requests to
 ;;; `handler` via a bounded pool of worker threads (default size 8).
@@ -555,7 +555,7 @@
 ;;;     (server-stop srv))
 ;;;
 ;;; Since: H6 (pool default added in H7)
-(defn server-start [port :int handler :ptr<void>] :ptr<void>
+(defn server-start [port : int handler : ptr<void>] : ptr<void>
   (server-start-pool port handler (srv-default-pool-size)))
 
 ;;; server-start-pool -- like server-start but with an explicit pool size.
@@ -572,7 +572,7 @@
 ;;;   (def srv (server-start-pool 8080 my-handler 32))
 ;;;
 ;;; Since: H7
-(defn server-start-pool [port :int handler :ptr<void> size :int] :ptr<void>
+(defn server-start-pool [port : int handler : ptr<void> size : int] : ptr<void>
   (let [fd (srv-make-listener port)]
     (if (< fd 0)
       (srv-null-ptr)
@@ -610,7 +610,7 @@
 ;;;   (def srv (server-start-spawn 8080 my-handler))
 ;;;
 ;;; Since: H7
-(defn server-start-spawn [port :int handler :ptr<void>] :ptr<void>
+(defn server-start-spawn [port : int handler : ptr<void>] : ptr<void>
   (let [fd (srv-make-listener port)]
     (if (< fd 0)
       (srv-null-ptr)
@@ -644,7 +644,7 @@
 ;;;   (server-stop srv)
 ;;;
 ;;; Since: H6 (pool join added in H7)
-(defn server-stop [s :ptr<void>] :void
+(defn server-stop [s : ptr<void>] : void
   (when (not= (srv-state->int s) 0)
     (do
       (srv-state-mark-stopping s)

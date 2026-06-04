@@ -25,14 +25,14 @@
 
   ;; -- Style assert helpers (no stdlib assert-err in our test framework) --
 
-  (defn err? [r :int] :bool
+  (defn err? [r : int] : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res =
         (void *)(intptr_t)r;
     return res && !res->is_ok;
     ```)
 
-  (defn ok-handle [r :int] :int
+  (defn ok-handle [r : int] : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res =
         (void *)(intptr_t)r;
@@ -44,7 +44,7 @@
   ;; Try a list of common font paths and return the first that exists,
   ;; or NULL.  Order: macOS system Helvetica, macOS supplemental Arial,
   ;; Linux DejaVu (common), Linux Liberation, generic fallback.
-  (defn probe-font-path [] :cstr
+  (defn probe-font-path [] : cstr
     ```c
     #include <unistd.h>
     static const char *candidates[] = {
@@ -143,24 +143,24 @@
            (println "  (skipped: no system font available)")
            true))))
 
-  (defn have-font-path? [p :cstr] :bool
+  (defn have-font-path? [p : cstr] : bool
     ```c
     return p != NULL && ((const char *)(intptr_t)p)[0] != '\0';
     ```)
 
-  (defn >f  [a :float b :float] :bool
+  (defn >f  [a : float b : float] : bool
     ```c
     return (double)a > (double)b;
     ```)
-  (defn <f  [a :float b :float] :bool
+  (defn <f  [a : float b : float] : bool
     ```c
     return (double)a < (double)b;
     ```)
-  (defn >=f [a :float b :float] :bool
+  (defn >=f [a : float b : float] : bool
     ```c
     return (double)a >= (double)b;
     ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (run-all)
     0))

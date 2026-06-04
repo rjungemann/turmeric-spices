@@ -23,7 +23,7 @@
                                   rect-destroy rect-x rect-y rect-w rect-h])
 
   ;; Convenience: read byte at offset n from a plutovg surface buffer.
-  (defn surface-byte [s :int n :int] :int
+  (defn surface-byte [s : int n : int] : int
     ```c
     #include <plutovg.h>
     unsigned char *p = plutovg_surface_get_data((plutovg_surface_t *)(intptr_t)s);
@@ -31,7 +31,7 @@
     ```)
 
   ;; Local float-equality helper (no stdlib epsilon in scope).
-  (defn fapprox [a :float b :float] :bool
+  (defn fapprox [a : float b : float] : bool
     ```c
     double d = (double)a - (double)b;
     if (d < 0) d = -d;
@@ -123,20 +123,20 @@
           (surface-destroy s)))))
 
   ;; Local float helpers (avoid pulling in stdlib comparisons).
-  (defn >f [a :float b :float] :bool
+  (defn >f [a : float b : float] : bool
     ```c
     return (double)a > (double)b;
     ```)
-  (defn <f [a :float b :float] :bool
+  (defn <f [a : float b : float] : bool
     ```c
     return (double)a < (double)b;
     ```)
-  (defn fabs-diff [a :float b :float] :float
+  (defn fabs-diff [a : float b : float] : float
     ```c
     double d = (double)a - (double)b;
     return d < 0 ? -d : d;
     ```)
 
-  (defn main [] :int
+  (defn main [] : int
     (run-all)
     0))

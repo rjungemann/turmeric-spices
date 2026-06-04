@@ -26,7 +26,7 @@
           image-display-tui)
 
   ;;; image-marker -- the stdout prefix used to signal an image path.
-  (defn image-marker [] :cstr "__NB_IMG__: ")
+  (defn image-marker [] : cstr "__NB_IMG__: ")
 
   ;;; image-hook-record-path -- record an image path via the stdout marker.
   ;;;
@@ -40,7 +40,7 @@
   ;;;   (image-hook-record-path "/tmp/cell-3-plot.png")
   ;;;
   ;;; Since: Phase NB11
-  (defn image-hook-record-path [path :cstr] #{Unsafe} :int
+  (defn image-hook-record-path [path : cstr] #{Unsafe} : int
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     printf("__NB_IMG__: %s\n", p);
@@ -60,7 +60,7 @@
   ;;;   (image-hook-install session)
   ;;;
   ;;; Since: Phase NB11
-  (defn image-hook-install [session :int] :int
+  (defn image-hook-install [session : int] : int
     (let [_ session] 0))
 
   ;;; image-hook-take -- no-op stub; image paths live in cell-output.image-paths.
@@ -75,7 +75,7 @@
   ;;;   (image-hook-take session)
   ;;;
   ;;; Since: Phase NB11
-  (defn image-hook-take [session :int] :int
+  (defn image-hook-take [session : int] : int
     (let [_ session] 0))
 
   ;;; png->data-url -- read a PNG file and return a base64 data URL.
@@ -91,7 +91,7 @@
   ;;;   (png->data-url "/tmp/plot.png")  ; => "data:image/png;base64,iVBOR..."
   ;;;
   ;;; Since: Phase NB11
-  (defn png->data-url [path :cstr] #{Unsafe} :cstr
+  (defn png->data-url [path : cstr] #{Unsafe} : cstr
     ```c
     #include <stdint.h>
     static const char b64[] =
@@ -139,7 +139,7 @@
     ```)
 
   ;; Extract the ok-value (image handle) from a png/reader result, or 0 on err.
-  (defn __img-result-handle [r :ptr<void>] #{Unsafe} :int
+  (defn __img-result-handle [r : ptr<void>] #{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
     if (!res || !res->is_ok) return 0;
@@ -165,7 +165,7 @@
   ;;;   (image-display-tui "/tmp/cell-3-plot.png")
   ;;;
   ;;; Since: Phase NB11 (AN5: delegated to ansi/image; v0.1.2: sixel via tur-png)
-  (defn image-display-tui [path :cstr] #{Unsafe} :int
+  (defn image-display-tui [path : cstr] #{Unsafe} : int
     (let [proto (term-image-protocol)]
       (do
         (if (= proto 3)

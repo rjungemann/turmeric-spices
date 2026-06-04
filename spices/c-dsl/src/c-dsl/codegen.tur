@@ -17,7 +17,7 @@
 ;;;   (c-raw "/* hand-written C */")  ; => "/* hand-written C */"
 ;;;
 ;;; Since: P1
-(defn c-raw [s :cstr] :cstr s)
+(defn c-raw [s : cstr] : cstr s)
 
 ;;; c-int->str -- convert an integer to a decimal string.
 ;;;
@@ -31,7 +31,7 @@
 ;;;   (c-int->str 42)  ; => "42"
 ;;;
 ;;; Since: P1
-(defn c-int->str [n :int] :cstr
+(defn c-int->str [n : int] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -52,7 +52,7 @@
 ;;;   (c-float->str 3.14)  ; => "3.14"
 ;;;
 ;;; Since: P1
-(defn c-float->str [f :float] :cstr
+(defn c-float->str [f : float] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -74,7 +74,7 @@
 ;;;   (c-cat2 "int32_t" "*")  ; => "int32_t*"
 ;;;
 ;;; Since: P1
-(defn c-cat2 [a :cstr b :cstr] :cstr
+(defn c-cat2 [a : cstr b : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -97,7 +97,7 @@
 ;;;   New heap-allocated string a+b+c.
 ;;;
 ;;; Since: P1
-(defn c-cat3 [a :cstr b :cstr c :cstr] :cstr
+(defn c-cat3 [a : cstr b : cstr c : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -113,7 +113,7 @@
 ;;; c-cat4 -- concatenate four C source strings.
 ;;;
 ;;; Since: P1
-(defn c-cat4 [a :cstr b :cstr c :cstr d :cstr] :cstr
+(defn c-cat4 [a : cstr b : cstr c : cstr d : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -140,7 +140,7 @@
 ;;;   (c-sprintf1 "return %s;" "x")  ; => "return x;"
 ;;;
 ;;; Since: P1
-(defn c-sprintf1 [fmt :cstr a :cstr] :cstr
+(defn c-sprintf1 [fmt : cstr a : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -155,7 +155,7 @@
 ;;; c-sprintf2 -- format a string with two %s substitutions.
 ;;;
 ;;; Since: P1
-(defn c-sprintf2 [fmt :cstr a :cstr b :cstr] :cstr
+(defn c-sprintf2 [fmt : cstr a : cstr b : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -171,7 +171,7 @@
 ;;; c-sprintf3 -- format a string with three %s substitutions.
 ;;;
 ;;; Since: P1
-(defn c-sprintf3 [fmt :cstr a :cstr b :cstr c :cstr] :cstr
+(defn c-sprintf3 [fmt : cstr a : cstr b : cstr c : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -188,7 +188,7 @@
 ;;; c-sprintf4 -- format a string with four %s substitutions.
 ;;;
 ;;; Since: P1
-(defn c-sprintf4 [fmt :cstr a :cstr b :cstr c :cstr d :cstr] :cstr
+(defn c-sprintf4 [fmt : cstr a : cstr b : cstr c : cstr d : cstr] : cstr
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -217,7 +217,7 @@
 ;;;   ; => "int32_t a, float b"
 ;;;
 ;;; Since: P1
-(defn c-join [items :int sep :cstr] :cstr
+(defn c-join [items : int sep : cstr] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -260,7 +260,7 @@
 ;;;   Items joined by "\n".
 ;;;
 ;;; Since: P1
-(defn c-lines [items :int] :cstr
+(defn c-lines [items : int] : cstr
   (c-join items "\n"))
 
 ;;; c-indent -- prefix every line of a multi-line string with 4 spaces.
@@ -276,7 +276,7 @@
 ;;;   ; => "    int x = 0;\n    return x;"
 ;;;
 ;;; Since: P1
-(defn c-indent [code :cstr] :cstr
+(defn c-indent [code : cstr] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -315,7 +315,7 @@
 ;;;   ; => "int32_t a, float b"
 ;;;
 ;;; Since: v0.2.0
-(defn c-join-vec [items :int sep :cstr] :cstr
+(defn c-join-vec [items : int sep : cstr] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -355,7 +355,7 @@
 ;;;   Statements joined by "\n".
 ;;;
 ;;; Since: P1
-(defn c-stmts [stmts :int] :cstr
+(defn c-stmts [stmts : int] : cstr
   (c-join-vec stmts "\n"))
 
 ;;; c-block -- wrap a cons list of statement strings in a braced block.
@@ -370,7 +370,7 @@
 ;;;   (c-block (cons "return 0;" 0))  ; => "{\n    return 0;\n}"
 ;;;
 ;;; Since: P1
-(defn c-block [stmts :int] :cstr
+(defn c-block [stmts : int] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -411,7 +411,7 @@
 ;;;                    (cons (c-defn ...) 0)))
 ;;;
 ;;; Since: P1
-(defn compile-c [fragments :int] :cstr
+(defn compile-c [fragments : int] : cstr
   (c-join fragments "\n\n"))
 
 ;;; emit-c-file -- write compiled C source to a file on disk.
@@ -427,7 +427,7 @@
 ;;;   (emit-c-file "out.c" my-fragments)  ; => true
 ;;;
 ;;; Since: P1
-(defn emit-c-file [path :cstr fragments :int] :bool
+(defn emit-c-file [path : cstr fragments : int] : bool
   ```c
   #include <stdio.h>
   #include <string.h>
