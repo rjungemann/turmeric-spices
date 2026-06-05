@@ -132,7 +132,7 @@
 ;;; Operates on a `Signal (Pair float float)` consumed via stdlib pair-fst/snd.
 (defn mix [alpha :float]
   (let [av alpha]
-    (fn [^fat prod-sig : (fn [:float] #{} :(Pair float float))]
+    (fn [^fat prod-sig : (fn [float] #{} (Pair float float))]
       (fn [t :float] :float
         (let [p (prod-sig t)
               x (pair-fst p)
@@ -141,7 +141,7 @@
 
 ;;; add -- sum a Pair signal sample-wise.
 (defn add []
-  (fn [^fat prod-sig : (fn [:float] #{} :(Pair float float))]
+  (fn [^fat prod-sig : (fn [float] #{} (Pair float float))]
     (fn [t :float] :float
       (let [p (prod-sig t)]
         (+ (pair-fst p) (pair-snd p))))))
