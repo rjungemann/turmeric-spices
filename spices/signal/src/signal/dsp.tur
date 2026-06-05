@@ -145,3 +145,16 @@
     (fn [t :float] :float
       (let [p (prod-sig t)]
         (+ (pair-fst p) (pair-snd p))))))
+
+;;; multiply -- product of a Pair signal sample-wise.
+;;;
+;;; Returns:
+;;;   SF (Pair Sample Sample) Sample: (fst * snd) at every t.
+;;;
+;;; Example:
+;;;   ((multiply) (pair-signals lfo carrier))
+(defn multiply []
+  (fn [^fat prod-sig : (fn [float] #{} (Pair float float))]
+    (fn [t :float] :float
+      (let [p (prod-sig t)]
+        (* (pair-fst p) (pair-snd p))))))
