@@ -1,0 +1,99 @@
+;; Signal Processing -- Oscillators
+;;
+;; Each oscillator returns an SF (Signal Function): apply it to any
+;; signal to receive a Time -> Sample closure. Periodic shapes only --
+;; wavetable, FM, additive, and granular oscillators are Tier 2.
+
+(defmodule signal/osc)
+
+;; =============================================================================
+;; libm bridges
+;; =============================================================================
+
+;;; __dsp_sin -- compute sine of angle in radians.
+(defn __dsp_sin [x :float] :float
+  ```c
+  return sin(x);
+  ```)
+
+;;; __dsp_fmod -- compute floating-point modulo.
+(defn __dsp_fmod [x :float y :float] :float
+  ```c
+  return fmod(x, y);
+  ```)
+
+;; =============================================================================
+;; Oscillators
+;; =============================================================================
+
+;;; sine -- sine-wave oscillator Signal Function.
+;;;
+;;; Parameters:
+;;;   freq  -- frequency in Hz
+;;;   phase -- initial phase offset in radians
+;;;
+;;; Returns:
+;;;   An SF: ignores its input signal and emits sin(2*pi*freq*t + phase).
+;;;
+;;; Example:
+;;;   (sine 440.0 0.0)
+(defn sine [freq :float phase :float]
+  (let [fv freq pv phase]
+    (fn [^fat sig]
+      (fn [t :float] :float
+        (__dsp_sin (+ (* (* 2.0 3.14159265358979323846) fv t) pv))))))
+
+;;; square -- square-wave oscillator Signal Function.
+;;;
+;;; Parameters:
+;;;   freq      -- frequency in Hz
+;;;   dutycycle -- duty cycle in [0, 1]
+;;;
+;;; Returns:
+;;;   An SF emitting +1.0 for the on-portion of each cycle, -1.0 otherwise.
+;;;
+;;; Example:
+;;;   (square 220.0 0.5)
+(defn square [freq :float dutycycle :float]
+  (let [fv freq dv dutycycle]
+    (fn [^fat sig]
+      (fn [t :float] :float
+        (let [phase (__dsp_fmod (* fv t) 1.0)]
+          (if (< phase dv) 1.0 -1.0))))))
+
+;;; sawtooth -- sawtooth-wave oscillator Signal Function.
+;;;
+;;; Parameters:
+;;;   freq -- frequency in Hz
+;;;
+;;; Returns:
+;;;   An SF emitting a rising ramp in [0.0, 1.0).
+;;;
+;;; Example:
+;;;   (sawtooth 110.0)
+(defn sawtooth [freq :float]
+  (let [fv freq]
+    (fn [^fat sig]
+      (fn [t :float] :float
+        (let [phase (__dsp_fmod (* fv t) 1.0)]
+          (if (< phase 0.0) (+ phase 1.0) phase))))))
+
+;;; triangle -- triangle-wave oscillator Signal Function.
+;;;
+;;; Parameters:
+;;;   freq -- frequency in Hz
+;;;
+;;; Returns:
+;;;   An SF that rises from -1.0 to 1.0 over the first half of each
+;;;   cycle and falls back to -1.0 over the second.
+;;;
+;;; Example:
+;;;   (triangle 440.0)
+(defn triangle [freq :float]
+  (let [fv freq]
+    (fn [^fat sig]
+      (fn [t :float] :float
+        (let [phase (__dsp_fmod (* fv t) 1.0)]
+          (if (< phase 0.5)
+            (- (* 4.0 phase) 1.0)
+            (- 3.0 (* 4.0 phase))))))))

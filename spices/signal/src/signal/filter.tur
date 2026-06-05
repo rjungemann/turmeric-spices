@@ -1,0 +1,84 @@
+;; Signal Processing -- Filters
+;;
+;; First-order IIR filters with per-instance state. Resonant / state-
+;; variable / ladder topologies are Tier 2.
+
+(defmodule signal/filter)
+
+;; =============================================================================
+;; State cells
+;; =============================================================================
+
+;;; __filter_alloc_state -- allocate a zero-initialized double cell.
+;;;
+;;; Each filter instance owns one of these for its previous sample.
+(defn __filter_alloc_state [] :int
+  ```c
+  double *p = (double *)calloc(1, sizeof(double));
+  if (!p) { fprintf(stderr, "filter: state alloc failed\n"); abort(); }
+  return (int64_t)(intptr_t)p;
+  ```)
+
+;;; __filter_lp_step -- low-pass EMA step.
+;;;
+;;; Reads `*prev` as the previous output, computes
+;;; `y = alpha * x + (1 - alpha) * prev`, stores `y`, and returns it.
+(defn __filter_lp_step [state :int alpha :float x :float] :float
+  ```c
+  double *prev = (double *)(intptr_t)state;
+  double y = alpha * x + (1.0 - alpha) * (*prev);
+  *prev = y;
+  return y;
+  ```)
+
+;;; __filter_hp_step -- high-pass step.
+;;;
+;;; Tracks the low-pass output internally; emits `x - lp`.
+(defn __filter_hp_step [state :int alpha :float x :float] :float
+  ```c
+  double *prev_lp = (double *)(intptr_t)state;
+  double lp = alpha * x + (1.0 - alpha) * (*prev_lp);
+  *prev_lp = lp;
+  return x - lp;
+  ```)
+
+;; =============================================================================
+;; Filters
+;; =============================================================================
+
+;;; low-pass -- first-order IIR low-pass filter Signal Function.
+;;;
+;;; Parameters:
+;;;   alpha -- smoothing coefficient in (0, 1); lower = more smoothing.
+;;;
+;;; Returns:
+;;;   SF Sample Sample. Each instance owns its own state cell, so the
+;;;   same `(low-pass alpha)` SF is stateful from the moment it is
+;;;   applied to an input signal.
+;;;
+;;; Example:
+;;;   ((low-pass 0.3) (sine 440.0 0.0))
+(defn low-pass [alpha :float]
+  (let [av alpha]
+    (fn [^fat sig : (fn [float] float)]
+      (let [state (__filter_alloc_state)]
+        (fn [t :float] :float
+          (__filter_lp_step state av (sig t)))))))
+
+;;; high-pass -- first-order IIR high-pass filter Signal Function.
+;;;
+;;; Parameters:
+;;;   alpha -- smoothing coefficient of the internal low-pass tap
+;;;            (matches `low-pass`'s convention).
+;;;
+;;; Returns:
+;;;   SF Sample Sample emitting `x - low_pass(x)` per sample.
+;;;
+;;; Example:
+;;;   ((high-pass 0.3) (sawtooth 110.0))
+(defn high-pass [alpha :float]
+  (let [av alpha]
+    (fn [^fat sig : (fn [float] float)]
+      (let [state (__filter_alloc_state)]
+        (fn [t :float] :float
+          (__filter_hp_step state av (sig t)))))))

@@ -1,7 +1,9 @@
-;; Signal Processing Envelopes
+;; Signal Processing -- Envelopes
 ;;
-;; This module provides envelope generators for signal processing.
-;; Envelopes control the amplitude or other parameters of a signal over time.
+;; ADSR amplitude envelope. Gate-driven re-trigger and tempo-synced
+;; envelopes are Tier 2.
+
+(defmodule signal/envelope)
 
 ;; =============================================================================
 ;; ADSR Envelope
@@ -75,3 +77,16 @@
         (__adsr_fixed_sample
           (__adsr_attack pv) (__adsr_decay pv) (__adsr_sustain pv) (__adsr_release pv)
           gd t)))))
+
+;;; adsr-gen -- one-shot ADSR with a unit (1.0s) gate duration.
+;;;
+;;; Parameters:
+;;;   params -- ADSRParams controlling envelope shape
+;;;
+;;; Returns:
+;;;   A Signal Function returning the ADSR amplitude at time t.
+;;;
+;;; Example:
+;;;   ((adsr-gen (make-struct ADSRParams 0.01 0.1 0.7 0.2)) (constant 0.0))
+(defn adsr-gen [params]
+  (adsr-fixed params 1.0))
