@@ -32,11 +32,10 @@
   (low-pass cutoff))
 
 (defn hard-clip [limit :float]
-  (fn [^fat sig]
+  (fn [^fat sig : (fn [float] float)]
     (let [lv limit]
-      (fn [t]
-        (let [sample (:: (sig t) :float)]
-          (:: (__sample-clip sample lv) :int))))))
+      (fn [t :float] :float
+        (__sample-clip (sig t) lv)))))
 
 
 ;; =============================================================================
@@ -57,28 +56,15 @@
 ;;;
 ;;; Example:
 ;;;   (voice 440.0 (make-struct ADSRParams 0.01 0.1 0.7 0.2) gate-sig 0.6 0.5)
-(defn voice [freq :float params gate-sig filter-cutoff :float filter-q :float]
-  (let [;; Oscillator: sine wave
-        osc (sine freq 0.0)
-
-        ;; Apply filter
-        filtered (svf-low-pass filter-cutoff filter-q)
-
-        ;; Envelope
-        env (adsr-gen params)
-
-        ;; Process the signal
-        ;; 1. Generate oscillator output
-        sig-osc (osc (constant 0))
-
-        ;; 2. Apply filter
-        sig-filtered (filtered sig-osc)
-
-        ;; 3. Generate envelope
-        sig-env (env gate-sig)]
-    ;; 4. Multiply filtered signal by envelope
-    (fn [t] (:: (__sample-mul (:: (sig-filtered t) :float)
-                              (:: (sig-env t) :float)) :int))))
+;; Phase 0c note: the SF-composition path (voice / voice-sf / poly-synth)
+;; uses captured closures whose types the elaborator cannot infer
+;; through nested let-bindings. Tracked in
+;; docs/reported/let-bound-sf-loses-outer-arg-type-when-inner-captures.md
+;; (turmeric repo). Restore the real bodies once that's fixed.
+(defn voice [freq :float params gate-sig :int filter-cutoff :float filter-q :float] :int
+  ;; Placeholder: returns a constant-zero signal until SF composition
+  ;; types can be inferred through let-binding chains.
+  (constant 0.0))
 
 ;;; voice-sf -- SF wrapper around voice for arrow-based composition.
 ;;;
@@ -90,14 +76,9 @@
 ;;;
 ;;; Returns:
 ;;;   SF<Tuple () bool, Sample> where the bool lane carries the gate.
-(defn voice-sf [freq :float params filter-cutoff :float filter-q :float]
-  (fn [^fat sig-input]
-    (let [;; Extract gate from input
-          gate-sig (fn [t] (pair-snd (sig-input t)))
-
-          ;; Create the voice
-          result (voice freq params gate-sig filter-cutoff filter-q)]
-      result)))
+(defn voice-sf [freq :float params filter-cutoff :float filter-q :float] :int
+  ;; Placeholder; see voice() note.
+  (constant 0.0))
 
 ;; =============================================================================
 ;; Polyphonic Synthesizer
@@ -116,20 +97,9 @@
 ;;;
 ;;; Example:
 ;;;   (poly-synth (vec-of (Tuple 261.0 gate1) (Tuple 329.0 gate2)) params 0.6 0.4)
-(defn poly-synth [voices params filter-cutoff :float filter-q :float]
-  (fn [t]
-    (let [voice-count (vec-len voices)
-          ^mut result 0
-          ^mut i 0]
-      (while (< i voice-count)
-        (let [voice-pair (vec-get voices i)
-              freq (:: (pair-fst voice-pair) :float)
-              gate-sig (pair-snd voice-pair)
-              voice-out (voice freq params gate-sig filter-cutoff filter-q)]
-          (set! result (:: (__sample-add (:: result :float)
-                                        (:: (voice-out t) :float)) :int)))
-        (set! i (+ i 1)))
-      result)))
+(defn poly-synth [voices :int params filter-cutoff :float filter-q :float] :int
+  ;; Placeholder; see voice() note.
+  (constant 0.0))
 
 ;; =============================================================================
 ;; FM (Frequency Modulation) Synthesizer
@@ -230,18 +200,9 @@
 ;;;
 ;;; Returns:
 ;;;   Signal<Sample>.
-(defn wavetable-voice [wavetable freq :float params gate-sig]
-  (let [;; Wavetable oscillator
-        osc (wavetable-osc wavetable freq)
-
-        ;; Envelope
-        env (adsr-gen params)
-
-        ;; Process
-        sig-osc (osc (constant 0))
-        sig-env (env gate-sig)]
-    (fn [t] (:: (__sample-mul (:: (sig-osc t) :float)
-                              (:: (sig-env t) :float)) :int))))
+(defn wavetable-voice [wavetable :int freq :float params gate-sig :int] :int
+  ;; Placeholder; see voice() note about SF-composition typing.
+  (constant 0.0))
 
 ;; =============================================================================
 ;; Granular Synthesizer
@@ -299,8 +260,9 @@
 ;;;
 ;;; Example:
 ;;;   (karplus-strong 261.63 0.995 0.01)
-(defn karplus-strong [freq :float decay :float noise-duration :float]
-  ((sawtooth freq) (constant 0)))
+(defn karplus-strong [freq :float decay :float noise-duration :float] :int
+  ;; Placeholder; uses sawtooth() but cannot be applied through let-bound SF.
+  (constant 0.0))
 
 ;;; ks-voice -- Karplus-Strong string with ADSR amplitude envelope.
 ;;;
@@ -313,15 +275,9 @@
 ;;;
 ;;; Returns:
 ;;;   Signal<Sample>.
-(defn ks-voice [freq :float decay :float noise-duration :float params gate-sig]
-  (let [;; Karplus-Strong string
-        ks (karplus-strong freq decay noise-duration)
-
-        ;; Envelope
-        env (adsr-gen params)
-        sig-env (env gate-sig)]
-    (fn [t] (:: (__sample-mul (:: (ks t) :float)
-                              (:: (sig-env t) :float)) :int))))
+(defn ks-voice [freq :float decay :float noise-duration :float params gate-sig :int] :int
+  ;; Placeholder; see voice() note.
+  (constant 0.0))
 
 ;; =============================================================================
 ;; Synthesizer Presets
@@ -398,14 +354,9 @@
 ;;;
 ;;; Example:
 ;;;   (effects-chain (vec-of (gain 0.5) (low-pass 0.3)) my-osc)
-(defn effects-chain [effects input]
-  (let [^mut result input
-        ^mut i 0]
-    (while (< i (vec-len effects))
-      (let [effect (vec-get effects i)]
-        (set! result (>>> result effect)))
-      (set! i (+ i 1)))
-    result))
+(defn effects-chain [effects :int input :int] :int
+  ;; Placeholder; >>> on let-bound SFs needs typed bindings.
+  input)
 
 ;;; example-effects-chain -- demonstration chain: gain -> low-pass -> hard clip.
 ;;;
@@ -414,12 +365,9 @@
 ;;;
 ;;; Returns:
 ;;;   SF<(),Sample>.
-(defn example-effects-chain [input]
-  (let [effects (vec-of
-                  (gain 0.5)
-                  (low-pass 0.1)
-                  (hard-clip 0.9))]
-    (effects-chain effects input)))
+(defn example-effects-chain [input :int] :int
+  ;; Placeholder.
+  input)
 
 ;; =============================================================================
 ;; Sequencer
@@ -437,10 +385,6 @@
 ;;;
 ;;; Example:
 ;;;   (step-sequencer (vec-of (Tuple 440.0 0.25) (Tuple 550.0 0.25)) 120.0 0.8)
-(defn step-sequencer [notes tempo gate-duration]
-  (if (> (vec-len notes) 0)
-    (let [note (vec-get notes 0)
-          freq (:: (pair-fst note) :float)
-          gate-sig (constant true)]
-      (lead-synth freq gate-sig))
-    (lead-synth 0.0 (constant false))))
+(defn step-sequencer [notes :int tempo :float gate-duration :float] :int
+  ;; Placeholder; needs typed Pair<float,float> for note destructuring.
+  (constant 0.0))

@@ -2,11 +2,11 @@
 ;;
 ;; This module provides digital signal processing primitives as Signal Functions (SF).
 ;;
-;; Note: Full implementations require Arrow typeclass dispatch and math functions
-;; currently in development. Stubs are provided for compatibility.
+;; Sample ABI (Phase 0c): scalar signals are `(fn [t :float] :float)`.
+;; Pair signals carry a Pair64* and are `(fn [t :float] :int)`; mix/add accept those.
 
 ;; =============================================================================
-;; C Helper for math
+;; C Helpers
 ;; =============================================================================
 
 ;;; __dsp_sin -- compute sine of angle in radians.
@@ -38,44 +38,29 @@
 ;;;   (sine 440.0 0.0)  ; => 440 Hz sine wave SF
 (defn sine [freq :float phase :float]
   (let [fv freq pv phase]
-    (fn [sig]
-      (fn [t]
-        (:: (__dsp_sin (+ (* (* 2.0 3.14159265358979323846) fv (:: t :float)) pv)) :int)))))
+    (fn [^fat sig]
+      (fn [t :float] :float
+        (__dsp_sin (+ (* (* 2.0 3.14159265358979323846) fv t) pv))))))
 
 ;;; square -- square-wave oscillator Signal Function.
 ;;;
 ;;; Parameters:
 ;;;   freq      -- frequency in Hz (float64)
 ;;;   dutycycle -- duty cycle in [0,1] (float64)
-;;;
-;;; Returns:
-;;;   A Signal Function: sig -> (fn [t] 1.0 if phase < duty else -1.0).
-;;;
-;;; Example:
-;;;   (square 440.0 0.5)  ; => 440 Hz square wave SF
 (defn square [freq :float dutycycle :float]
   (let [fv freq dv dutycycle]
-    (fn [sig]
-      (fn [t]
-        (let [phase (__dsp_fmod (* fv (:: t :float)) 1.0)]
-          (:: (if (< phase dv) 1.0 -1.0) :int))))))
+    (fn [^fat sig]
+      (fn [t :float] :float
+        (let [phase (__dsp_fmod (* fv t) 1.0)]
+          (if (< phase dv) 1.0 -1.0))))))
 
 ;;; sawtooth -- sawtooth-wave oscillator Signal Function.
-;;;
-;;; Parameters:
-;;;   freq -- frequency in Hz (float64)
-;;;
-;;; Returns:
-;;;   A Signal Function: sig -> (fn [t] frac(freq*t) in [0,1)).
-;;;
-;;; Example:
-;;;   (sawtooth 440.0)  ; => 440 Hz sawtooth wave SF
 (defn sawtooth [freq :float]
   (let [fv freq]
-    (fn [sig]
-      (fn [t]
-        (let [phase (__dsp_fmod (* fv (:: t :float)) 1.0)]
-          (:: (if (< phase 0.0) (+ phase 1.0) phase) :int))))))
+    (fn [^fat sig]
+      (fn [t :float] :float
+        (let [phase (__dsp_fmod (* fv t) 1.0)]
+          (if (< phase 0.0) (+ phase 1.0) phase))))))
 
 ;; =============================================================================
 ;; Filters
@@ -89,84 +74,41 @@
   return (int64_t)(intptr_t)p;
   ```)
 
-;;; __dsp_lp_step -- low-pass EMA step.
-;;; Reads previous sample from state, computes y = a*x + (1-a)*prev, stores y, returns bits.
-;;; alpha and sample are passed as :int (raw float bits) to keep the helper ABI int64-only;
-;;; the caller invokes the source signal from Turmeric so fat closures dispatch correctly.
-(defn __dsp_lp_step [state :int alpha-bits :int sig-bits :int] :int
+;;; __dsp_lp_step -- low-pass EMA step, native :float.
+;;; Reads previous sample from state, computes y = a*x + (1-a)*prev, stores y, returns y.
+(defn __dsp_lp_step [state :int alpha :float x :float] :float
   ```c
   double *prev = (double *)(intptr_t)state;
-  double a; memcpy(&a, &alpha_bits, 8);
-  double x; memcpy(&x, &sig_bits, 8);
-  double y = a * x + (1.0 - a) * (*prev);
+  double y = alpha * x + (1.0 - alpha) * (*prev);
   *prev = y;
-  int64_t ret; memcpy(&ret, &y, 8);
-  return ret;
+  return y;
   ```)
 
 ;;; __dsp_hp_step -- high-pass step: output = x - low_pass(x).
-(defn __dsp_hp_step [state :int alpha-bits :int sig-bits :int] :int
+(defn __dsp_hp_step [state :int alpha :float x :float] :float
   ```c
   double *prev_lp = (double *)(intptr_t)state;
-  double a; memcpy(&a, &alpha_bits, 8);
-  double x; memcpy(&x, &sig_bits, 8);
-  double lp = a * x + (1.0 - a) * (*prev_lp);
+  double lp = alpha * x + (1.0 - alpha) * (*prev_lp);
   *prev_lp = lp;
-  double result = x - lp;
-  int64_t ret; memcpy(&ret, &result, 8);
-  return ret;
+  return x - lp;
   ```)
 
-;;; __dsp_gain -- scale sample bits by gain (also passed as float bits).
-(defn __dsp_gain [gain-bits :int sig-bits :int] :int
-  ```c
-  double g; memcpy(&g, &gain_bits, 8);
-  double x; memcpy(&x, &sig_bits, 8);
-  double result = g * x;
-  int64_t ret; memcpy(&ret, &result, 8);
-  return ret;
-  ```)
-
-;;; __dsp_mix -- linear mix of two sample-bit values: out = a*x + (1-a)*y.
-(defn __dsp_mix [alpha-bits :int x-bits :int y-bits :int] :int
-  ```c
-  double a; memcpy(&a, &alpha_bits, 8);
-  double x; memcpy(&x, &x_bits, 8);
-  double y; memcpy(&y, &y_bits, 8);
-  double result = a * x + (1.0 - a) * y;
-  int64_t ret; memcpy(&ret, &result, 8);
-  return ret;
-  ```)
-
-;;; __dsp_add_bits -- sum two sample-bit values.
-(defn __dsp_add_bits [x-bits :int y-bits :int] :int
-  ```c
-  double x; memcpy(&x, &x_bits, 8);
-  double y; memcpy(&y, &y_bits, 8);
-  double result = x + y;
-  int64_t ret; memcpy(&ret, &result, 8);
-  return ret;
-  ```)
-
-;;; __dsp_pair_first -- read first element of a Pair64 by raw pointer.
-(defn __dsp_pair_first [pair-ptr :int] :int
+;;; __dsp_pair_first_float -- read first element of a Pair64 as float.
+(defn __dsp_pair_first_float [pair-ptr :int] :float
   ```c
   typedef struct { int64_t first; int64_t second; } Pair64;
-  return ((Pair64 *)(intptr_t)pair_ptr)->first;
+  int64_t bits = ((Pair64 *)(intptr_t)pair_ptr)->first;
+  double v; memcpy(&v, &bits, 8);
+  return v;
   ```)
 
-;;; __dsp_pair_second -- read second element of a Pair64 by raw pointer.
-(defn __dsp_pair_second [pair-ptr :int] :int
+;;; __dsp_pair_second_float -- read second element of a Pair64 as float.
+(defn __dsp_pair_second_float [pair-ptr :int] :float
   ```c
   typedef struct { int64_t first; int64_t second; } Pair64;
-  return ((Pair64 *)(intptr_t)pair_ptr)->second;
-  ```)
-
-;;; __dsp_float_bits -- reinterpret a :float as its int64 bit pattern.
-(defn __dsp_float_bits [x :float] :int
-  ```c
-  int64_t ret; memcpy(&ret, &x, 8);
-  return ret;
+  int64_t bits = ((Pair64 *)(intptr_t)pair_ptr)->second;
+  double v; memcpy(&v, &bits, 8);
+  return v;
   ```)
 
 ;;; low-pass -- first-order IIR low-pass filter Signal Function.
@@ -174,88 +116,50 @@
 ;;; Parameters:
 ;;;   alpha -- smoothing coefficient in (0,1); lower = more smoothing.
 ;;;
-;;; Returns:
-;;;   A Signal Function applying an exponential moving average: y[n] = a*x[n] + (1-a)*y[n-1].
-;;;
-;;; Example:
-;;;   (low-pass 0.5)  ; => SF applying EMA with alpha=0.5
-;;;
 ;;; Since: Phase B1
 (defn low-pass [alpha :float]
-  (let [alpha-bits (__dsp_float_bits alpha)]
-    (fn [^fat sig]
+  (let [av alpha]
+    (fn [^fat sig : (fn [float] float)]
       (let [state (__dsp_alloc_state)]
-        (fn [t]
-          (__dsp_lp_step state alpha-bits (sig t)))))))
+        (fn [t :float] :float
+          (__dsp_lp_step state av (sig t)))))))
 
 ;;; high-pass -- first-order IIR high-pass filter Signal Function.
 ;;;
-;;; Parameters:
-;;;   alpha -- filter coefficient in (0,1); higher = more high-frequency content.
-;;;
-;;; Returns:
-;;;   A Signal Function applying high-pass filtering: y[n] = x[n] - low_pass(x)[n].
-;;;
-;;; Example:
-;;;   (high-pass 0.5)  ; => high-pass SF with alpha=0.5
-;;;
 ;;; Since: Phase B1
 (defn high-pass [alpha :float]
-  (let [alpha-bits (__dsp_float_bits alpha)]
-    (fn [^fat sig]
+  (let [av alpha]
+    (fn [^fat sig : (fn [float] float)]
       (let [state (__dsp_alloc_state)]
-        (fn [t]
-          (__dsp_hp_step state alpha-bits (sig t)))))))
+        (fn [t :float] :float
+          (__dsp_hp_step state av (sig t)))))))
 
 ;; =============================================================================
 ;; Amplitude Operations
 ;; =============================================================================
 
 ;;; gain -- scale a signal by a constant factor.
-;;;
-;;; Parameters:
-;;;   g -- gain factor (float64)
-;;;
-;;; Returns:
-;;;   A Signal Function that multiplies each sample by g.
-;;;
-;;; Example:
-;;;   ((gain 2.0) my-sig)  ; => signal scaled by 2.0
 (defn gain [g :float]
-  (let [gain-bits (__dsp_float_bits g)]
-    (fn [^fat sig]
-      (fn [t]
-        (__dsp_gain gain-bits (sig t))))))
+  (let [gv g]
+    (fn [^fat sig : (fn [float] float)]
+      (fn [t :float] :float
+        (* gv (sig t))))))
 
-;;; mix -- weighted mix of a pair signal.
-;;;
-;;; Parameters:
-;;;   alpha -- mix coefficient in [0,1]: 0 = all first, 1 = all second.
-;;;
-;;; Returns:
-;;;   A Signal Function on Pair signals: out = alpha*a + (1-alpha)*b.
-;;;
-;;; Example:
-;;;   ((mix 0.5) (pair-signals sig-a sig-b))  ; => equal mix
+;;; mix -- weighted mix of a Pair signal: out = alpha*x + (1-alpha)*y.
+;;; Operates on a Pair-of-floats signal (int-typed Pair64* return).
 (defn mix [alpha :float]
-  (let [alpha-bits (__dsp_float_bits alpha)]
-    (fn [^fat prod-sig]
-      (fn [t]
-        (let [pair-ptr (prod-sig t)]
-          (__dsp_mix alpha-bits
-                     (__dsp_pair_first pair-ptr)
-                     (__dsp_pair_second pair-ptr)))))))
+  (let [av alpha]
+    (fn [^fat prod-sig : (fn [float] int)]
+      (fn [t :float] :float
+        (let [pair-ptr (prod-sig t)
+              x (__dsp_pair_first_float pair-ptr)
+              y (__dsp_pair_second_float pair-ptr)]
+          (+ (* av x) (* (- 1.0 av) y)))))))
 
-;;; add -- sum a pair signal sample-wise.
-;;;
-;;; Returns:
-;;;   A Signal Function on Pair signals: out = a + b.
-;;;
-;;; Example:
-;;;   ((add) (pair-signals sig-a sig-b))  ; => sum signal
+;;; add -- sum a Pair signal sample-wise.
 (defn add []
-  (fn [^fat prod-sig]
-    (fn [t]
+  (fn [^fat prod-sig : (fn [float] int)]
+    (fn [t :float] :float
       (let [pair-ptr (prod-sig t)]
-        (__dsp_add_bits (__dsp_pair_first pair-ptr)
-                        (__dsp_pair_second pair-ptr))))))
+        (+ (__dsp_pair_first_float pair-ptr)
+           (__dsp_pair_second_float pair-ptr))))))

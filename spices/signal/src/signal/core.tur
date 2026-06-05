@@ -26,8 +26,8 @@
 ;;;
 ;;; Example:
 ;;;   ((constant 0.5) 2.0)  ; => 0.5
-(defn constant [val]
-  (fn [_t] val))
+(defn constant [val :float]
+  (fn [_t :float] :float val))
 
 ;;; time-signal -- a signal that returns the current time at each sample.
 ;;;
@@ -36,7 +36,7 @@
 ;;;
 ;;; Example:
 ;;;   (time-signal 2.0)  ; => 2.0
-(defn time-signal [t] t)
+(defn time-signal [t :float] :float t)
 
 ;;; sample -- evaluate a signal at a specific time point.
 ;;;
@@ -49,7 +49,7 @@
 ;;;
 ;;; Example:
 ;;;   (sample (constant 3.0) 0.0)  ; => 3.0
-(defn sample [sig : fn t : int] : int
+(defn sample [^fat sig : (fn [float] float) t :float] :float
   (sig t))
 
 ;;; map-signal -- lift a pure function to operate on signals pointwise.
@@ -63,10 +63,8 @@
 ;;;
 ;;; Example:
 ;;;   (map-signal (fn [x] (* x 2.0)) my-sig)
-(defn map-signal [f : fn sig : fn] : int
-  (let [fv : fn f
-        sv : fn sig]
-    (fn [t] (fv (sv t)))))
+(defn map-signal [^fat f : (fn [float] float) ^fat sig : (fn [float] float)] : int
+  (fn [t :float] :float (f (sig t))))
 
 ;;; pair-signals -- zip two signals into a product signal.
 ;;;
@@ -79,10 +77,8 @@
 ;;;
 ;;; Example:
 ;;;   (pair-signals freq-sig amp-sig)
-(defn pair-signals [sig-a : fn sig-b : fn] : int
-  (let [sa : fn sig-a
-        sb : fn sig-b]
-    (fn [t] (pair (sa t) (sb t)))))
+(defn pair-signals [^fat sig-a : (fn [float] float) ^fat sig-b : (fn [float] float)] : int
+  (fn [t :float] :int (pair (sig-a t) (sig-b t))))
 
 ;;; left-signal -- inject a signal into the Left branch.
 ;;;
@@ -112,8 +108,5 @@
 ;; Arrow Helpers for C calling
 ;; =============================================================================
 
-;;; __signal_call1 -- call a signal (function of time) at time t.
-(defn __signal_call1 [sig t] :int
-  ```c
-  return ((int64_t(*)(int64_t))(intptr_t)sig)(t);
-  ```)
+;; Phase 0c: __signal_call1 removed. Signals are called directly via (sig t)
+;; through fat dispatch, which handles capturing closures and :float returns.
