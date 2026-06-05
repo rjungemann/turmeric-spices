@@ -1,23 +1,54 @@
 # tur-signal
 
-Arrow-based signal processing for [Turmeric](https://github.com/rjungemann/turmeric): Signal Function (SF) combinators, DSP filters, ADSR envelopes, and synthesizer voices.
+Typed Signal Function (SF) library for [Turmeric](https://github.com/rjungemann/turmeric):
+oscillators, filters, shapers, ADSR envelopes, and SF-pipeline composition.
 
 ---
 
-## Overview
+## Status
 
-`tur-signal` provides a composable signal processing pipeline built on Turmeric's Arrow typeclass:
+Library-side `tur check` is clean on all six modules. End-to-end caller
+exercise of SF-application surfaces (oscillators, filters, shapers,
+envelopes, `effects-chain`) is currently blocked downstream on a
+`tur` codegen regression around the fat-closure int<->ptr<void>
+carrier bridge -- tracked in
+`docs/reported/vec-typed-fat-closure-readback-fixture-regressed-codegen.md`
+in the turmeric repo. The Phase 1 example and `tests/signal/test_core.tur`
+exercise the parts that work today.
 
-- **`signal/core`** -- Signal type, SF arrow combinators (`constant`, `time-signal`, `sample`, `map-signal`, `pair-signals`)
-- **`signal/dsp`** -- Oscillators (`sine`, `square`, `sawtooth`), filters (`low-pass`, `high-pass`), amplitude ops (`gain`, `mix`, `add`)
-- **`signal/envelope`** -- Piecewise-linear ADSR envelope generator (`adsr-fixed`, `ADSRParams`)
-- **`signal/synth`** -- Synthesizer voices and effects (`voice`, `fm-voice`, `wavetable-osc`, `karplus-strong`, presets, `effects-chain`, `step-sequencer`)
+This is the surface area an honest version of the previous spice
+would have shipped. Tier 2 -- wavetable/FM/Karplus-Strong/granular,
+voice / poly-synth / step-sequencer, resonant filters -- is
+explicitly out of scope until each lands behind a real consumer
+and a dedicated plan. See
+`docs/upcoming/tur-signal-rebuild-plan.md` in the turmeric repo.
+
+---
+
+## Module layout
+
+| Module            | Surface                                                                                  |
+|-------------------|------------------------------------------------------------------------------------------|
+| `signal/core`     | `constant`, `time-signal`, `sample`, `map-signal`, `pair-signals`                        |
+| `signal/osc`      | `sine`, `square`, `sawtooth`, `triangle`                                                 |
+| `signal/filter`   | `low-pass`, `high-pass`                                                                  |
+| `signal/shaper`   | `gain`, `offset`, `invert`, `abs-sf`, `scale`, `saturate-tanh`, `hard-clip`, `clip`, `mix`, `add`, `multiply` |
+| `signal/envelope` | `ADSRParams`, `adsr-fixed`, `adsr-gen`                                                   |
+| `signal/compose`  | `effects-chain`                                                                          |
+
+A `Signal Sample` is `(fn [t :float] :float)`. An `SF Sample Sample`
+is the closure `(fn [^fat sig : (fn [float] float)] (fn [t :float] :float ...))`
+returned by every shaper / filter / oscillator constructor: apply it
+to a signal to get a signal.
+
+Pair-consuming mixers (`mix`, `add`, `multiply`) consume the
+`Signal (Pair Sample Sample)` shape produced by `pair-signals`.
 
 ---
 
 ## Installation
 
-Add `tur-signal` to your `build.tur` `:spices` block:
+In your `build.tur` `:spices` block:
 
 ```turmeric
 (defpackage my-app
@@ -28,92 +59,67 @@ Add `tur-signal` to your `build.tur` `:spices` block:
   })
 ```
 
-Then fetch:
-
-```sh
-tur fetch
-```
+Then `tur fetch`.
 
 ---
 
-## Quick Start
+## Quick start
+
+The Phase 1 example, working today:
 
 ```turmeric
-(import signal/core)
-(import signal/dsp)
-(import signal/envelope)
+(defmodule my/app
+  (import signal/core :refer [constant time-signal sample])
 
-;; 440 Hz sine wave sampled at t=0.0
-(let [sine-sf (sine 440.0 0.0)
-      dummy   (constant ())
-      out     (sine-sf dummy)]
-  (println (out 0.0)))    ; => ~0.0
+(defn main [] : int
+  (let [c (constant 0.5)]
+    (println (sample c 0.0))                ;; 0.5
+    (println (sample c 9999.0)))            ;; 0.5
+  (println (time-signal 0.25))              ;; 0.25
+  0)
 
-;; Chained: sine -> low-pass filter
-(let [osc     (sine 440.0 0.0)
-      filt    (low-pass 0.3)
-      sig     ((osc (constant ())))
-      filtered (filt sig)]
-  (println (filtered 0.001)))
-
-;; ADSR envelope
-(let [params (ADSRParams 0.01 0.1 0.7 0.3)
-      env    (adsr-fixed params 0.5)
-      out    (env (constant ()))]
-  (println (out 0.005)))  ; => ~0.5 (mid-attack)
+) ;; end defmodule
 ```
 
----
+The Phase 2-5 patterns (oscillators, filters, shapers, envelopes,
+`effects-chain`) are written and `tur check`-clean but blocked
+from caller-side exercise until the upstream codegen fix lands.
+The intended call shapes look like:
 
-## Module Reference
+```turmeric
+;; oscillator at t = 0.25
+(let [unused (constant 0.0)
+      s1     ((sine 1.0 0.0) unused)]
+  (sample s1 0.25))                          ;; ~1.0 (sin pi/2)
 
-### `signal/core`
+;; sine driven through a low-pass filter
+(let [unused (constant 0.0)
+      tone   ((sine 440.0 0.0) unused)
+      tone-f ((low-pass 0.3) tone)]
+  (sample tone-f 0.001))
 
-| Symbol | Description |
-|--------|-------------|
-| `constant val` | Signal that always returns `val` |
-| `time-signal t` | Signal that returns `t` at each sample |
-| `sample sig t` | Evaluate signal `sig` at time `t` |
-| `map-signal f sig` | Lift pure function `f` over signal pointwise |
-| `pair-signals sig-a sig-b` | Zip two signals into a Pair signal |
-| `left-signal sig` | Identity injection (Left branch placeholder) |
-| `right-signal sig` | Identity injection (Right branch placeholder) |
+;; ADSR envelope
+(let [params (make-struct ADSRParams 0.01 0.1 0.7 0.3)
+      env-sf (adsr-fixed params 0.5)
+      env    (env-sf (constant 0.0))]
+  (sample env 0.005))                        ;; ~0.5 (mid-attack)
 
-### `signal/dsp`
-
-| Symbol | Description |
-|--------|-------------|
-| `sine freq phase` | Sine-wave SF at `freq` Hz with phase offset |
-| `square freq duty` | Square-wave SF with duty cycle |
-| `sawtooth freq` | Sawtooth-wave SF |
-| `low-pass alpha` | First-order IIR low-pass filter SF |
-| `high-pass alpha` | First-order IIR high-pass filter SF |
-| `gain g` | Scale signal by constant factor `g` |
-| `mix alpha` | Weighted mix of a Pair signal |
-| `add` | Sample-wise sum of a Pair signal |
-
-### `signal/envelope`
-
-| Symbol | Description |
-|--------|-------------|
-| `ADSRParams attack decay sustain release` | ADSR parameter struct |
-| `adsr-fixed params gate-duration` | Piecewise-linear ADSR envelope SF |
-
-### `signal/synth`
-
-Synthesizer voices, wavetable oscillators, granular synthesis, FM, Karplus-Strong string model, effects chain, and step sequencer. See source for full API.
+;; effects chain
+(let [v   (vec-new)]
+  (vec-push! v (gain 0.5))
+  (vec-push! v (low-pass 0.3))
+  (let [^fat out : (fn [float] #{} float)
+                (effects-chain v ((sine 440.0 0.0) (constant 0.0)))]
+    (out 0.0)))
+```
 
 ---
 
 ## Examples
 
-Examples live in `examples/`:
-
 ```sh
-cd ../turmeric-spices/spices/signal
-tur run examples/01_basics.tur
-tur run examples/02_signals.tur
-tur run examples/03_dsp.tur
+cd spices/signal
+tur run examples/01_constant_and_time.tur   # works today
 ```
 
 ---
@@ -122,6 +128,6 @@ tur run examples/03_dsp.tur
 
 ```sh
 cd spices/signal
-tur check src/signal/synth.tur   # typecheck
-tur run tests/signal/arrow_tests.tur  # run tests
+for f in src/signal/*.tur; do tur check "$f"; done   # all clean
+tur run tests/signal/test_core.tur                    # PASS test_core
 ```
