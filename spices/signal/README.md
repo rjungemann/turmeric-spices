@@ -7,14 +7,33 @@ oscillators, filters, shapers, ADSR envelopes, and SF-pipeline composition.
 
 ## Status
 
-Library-side `tur check` is clean on all six modules. End-to-end caller
-exercise of SF-application surfaces (oscillators, filters, shapers,
-envelopes, `effects-chain`) is currently blocked downstream on a
-`tur` codegen regression around the fat-closure int<->ptr<void>
-carrier bridge -- tracked in
-`docs/reported/vec-typed-fat-closure-readback-fixture-regressed-codegen.md`
-in the turmeric repo. The Phase 1 example and `tests/signal/test_core.tur`
-exercise the parts that work today.
+The Tier 1 surface is written and `:exports` is pruned to match, but
+the spice is currently not exercisable end-to-end against turmeric
+`main`. Two distinct gaps both have to clear before any caller (the
+Phase 1 example, `test_core`, or downstream importers) works:
+
+1. `^fat name : (fn ...)` parameter annotations are dropped across the
+   `(defmodule ... (export ...))` boundary, so any caller of an
+   exported fat-typed defn (`sample`, every oscillator/filter/shaper
+   SF, `effects-chain`) gets a `TUR-E0001` `expected (fn [] : ?)` at
+   the call site. Tracked at
+   `docs/reported/defmodule-loses-fat-fn-type-annotation.md` in the
+   turmeric repo. The same bug also breaks `signal/compose`'s
+   in-module `(__apply-sf ...)` self-call, so `tur check
+   src/signal/compose.tur` itself fails today.
+2. Once (1) clears, the SF-pipeline shape still needs the
+   `int<->ptr<void>` carrier bridge fix tracked at
+   `docs/reported/vec-typed-fat-closure-readback-fixture-regressed-codegen.md`
+   (it produces 4 `-Wint-conversion` errors at the apply-sf body and
+   the `vec-push!` call sites).
+
+`src/signal/{core,osc,filter,shaper,envelope}.tur` all `tur check`
+clean (after the `pair` / `(as float ...)` workarounds the rebuild
+applied to dodge two other defmodule scoping gaps for `Pair`).
+`compose.tur` does NOT check clean. The Phase 1 example does NOT run.
+`tests/signal/test_core.tur` does NOT pass. The Tier 1 surface
+remains the *intended* shipping shape and the source layout matches
+the plan; only the runnability gates remain.
 
 This is the surface area an honest version of the previous spice
 would have shipped. Tier 2 -- wavetable/FM/Karplus-Strong/granular,
@@ -119,7 +138,8 @@ The intended call shapes look like:
 
 ```sh
 cd spices/signal
-tur run examples/01_constant_and_time.tur   # works today
+tur run examples/01_constant_and_time.tur
+# Currently fails at (sample c 0.0) -- see Status above.
 ```
 
 ---
@@ -128,6 +148,8 @@ tur run examples/01_constant_and_time.tur   # works today
 
 ```sh
 cd spices/signal
-for f in src/signal/*.tur; do tur check "$f"; done   # all clean
-tur run tests/signal/test_core.tur                    # PASS test_core
+for f in src/signal/*.tur; do tur check "$f"; done
+# 5/6 clean; compose.tur fails -- see Status above.
+tur run tests/signal/test_core.tur
+# Currently fails -- see Status above.
 ```

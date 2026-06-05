@@ -1,0 +1,40 @@
+;; 02_oscillators -- Phase 2 example.
+;;
+;; Each oscillator returns an SF; apply it to a placeholder input signal
+;; (oscillators ignore their input) and sample at a few characteristic
+;; time points.
+
+(defmodule signal/examples/02_oscillators
+  (import signal/core :refer [constant sample])
+  (import signal/osc  :refer [sine square sawtooth triangle])
+
+(defn main [] : int
+  (let [unused (constant 0.0)
+
+        ;; sine 1 Hz, no phase offset: zero at t=0, ~+1 at t=0.25, ~0 at t=0.5.
+        s1   ((sine 1.0 0.0) unused)
+        ;; square 1 Hz, 50% duty: +1 for first half of cycle, -1 for second.
+        sq   ((square 1.0 0.5) unused)
+        ;; sawtooth 1 Hz: ramps in [0, 1).
+        saw  ((sawtooth 1.0) unused)
+        ;; triangle 1 Hz: rises -1 -> 1 over [0, 0.5), falls 1 -> -1 over [0.5, 1).
+        tri  ((triangle 1.0) unused)]
+
+    (println (sample s1 0.0))             ;; 0
+    (println (sample s1 0.25))            ;; ~1
+    (println (sample s1 0.5))             ;; ~0  (small rounding)
+
+    (println (sample sq 0.25))            ;; 1
+    (println (sample sq 0.75))            ;; -1
+
+    (println (sample saw 0.0))            ;; 0
+    (println (sample saw 0.5))            ;; 0.5
+
+    (println (sample tri 0.0))            ;; -1
+    (println (sample tri 0.25))           ;; 0
+    (println (sample tri 0.5))            ;; 1
+    (println (sample tri 0.75)))          ;; 0
+
+  0)
+
+) ;; end defmodule

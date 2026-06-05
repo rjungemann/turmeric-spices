@@ -16,12 +16,14 @@
 ;;; __shaper_fabs -- absolute value of a float.
 (defn __shaper_fabs [x :float] :float
   ```c
+  extern double fabs(double);
   return fabs(x);
   ```)
 
 ;;; __shaper_tanh -- hyperbolic tangent.
 (defn __shaper_tanh [x :float] :float
   ```c
+  extern double tanh(double);
   return tanh(x);
   ```)
 
@@ -128,8 +130,8 @@
     (fn [^fat prod-sig : (fn [float] #{} (Pair float float))]
       (fn [t :float] :float
         (let [p (prod-sig t)
-              x (pair-fst p)
-              y (pair-snd p)]
+              x (as float (pair-fst p))
+              y (as float (pair-snd p))]
           (+ (* av x) (* (- 1.0 av) y)))))))
 
 ;;; add -- sum a Pair signal sample-wise.
