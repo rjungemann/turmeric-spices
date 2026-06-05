@@ -1,0 +1,65 @@
+;; Signal Processing Composition
+;;
+;; This module composes Signal Functions over a Vec.  Pattern lifted from
+;; tests/fixtures/vec-typed-fat-closure-readback/ in the turmeric repo
+;; (the regression that shipped with PR #288 closing five interacting
+;; closure/fat-dispatch gaps that previously blocked this exact shape).
+
+(defmodule signal/compose)
+
+;;; __apply-sf -- apply one SF to a signal, returning the resulting signal.
+;;;
+;;; The SF parameter type is spelled as the carrier shape
+;;; `(fn [ptr<void>] ptr<void>)` rather than the higher-order
+;;; `(fn [(fn [float] float)] (fn [float] float))`: the fat-dispatch ABI
+;;; casts slot 0 to the SF's declared parameter ABI (a closure box pointer),
+;;; not to the inner :float thunk signature. Trying to spell the
+;;; higher-order shape directly would mis-declare the call site.
+(defn __apply-sf
+  [^fat sf  : (fn [ptr<void>] #{} ptr<void>)
+   ^fat sig : (fn [float]     #{} float)] : ptr<void>
+  (sf sig))
+
+;;; __chain-loop -- threading recursion for effects-chain.
+;;;
+;;; Reads each element back via `(:: (vec-get effects i) :ptr<void>)`
+;;; per the documented Vec[A] readback idiom for typed fat closures.
+;;; The self-call passes the accumulator `sig` back into its own ^fat
+;;; param; arg_fat propagation through forward bindings (HRT5 fix in
+;;; PR #288) makes that elaborate.
+(defn __chain-loop
+  [effects  : int
+   ^fat sig : (fn [float] #{} float)
+   i : int
+   n : int] : ptr<void>
+  (if (>= i n)
+    sig
+    (__chain-loop effects
+                  (__apply-sf (:: (vec-get effects i) :ptr<void>) sig)
+                  (+ i 1)
+                  n)))
+
+;;; effects-chain -- apply a vector of effects in order to an input signal.
+;;;
+;;; Parameters:
+;;;   effects -- Vec of SF (Sample Sample) processors, applied left-to-right
+;;;   input   -- source Signal Sample
+;;;
+;;; Returns:
+;;;   Signal Sample with each effect applied in order.
+;;;
+;;; Callers wanting to invoke the result as a closure should re-bind it
+;;; with `^fat`, e.g.
+;;;   (let [^fat out : (fn [float] #{} float)
+;;;              (effects-chain (vec-of (gain 0.5) (low-pass 0.3)) my-osc)]
+;;;     (out 0.0))
+;;; -- this re-types the :ptr<void> result back into a directly-callable
+;;; fat closure (the let-binding fix in PR #288).
+;;;
+;;; Example:
+;;;   (let [chain (effects-chain (vec-of (gain 0.5) (low-pass 0.3))
+;;;                              (sine 440.0 0.0))]
+;;;     chain)
+(defn effects-chain
+  [effects : int ^fat input : (fn [float] #{} float)] : ptr<void>
+  (__chain-loop effects input 0 (vec-len effects)))
