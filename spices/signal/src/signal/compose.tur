@@ -1,11 +1,12 @@
-;; Signal Processing Composition
+;; Signal Processing -- Composition
 ;;
 ;; This module composes Signal Functions over a Vec.  Pattern lifted from
 ;; tests/fixtures/vec-typed-fat-closure-readback/ in the turmeric repo
 ;; (the regression that shipped with PR #288 closing five interacting
 ;; closure/fat-dispatch gaps that previously blocked this exact shape).
 
-(defmodule signal/compose)
+(defmodule signal/compose
+  (export effects-chain)
 
 ;;; __apply-sf -- apply one SF to a signal, returning the resulting signal.
 ;;;
@@ -22,11 +23,11 @@
 
 ;;; __chain-loop -- threading recursion for effects-chain.
 ;;;
-;;; Reads each element back via `(:: (vec-get effects i) :ptr<void>)`
-;;; per the documented Vec[A] readback idiom for typed fat closures.
-;;; The self-call passes the accumulator `sig` back into its own ^fat
-;;; param; arg_fat propagation through forward bindings (HRT5 fix in
-;;; PR #288) makes that elaborate.
+;;; The self-call's result is ascribed `:ptr<void>` so the `if`-branch
+;;; type-unifier sees both arms as fat boxes (matching the PR #288 fix);
+;;; without the ascription a forward-reference into the same defmodule
+;;; widens the recursion's inferred return to `int`, breaking the
+;;; unification.
 (defn __chain-loop
   [effects  : int
    ^fat sig : (fn [float] #{} float)
@@ -34,10 +35,10 @@
    n : int] : ptr<void>
   (if (>= i n)
     sig
-    (__chain-loop effects
-                  (__apply-sf (:: (vec-get effects i) :ptr<void>) sig)
-                  (+ i 1)
-                  n)))
+    (:: (__chain-loop effects
+                      (__apply-sf (:: (vec-get effects i) :ptr<void>) sig)
+                      (+ i 1)
+                      n) :ptr<void>)))
 
 ;;; effects-chain -- apply a vector of effects in order to an input signal.
 ;;;
@@ -53,8 +54,6 @@
 ;;;   (let [^fat out : (fn [float] #{} float)
 ;;;              (effects-chain (vec-of (gain 0.5) (low-pass 0.3)) my-osc)]
 ;;;     (out 0.0))
-;;; -- this re-types the :ptr<void> result back into a directly-callable
-;;; fat closure (the let-binding fix in PR #288).
 ;;;
 ;;; Example:
 ;;;   (let [chain (effects-chain (vec-of (gain 0.5) (low-pass 0.3))
@@ -63,3 +62,5 @@
 (defn effects-chain
   [effects : int ^fat input : (fn [float] #{} float)] : ptr<void>
   (__chain-loop effects input 0 (vec-len effects)))
+
+) ;; end defmodule signal/compose
