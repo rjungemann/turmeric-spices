@@ -2,8 +2,9 @@
 ;;
 ;; This module provides digital signal processing primitives as Signal Functions (SF).
 ;;
-;; Sample ABI (Phase 0c): scalar signals are `(fn [t :float] :float)`.
-;; Pair signals carry a Pair64* and are `(fn [t :float] :int)`; mix/add accept those.
+;; Sample ABI: scalar signals are `(fn [t :float] :float)`.
+;; Pair signals are `(fn [t :float] : (Pair float float))`; mix/add accept those
+;; and read components with stdlib/pair.tur's pair-fst / pair-snd.
 
 ;; =============================================================================
 ;; C Helpers
@@ -93,24 +94,6 @@
   return x - lp;
   ```)
 
-;;; __dsp_pair_first_float -- read first element of a Pair64 as float.
-(defn __dsp_pair_first_float [pair-ptr :int] :float
-  ```c
-  typedef struct { int64_t first; int64_t second; } Pair64;
-  int64_t bits = ((Pair64 *)(intptr_t)pair_ptr)->first;
-  double v; memcpy(&v, &bits, 8);
-  return v;
-  ```)
-
-;;; __dsp_pair_second_float -- read second element of a Pair64 as float.
-(defn __dsp_pair_second_float [pair-ptr :int] :float
-  ```c
-  typedef struct { int64_t first; int64_t second; } Pair64;
-  int64_t bits = ((Pair64 *)(intptr_t)pair_ptr)->second;
-  double v; memcpy(&v, &bits, 8);
-  return v;
-  ```)
-
 ;;; low-pass -- first-order IIR low-pass filter Signal Function.
 ;;;
 ;;; Parameters:
@@ -146,20 +129,19 @@
         (* gv (sig t))))))
 
 ;;; mix -- weighted mix of a Pair signal: out = alpha*x + (1-alpha)*y.
-;;; Operates on a Pair-of-floats signal (int-typed Pair64* return).
+;;; Operates on a `Signal (Pair float float)` consumed via stdlib pair-fst/snd.
 (defn mix [alpha :float]
   (let [av alpha]
-    (fn [^fat prod-sig : (fn [float] int)]
+    (fn [^fat prod-sig : (fn [:float] #{} :(Pair float float))]
       (fn [t :float] :float
-        (let [pair-ptr (prod-sig t)
-              x (__dsp_pair_first_float pair-ptr)
-              y (__dsp_pair_second_float pair-ptr)]
+        (let [p (prod-sig t)
+              x (pair-fst p)
+              y (pair-snd p)]
           (+ (* av x) (* (- 1.0 av) y)))))))
 
 ;;; add -- sum a Pair signal sample-wise.
 (defn add []
-  (fn [^fat prod-sig : (fn [float] int)]
+  (fn [^fat prod-sig : (fn [:float] #{} :(Pair float float))]
     (fn [t :float] :float
-      (let [pair-ptr (prod-sig t)]
-        (+ (__dsp_pair_first_float pair-ptr)
-           (__dsp_pair_second_float pair-ptr))))))
+      (let [p (prod-sig t)]
+        (+ (pair-fst p) (pair-snd p))))))

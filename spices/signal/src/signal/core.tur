@@ -77,8 +77,12 @@
 ;;;
 ;;; Example:
 ;;;   (pair-signals freq-sig amp-sig)
-(defn pair-signals [^fat sig-a : (fn [float] float) ^fat sig-b : (fn [float] float)] : int
-  (fn [t :float] :int (pair (sig-a t) (sig-b t))))
+(defn pair-signals
+  [^fat sig-a : (fn [:float] #{} :float)
+   ^fat sig-b : (fn [:float] #{} :float)] : ptr<void>
+  (let [av sig-a bv sig-b]
+    (fn [t :float] : (Pair float float)
+      (make-struct Pair (av t) (bv t)))))
 
 ;;; left-signal -- inject a signal into the Left branch.
 ;;;
