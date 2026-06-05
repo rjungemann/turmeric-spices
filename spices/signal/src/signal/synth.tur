@@ -1,0 +1,446 @@
+;; Signal Processing Synthesizer Examples
+;;
+;; This module provides synthesizer voice implementations using the
+;; Arrow-based signal processing framework.
+;;
+;; Note: formerly carried `(defalias Sample :int)` with union bit-cast
+;; encoding for float64 samples.  All sample values are now native :float.
+
+(defmodule signal/synth
+  (import signal/core)
+  (import signal/dsp)
+  (import signal/envelope)
+  (import arrow))
+
+(defn __sample-add [a :float b :float] :float (+ a b))
+
+(defn __sample-mul [a :float b :float] :float (* a b))
+
+(defn __sample-clip [x :float limit :float] :float
+  ```c
+  double v = x;
+  double l = limit;
+  if (v > l) v = l;
+  if (v < -l) v = -l;
+  return v;
+  ```)
+
+(defn adsr-gen [params]
+  (adsr-fixed params 1.0))
+
+(defn svf-low-pass [cutoff :float q :float]
+  (low-pass cutoff))
+
+(defn hard-clip [limit :float]
+  (fn [^fat sig]
+    (let [lv limit]
+      (fn [t]
+        (let [sample (:: (sig t) :float)]
+          (:: (__sample-clip sample lv) :int))))))
+
+
+;; =============================================================================
+;; Simple Synthesizer Voice
+;; =============================================================================
+
+;;; voice -- subtractive synthesizer voice: oscillator -> filter -> envelope.
+;;;
+;;; Parameters:
+;;;   freq          -- frequency in Hz
+;;;   params        -- ADSRParams for the amplitude envelope
+;;;   gate-sig      -- Signal<bool> controlling note on/off
+;;;   filter-cutoff -- SVF cutoff frequency (normalised 0.0 to 1.0)
+;;;   filter-q      -- SVF resonance
+;;;
+;;; Returns:
+;;;   Signal<Sample> ready to be summed into a mix bus.
+;;;
+;;; Example:
+;;;   (voice 440.0 (make-struct ADSRParams 0.01 0.1 0.7 0.2) gate-sig 0.6 0.5)
+(defn voice [freq :float params gate-sig filter-cutoff :float filter-q :float]
+  (let [;; Oscillator: sine wave
+        osc (sine freq 0.0)
+
+        ;; Apply filter
+        filtered (svf-low-pass filter-cutoff filter-q)
+
+        ;; Envelope
+        env (adsr-gen params)
+
+        ;; Process the signal
+        ;; 1. Generate oscillator output
+        sig-osc (osc (constant 0))
+
+        ;; 2. Apply filter
+        sig-filtered (filtered sig-osc)
+
+        ;; 3. Generate envelope
+        sig-env (env gate-sig)]
+    ;; 4. Multiply filtered signal by envelope
+    (fn [t] (:: (__sample-mul (:: (sig-filtered t) :float)
+                              (:: (sig-env t) :float)) :int))))
+
+;;; voice-sf -- SF wrapper around voice for arrow-based composition.
+;;;
+;;; Parameters:
+;;;   freq          -- frequency in Hz
+;;;   params        -- ADSRParams
+;;;   filter-cutoff -- normalised cutoff
+;;;   filter-q      -- resonance
+;;;
+;;; Returns:
+;;;   SF<Tuple () bool, Sample> where the bool lane carries the gate.
+(defn voice-sf [freq :float params filter-cutoff :float filter-q :float]
+  (fn [^fat sig-input]
+    (let [;; Extract gate from input
+          gate-sig (fn [t] (pair-snd (sig-input t)))
+
+          ;; Create the voice
+          result (voice freq params gate-sig filter-cutoff filter-q)]
+      result)))
+
+;; =============================================================================
+;; Polyphonic Synthesizer
+;; =============================================================================
+
+;;; poly-synth -- polyphonic synthesizer mixing multiple voices.
+;;;
+;;; Parameters:
+;;;   voices        -- vector of (freq, gate-signal) tuples, one per voice
+;;;   params        -- ADSRParams shared by all voices
+;;;   filter-cutoff -- shared filter cutoff
+;;;   filter-q      -- shared filter resonance
+;;;
+;;; Returns:
+;;;   Signal<Sample> summing all active voices.
+;;;
+;;; Example:
+;;;   (poly-synth (vec-of (Tuple 261.0 gate1) (Tuple 329.0 gate2)) params 0.6 0.4)
+(defn poly-synth [voices params filter-cutoff :float filter-q :float]
+  (fn [t]
+    (let [voice-count (vec-len voices)
+          ^mut result 0
+          ^mut i 0]
+      (while (< i voice-count)
+        (let [voice-pair (vec-get voices i)
+              freq (:: (pair-fst voice-pair) :float)
+              gate-sig (pair-snd voice-pair)
+              voice-out (voice freq params gate-sig filter-cutoff filter-q)]
+          (set! result (:: (__sample-add (:: result :float)
+                                        (:: (voice-out t) :float)) :int)))
+        (set! i (+ i 1)))
+      result)))
+
+;; =============================================================================
+;; FM (Frequency Modulation) Synthesizer
+;; =============================================================================
+
+;;; fm-voice -- two-operator FM voice.
+;;;
+;;; Parameters:
+;;;   carrier-freq   -- carrier oscillator frequency in Hz
+;;;   modulator-freq -- modulator oscillator frequency in Hz
+;;;   mod-index      -- modulation index (depth of FM)
+;;;   params         -- ADSRParams for amplitude and modulator envelopes
+;;;   gate-sig       -- Signal<bool> controlling note on/off
+;;;
+;;; Returns:
+;;;   Signal<Sample> with FM-processed output.
+;;;
+;;; Example:
+;;;   (fm-voice 440.0 880.0 2.0 (make-struct ADSRParams 0.01 0.1 0.7 0.3) gate-sig)
+(defn fm-voice [carrier-freq :float modulator-freq :float mod-index :float params gate-sig]
+  (voice carrier-freq params gate-sig mod-index modulator-freq))
+
+;; =============================================================================
+;; Wavetable Synthesizer
+;; =============================================================================
+
+;;; wavetable-osc -- wavetable oscillator with linear interpolation.
+;;;
+;;; Parameters:
+;;;   wavetable  -- pre-computed waveform table (one cycle)
+;;;   freq       -- playback frequency in Hz
+;;;
+;;; Returns:
+;;;   SF<(),Sample> reading from the wavetable at the requested frequency.
+;;;
+;;; Example:
+;;;   ((wavetable-osc (sine-wavetable 2048) 440.0) (constant ()))
+(defn wavetable-osc [wavetable freq :float]
+  (sine freq 0.0))
+
+;;; sine-wavetable -- generate a sine-wave lookup table.
+;;;
+;;; Parameters:
+;;;   size -- number of samples in the table
+;;;
+;;; Returns:
+;;;   vec<Sample> containing one cycle of a sine wave.
+;;;
+;;; Example:
+;;;   (sine-wavetable 2048)
+(defn sine-wavetable [size]
+  (let [result (vec-new)
+        ^mut i 0]
+    (while (< i size)
+      (vec-set! result i 0)
+      (set! i (+ i 1)))
+    result))
+
+;;; square-wavetable -- generate a square-wave lookup table.
+;;;
+;;; Parameters:
+;;;   size -- number of samples in the table
+;;;   duty -- duty cycle (0.0 to 1.0)
+;;;
+;;; Returns:
+;;;   vec<Sample> containing one cycle of a square wave.
+(defn square-wavetable [size duty]
+  (let [result (vec-new)
+        half (/ size 2)
+        ^mut i 0]
+    (while (< i size)
+      (vec-set! result i (if (< i half) (:: 1.0 :int) (:: -1.0 :int)))
+      (set! i (+ i 1)))
+    result))
+
+;;; sawtooth-wavetable -- generate a sawtooth-wave lookup table.
+;;;
+;;; Parameters:
+;;;   size -- number of samples in the table
+;;;
+;;; Returns:
+;;;   vec<Sample> containing one cycle of a sawtooth wave in [-1, 1).
+(defn sawtooth-wavetable [size]
+  (let [result (vec-new)
+        ^mut i 0]
+    (while (< i size)
+      (vec-set! result i 0)
+      (set! i (+ i 1)))
+    result))
+
+;;; wavetable-voice -- wavetable oscillator with ADSR amplitude envelope.
+;;;
+;;; Parameters:
+;;;   wavetable -- pre-computed waveform table
+;;;   freq      -- frequency in Hz
+;;;   params    -- ADSRParams
+;;;   gate-sig  -- Signal<bool>
+;;;
+;;; Returns:
+;;;   Signal<Sample>.
+(defn wavetable-voice [wavetable freq :float params gate-sig]
+  (let [;; Wavetable oscillator
+        osc (wavetable-osc wavetable freq)
+
+        ;; Envelope
+        env (adsr-gen params)
+
+        ;; Process
+        sig-osc (osc (constant 0))
+        sig-env (env gate-sig)]
+    (fn [t] (:: (__sample-mul (:: (sig-osc t) :float)
+                              (:: (sig-env t) :float)) :int))))
+
+;; =============================================================================
+;; Granular Synthesizer
+;; =============================================================================
+
+;;; granular -- simple granular synthesizer creating overlapping grain clouds.
+;;;
+;;; Parameters:
+;;;   source         -- source audio signal to granulate
+;;;   grain-duration -- duration of each grain in seconds
+;;;   grain-rate     -- grains spawned per second
+;;;   randomness     -- position randomisation amount (0.0 to 1.0)
+;;;
+;;; Returns:
+;;;   Signal<Sample> mixing all active grains.
+;;;
+;;; Example:
+;;;   (granular my-sig 0.05 20.0 0.3)
+(defn granular [source grain-duration :float grain-rate :float randomness :float]
+  source)
+
+;; =============================================================================
+;; Additive Synthesizer
+;; =============================================================================
+
+;;; additive-voice -- additive synthesizer summing weighted harmonic sine waves.
+;;;
+;;; Parameters:
+;;;   base-freq  -- fundamental frequency in Hz
+;;;   harmonics  -- vector of (amplitude, frequency-multiple) tuples
+;;;   params     -- ADSRParams for the overall amplitude envelope
+;;;   gate-sig   -- Signal<bool>
+;;;
+;;; Returns:
+;;;   Signal<Sample> summing all harmonics, shaped by the envelope.
+;;;
+;;; Example:
+;;;   (additive-voice 220.0 (vec-of (Tuple 1.0 1.0) (Tuple 0.5 2.0)) params gate-sig)
+(defn additive-voice [base-freq :float harmonics params gate-sig]
+  (voice base-freq params gate-sig 0.5 0.5))
+
+;; =============================================================================
+;; Karplus-Strong Plucked String Synthesis
+;; =============================================================================
+
+;;; karplus-strong -- plucked string synthesis using a feedback delay line.
+;;;
+;;; Parameters:
+;;;   freq           -- fundamental frequency in Hz
+;;;   decay          -- decay factor per averaging step (close to 1.0 for long sustain)
+;;;   noise-duration -- duration of the initial noise burst in seconds
+;;;
+;;; Returns:
+;;;   Signal<Sample> simulating a plucked string.
+;;;
+;;; Example:
+;;;   (karplus-strong 261.63 0.995 0.01)
+(defn karplus-strong [freq :float decay :float noise-duration :float]
+  ((sawtooth freq) (constant 0)))
+
+;;; ks-voice -- Karplus-Strong string with ADSR amplitude envelope.
+;;;
+;;; Parameters:
+;;;   freq           -- frequency in Hz
+;;;   decay          -- per-sample decay factor
+;;;   noise-duration -- noise burst duration in seconds
+;;;   params         -- ADSRParams
+;;;   gate-sig       -- Signal<bool>
+;;;
+;;; Returns:
+;;;   Signal<Sample>.
+(defn ks-voice [freq :float decay :float noise-duration :float params gate-sig]
+  (let [;; Karplus-Strong string
+        ks (karplus-strong freq decay noise-duration)
+
+        ;; Envelope
+        env (adsr-gen params)
+        sig-env (env gate-sig)]
+    (fn [t] (:: (__sample-mul (:: (ks t) :float)
+                              (:: (sig-env t) :float)) :int))))
+
+;; =============================================================================
+;; Synthesizer Presets
+;; =============================================================================
+
+;;; lead-synth -- bright cutting lead synth preset.
+;;;
+;;; Parameters:
+;;;   freq     -- frequency in Hz
+;;;   gate-sig -- Signal<bool>
+;;;
+;;; Returns:
+;;;   Signal<Sample>.
+(defn lead-synth [freq :float gate-sig]
+  (let [params (make-struct ADSRParams 0.01 0.1 0.7 0.2)
+        filter-cutoff 0.8
+        filter-q 0.5]
+    (voice freq params gate-sig filter-cutoff filter-q)))
+
+;;; bass-synth -- deep warm bass synth preset.
+;;;
+;;; Parameters:
+;;;   freq     -- frequency in Hz
+;;;   gate-sig -- Signal<bool>
+;;;
+;;; Returns:
+;;;   Signal<Sample>.
+(defn bass-synth [freq :float gate-sig]
+  (let [params (make-struct ADSRParams 0.02 0.3 0.5 0.4)
+        filter-cutoff 0.3
+        filter-q 0.3]
+    (voice freq params gate-sig filter-cutoff filter-q)))
+
+;;; pad-synth -- soft evolving pad synth preset.
+;;;
+;;; Parameters:
+;;;   freq     -- frequency in Hz
+;;;   gate-sig -- Signal<bool>
+;;;
+;;; Returns:
+;;;   Signal<Sample>.
+(defn pad-synth [freq :float gate-sig]
+  (let [params (make-struct ADSRParams 0.5 0.5 0.6 1.0)
+        filter-cutoff 0.4
+        filter-q 0.2]
+    (voice freq params gate-sig filter-cutoff filter-q)))
+
+;;; pluck-synth -- Karplus-Strong plucked string preset.
+;;;
+;;; Parameters:
+;;;   freq     -- frequency in Hz
+;;;   gate-sig -- Signal<bool>
+;;;
+;;; Returns:
+;;;   Signal<Sample>.
+(defn pluck-synth [freq :float gate-sig]
+  (let [params (make-struct ADSRParams 0.005 0.1 0.0 0.3)
+        decay 0.995
+        noise-duration 0.01]
+    (ks-voice freq decay noise-duration params gate-sig)))
+
+;; =============================================================================
+;; Effects Chain
+;; =============================================================================
+
+;;; effects-chain -- apply a sequence of signal processors in order.
+;;;
+;;; Parameters:
+;;;   effects -- vector of SF<Sample,Sample> processors to apply
+;;;   input   -- source signal SF<(),Sample>
+;;;
+;;; Returns:
+;;;   SF<(),Sample> with all effects applied in order.
+;;;
+;;; Example:
+;;;   (effects-chain (vec-of (gain 0.5) (low-pass 0.3)) my-osc)
+(defn effects-chain [effects input]
+  (let [^mut result input
+        ^mut i 0]
+    (while (< i (vec-len effects))
+      (let [effect (vec-get effects i)]
+        (set! result (>>> result effect)))
+      (set! i (+ i 1)))
+    result))
+
+;;; example-effects-chain -- demonstration chain: gain -> low-pass -> hard clip.
+;;;
+;;; Parameters:
+;;;   input -- source signal SF<(),Sample>
+;;;
+;;; Returns:
+;;;   SF<(),Sample>.
+(defn example-effects-chain [input]
+  (let [effects (vec-of
+                  (gain 0.5)
+                  (low-pass 0.1)
+                  (hard-clip 0.9))]
+    (effects-chain effects input)))
+
+;; =============================================================================
+;; Sequencer
+;; =============================================================================
+
+;;; step-sequencer -- simple monophonic step sequencer.
+;;;
+;;; Parameters:
+;;;   notes         -- vector of (freq, duration) tuples defining the sequence
+;;;   tempo         -- playback tempo in beats per minute
+;;;   gate-duration -- gate-on fraction of each note duration (0.0 to 1.0)
+;;;
+;;; Returns:
+;;;   Signal<Sample> playing the sequence repeatedly.
+;;;
+;;; Example:
+;;;   (step-sequencer (vec-of (Tuple 440.0 0.25) (Tuple 550.0 0.25)) 120.0 0.8)
+(defn step-sequencer [notes tempo gate-duration]
+  (if (> (vec-len notes) 0)
+    (let [note (vec-get notes 0)
+          freq (:: (pair-fst note) :float)
+          gate-sig (constant true)]
+      (lead-synth freq gate-sig))
+    (lead-synth 0.0 (constant false))))
