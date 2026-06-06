@@ -263,7 +263,7 @@
     /* Free pending event handles, then the array. */
     if (w->pending_evs) {
       for (int i = 0; i < w->pending_n; i++) {
-        if (w->pending_evs[i]) watch__event__watch_event_free(w->pending_evs[i]);
+        if (w->pending_evs[i]) watch__event__watch_hyevent_hyfree(w->pending_evs[i]);
       }
       free(w->pending_evs);
     }
@@ -338,14 +338,14 @@
     /* Reach into the backend via its Turmeric ABI: open with empty base
        so all events in the dir are forwarded.  The codegen marshals
        cstr arguments as const char*, so pass the pointer directly. */
-    int64_t b = watch__backend__backend_open(cdir, "");
+    int64_t b = watch__backend__backend_hyopen(cdir, "");
     if (b == 0) return -1;
 
     if (w->t_n == w->t_cap) {
       int new_cap = w->t_cap ? w->t_cap * 2 : 8;
       int64_t *grow_b = (int64_t *)realloc(w->t_backends, sizeof(int64_t) * (size_t)new_cap);
       char   **grow_d = (char   **)realloc(w->t_dirs,     sizeof(char *)   * (size_t)new_cap);
-      if (!grow_b || !grow_d) { watch__backend__backend_close(b); return -1; }
+      if (!grow_b || !grow_d) { watch__backend__backend_hyclose(b); return -1; }
       w->t_backends = grow_b;
       w->t_dirs     = grow_d;
       w->t_cap      = new_cap;
@@ -373,7 +373,7 @@
     /* Register this directory first.  Both callees below are static
        functions in the same generated translation unit; we reach them
        via their mangled C names rather than extern decls. */
-    if (watch__watch____watcher_tree_add_dir((int64_t)(intptr_t)w, cdir) < 0) {
+    if (watch__watch___un_unwatcher_hytree_hyadd_hydir((int64_t)(intptr_t)w, cdir) < 0) {
       return 0;
     }
 
@@ -392,7 +392,7 @@
       /* lstat returns the symlink itself; we skip dirs that are symlinks
          to avoid cycles entirely. */
 
-      watch__watch____watcher_tree_walk((int64_t)(intptr_t)w, child,
+      watch__watch___un_unwatcher_hytree_hywalk((int64_t)(intptr_t)w, child,
                                         (int64_t)(depth + 1));
     }
     closedir(dh);
@@ -412,7 +412,7 @@
     struct pollfd *pfds = (struct pollfd *)calloc((size_t)w->t_n, sizeof(*pfds));
     if (!pfds) return -1;
     for (int i = 0; i < w->t_n; i++) {
-      pfds[i].fd = (int)watch__backend__backend_fd(w->t_backends[i]);
+      pfds[i].fd = (int)watch__backend__backend_hyfd(w->t_backends[i]);
       pfds[i].events = POLLIN;
     }
     int rc = poll(pfds, (nfds_t)w->t_n, (int)timeout_ms);
@@ -468,7 +468,7 @@
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1) return;
     for (int i = 0; i < w->t_n; i++) {
-      if (w->t_backends[i]) watch__backend__backend_close(w->t_backends[i]);
+      if (w->t_backends[i]) watch__backend__backend_hyclose(w->t_backends[i]);
       w->t_backends[i] = 0;
     }
     ```)
@@ -595,7 +595,7 @@
       int nc = w->pending_cap ? w->pending_cap * 2 : 4;
       int64_t *g = (int64_t *)realloc(w->pending_evs, sizeof(int64_t) * (size_t)nc);
       if (!g) {
-        watch__event__watch_event_free(ev);
+        watch__event__watch_hyevent_hyfree(ev);
         return;
       }
       w->pending_evs = g;
@@ -648,10 +648,10 @@
       if (*after == '/') rel_path = after + 1;
     }
 
-    return watch__event__watch_event_make(
-      (int64_t)(intptr_t)r,
-      (int64_t)(intptr_t)rel_path,
-      (int64_t)(intptr_t)full_path,
+    return watch__event__watch_hyevent_hymake(
+      r,
+      rel_path,
+      full_path,
       (int64_t)kind,
       (int64_t)is_dir,
       (int64_t)cookie);
@@ -689,7 +689,7 @@
           int _nc = w->pending_cap ? w->pending_cap * 2 : 4; \
           int64_t *_g = (int64_t *)realloc(w->pending_evs, \
                           sizeof(int64_t) * (size_t)_nc); \
-          if (!_g) { watch__event__watch_event_free(_ev); break; } \
+          if (!_g) { watch__event__watch_hyevent_hyfree(_ev); break; } \
           w->pending_evs = _g; w->pending_cap = _nc; \
         } \
         w->pending_evs[w->pending_n++] = _ev; \
@@ -698,27 +698,27 @@
 
     #if defined(__linux__)
     {
-      int ev_count = (int)watch__backend__backend_event_count(bk);
+      int ev_count = (int)watch__backend__backend_hyevent_hycount(bk);
       for (int j = 0; j < ev_count; j++) {
         const char *ename = (const char *)(intptr_t)
-            watch__backend__backend_event_name_at(bk, (int64_t)j);
-        unsigned int mask   = (unsigned int)watch__backend__backend_event_mask_at(bk, (int64_t)j);
-        unsigned int cookie = (unsigned int)watch__backend__backend_event_cookie_at(bk, (int64_t)j);
-        int          is_dir = (int)watch__backend__backend_event_is_dir_at(bk, (int64_t)j);
+            watch__backend__backend_hyevent_hyname_hyat(bk, (int64_t)j);
+        unsigned int mask   = (unsigned int)watch__backend__backend_hyevent_hymask_hyat(bk, (int64_t)j);
+        unsigned int cookie = (unsigned int)watch__backend__backend_hyevent_hycookie_hyat(bk, (int64_t)j);
+        int          is_dir = (int)watch__backend__backend_hyevent_hyis_hydir_hyat(bk, (int64_t)j);
         if (!ename) ename = "";
 
         int kind = tur_inotify_kind(mask);
         if (kind == 6) {
           /* overflow: emit one overflow event for the directory itself */
-          int64_t ev = watch__watch____watcher_tree_mk_event(
-              (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
-              (int64_t)(intptr_t)"", 6, 1, 0);
+          int64_t ev = watch__watch___un_unwatcher_hytree_hymk_hyevent(
+              croot, cdir,
+              "", 6, 1, 0);
           TUR_PEND_PUSH(ev);
           break; /* one overflow is enough */
         }
-        int64_t ev = watch__watch____watcher_tree_mk_event(
-            (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
-            (int64_t)(intptr_t)ename, kind, is_dir, (int64_t)cookie);
+        int64_t ev = watch__watch___un_unwatcher_hytree_hymk_hyevent(
+            croot, cdir,
+            ename, kind, is_dir, (int64_t)cookie);
         TUR_PEND_PUSH(ev);
       }
 
@@ -747,9 +747,9 @@
               if (ne->ino != oe->ino)        kind = 4; /* rename / atomic-save */
               else if (ne->size != oe->size) kind = 1; /* write */
               if (kind) {
-                int64_t ev = watch__watch____watcher_tree_mk_event(
-                    (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
-                    (int64_t)(intptr_t)ne->name, kind, ne->is_dir, 0);
+                int64_t ev = watch__watch___un_unwatcher_hytree_hymk_hyevent(
+                    croot, cdir,
+                    ne->name, kind, ne->is_dir, 0);
                 TUR_PEND_PUSH(ev);
               }
               break;
@@ -757,9 +757,9 @@
           }
           if (!found) {
             /* New entry: create */
-            int64_t ev = watch__watch____watcher_tree_mk_event(
-                (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
-                (int64_t)(intptr_t)ne->name, 2, ne->is_dir, 0);
+            int64_t ev = watch__watch___un_unwatcher_hytree_hymk_hyevent(
+                croot, cdir,
+                ne->name, 2, ne->is_dir, 0);
             TUR_PEND_PUSH(ev);
           }
         }
@@ -775,9 +775,9 @@
               }
             }
             if (!still_there) {
-              int64_t ev = watch__watch____watcher_tree_mk_event(
-                  (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
-                  (int64_t)(intptr_t)oe->name, 3, oe->is_dir, 0);
+              int64_t ev = watch__watch___un_unwatcher_hytree_hymk_hyevent(
+                  croot, cdir,
+                  oe->name, 3, oe->is_dir, 0);
               TUR_PEND_PUSH(ev);
             }
           }
@@ -792,9 +792,9 @@
         }
       } else if (old_s) {
         /* Could not snapshot (dir deleted?): emit a delete for the dir. */
-        int64_t ev = watch__watch____watcher_tree_mk_event(
-            (int64_t)(intptr_t)croot, (int64_t)(intptr_t)cdir,
-            (int64_t)(intptr_t)"", 3, 1, 0);
+        int64_t ev = watch__watch___un_unwatcher_hytree_hymk_hyevent(
+            croot, cdir,
+            "", 3, 1, 0);
         TUR_PEND_PUSH(ev);
       }
     }

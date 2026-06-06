@@ -37,7 +37,7 @@
   #include <stdlib.h>
   char *buf = malloc(32);
   snprintf(buf, 32, "%lld", (long long)n);
-  return (int64_t)(intptr_t)buf;
+  return buf;
   ```)
 
 ;;; c-float->str -- convert a float to a string.
@@ -58,7 +58,7 @@
   #include <stdlib.h>
   char *buf = malloc(64);
   snprintf(buf, 64, "%g", (double)f);
-  return (int64_t)(intptr_t)buf;
+  return buf;
   ```)
 
 ;;; c-cat2 -- concatenate two C source strings.
@@ -83,7 +83,7 @@
   int n = snprintf(NULL, 0, "%s%s", sa, sb);
   char *out = malloc(n + 1);
   snprintf(out, n + 1, "%s%s", sa, sb);
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-cat3 -- concatenate three C source strings.
@@ -107,7 +107,7 @@
   int n = snprintf(NULL, 0, "%s%s%s", sa, sb, sc);
   char *out = malloc(n + 1);
   snprintf(out, n + 1, "%s%s%s", sa, sb, sc);
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-cat4 -- concatenate four C source strings.
@@ -124,7 +124,7 @@
   int n = snprintf(NULL, 0, "%s%s%s%s", sa, sb, sc, sd);
   char *out = malloc(n + 1);
   snprintf(out, n + 1, "%s%s%s%s", sa, sb, sc, sd);
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-sprintf1 -- format a string with one %s substitution.
@@ -149,7 +149,7 @@
   int n = snprintf(NULL, 0, f, s1);
   char *out = malloc(n + 1);
   snprintf(out, n + 1, f, s1);
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-sprintf2 -- format a string with two %s substitutions.
@@ -165,7 +165,7 @@
   int n = snprintf(NULL, 0, f, s1, s2);
   char *out = malloc(n + 1);
   snprintf(out, n + 1, f, s1, s2);
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-sprintf3 -- format a string with three %s substitutions.
@@ -182,7 +182,7 @@
   int n = snprintf(NULL, 0, f, s1, s2, s3);
   char *out = malloc(n + 1);
   snprintf(out, n + 1, f, s1, s2, s3);
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-sprintf4 -- format a string with four %s substitutions.
@@ -200,7 +200,7 @@
   int n = snprintf(NULL, 0, f, s1, s2, s3, s4);
   char *out = malloc(n + 1);
   snprintf(out, n + 1, f, s1, s2, s3, s4);
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-join -- join a cons list of :cstr items with a separator.
@@ -248,7 +248,7 @@
     cur = (void*)(intptr_t)cur->next;
   }
   *p = '\0';
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-lines -- join a cons list of :cstr items with newlines.
@@ -282,7 +282,7 @@
   #include <stdlib.h>
   const char *s = (const char*)(intptr_t)code;
   size_t slen = strlen(s);
-  if (slen == 0) return (int64_t)(intptr_t)"";
+  if (slen == 0) return "";
   int lines = 1;
   for (size_t i = 0; i < slen; i++) if (s[i] == '\n') lines++;
   char *out = malloc(slen + (size_t)lines * 4 + 1);
@@ -294,7 +294,7 @@
     if (s[i] == '\n') at_start = 1;
   }
   *p = '\0';
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-join-vec -- join a Vec[cstr] of strings with a separator.
@@ -326,7 +326,7 @@
   if (!vec || vec->len == 0) {
     char *empty = malloc(1);
     empty[0] = '\0';
-    return (int64_t)(intptr_t)empty;
+    return empty;
   }
   size_t total = 0;
   for (size_t i = 0; i < vec->len; i++) {
@@ -342,7 +342,7 @@
     memcpy(p, s, slen); p += slen;
   }
   *p = '\0';
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-stmts -- join a Vec[cstr] of statement strings with newlines.
@@ -395,7 +395,7 @@
     cur = (void*)(intptr_t)cur->next;
   }
   *p++ = '}'; *p = '\0';
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; compile-c -- join a cons list of top-level C declarations into a source string.

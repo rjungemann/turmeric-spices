@@ -8,24 +8,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-int64_t scscm__lexer__nil_value();
-bool scscm__lexer__list_nil_(int64_t);
+int64_t scscm__lexer__nil_hyvalue();
+bool scscm__lexer__list_hynil_qu(int64_t);
 int64_t scscm__lexer__cons(int64_t, int64_t);
 int64_t scscm__lexer__head(int64_t);
 int64_t scscm__lexer__tail(int64_t);
-void * scscm__lexer__lex_ok(int64_t);
-void * scscm__lexer__lex_err(int64_t);
-bool scscm__lexer__lex_ok_(void *);
-bool scscm__lexer__lex_err_(void *);
-int64_t scscm__lexer__lex_ok_val(void *);
-int64_t scscm__lexer__lex_err_val(void *);
-const char * scscm__lexer__token_type(int64_t);
-const char * scscm__lexer__token_value(int64_t);
-int64_t scscm__lexer__token_line(int64_t);
-int64_t scscm__lexer__token_col(int64_t);
-int64_t scscm__lexer__scscm_list_rev(int64_t, int64_t);
-int64_t scscm__lexer__scscm_cstr_as_int(const char *);
-bool scscm__lexer__scscm_cstr_eq_(const char *, const char *);
+void * scscm__lexer__lex_hyok(int64_t);
+void * scscm__lexer__lex_hyerr(int64_t);
+bool scscm__lexer__lex_hyok_qu(void *);
+bool scscm__lexer__lex_hyerr_qu(void *);
+int64_t scscm__lexer__lex_hyok_hyval(void *);
+int64_t scscm__lexer__lex_hyerr_hyval(void *);
+const char * scscm__lexer__token_hytype(int64_t);
+const char * scscm__lexer__token_hyvalue(int64_t);
+int64_t scscm__lexer__token_hyline(int64_t);
+int64_t scscm__lexer__token_hycol(int64_t);
+int64_t scscm__lexer__scscm_hylist_hyrev(int64_t, int64_t);
+int64_t scscm__lexer__scscm_hycstr_hyas_hyint(const char *);
+const char * scscm__lexer__scscm_hyint_hyas_hycstr(int64_t);
+bool scscm__lexer__scscm_hycstr_hyeq_qu(const char *, const char *);
 void * scscm__lexer__tokenize(const char *);
-void scscm__lexer__tokens_free(int64_t);
+void scscm__lexer__tokens_hyfree(int64_t);
 #endif /* TUR_scscm__lexer_H */

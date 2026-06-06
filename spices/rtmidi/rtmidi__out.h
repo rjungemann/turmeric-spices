@@ -8,8 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-void * rtmidi__out__midi_out_open(int64_t, int64_t, const char *);
-void * rtmidi__out__midi_out_open_virtual(int64_t, const char *);
-void rtmidi__out__midi_out_close(int64_t);
-void * rtmidi__out__midi_out_send(int64_t, const char *, int64_t);
+void * rtmidi__out__midi_hyout_hyopen(int64_t, int64_t, const char *);
+void * rtmidi__out__midi_hyout_hyopen_hyvirtual(int64_t, const char *);
+void rtmidi__out__midi_hyout_hyclose(int64_t);
+void * rtmidi__out__midi_hyout_hysend(int64_t, const char *, int64_t);
 #endif /* TUR_rtmidi__out_H */

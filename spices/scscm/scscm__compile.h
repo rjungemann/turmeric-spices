@@ -13,6 +13,6 @@
 #include "scscm__expander.h"
 #include "scscm__codegen.h"
 
-void * scscm__compile__compile_text(const char *);
-void * scscm__compile__compile_file(const char *);
+void * scscm__compile__compile_hytext(const char *);
+void * scscm__compile__compile_hyfile(const char *);
 #endif /* TUR_scscm__compile_H */

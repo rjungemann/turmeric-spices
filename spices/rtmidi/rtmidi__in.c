@@ -3,12 +3,12 @@
 
 static void * rtmidi__in____ok(int64_t);
 static void * rtmidi__in____err(int64_t);
-void * rtmidi__in__midi_in_open(int64_t, int64_t, const char *);
-void * rtmidi__in__midi_in_open_virtual(int64_t, const char *);
-void rtmidi__in__midi_in_close(int64_t);
-void rtmidi__in__midi_in_set_callback(int64_t, int64_t);
-void rtmidi__in__midi_in_cancel_callback(int64_t);
-void rtmidi__in__midi_in_ignore_types(int64_t, bool, bool, bool);
+void * rtmidi__in__midi_hyin_hyopen(int64_t, int64_t, const char *);
+void * rtmidi__in__midi_hyin_hyopen_hyvirtual(int64_t, const char *);
+void rtmidi__in__midi_hyin_hyclose(int64_t);
+void rtmidi__in__midi_hyin_hyset_hycallback(int64_t, int64_t);
+void rtmidi__in__midi_hyin_hycancel_hycallback(int64_t);
+void rtmidi__in__midi_hyin_hyignore_hytypes(int64_t, bool, bool, bool);
 
 static void * rtmidi__in____ok(int64_t v) {
         #include <stdlib.h>
@@ -24,7 +24,7 @@ static void * rtmidi__in____err(int64_t e) {
   
 }
 
-void * rtmidi__in__midi_in_open(int64_t mi, int64_t i, const char * name) {
+void * rtmidi__in__midi_hyin_hyopen(int64_t mi, int64_t i, const char * name) {
         #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   rtmidi_open_port((RtMidiPtr)(intptr_t)mi, (unsigned int)i, (const char*)name);
@@ -36,7 +36,7 @@ void * rtmidi__in__midi_in_open(int64_t mi, int64_t i, const char * name) {
   
 }
 
-void * rtmidi__in__midi_in_open_virtual(int64_t mi, const char * name) {
+void * rtmidi__in__midi_hyin_hyopen_hyvirtual(int64_t mi, const char * name) {
         #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   rtmidi_open_virtual_port((RtMidiPtr)(intptr_t)mi, (const char*)name);
@@ -48,13 +48,13 @@ void * rtmidi__in__midi_in_open_virtual(int64_t mi, const char * name) {
   
 }
 
-void rtmidi__in__midi_in_close(int64_t mi) {
+void rtmidi__in__midi_hyin_hyclose(int64_t mi) {
         #include <rtmidi/rtmidi_c.h>
   rtmidi_close_port((RtMidiPtr)(intptr_t)mi);
   
 }
 
-void rtmidi__in__midi_in_set_callback(int64_t mi, int64_t callback) {
+void rtmidi__in__midi_hyin_hyset_hycallback(int64_t mi, int64_t callback) {
         #include <rtmidi/rtmidi_c.h>
   rtmidi_in_set_callback((RtMidiInPtr)(intptr_t)mi,
                          (RtMidiCCallback)(intptr_t)callback,
@@ -62,13 +62,13 @@ void rtmidi__in__midi_in_set_callback(int64_t mi, int64_t callback) {
   
 }
 
-void rtmidi__in__midi_in_cancel_callback(int64_t mi) {
+void rtmidi__in__midi_hyin_hycancel_hycallback(int64_t mi) {
         #include <rtmidi/rtmidi_c.h>
   rtmidi_in_cancel_callback((RtMidiInPtr)(intptr_t)mi);
   
 }
 
-void rtmidi__in__midi_in_ignore_types(int64_t mi, bool sysex, bool timing, bool active_sense) {
+void rtmidi__in__midi_hyin_hyignore_hytypes(int64_t mi, bool sysex, bool timing, bool active_sense) {
         #include <rtmidi/rtmidi_c.h>
   rtmidi_in_ignore_types((RtMidiInPtr)(intptr_t)mi,
                          (bool)sysex, (bool)timing, (bool)active_sense);

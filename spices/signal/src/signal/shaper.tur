@@ -9,6 +9,19 @@
           saturate-tanh hard-clip clip
           mix add multiply)
 
+;;; __pair-fst-f / __pair-snd-f -- local readers for the float-pair shape
+;;; produced by signal/core's __sig-pair. stdlib/pair.tur's typed helpers
+;;; are not in scope under project-mode compilation.
+(defn __pair-fst-f [p : ptr<void>] : float
+  ```c struct { double fst; double snd; } *q = (void*)(intptr_t)p;
+  return q->fst;
+  ```)
+
+(defn __pair-snd-f [p : ptr<void>] : float
+  ```c struct { double fst; double snd; } *q = (void*)(intptr_t)p;
+  return q->snd;
+  ```)
+
 ;; =============================================================================
 ;; libm bridges
 ;; =============================================================================
@@ -127,28 +140,28 @@
 ;;;   ((mix 0.5) (pair-signals (sine 440.0 0.0) (sine 660.0 0.0)))
 (defn mix [alpha :float]
   (let [av alpha]
-    (fn [^fat prod-sig : (fn [float] #{} (Pair float float))]
+    (fn [^fat prod-sig : (fn [float] #{} ptr<void>)]
       (fn [t :float] :float
         (let [p (prod-sig t)
-              x (as float (pair-fst p))
-              y (as float (pair-snd p))]
+              x (__pair-fst-f p)
+              y (__pair-snd-f p)]
           (+ (* av x) (* (- 1.0 av) y)))))))
 
 ;;; add -- sum a Pair signal sample-wise.
 (defn add []
-  (fn [^fat prod-sig : (fn [float] #{} (Pair float float))]
+  (fn [^fat prod-sig : (fn [float] #{} ptr<void>)]
     (fn [t :float] :float
       (let [p (prod-sig t)]
-        (+ (pair-fst p) (pair-snd p))))))
+        (+ (__pair-fst-f p) (__pair-snd-f p))))))
 
 ;;; multiply -- product of a Pair signal sample-wise.
 ;;;
 ;;; Example:
 ;;;   ((multiply) (pair-signals lfo carrier))
 (defn multiply []
-  (fn [^fat prod-sig : (fn [float] #{} (Pair float float))]
+  (fn [^fat prod-sig : (fn [float] #{} ptr<void>)]
     (fn [t :float] :float
       (let [p (prod-sig t)]
-        (* (pair-fst p) (pair-snd p))))))
+        (* (__pair-fst-f p) (__pair-snd-f p))))))
 
 ) ;; end defmodule signal/shaper

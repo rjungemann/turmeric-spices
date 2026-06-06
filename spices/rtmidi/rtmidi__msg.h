@@ -8,19 +8,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-int64_t rtmidi__msg__msg_note_on(int64_t, int64_t, int64_t);
-int64_t rtmidi__msg__msg_note_off(int64_t, int64_t, int64_t);
-int64_t rtmidi__msg__msg_control_change(int64_t, int64_t, int64_t);
-int64_t rtmidi__msg__msg_program_change(int64_t, int64_t);
-int64_t rtmidi__msg__msg_pitch_bend(int64_t, int64_t, int64_t);
-int64_t rtmidi__msg__msg_aftertouch(int64_t, int64_t);
-int64_t rtmidi__msg__msg_poly_aftertouch(int64_t, int64_t, int64_t);
-int64_t rtmidi__msg__msg_sysex(const char *, int64_t);
-int64_t rtmidi__msg__msg_status(int64_t);
-int64_t rtmidi__msg__msg_channel(int64_t);
-int64_t rtmidi__msg__msg_data1(int64_t);
-int64_t rtmidi__msg__msg_data2(int64_t);
-const char * rtmidi__msg__msg_bytes(int64_t);
-int64_t rtmidi__msg__msg_len(int64_t);
-void rtmidi__msg__msg_free(int64_t);
+int64_t rtmidi__msg__msg_hynote_hyon(int64_t, int64_t, int64_t);
+int64_t rtmidi__msg__msg_hynote_hyoff(int64_t, int64_t, int64_t);
+int64_t rtmidi__msg__msg_hycontrol_hychange(int64_t, int64_t, int64_t);
+int64_t rtmidi__msg__msg_hyprogram_hychange(int64_t, int64_t);
+int64_t rtmidi__msg__msg_hypitch_hybend(int64_t, int64_t, int64_t);
+int64_t rtmidi__msg__msg_hyaftertouch(int64_t, int64_t);
+int64_t rtmidi__msg__msg_hypoly_hyaftertouch(int64_t, int64_t, int64_t);
+int64_t rtmidi__msg__msg_hysysex(const char *, int64_t);
+int64_t rtmidi__msg__msg_hystatus(int64_t);
+int64_t rtmidi__msg__msg_hychannel(int64_t);
+int64_t rtmidi__msg__msg_hydata1(int64_t);
+int64_t rtmidi__msg__msg_hydata2(int64_t);
+const char * rtmidi__msg__msg_hybytes(int64_t);
+int64_t rtmidi__msg__msg_hylen(int64_t);
+void rtmidi__msg__msg_hyfree(int64_t);
 #endif /* TUR_rtmidi__msg_H */

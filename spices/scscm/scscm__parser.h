@@ -10,17 +10,17 @@
 
 #include "scscm__lexer.h"
 
-int64_t scscm__parser__scscm_ast_leaf(int64_t, const char *);
-int64_t scscm__parser__scscm_ast_list_node(int64_t);
-void scscm__parser__scscm_ast_add_child(int64_t, int64_t);
-const char * scscm__parser__ast_kind(int64_t);
-const char * scscm__parser__ast_symbol_name(int64_t);
-const char * scscm__parser__ast_number_value(int64_t);
-const char * scscm__parser__ast_string_value(int64_t);
-int64_t scscm__parser__ast_list_len(int64_t);
-int64_t scscm__parser__ast_list_get(int64_t, int64_t);
-const char * scscm__parser__scscm_ast_value(int64_t);
-void scscm__parser__ast_free(int64_t);
-void scscm__parser__ast_free_all(int64_t);
+int64_t scscm__parser__scscm_hyast_hyleaf(int64_t, const char *);
+int64_t scscm__parser__scscm_hyast_hylist_hynode(int64_t);
+void scscm__parser__scscm_hyast_hyadd_hychild(int64_t, int64_t);
+const char * scscm__parser__ast_hykind(int64_t);
+const char * scscm__parser__ast_hysymbol_hyname(int64_t);
+const char * scscm__parser__ast_hynumber_hyvalue(int64_t);
+const char * scscm__parser__ast_hystring_hyvalue(int64_t);
+int64_t scscm__parser__ast_hylist_hylen(int64_t);
+int64_t scscm__parser__ast_hylist_hyget(int64_t, int64_t);
+const char * scscm__parser__scscm_hyast_hyvalue(int64_t);
+void scscm__parser__ast_hyfree(int64_t);
+void scscm__parser__ast_hyfree_hyall(int64_t);
 void * scscm__parser__parse(int64_t);
 #endif /* TUR_scscm__parser_H */

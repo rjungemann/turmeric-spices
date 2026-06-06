@@ -8,12 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-void * rtmidi__core__midi_in_new(const char *);
-void * rtmidi__core__midi_out_new(const char *);
-void rtmidi__core__midi_in_free(int64_t);
-void rtmidi__core__midi_out_free(int64_t);
-int64_t rtmidi__core__midi_in_port_count(int64_t);
-int64_t rtmidi__core__midi_out_port_count(int64_t);
-const char * rtmidi__core__midi_in_port_name(int64_t, int64_t);
-const char * rtmidi__core__midi_out_port_name(int64_t, int64_t);
+void * rtmidi__core__midi_hyin_hynew(const char *);
+void * rtmidi__core__midi_hyout_hynew(const char *);
+void rtmidi__core__midi_hyin_hyfree(int64_t);
+void rtmidi__core__midi_hyout_hyfree(int64_t);
+int64_t rtmidi__core__midi_hyin_hyport_hycount(int64_t);
+int64_t rtmidi__core__midi_hyout_hyport_hycount(int64_t);
+const char * rtmidi__core__midi_hyin_hyport_hyname(int64_t, int64_t);
+const char * rtmidi__core__midi_hyout_hyport_hyname(int64_t, int64_t);
 #endif /* TUR_rtmidi__core_H */

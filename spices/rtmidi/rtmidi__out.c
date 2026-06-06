@@ -3,10 +3,10 @@
 
 static void * rtmidi__out____ok(int64_t);
 static void * rtmidi__out____err(int64_t);
-void * rtmidi__out__midi_out_open(int64_t, int64_t, const char *);
-void * rtmidi__out__midi_out_open_virtual(int64_t, const char *);
-void rtmidi__out__midi_out_close(int64_t);
-void * rtmidi__out__midi_out_send(int64_t, const char *, int64_t);
+void * rtmidi__out__midi_hyout_hyopen(int64_t, int64_t, const char *);
+void * rtmidi__out__midi_hyout_hyopen_hyvirtual(int64_t, const char *);
+void rtmidi__out__midi_hyout_hyclose(int64_t);
+void * rtmidi__out__midi_hyout_hysend(int64_t, const char *, int64_t);
 
 static void * rtmidi__out____ok(int64_t v) {
         #include <stdlib.h>
@@ -22,7 +22,7 @@ static void * rtmidi__out____err(int64_t e) {
   
 }
 
-void * rtmidi__out__midi_out_open(int64_t mo, int64_t i, const char * name) {
+void * rtmidi__out__midi_hyout_hyopen(int64_t mo, int64_t i, const char * name) {
         #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   rtmidi_open_port((RtMidiPtr)(intptr_t)mo, (unsigned int)i, (const char*)name);
@@ -34,7 +34,7 @@ void * rtmidi__out__midi_out_open(int64_t mo, int64_t i, const char * name) {
   
 }
 
-void * rtmidi__out__midi_out_open_virtual(int64_t mo, const char * name) {
+void * rtmidi__out__midi_hyout_hyopen_hyvirtual(int64_t mo, const char * name) {
         #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   rtmidi_open_virtual_port((RtMidiPtr)(intptr_t)mo, (const char*)name);
@@ -46,13 +46,13 @@ void * rtmidi__out__midi_out_open_virtual(int64_t mo, const char * name) {
   
 }
 
-void rtmidi__out__midi_out_close(int64_t mo) {
+void rtmidi__out__midi_hyout_hyclose(int64_t mo) {
         #include <rtmidi/rtmidi_c.h>
   rtmidi_close_port((RtMidiPtr)(intptr_t)mo);
   
 }
 
-void * rtmidi__out__midi_out_send(int64_t mo, const char * bytes, int64_t len) {
+void * rtmidi__out__midi_hyout_hysend(int64_t mo, const char * bytes, int64_t len) {
         #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   int rc = rtmidi_out_send_message((RtMidiOutPtr)(intptr_t)mo,

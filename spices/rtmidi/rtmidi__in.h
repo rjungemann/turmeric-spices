@@ -8,10 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-void * rtmidi__in__midi_in_open(int64_t, int64_t, const char *);
-void * rtmidi__in__midi_in_open_virtual(int64_t, const char *);
-void rtmidi__in__midi_in_close(int64_t);
-void rtmidi__in__midi_in_set_callback(int64_t, int64_t);
-void rtmidi__in__midi_in_cancel_callback(int64_t);
-void rtmidi__in__midi_in_ignore_types(int64_t, bool, bool, bool);
+void * rtmidi__in__midi_hyin_hyopen(int64_t, int64_t, const char *);
+void * rtmidi__in__midi_hyin_hyopen_hyvirtual(int64_t, const char *);
+void rtmidi__in__midi_hyin_hyclose(int64_t);
+void rtmidi__in__midi_hyin_hyset_hycallback(int64_t, int64_t);
+void rtmidi__in__midi_hyin_hycancel_hycallback(int64_t);
+void rtmidi__in__midi_hyin_hyignore_hytypes(int64_t, bool, bool, bool);
 #endif /* TUR_rtmidi__in_H */

@@ -12,5 +12,5 @@
 #include "scscm__parser.h"
 
 int64_t scscm__expander__expand(int64_t);
-int64_t scscm__expander__expand_all(int64_t);
+int64_t scscm__expander__expand_hyall(int64_t);
 #endif /* TUR_scscm__expander_H */

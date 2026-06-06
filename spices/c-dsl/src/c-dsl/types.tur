@@ -25,30 +25,30 @@
   ```c
   #include <string.h>
   const char *s = (const char*)(intptr_t)t;
-  if (!strcmp(s, ":void"))                             return (int64_t)(intptr_t)"void";
-  if (!strcmp(s, ":bool") || !strcmp(s, ":cbool"))     return (int64_t)(intptr_t)"bool";
-  if (!strcmp(s, ":int8"))                             return (int64_t)(intptr_t)"int8_t";
-  if (!strcmp(s, ":uint8"))                            return (int64_t)(intptr_t)"uint8_t";
-  if (!strcmp(s, ":int16"))                            return (int64_t)(intptr_t)"int16_t";
-  if (!strcmp(s, ":uint16"))                           return (int64_t)(intptr_t)"uint16_t";
-  if (!strcmp(s, ":int") || !strcmp(s, ":int32"))      return (int64_t)(intptr_t)"int32_t";
-  if (!strcmp(s, ":uint") || !strcmp(s, ":uint32"))    return (int64_t)(intptr_t)"uint32_t";
-  if (!strcmp(s, ":int64"))                            return (int64_t)(intptr_t)"int64_t";
-  if (!strcmp(s, ":uint64"))                           return (int64_t)(intptr_t)"uint64_t";
-  if (!strcmp(s, ":float"))                            return (int64_t)(intptr_t)"float";
-  if (!strcmp(s, ":double"))                           return (int64_t)(intptr_t)"double";
-  if (!strcmp(s, ":char"))                             return (int64_t)(intptr_t)"char";
-  if (!strcmp(s, ":cstr"))                             return (int64_t)(intptr_t)"char*";
-  if (!strcmp(s, ":size-t"))                           return (int64_t)(intptr_t)"size_t";
-  if (!strcmp(s, ":ssize-t"))                          return (int64_t)(intptr_t)"ssize_t";
-  if (!strcmp(s, ":intptr"))                           return (int64_t)(intptr_t)"intptr_t";
-  if (!strcmp(s, ":uintptr"))                          return (int64_t)(intptr_t)"uintptr_t";
-  if (!strcmp(s, ":ptrdiff-t"))                        return (int64_t)(intptr_t)"ptrdiff_t";
-  if (!strcmp(s, ":time-t"))                           return (int64_t)(intptr_t)"time_t";
-  if (!strcmp(s, ":FILE*"))                            return (int64_t)(intptr_t)"FILE*";
+  if (!strcmp(s, ":void"))                             return "void";
+  if (!strcmp(s, ":bool") || !strcmp(s, ":cbool"))     return "bool";
+  if (!strcmp(s, ":int8"))                             return "int8_t";
+  if (!strcmp(s, ":uint8"))                            return "uint8_t";
+  if (!strcmp(s, ":int16"))                            return "int16_t";
+  if (!strcmp(s, ":uint16"))                           return "uint16_t";
+  if (!strcmp(s, ":int") || !strcmp(s, ":int32"))      return "int32_t";
+  if (!strcmp(s, ":uint") || !strcmp(s, ":uint32"))    return "uint32_t";
+  if (!strcmp(s, ":int64"))                            return "int64_t";
+  if (!strcmp(s, ":uint64"))                           return "uint64_t";
+  if (!strcmp(s, ":float"))                            return "float";
+  if (!strcmp(s, ":double"))                           return "double";
+  if (!strcmp(s, ":char"))                             return "char";
+  if (!strcmp(s, ":cstr"))                             return "char*";
+  if (!strcmp(s, ":size-t"))                           return "size_t";
+  if (!strcmp(s, ":ssize-t"))                          return "ssize_t";
+  if (!strcmp(s, ":intptr"))                           return "intptr_t";
+  if (!strcmp(s, ":uintptr"))                          return "uintptr_t";
+  if (!strcmp(s, ":ptrdiff-t"))                        return "ptrdiff_t";
+  if (!strcmp(s, ":time-t"))                           return "time_t";
+  if (!strcmp(s, ":FILE*"))                            return "FILE*";
   /* Unknown keyword: strip leading colon; bare identifiers pass through */
-  if (s[0] == ':') return (int64_t)(intptr_t)(s + 1);
-  return (int64_t)(intptr_t)s;
+  if (s[0] == ':') return s + 1;
+  return s;
   ```)
 
 ;;; c-ptr-type -- create a C pointer type string.
@@ -124,7 +124,7 @@
     memcpy(p, s, slen); p += slen;
   }
   *p++ = ')'; *p = '\0';
-  return (int64_t)(intptr_t)out;
+  return out;
   ```)
 
 ;;; c-const-type -- prepend "const " to a type string.

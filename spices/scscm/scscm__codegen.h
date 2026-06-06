@@ -12,5 +12,5 @@
 #include "scscm__parser.h"
 
 const char * scscm__codegen__generate(int64_t);
-const char * scscm__codegen__generate_all(int64_t);
+const char * scscm__codegen__generate_hyall(int64_t);
 #endif /* TUR_scscm__codegen_H */

@@ -13,6 +13,17 @@
 (defmodule signal/core
   (export constant time-signal sample map-signal pair-signals)
 
+;;; __sig-pair -- local heap-allocated 2-cell pair (fst/snd as float).
+;;;
+;;; stdlib/pair.tur's typed `pair` is not in scope under project-mode
+;;; compilation; inline a minimal allocator with a matching runtime shape.
+(defn __sig-pair [a : float b : float] : ptr<void>
+  ```c struct { double fst; double snd; } *p = malloc(sizeof(*p));
+  p->fst = a;
+  p->snd = b;
+  return (int64_t)(intptr_t)p;
+  ```)
+
 ;; =============================================================================
 ;; Basic Signal Constructors
 ;; =============================================================================
@@ -83,6 +94,6 @@
    ^fat sig-b : (fn [float] #{} float)] : ptr<void>
   (let [av sig-a bv sig-b]
     (fn [t :float]
-      (pair (av t) (bv t)))))
+      (__sig-pair (av t) (bv t)))))
 
 ) ;; end defmodule signal/core

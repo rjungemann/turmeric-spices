@@ -8,6 +8,25 @@
 (defmodule signal/compose
   (export effects-chain)
 
+;;; __vec-get-i -- local untyped vec read, returns the int64_t slot at index i.
+;;;
+;;; Project-mode compilation auto-loads only stdlib/macros.tur, so
+;;; stdlib/vec.tur's `vec-get` is not in scope here. Inline a minimal reader
+;;; that matches the Vec runtime layout (data/len/cap).
+(defn __vec-get-i [v : int i : int] : int
+  ```c struct { int64_t *data; size_t len; size_t cap; } *vec = (void*)(intptr_t)v;
+  if (i >= 0 && (size_t)i < vec->len) return (int64_t)vec->data[i];
+  fprintf(stderr, "signal/compose: vec index out of bounds\n");
+  exit(1);
+  return 0;
+  ```)
+
+;;; __vec-len-i -- local untyped vec length read.
+(defn __vec-len-i [v : int] : int
+  ```c struct { int64_t *data; size_t len; size_t cap; } *vec = (void*)(intptr_t)v;
+  return (int)vec->len;
+  ```)
+
 ;;; __apply-sf -- apply one SF to a signal, returning the resulting signal.
 ;;;
 ;;; The SF parameter type is spelled as the carrier shape
@@ -36,7 +55,7 @@
   (if (>= i n)
     sig
     (:: (__chain-loop effects
-                      (__apply-sf (:: (vec-get effects i) :ptr<void>) sig)
+                      (__apply-sf (:: (__vec-get-i effects i) :ptr<void>) sig)
                       (+ i 1)
                       n) :ptr<void>)))
 
@@ -61,6 +80,6 @@
 ;;;     chain)
 (defn effects-chain
   [effects : int ^fat input : (fn [float] #{} float)] : ptr<void>
-  (__chain-loop effects input 0 (vec-len effects)))
+  (__chain-loop effects input 0 (__vec-len-i effects)))
 
 ) ;; end defmodule signal/compose

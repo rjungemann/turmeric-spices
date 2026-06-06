@@ -3,15 +3,15 @@
 
 static void * rtmidi__core____ok(int64_t);
 static void * rtmidi__core____err(int64_t);
-static int64_t rtmidi__core____parse_midi_api(const char *);
-void * rtmidi__core__midi_in_new(const char *);
-void * rtmidi__core__midi_out_new(const char *);
-void rtmidi__core__midi_in_free(int64_t);
-void rtmidi__core__midi_out_free(int64_t);
-int64_t rtmidi__core__midi_in_port_count(int64_t);
-int64_t rtmidi__core__midi_out_port_count(int64_t);
-const char * rtmidi__core__midi_in_port_name(int64_t, int64_t);
-const char * rtmidi__core__midi_out_port_name(int64_t, int64_t);
+static int64_t rtmidi__core___un_unparse_hymidi_hyapi(const char *);
+void * rtmidi__core__midi_hyin_hynew(const char *);
+void * rtmidi__core__midi_hyout_hynew(const char *);
+void rtmidi__core__midi_hyin_hyfree(int64_t);
+void rtmidi__core__midi_hyout_hyfree(int64_t);
+int64_t rtmidi__core__midi_hyin_hyport_hycount(int64_t);
+int64_t rtmidi__core__midi_hyout_hyport_hycount(int64_t);
+const char * rtmidi__core__midi_hyin_hyport_hyname(int64_t, int64_t);
+const char * rtmidi__core__midi_hyout_hyport_hyname(int64_t, int64_t);
 
 static void * rtmidi__core____ok(int64_t v) {
         #include <stdlib.h>
@@ -27,7 +27,7 @@ static void * rtmidi__core____err(int64_t e) {
   
 }
 
-static int64_t rtmidi__core____parse_midi_api(const char * api) {
+static int64_t rtmidi__core___un_unparse_hymidi_hyapi(const char * api) {
         #include <string.h>
   #include <rtmidi/rtmidi_c.h>
   rtmidi_api_t api_val = RTMIDI_API_UNSPECIFIED;
@@ -40,7 +40,7 @@ static int64_t rtmidi__core____parse_midi_api(const char * api) {
   
 }
 
-void * rtmidi__core__midi_in_new(const char * api) {
+void * rtmidi__core__midi_hyin_hynew(const char * api) {
         #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   rtmidi_api_t api_val = (rtmidi_api_t)(__parse_midi_api(api));
@@ -56,7 +56,7 @@ void * rtmidi__core__midi_in_new(const char * api) {
   
 }
 
-void * rtmidi__core__midi_out_new(const char * api) {
+void * rtmidi__core__midi_hyout_hynew(const char * api) {
         #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   rtmidi_api_t api_val = (rtmidi_api_t)(__parse_midi_api(api));
@@ -72,38 +72,38 @@ void * rtmidi__core__midi_out_new(const char * api) {
   
 }
 
-void rtmidi__core__midi_in_free(int64_t mi) {
+void rtmidi__core__midi_hyin_hyfree(int64_t mi) {
         #include <rtmidi/rtmidi_c.h>
   rtmidi_in_free((RtMidiInPtr)(intptr_t)mi);
   
 }
 
-void rtmidi__core__midi_out_free(int64_t mo) {
+void rtmidi__core__midi_hyout_hyfree(int64_t mo) {
         #include <rtmidi/rtmidi_c.h>
   rtmidi_out_free((RtMidiOutPtr)(intptr_t)mo);
   
 }
 
-int64_t rtmidi__core__midi_in_port_count(int64_t mi) {
+int64_t rtmidi__core__midi_hyin_hyport_hycount(int64_t mi) {
         #include <rtmidi/rtmidi_c.h>
   return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mi);
   
 }
 
-int64_t rtmidi__core__midi_out_port_count(int64_t mo) {
+int64_t rtmidi__core__midi_hyout_hyport_hycount(int64_t mo) {
         #include <rtmidi/rtmidi_c.h>
   return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mo);
   
 }
 
-const char * rtmidi__core__midi_in_port_name(int64_t mi, int64_t i) {
+const char * rtmidi__core__midi_hyin_hyport_hyname(int64_t mi, int64_t i) {
         #include <rtmidi/rtmidi_c.h>
   int len = 0;
   return (char*)rtmidi_get_port_name((RtMidiPtr)(intptr_t)mi, (unsigned int)i, NULL, &len);
   
 }
 
-const char * rtmidi__core__midi_out_port_name(int64_t mo, int64_t i) {
+const char * rtmidi__core__midi_hyout_hyport_hyname(int64_t mo, int64_t i) {
         #include <rtmidi/rtmidi_c.h>
   int len = 0;
   return (char*)rtmidi_get_port_name((RtMidiPtr)(intptr_t)mo, (unsigned int)i, NULL, &len);
