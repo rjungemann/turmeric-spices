@@ -47,6 +47,121 @@
           watch-next watch-drain
           watch-tree-dir-count watch-tree-dir-at)
 
+;; file-scope-c-block: macOS 14+ / Xcode 15+ forbids system headers inside
+;; a function body (they contain static inline defs and decorated prototypes).
+;; Hoist every header, shared typedef, and static helper here so all defn
+;; inline-C bodies share one consistent C compilation unit.
+```c
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <limits.h>
+#include <poll.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#if defined(__linux__)
+#include <sys/inotify.h>
+#endif
+
+typedef struct {
+  int mode;
+  int64_t backend;
+  char *dir;
+  char *base;
+  char *full_path;
+  int debounce_ms;
+  int coalesce;
+  int attrib_enabled;
+  int follow_moves;
+  int exists;
+  long long mtime_sec;
+  long long mtime_nsec;
+  long long size;
+  long long ino;
+  char *root;
+  int64_t *t_backends;
+  char **t_dirs;
+  int t_n;
+  int t_cap;
+  int64_t *pending_evs;
+  int pending_n;
+  int pending_cap;
+  void **t_snaps;
+} TurWatcher;
+
+typedef struct {
+  char name[256];
+  long long ino;
+  long long size;
+  int is_dir;
+} TurSnapEntry;
+
+typedef struct {
+  TurSnapEntry *entries;
+  int n;
+  int cap;
+} TurDirSnapshot;
+
+typedef struct __tur_cons_s {
+  int64_t head;
+  int64_t tail;
+} __tur_cons_cell;
+
+static TurDirSnapshot *tur_snap_take(const char *dir) {
+  DIR *dh = opendir(dir);
+  if (!dh) return NULL;
+  TurDirSnapshot *s = (TurDirSnapshot *)calloc(1, sizeof(*s));
+  if (!s) { closedir(dh); return NULL; }
+  struct dirent *ent;
+  while ((ent = readdir(dh)) != NULL) {
+    if (ent->d_name[0] == '.') continue;
+    if (s->n == s->cap) {
+      int nc = s->cap ? s->cap * 2 : 8;
+      TurSnapEntry *g = (TurSnapEntry *)realloc(s->entries, sizeof(TurSnapEntry) * (size_t)nc);
+      if (!g) break;
+      s->entries = g;
+      s->cap = nc;
+    }
+    TurSnapEntry *e = &s->entries[s->n];
+    memset(e, 0, sizeof(*e));
+    strncpy(e->name, ent->d_name, sizeof(e->name) - 1);
+    char full[PATH_MAX];
+    snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name);
+    struct stat st;
+    if (lstat(full, &st) == 0) {
+      e->ino    = (long long)st.st_ino;
+      e->size   = (long long)st.st_size;
+      e->is_dir = (st.st_mode & S_IFMT) == S_IFDIR ? 1 : 0;
+    }
+    s->n++;
+  }
+  closedir(dh);
+  return s;
+}
+
+static void tur_snap_free(TurDirSnapshot *s) {
+  if (!s) return;
+  if (s->entries) free(s->entries);
+  free(s);
+}
+
+#if defined(__linux__)
+static int tur_inotify_kind(unsigned int mask) {
+  if (mask & IN_Q_OVERFLOW) return 6;
+  if (mask & (IN_DELETE | IN_DELETE_SELF | IN_MOVED_FROM)) return 3;
+  if (mask & IN_MOVED_TO) return 4;
+  if (mask & IN_CREATE) return 2;
+  if (mask & (IN_MODIFY | IN_CLOSE_WRITE)) return 1;
+  if (mask & IN_ATTRIB) return 5;
+  return 1;
+}
+#endif
+```
+
   ;;; watch-supported? -- 1 if a real backend is compiled in.
   (defn watch-supported? [] #{Unsafe} : int
     (backend-supported?))
@@ -60,10 +175,6 @@
                         debounce-ms : int coalesce : int attrib : int
                         follow-moves : int] #{Unsafe} : int
     ```c
-    /* __tur_include__: #include <sys/stat.h> */
-    /* __tur_include__: #include <stdlib.h> */
-    /* __tur_include__: #include <string.h> */
-    /* __tur_include__: typedef struct { int mode; int64_t backend; char *dir; char *base; char *full_path; int debounce_ms; int coalesce; int attrib_enabled; int follow_moves; int exists; long long mtime_sec; long long mtime_nsec; long long size; long long ino; char *root; int64_t *t_backends; char **t_dirs; int t_n; int t_cap; int64_t *pending_evs; int pending_n; int pending_cap; void **t_snaps; } TurWatcher; */
 
     TurWatcher *w = (TurWatcher *)calloc(1, sizeof(*w));
     if (!w) return 0;
@@ -120,7 +231,6 @@
   ;;; __watcher-sleep-ms -- sleep for ms milliseconds.
   (defn __watcher-sleep-ms [ms : int] #{Unsafe} : void
     ```c
-    /* __tur_include__: #include <unistd.h> */
     int v = (int)ms;
     if (v > 0) usleep((useconds_t)v * 1000u);
     ```)
@@ -362,8 +472,6 @@
   ;;; at 32 levels to keep pathological inputs bounded.
   (defn __watcher-tree-walk [watcher : int dir : cstr depth : int] #{Unsafe} : int
     ```c
-    /* __tur_include__: #include <dirent.h> */
-    /* __tur_include__: #include <limits.h> */
     if ((int)depth > 32) return 0;
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1) return 0;
@@ -405,7 +513,6 @@
   ;;;   index of the first ready backend (>= 0), or -1 on timeout / error.
   (defn __watcher-tree-poll-fired [watcher : int timeout-ms : int] #{Unsafe} : int
     ```c
-    /* __tur_include__: #include <poll.h> */
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1 || w->t_n == 0) return -1;
 
@@ -488,10 +595,6 @@
   ;;; pre-existing snapshots before allocating new ones.
   (defn __watcher-tree-snap-init [watcher : int] #{Unsafe} : void
     ```c
-    /* __tur_include__: typedef struct { char name[256]; long long ino; long long size; int is_dir; } TurSnapEntry; */
-    /* __tur_include__: typedef struct { TurSnapEntry *entries; int n; int cap; } TurDirSnapshot; */
-    /* __tur_include__: static TurDirSnapshot *tur_snap_take(const char *dir) { DIR *dh = opendir(dir); if (!dh) return NULL; TurDirSnapshot *s = (TurDirSnapshot *)calloc(1, sizeof(*s)); if (!s) { closedir(dh); return NULL; } struct dirent *ent; while ((ent = readdir(dh)) != NULL) { if (ent->d_name[0] == '.') continue; if (s->n == s->cap) { int nc = s->cap ? s->cap * 2 : 8; TurSnapEntry *g = (TurSnapEntry *)realloc(s->entries, sizeof(TurSnapEntry)*(size_t)nc); if (!g) break; s->entries = g; s->cap = nc; } TurSnapEntry *e = &s->entries[s->n]; memset(e, 0, sizeof(*e)); strncpy(e->name, ent->d_name, sizeof(e->name)-1); char full[PATH_MAX]; snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name); struct stat st; if (lstat(full, &st) == 0) { e->ino = (long long)st.st_ino; e->size = (long long)st.st_size; e->is_dir = (st.st_mode & S_IFMT) == S_IFDIR ? 1 : 0; } s->n++; } closedir(dh); return s; } */
-    /* __tur_include__: static void tur_snap_free(TurDirSnapshot *s) { if (!s) return; if (s->entries) free(s->entries); free(s); } */
 
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1 || w->t_n == 0) return;
@@ -667,10 +770,6 @@
   ;;; them onto w->pending_evs via inline realloc logic.
   (defn __watcher-tree-produce-events [watcher : int idx : int root : cstr] #{Unsafe} : void
     ```c
-    /* __tur_include__: #if defined(__linux__) */
-    /* __tur_include__: #include <sys/inotify.h> */
-    /* __tur_include__: static int tur_inotify_kind(unsigned int mask) { if (mask & IN_Q_OVERFLOW) return 6; if (mask & (IN_DELETE|IN_DELETE_SELF|IN_MOVED_FROM)) return 3; if (mask & IN_MOVED_TO) return 4; if (mask & IN_CREATE) return 2; if (mask & (IN_MODIFY|IN_CLOSE_WRITE)) return 1; if (mask & IN_ATTRIB) return 5; return 1; } */
-    /* __tur_include__: #endif */
 
     TurWatcher *w = (TurWatcher *)(intptr_t)watcher;
     if (!w || w->mode != 1) return;
@@ -884,9 +983,11 @@
   ;;; __watch-make-cons -- internal: wrap a single event handle in a cons cell.
   (defn __watch-make-cons [head : int] #{Unsafe} : int
     ```c
-    /* __tur_include__: typedef struct __tur_cons_s { int64_t head; int64_t tail; } __tur_cons_cell; */
+    /* Project-mode emit may place this defn before the file-scope-c-block,
+       so redeclare the cons-cell type locally. */
+    typedef struct __tur_cons_s_local { int64_t head; int64_t tail; } __tur_cons_cell_local;
     if (head == 0) return 0;
-    __tur_cons_cell *cell = (__tur_cons_cell *)calloc(1, sizeof(*cell));
+    __tur_cons_cell_local *cell = (__tur_cons_cell_local *)calloc(1, sizeof(*cell));
     if (!cell) return 0;
     cell->head = head;
     cell->tail = 0;
