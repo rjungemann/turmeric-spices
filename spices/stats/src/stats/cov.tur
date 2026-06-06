@@ -9,9 +9,181 @@
           cov-matrix cor-matrix cor-matrix-spearman
           frame-cor frame-cor-spearman)
 
-;; ---------------------------------------------------------------------------
-;; Shared inline helpers (duplicated across defn but compiler deduplicates).
-;; ---------------------------------------------------------------------------
+;; file-scope-c-block: hoist includes, shared struct layouts, and static
+;; helpers so they are available at file scope in every generated TU.
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+struct __frame_col {
+  int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+  void *validity; void *values; void *offsets;
+};
+struct __cons { int64_t value; int64_t next; };
+struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+struct __schema { int64_t arity; struct __field *fields; };
+struct __frame {
+  int64_t nrows; int64_t ncols;
+  int64_t schema_ptr; int64_t *columns;
+};
+
+static inline int __valid(void *validity, int64_t i) {
+  if (!validity) return 1;
+  uint8_t *bm = (uint8_t *)validity;
+  return (bm[i >> 3] >> (i & 7)) & 1;
+}
+typedef struct { double val; int64_t idx; } __pair_t;
+typedef double (*__pairfn_t)(int64_t, int64_t);
+static int __cmp_pair(const void *x, const void *y) {
+  double a = ((__pair_t *)x)->val, b = ((__pair_t *)y)->val;
+  return (a > b) - (a < b);
+}
+static double __cov_cols(int64_t ah, int64_t bh) {
+  struct __frame_col *ca = (struct __frame_col *)(intptr_t)ah;
+  struct __frame_col *cb = (struct __frame_col *)(intptr_t)bh;
+  double *va = (double *)ca->values, *vb = (double *)cb->values;
+  int64_t len = ca->length < cb->length ? ca->length : cb->length;
+  double sa=0.0, sb2=0.0; int64_t n=0;
+  for(int64_t i=0;i<len;i++)
+    if(__valid(ca->validity,i)&&__valid(cb->validity,i)){sa+=va[i];sb2+=vb[i];n++;}
+  if(n<2) return 0.0/0.0;
+  double ma=sa/(double)n, mb=sb2/(double)n, s=0.0;
+  for(int64_t i=0;i<len;i++)
+    if(__valid(ca->validity,i)&&__valid(cb->validity,i))
+      s+=(va[i]-ma)*(vb[i]-mb);
+  return s/(double)(n-1);
+}
+static double __cor_cols(int64_t ah, int64_t bh) {
+  struct __frame_col *ca=(struct __frame_col *)(intptr_t)ah;
+  struct __frame_col *cb=(struct __frame_col *)(intptr_t)bh;
+  double *va=(double *)ca->values, *vb=(double *)cb->values;
+  int64_t len=ca->length<cb->length?ca->length:cb->length;
+  double sa=0.0, sb2=0.0; int64_t n=0;
+  for(int64_t i=0;i<len;i++)
+    if(__valid(ca->validity,i)&&__valid(cb->validity,i)){sa+=va[i];sb2+=vb[i];n++;}
+  if(n<2) return 0.0/0.0;
+  double ma=sa/(double)n, mb=sb2/(double)n, sab=0.0, ssa=0.0, ssb=0.0;
+  for(int64_t i=0;i<len;i++)
+    if(__valid(ca->validity,i)&&__valid(cb->validity,i)){
+      double da=va[i]-ma, db=vb[i]-mb;
+      sab+=da*db; ssa+=da*da; ssb+=db*db;
+    }
+  double denom=sqrt(ssa*ssb);
+  return denom==0.0?0.0/0.0:sab/denom;
+}
+static double __spear_cols(int64_t ah, int64_t bh) {
+  struct __frame_col *ca=(struct __frame_col *)(intptr_t)ah;
+  struct __frame_col *cb=(struct __frame_col *)(intptr_t)bh;
+  double *va=(double *)ca->values, *vb=(double *)cb->values;
+  int64_t len=ca->length<cb->length?ca->length:cb->length;
+  int64_t n=0;
+  for(int64_t i=0;i<len;i++)
+    if(__valid(ca->validity,i)&&__valid(cb->validity,i)) n++;
+  if(n<2) return 0.0/0.0;
+  __pair_t *pa=(__pair_t *)malloc((size_t)n*sizeof(__pair_t));
+  __pair_t *pb=(__pair_t *)malloc((size_t)n*sizeof(__pair_t));
+  int64_t k=0;
+  for(int64_t i=0;i<len;i++)
+    if(__valid(ca->validity,i)&&__valid(cb->validity,i)){
+      pa[k].val=va[i];pa[k].idx=k;
+      pb[k].val=vb[i];pb[k].idx=k;k++;
+    }
+  qsort(pa,(size_t)n,sizeof(__pair_t),__cmp_pair);
+  qsort(pb,(size_t)n,sizeof(__pair_t),__cmp_pair);
+  double *ra=(double *)malloc((size_t)n*sizeof(double));
+  double *rb=(double *)malloc((size_t)n*sizeof(double));
+  for(int64_t i=0;i<n;){
+    int64_t j=i;
+    while(j<n&&pa[j].val==pa[i].val)j++;
+    double avg=(double)(i+j-1)/2.0+1.0;
+    for(int64_t kk=i;kk<j;kk++)ra[pa[kk].idx]=avg;
+    i=j;
+  }
+  for(int64_t i=0;i<n;){
+    int64_t j=i;
+    while(j<n&&pb[j].val==pb[i].val)j++;
+    double avg=(double)(i+j-1)/2.0+1.0;
+    for(int64_t kk=i;kk<j;kk++)rb[pb[kk].idx]=avg;
+    i=j;
+  }
+  double sa=0.0,sb2=0.0;
+  for(int64_t i=0;i<n;i++){sa+=ra[i];sb2+=rb[i];}
+  double ma=sa/(double)n,mb=sb2/(double)n,sab=0.0,ssa=0.0,ssb=0.0;
+  for(int64_t i=0;i<n;i++){
+    double da=ra[i]-ma,db=rb[i]-mb;
+    sab+=da*db;ssa+=da*da;ssb+=db*db;
+  }
+  free(pa);free(pb);free(ra);free(rb);
+  double denom=sqrt(ssa*ssb);
+  return denom==0.0?0.0/0.0:sab/denom;
+}
+static int64_t __build_matrix(__pairfn_t fn, int64_t cols, int64_t names) {
+  int64_t N = 0;
+  for (struct __cons *p = (struct __cons *)(intptr_t)cols; p;
+       p = (struct __cons *)(intptr_t)p->next) N++;
+  int64_t *col_handles = (int64_t *)malloc((size_t)N * sizeof(int64_t));
+  const char **col_names = (const char **)malloc((size_t)N * sizeof(const char *));
+  {
+    struct __cons *pc = (struct __cons *)(intptr_t)cols;
+    struct __cons *pn = (struct __cons *)(intptr_t)names;
+    for (int64_t i = 0; i < N; i++) {
+      col_handles[i] = pc->value;
+      col_names[i]   = pn ? (const char *)(intptr_t)pn->value : "";
+      pc = (struct __cons *)(intptr_t)pc->next;
+      if (pn) pn = (struct __cons *)(intptr_t)pn->next;
+    }
+  }
+  int64_t out_ncols = 1 + N;
+  struct __schema *sc = (struct __schema *)malloc(sizeof(struct __schema));
+  sc->arity  = out_ncols;
+  sc->fields = (struct __field *)calloc((size_t)out_ncols, sizeof(struct __field));
+  sc->fields[0].name_ptr = (int64_t)(intptr_t)strdup("name");
+  sc->fields[0].type_tag = 6;
+  for (int64_t j = 0; j < N; j++) {
+    sc->fields[1+j].name_ptr = (int64_t)(intptr_t)strdup(col_names[j]);
+    sc->fields[1+j].type_tag = 4;
+  }
+  int64_t *out_cols = (int64_t *)calloc((size_t)out_ncols, sizeof(int64_t));
+  {
+    int64_t total = 0;
+    for (int64_t i = 0; i < N; i++) total += (int64_t)strlen(col_names[i]);
+    int32_t *offs  = (int32_t *)malloc((size_t)(N+1)*sizeof(int32_t));
+    char    *chars = (char    *)malloc((size_t)(total+1));
+    int32_t pos = 0;
+    for (int64_t i = 0; i < N; i++) {
+      offs[i] = pos;
+      int64_t slen = (int64_t)strlen(col_names[i]);
+      memcpy(chars+pos, col_names[i], (size_t)slen);
+      pos += (int32_t)slen;
+    }
+    offs[N] = pos; chars[pos] = '\0';
+    struct __frame_col *oc = (struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+    oc->type_tag=6; oc->length=N; oc->refcount=1;
+    oc->offsets=offs; oc->values=chars;
+    out_cols[0] = (int64_t)(intptr_t)oc;
+  }
+  for (int64_t j = 0; j < N; j++) {
+    int64_t bytes   = N * (int64_t)sizeof(double);
+    int64_t rounded = (bytes+63)&~((int64_t)63);
+    void *buf = malloc((size_t)(sizeof(int64_t)+rounded));
+    *(int64_t *)buf = rounded;
+    double *dv = (double *)((char *)buf+sizeof(int64_t));
+    for (int64_t i = 0; i < N; i++)
+      dv[i] = fn(col_handles[i], col_handles[j]);
+    struct __frame_col *oc = (struct __frame_col *)calloc(1,sizeof(struct __frame_col));
+    oc->type_tag=4; oc->length=N; oc->refcount=1; oc->values=dv;
+    out_cols[1+j] = (int64_t)(intptr_t)oc;
+  }
+  free(col_handles); free(col_names);
+  struct __frame *out = (struct __frame *)malloc(sizeof(struct __frame));
+  out->nrows = N; out->ncols = out_ncols;
+  out->schema_ptr = (int64_t)(intptr_t)sc;
+  out->columns = out_cols;
+  return (int64_t)(intptr_t)out;
+}
+```
 
 ;;; cov -- sample covariance of two float64 columns (complete-cases).
 ;;;
@@ -28,19 +200,6 @@
 ;;; Since: ST2
 (defn cov [a : int b : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *ca = (struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb = (struct __frame_col *)(intptr_t)b;
   double *va = (double *)ca->values;
@@ -72,19 +231,6 @@
 ;;; Since: ST2
 (defn cor [a : int b : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *ca = (struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb = (struct __frame_col *)(intptr_t)b;
   double *va = (double *)ca->values;
@@ -119,26 +265,6 @@
 ;;; Since: ST2
 (defn cor-spearman [a : int b : int] : float
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  /* Pair for sort. */
-  typedef struct { double val; int64_t idx; } __pair_t;
-  static int __cmp_pair(const void *x, const void *y) {
-    double a = ((__pair_t *)x)->val, b = ((__pair_t *)y)->val;
-    return (a > b) - (a < b);
-  }
-
   struct __frame_col *ca = (struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb = (struct __frame_col *)(intptr_t)b;
   double *va = (double *)ca->values;
@@ -196,114 +322,6 @@
   return denom == 0.0 ? 0.0/0.0 : sab/denom;
   ```)
 
-;; ---------------------------------------------------------------------------
-;; Matrix helpers -- build N-by-N frame of pairwise stats.
-;; cols  = cons list of :int  (column handles)
-;; names = cons list of :cstr (column names)
-;; ---------------------------------------------------------------------------
-
-(defn __mat-build [cols : int names : int pairfn : int] : int
-  ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <string.h>
-
-  /* We receive a function pointer via a Turmeric :int that is actually a
-     C function pointer cast to int64_t.  The caller passes one of three
-     concrete C functions below. */
-  typedef double (*__pairfn_t)(int64_t, int64_t);
-
-  struct __cons { int64_t value; int64_t next; };
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame {
-    int64_t nrows; int64_t ncols;
-    int64_t schema_ptr; int64_t *columns;
-  };
-
-  /* Count N. */
-  int64_t N = 0;
-  for (struct __cons *p = (struct __cons *)(intptr_t)cols; p;
-       p = (struct __cons *)(intptr_t)p->next) N++;
-
-  /* Collect column handles and names. */
-  int64_t *col_handles = (int64_t *)malloc((size_t)N * sizeof(int64_t));
-  const char **col_names = (const char **)malloc((size_t)N * sizeof(const char *));
-  {
-    struct __cons *pc = (struct __cons *)(intptr_t)cols;
-    struct __cons *pn = (struct __cons *)(intptr_t)names;
-    for (int64_t i = 0; i < N; i++) {
-      col_handles[i] = pc->value;
-      col_names[i]   = pn ? (const char *)(intptr_t)pn->value : "";
-      pc = (struct __cons *)(intptr_t)pc->next;
-      if (pn) pn = (struct __cons *)(intptr_t)pn->next;
-    }
-  }
-
-  __pairfn_t fn = (__pairfn_t)(intptr_t)pairfn;
-
-  /* Output columns: "name" (utf8) + N float64 columns. */
-  int64_t out_ncols = 1 + N;
-  struct __schema *sc = (struct __schema *)malloc(sizeof(struct __schema));
-  sc->arity  = out_ncols;
-  sc->fields = (struct __field *)calloc((size_t)out_ncols, sizeof(struct __field));
-  sc->fields[0].name_ptr = (int64_t)(intptr_t)strdup("name");
-  sc->fields[0].type_tag = 6; /* utf8 */
-  for (int64_t j = 0; j < N; j++) {
-    sc->fields[1+j].name_ptr = (int64_t)(intptr_t)strdup(col_names[j]);
-    sc->fields[1+j].type_tag = 4; /* float64 */
-  }
-
-  int64_t *out_cols = (int64_t *)calloc((size_t)out_ncols, sizeof(int64_t));
-
-  /* Build "name" utf8 column. */
-  {
-    int64_t total = 0;
-    for (int64_t i = 0; i < N; i++) total += (int64_t)strlen(col_names[i]);
-    int32_t *offs  = (int32_t *)malloc((size_t)(N+1)*sizeof(int32_t));
-    char    *chars = (char    *)malloc((size_t)(total+1));
-    int32_t pos = 0;
-    for (int64_t i = 0; i < N; i++) {
-      offs[i] = pos;
-      int64_t slen = (int64_t)strlen(col_names[i]);
-      memcpy(chars+pos, col_names[i], (size_t)slen);
-      pos += (int32_t)slen;
-    }
-    offs[N] = pos; chars[pos] = '\0';
-    struct __frame_col *oc = (struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    oc->type_tag=6; oc->length=N; oc->refcount=1;
-    oc->offsets=offs; oc->values=chars;
-    out_cols[0] = (int64_t)(intptr_t)oc;
-  }
-
-  /* Build N float64 columns (one per output column = one per input column). */
-  for (int64_t j = 0; j < N; j++) {
-    int64_t bytes   = N * (int64_t)sizeof(double);
-    int64_t rounded = (bytes+63)&~((int64_t)63);
-    void *buf = malloc((size_t)(sizeof(int64_t)+rounded));
-    *(int64_t *)buf = rounded;
-    double *dv = (double *)((char *)buf+sizeof(int64_t));
-    for (int64_t i = 0; i < N; i++)
-      dv[i] = fn(col_handles[i], col_handles[j]);
-    struct __frame_col *oc = (struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    oc->type_tag=4; oc->length=N; oc->refcount=1; oc->values=dv;
-    out_cols[1+j] = (int64_t)(intptr_t)oc;
-  }
-
-  free(col_handles); free(col_names);
-
-  struct __frame *out = (struct __frame *)malloc(sizeof(struct __frame));
-  out->nrows      = N;
-  out->ncols      = out_ncols;
-  out->schema_ptr = (int64_t)(intptr_t)sc;
-  out->columns    = out_cols;
-  return (int64_t)(intptr_t)out;
-  ```)
-
 ;;; cov-matrix -- pairwise covariance matrix over a list of columns.
 ;;;
 ;;; Parameters:
@@ -316,88 +334,7 @@
 ;;; Since: ST2
 (defn cov-matrix [cols : int names : int] : int
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __cons { int64_t value; int64_t next; };
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame {
-    int64_t nrows; int64_t ncols;
-    int64_t schema_ptr; int64_t *columns;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static double __cov_cols(int64_t ah, int64_t bh) {
-    struct __frame_col *ca = (struct __frame_col *)(intptr_t)ah;
-    struct __frame_col *cb = (struct __frame_col *)(intptr_t)bh;
-    double *va = (double *)ca->values, *vb = (double *)cb->values;
-    int64_t len = ca->length < cb->length ? ca->length : cb->length;
-    double sa=0.0,sb2=0.0; int64_t n=0;
-    for(int64_t i=0;i<len;i++)
-      if(__valid(ca->validity,i)&&__valid(cb->validity,i)){sa+=va[i];sb2+=vb[i];n++;}
-    if(n<2) return 0.0/0.0;
-    double ma=sa/(double)n,mb=sb2/(double)n,s=0.0;
-    for(int64_t i=0;i<len;i++)
-      if(__valid(ca->validity,i)&&__valid(cb->validity,i))
-        s+=(va[i]-ma)*(vb[i]-mb);
-    return s/(double)(n-1);
-  }
-
-  int64_t N=0;
-  for(struct __cons *p=(struct __cons *)(intptr_t)cols;p;p=(struct __cons *)(intptr_t)p->next) N++;
-  int64_t *ch=(int64_t *)malloc((size_t)N*sizeof(int64_t));
-  const char **cn=(const char **)malloc((size_t)N*sizeof(const char *));
-  { struct __cons *pc=(struct __cons *)(intptr_t)cols;
-    struct __cons *pn=(struct __cons *)(intptr_t)names;
-    for(int64_t i=0;i<N;i++){
-      ch[i]=pc->value; cn[i]=pn?(const char *)(intptr_t)pn->value:"";
-      pc=(struct __cons *)(intptr_t)pc->next;
-      if(pn)pn=(struct __cons *)(intptr_t)pn->next;
-    }
-  }
-  int64_t out_ncols=1+N;
-  struct __schema *sc=(struct __schema *)malloc(sizeof(struct __schema));
-  sc->arity=out_ncols;
-  sc->fields=(struct __field *)calloc((size_t)out_ncols,sizeof(struct __field));
-  sc->fields[0].name_ptr=(int64_t)(intptr_t)strdup("name"); sc->fields[0].type_tag=6;
-  for(int64_t j=0;j<N;j++){sc->fields[1+j].name_ptr=(int64_t)(intptr_t)strdup(cn[j]);sc->fields[1+j].type_tag=4;}
-  int64_t *oc=(int64_t *)calloc((size_t)out_ncols,sizeof(int64_t));
-  /* name col */
-  { int64_t tot=0; for(int64_t i=0;i<N;i++) tot+=(int64_t)strlen(cn[i]);
-    int32_t *offs=(int32_t *)malloc((size_t)(N+1)*sizeof(int32_t));
-    char *chars=(char *)malloc((size_t)(tot+1));
-    int32_t pos=0;
-    for(int64_t i=0;i<N;i++){offs[i]=pos;int64_t sl=(int64_t)strlen(cn[i]);memcpy(chars+pos,cn[i],(size_t)sl);pos+=(int32_t)sl;}
-    offs[N]=pos;chars[pos]='\0';
-    struct __frame_col *nc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    nc->type_tag=6;nc->length=N;nc->refcount=1;nc->offsets=offs;nc->values=chars;
-    oc[0]=(int64_t)(intptr_t)nc;
-  }
-  for(int64_t j=0;j<N;j++){
-    int64_t bytes=N*(int64_t)sizeof(double);
-    int64_t rounded=(bytes+63)&~((int64_t)63);
-    void *buf=malloc((size_t)(sizeof(int64_t)+rounded));
-    *(int64_t *)buf=rounded;
-    double *dv=(double *)((char *)buf+sizeof(int64_t));
-    for(int64_t i=0;i<N;i++) dv[i]=__cov_cols(ch[i],ch[j]);
-    struct __frame_col *fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    fc->type_tag=4;fc->length=N;fc->refcount=1;fc->values=dv;
-    oc[1+j]=(int64_t)(intptr_t)fc;
-  }
-  free(ch);free(cn);
-  struct __frame *out=(struct __frame *)malloc(sizeof(struct __frame));
-  out->nrows=N;out->ncols=out_ncols;out->schema_ptr=(int64_t)(intptr_t)sc;out->columns=oc;
-  return (int64_t)(intptr_t)out;
+  return __build_matrix(__cov_cols, cols, names);
   ```)
 
 ;;; cor-matrix -- Pearson correlation matrix over a list of columns.
@@ -412,90 +349,7 @@
 ;;; Since: ST2
 (defn cor-matrix [cols : int names : int] : int
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __cons { int64_t value; int64_t next; };
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame {
-    int64_t nrows; int64_t ncols;
-    int64_t schema_ptr; int64_t *columns;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static double __cor_cols(int64_t ah, int64_t bh) {
-    struct __frame_col *ca=(struct __frame_col *)(intptr_t)ah;
-    struct __frame_col *cb=(struct __frame_col *)(intptr_t)bh;
-    double *va=(double *)ca->values,*vb=(double *)cb->values;
-    int64_t len=ca->length<cb->length?ca->length:cb->length;
-    double sa=0.0,sb2=0.0; int64_t n=0;
-    for(int64_t i=0;i<len;i++)
-      if(__valid(ca->validity,i)&&__valid(cb->validity,i)){sa+=va[i];sb2+=vb[i];n++;}
-    if(n<2) return 0.0/0.0;
-    double ma=sa/(double)n,mb=sb2/(double)n,sab=0.0,ssa=0.0,ssb=0.0;
-    for(int64_t i=0;i<len;i++)
-      if(__valid(ca->validity,i)&&__valid(cb->validity,i)){
-        double da=va[i]-ma,db=vb[i]-mb;
-        sab+=da*db;ssa+=da*da;ssb+=db*db;
-      }
-    double denom=sqrt(ssa*ssb);
-    return denom==0.0?0.0/0.0:sab/denom;
-  }
-
-  int64_t N=0;
-  for(struct __cons *p=(struct __cons *)(intptr_t)cols;p;p=(struct __cons *)(intptr_t)p->next) N++;
-  int64_t *ch=(int64_t *)malloc((size_t)N*sizeof(int64_t));
-  const char **cn=(const char **)malloc((size_t)N*sizeof(const char *));
-  { struct __cons *pc=(struct __cons *)(intptr_t)cols;
-    struct __cons *pn=(struct __cons *)(intptr_t)names;
-    for(int64_t i=0;i<N;i++){
-      ch[i]=pc->value;cn[i]=pn?(const char *)(intptr_t)pn->value:"";
-      pc=(struct __cons *)(intptr_t)pc->next;
-      if(pn)pn=(struct __cons *)(intptr_t)pn->next;
-    }
-  }
-  int64_t out_ncols=1+N;
-  struct __schema *sc=(struct __schema *)malloc(sizeof(struct __schema));
-  sc->arity=out_ncols;
-  sc->fields=(struct __field *)calloc((size_t)out_ncols,sizeof(struct __field));
-  sc->fields[0].name_ptr=(int64_t)(intptr_t)strdup("name");sc->fields[0].type_tag=6;
-  for(int64_t j=0;j<N;j++){sc->fields[1+j].name_ptr=(int64_t)(intptr_t)strdup(cn[j]);sc->fields[1+j].type_tag=4;}
-  int64_t *oc=(int64_t *)calloc((size_t)out_ncols,sizeof(int64_t));
-  { int64_t tot=0;for(int64_t i=0;i<N;i++) tot+=(int64_t)strlen(cn[i]);
-    int32_t *offs=(int32_t *)malloc((size_t)(N+1)*sizeof(int32_t));
-    char *chars=(char *)malloc((size_t)(tot+1));
-    int32_t pos=0;
-    for(int64_t i=0;i<N;i++){offs[i]=pos;int64_t sl=(int64_t)strlen(cn[i]);memcpy(chars+pos,cn[i],(size_t)sl);pos+=(int32_t)sl;}
-    offs[N]=pos;chars[pos]='\0';
-    struct __frame_col *nc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    nc->type_tag=6;nc->length=N;nc->refcount=1;nc->offsets=offs;nc->values=chars;
-    oc[0]=(int64_t)(intptr_t)nc;
-  }
-  for(int64_t j=0;j<N;j++){
-    int64_t bytes=N*(int64_t)sizeof(double);
-    int64_t rounded=(bytes+63)&~((int64_t)63);
-    void *buf=malloc((size_t)(sizeof(int64_t)+rounded));
-    *(int64_t *)buf=rounded;
-    double *dv=(double *)((char *)buf+sizeof(int64_t));
-    for(int64_t i=0;i<N;i++) dv[i]=__cor_cols(ch[i],ch[j]);
-    struct __frame_col *fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    fc->type_tag=4;fc->length=N;fc->refcount=1;fc->values=dv;
-    oc[1+j]=(int64_t)(intptr_t)fc;
-  }
-  free(ch);free(cn);
-  struct __frame *out=(struct __frame *)malloc(sizeof(struct __frame));
-  out->nrows=N;out->ncols=out_ncols;out->schema_ptr=(int64_t)(intptr_t)sc;out->columns=oc;
-  return (int64_t)(intptr_t)out;
+  return __build_matrix(__cor_cols, cols, names);
   ```)
 
 ;;; cor-matrix-spearman -- Spearman correlation matrix.
@@ -510,123 +364,7 @@
 ;;; Since: ST2
 (defn cor-matrix-spearman [cols : int names : int] : int
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __cons { int64_t value; int64_t next; };
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame {
-    int64_t nrows; int64_t ncols;
-    int64_t schema_ptr; int64_t *columns;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  typedef struct { double val; int64_t idx; } __pair_t;
-  static int __cmp_pair(const void *x, const void *y) {
-    double a = ((__pair_t *)x)->val, b = ((__pair_t *)y)->val;
-    return (a > b) - (a < b);
-  }
-  static double __spear_cols(int64_t ah, int64_t bh) {
-    struct __frame_col *ca=(struct __frame_col *)(intptr_t)ah;
-    struct __frame_col *cb=(struct __frame_col *)(intptr_t)bh;
-    double *va=(double *)ca->values,*vb=(double *)cb->values;
-    int64_t len=ca->length<cb->length?ca->length:cb->length;
-    int64_t n=0;
-    for(int64_t i=0;i<len;i++)
-      if(__valid(ca->validity,i)&&__valid(cb->validity,i)) n++;
-    if(n<2) return 0.0/0.0;
-    __pair_t *pa=(__pair_t *)malloc((size_t)n*sizeof(__pair_t));
-    __pair_t *pb=(__pair_t *)malloc((size_t)n*sizeof(__pair_t));
-    int64_t k=0;
-    for(int64_t i=0;i<len;i++)
-      if(__valid(ca->validity,i)&&__valid(cb->validity,i)){
-        pa[k].val=va[i];pa[k].idx=k;
-        pb[k].val=vb[i];pb[k].idx=k;k++;
-      }
-    qsort(pa,(size_t)n,sizeof(__pair_t),__cmp_pair);
-    qsort(pb,(size_t)n,sizeof(__pair_t),__cmp_pair);
-    double *ra=(double *)malloc((size_t)n*sizeof(double));
-    double *rb=(double *)malloc((size_t)n*sizeof(double));
-    for(int64_t i=0;i<n;){
-      int64_t j=i;
-      while(j<n&&pa[j].val==pa[i].val)j++;
-      double avg=(double)(i+j-1)/2.0+1.0;
-      for(int64_t kk=i;kk<j;kk++)ra[pa[kk].idx]=avg;
-      i=j;
-    }
-    for(int64_t i=0;i<n;){
-      int64_t j=i;
-      while(j<n&&pb[j].val==pb[i].val)j++;
-      double avg=(double)(i+j-1)/2.0+1.0;
-      for(int64_t kk=i;kk<j;kk++)rb[pb[kk].idx]=avg;
-      i=j;
-    }
-    double sa=0.0,sb2=0.0;
-    for(int64_t i=0;i<n;i++){sa+=ra[i];sb2+=rb[i];}
-    double ma=sa/(double)n,mb=sb2/(double)n,sab=0.0,ssa=0.0,ssb=0.0;
-    for(int64_t i=0;i<n;i++){
-      double da=ra[i]-ma,db=rb[i]-mb;
-      sab+=da*db;ssa+=da*da;ssb+=db*db;
-    }
-    free(pa);free(pb);free(ra);free(rb);
-    double denom=sqrt(ssa*ssb);
-    return denom==0.0?0.0/0.0:sab/denom;
-  }
-
-  int64_t N=0;
-  for(struct __cons *p=(struct __cons *)(intptr_t)cols;p;p=(struct __cons *)(intptr_t)p->next) N++;
-  int64_t *ch=(int64_t *)malloc((size_t)N*sizeof(int64_t));
-  const char **cn=(const char **)malloc((size_t)N*sizeof(const char *));
-  { struct __cons *pc=(struct __cons *)(intptr_t)cols;
-    struct __cons *pn=(struct __cons *)(intptr_t)names;
-    for(int64_t i=0;i<N;i++){
-      ch[i]=pc->value;cn[i]=pn?(const char *)(intptr_t)pn->value:"";
-      pc=(struct __cons *)(intptr_t)pc->next;
-      if(pn)pn=(struct __cons *)(intptr_t)pn->next;
-    }
-  }
-  int64_t out_ncols=1+N;
-  struct __schema *sc=(struct __schema *)malloc(sizeof(struct __schema));
-  sc->arity=out_ncols;
-  sc->fields=(struct __field *)calloc((size_t)out_ncols,sizeof(struct __field));
-  sc->fields[0].name_ptr=(int64_t)(intptr_t)strdup("name");sc->fields[0].type_tag=6;
-  for(int64_t j=0;j<N;j++){sc->fields[1+j].name_ptr=(int64_t)(intptr_t)strdup(cn[j]);sc->fields[1+j].type_tag=4;}
-  int64_t *oc=(int64_t *)calloc((size_t)out_ncols,sizeof(int64_t));
-  { int64_t tot=0;for(int64_t i=0;i<N;i++) tot+=(int64_t)strlen(cn[i]);
-    int32_t *offs=(int32_t *)malloc((size_t)(N+1)*sizeof(int32_t));
-    char *chars=(char *)malloc((size_t)(tot+1));
-    int32_t pos=0;
-    for(int64_t i=0;i<N;i++){offs[i]=pos;int64_t sl=(int64_t)strlen(cn[i]);memcpy(chars+pos,cn[i],(size_t)sl);pos+=(int32_t)sl;}
-    offs[N]=pos;chars[pos]='\0';
-    struct __frame_col *nc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    nc->type_tag=6;nc->length=N;nc->refcount=1;nc->offsets=offs;nc->values=chars;
-    oc[0]=(int64_t)(intptr_t)nc;
-  }
-  for(int64_t j=0;j<N;j++){
-    int64_t bytes=N*(int64_t)sizeof(double);
-    int64_t rounded=(bytes+63)&~((int64_t)63);
-    void *buf=malloc((size_t)(sizeof(int64_t)+rounded));
-    *(int64_t *)buf=rounded;
-    double *dv=(double *)((char *)buf+sizeof(int64_t));
-    for(int64_t i=0;i<N;i++) dv[i]=__spear_cols(ch[i],ch[j]);
-    struct __frame_col *fc=(struct __frame_col *)calloc(1,sizeof(struct __frame_col));
-    fc->type_tag=4;fc->length=N;fc->refcount=1;fc->values=dv;
-    oc[1+j]=(int64_t)(intptr_t)fc;
-  }
-  free(ch);free(cn);
-  struct __frame *out=(struct __frame *)malloc(sizeof(struct __frame));
-  out->nrows=N;out->ncols=out_ncols;out->schema_ptr=(int64_t)(intptr_t)sc;out->columns=oc;
-  return (int64_t)(intptr_t)out;
+  return __build_matrix(__spear_cols, cols, names);
   ```)
 
 ;; ---------------------------------------------------------------------------
@@ -635,22 +373,6 @@
 
 (defn __frame-numeric-cols [f : int names : int] : int
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <string.h>
-
-  struct __cons { int64_t value; int64_t next; };
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame {
-    int64_t nrows; int64_t ncols;
-    int64_t schema_ptr; int64_t *columns;
-  };
-
   struct __frame *fr = (struct __frame *)(intptr_t)f;
   struct __schema *sc = (struct __schema *)(intptr_t)fr->schema_ptr;
 

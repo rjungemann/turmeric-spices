@@ -10,4 +10,5 @@
 
 #include "notebook__cli.h"
 
+int64_t watch__watch__watch_hydrain(int64_t, int64_t, int64_t);
 #endif /* TUR_main_H */

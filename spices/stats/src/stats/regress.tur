@@ -4,8 +4,30 @@
   (export ols ols-frame predict predict-frame diagnostics)
 
   (import stats/test :refer [])
-  (import frame/column :refer [col-float64 col-length col-get-float])
-  (import frame/frame  :refer [frame-ncols frame-nrows frame-col-name frame-col-idx])
+
+```c
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
+
+struct __frame_col {
+  int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+  void *validity; void *values; void *offsets;
+};
+struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+struct __schema { int64_t arity; struct __field *fields; };
+struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+struct __cons { int64_t value; int64_t next; };
+
+typedef struct {
+  int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
+  int64_t fitted; int64_t residuals;
+  double r_squared; double adj_r_squared; double sigma;
+  int64_t df_residual; int64_t df_model; int64_t n_obs;
+  int64_t names;
+} __lm_fit_t;
+```
 
 ;;; ols -- Ordinary least squares.
 ;;;
@@ -24,22 +46,11 @@
 ;;; Since: ST7
 (defn ols [y : int xs : int names : int intercept? : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __cons { int64_t value; int64_t next; };
-
   /* ---- count predictors ---- */
   int64_t p = 0;
   { struct __cons *c = (struct __cons *)(intptr_t)xs;
     while(c){ p++; c = (struct __cons *)(intptr_t)c->next; } }
-  int64_t p1 = p + (intercept? ? 1 : 0); /* number of columns in X */
+  int64_t p1 = p + (intercept_qu ? 1 : 0); /* number of columns in X */
 
   struct __frame_col *yc = (struct __frame_col *)(intptr_t)y;
   int64_t n = yc->length;
@@ -50,7 +61,7 @@
   if(!X) return (int64_t)(intptr_t)NULL; /* OOM -- caller will segfault, acceptable */
 
   int64_t col_start = 0;
-  if(intercept?){ for(int64_t i=0;i<n;i++) X[i*p1+0]=1.0; col_start=1; }
+  if(intercept_qu){ for(int64_t i=0;i<n;i++) X[i*p1+0]=1.0; col_start=1; }
 
   { int64_t j = col_start;
     struct __cons *c = (struct __cons *)(intptr_t)xs;
@@ -139,7 +150,7 @@
     ss_res+=(yv[i]-yhat)*(yv[i]-yhat);
     ss_tot+=(yv[i]-ymean)*(yv[i]-ymean);
   }
-  int64_t df_res=n-p1, df_mod=p1-(intercept?1:0);
+  int64_t df_res=n-p1, df_mod=p1-(intercept_qu?1:0);
   double sigma = (df_res>0) ? sqrt(ss_res/(double)df_res) : 0.0;
   double r2    = (ss_tot>0) ? 1.0-ss_res/ss_tot : 0.0;
   double r2adj = (n>p1 && ss_tot>0) ? 1.0-(ss_res/(double)df_res)/(ss_tot/(double)(n-1)) : 0.0;
@@ -214,7 +225,7 @@
   /* Actually build in order using a helper array. */
   const char **name_arr=(const char **)malloc((size_t)(p1*sizeof(const char *)));
   { int64_t j2=0;
-    if(intercept?){ name_arr[0]="(Intercept)"; j2=1; }
+    if(intercept_qu){ name_arr[0]="(Intercept)"; j2=1; }
     struct __cons *nc=(struct __cons *)(intptr_t)names;
     while(nc && j2<p1){
       name_arr[j2++]=(const char *)(intptr_t)nc->value;
@@ -242,14 +253,6 @@
     _fc->type_tag=4;_fc->length=(len);_fc->refcount=1;_fc->values=_dv; \
     (dst)=(int64_t)(intptr_t)_fc; \
   } while(0)
-
-  typedef struct {
-    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
-    int64_t fitted; int64_t residuals;
-    double r_squared; double adj_r_squared; double sigma;
-    int64_t df_residual; int64_t df_model; int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
 
   __lm_fit_t *fit_out=(__lm_fit_t *)malloc(sizeof(__lm_fit_t));
   _MKCOL(fit_out->coefs,    beta,      p1);
@@ -294,19 +297,6 @@
 ;;; Since: ST7
 (defn ols-frame [f : int response-name : cstr predictor-names : int intercept? : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
-  struct __cons { int64_t value; int64_t next; };
-
   struct __frame *fr=(struct __frame *)(intptr_t)f;
   struct __schema *sc=(struct __schema *)(intptr_t)fr->schema_ptr;
 
@@ -374,12 +364,12 @@
   int64_t p=0;
   { struct __cons *cc2=(struct __cons *)(intptr_t)xs_head;
     while(cc2){p++;cc2=(struct __cons *)(intptr_t)cc2->next;} }
-  int64_t p1=p+(intercept?1:0);
+  int64_t p1=p+(intercept_qu?1:0);
   int64_t n=yc->length;
   double *yv=(double *)yc->values;
   double *X=(double *)malloc((size_t)(n*p1*sizeof(double)));
   int64_t col_start2=0;
-  if(intercept?){for(int64_t i=0;i<n;i++) X[i*p1]=1.0;col_start2=1;}
+  if(intercept_qu){for(int64_t i=0;i<n;i++) X[i*p1]=1.0;col_start2=1;}
   { int64_t j=col_start2;
     struct __cons *cc2=(struct __cons *)(intptr_t)xs_head;
     while(cc2){
@@ -446,7 +436,7 @@
     ss_res2+=(yv[i]-yhat2)*(yv[i]-yhat2);
     ss_tot2+=(yv[i]-ym2)*(yv[i]-ym2);
   }
-  int64_t df_res2=n-p1,df_mod2=p1-(intercept?1:0);
+  int64_t df_res2=n-p1,df_mod2=p1-(intercept_qu?1:0);
   double sigma2=(df_res2>0)?sqrt(ss_res2/(double)df_res2):0.0;
   double r2_2=(ss_tot2>0)?1.0-ss_res2/ss_tot2:0.0;
   double r2adj2=(n>p1&&ss_tot2>0)?1.0-(ss_res2/(double)df_res2)/(ss_tot2/(double)(n-1)):0.0;
@@ -498,13 +488,6 @@
   }
   #undef _IB2
 
-  typedef struct {
-    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
-    int64_t fitted;int64_t residuals;
-    double r_squared;double adj_r_squared;double sigma;
-    int64_t df_residual;int64_t df_model;int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
   #define _MC2(dst,src,len) do { \
     int64_t _by=(len)*sizeof(double),_ro=(_by+63)&~((int64_t)63); \
     void *_b=malloc((size_t)(sizeof(int64_t)+_ro));*(int64_t *)_b=_ro; \
@@ -543,23 +526,6 @@
 ;;; Since: ST7
 (defn predict [fit : int new-xs : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __cons { int64_t value; int64_t next; };
-  typedef struct {
-    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
-    int64_t fitted;int64_t residuals;
-    double r_squared;double adj_r_squared;double sigma;
-    int64_t df_residual;int64_t df_model;int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
-
   __lm_fit_t *f=(__lm_fit_t *)(intptr_t)fit;
   struct __frame_col *coefs_col=(struct __frame_col *)(intptr_t)f->coefs;
   int64_t p1=coefs_col->length;
@@ -609,26 +575,6 @@
 ;;; Since: ST7
 (defn predict-frame [fit : int new-frame : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
-  struct __cons { int64_t value; int64_t next; };
-  typedef struct {
-    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
-    int64_t fitted;int64_t residuals;
-    double r_squared;double adj_r_squared;double sigma;
-    int64_t df_residual;int64_t df_model;int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
-
   __lm_fit_t *f=(__lm_fit_t *)(intptr_t)fit;
   struct __frame_col *coefs_col=(struct __frame_col *)(intptr_t)f->coefs;
   int64_t p1=coefs_col->length;
@@ -704,26 +650,6 @@
 ;;; Since: ST7
 (defn diagnostics [fit : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
-  typedef struct {
-    int64_t coefs;int64_t se;int64_t t_values;int64_t p_values;
-    int64_t fitted;int64_t residuals;
-    double r_squared;double adj_r_squared;double sigma;
-    int64_t df_residual;int64_t df_model;int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
-
   __lm_fit_t *f=(__lm_fit_t *)(intptr_t)fit;
   int64_t n=f->n_obs;
   int64_t p1=((struct __frame_col *)(intptr_t)f->coefs)->length;

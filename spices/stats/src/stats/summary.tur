@@ -16,9 +16,38 @@
           frame-quantile frame-iqr frame-skewness frame-kurtosis
           describe)
 
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdio.h>
+#include <float.h>
+
+struct __frame_col {
+  int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+  void *validity; void *values; void *offsets;
+};
+struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+struct __schema { int64_t arity; struct __field *fields; };
+struct __frame {
+  int64_t nrows; int64_t ncols;
+  int64_t schema_ptr; int64_t *columns;
+};
+
+static inline int __valid(void *validity, int64_t i) {
+  if (!validity) return 1;
+  uint8_t *bm = (uint8_t *)validity;
+  return (bm[i >> 3] >> (i & 7)) & 1;
+}
+static int __cmp_dbl(const void *a, const void *b) {
+  double x = *(const double *)a, y = *(const double *)b;
+  return (x > y) - (x < y);
+}
+```
+
 ;; ---------------------------------------------------------------------------
-;; Internal C helpers (not exported).  Included once via the first defn that
-;; uses them; the interpreter deduplicates #include guards.
+;; Internal C helpers hoisted to file scope above.
 ;; ---------------------------------------------------------------------------
 
 ;;; col-count -- count non-null values in a float64 column.
@@ -35,19 +64,6 @@
 ;;; Since: ST1
 (defn col-count [col : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   int64_t n = 0;
   for (int64_t i = 0; i < c->length; i++)
@@ -66,19 +82,6 @@
 ;;; Since: ST1
 (defn col-sum [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double sum = 0.0;
@@ -98,19 +101,6 @@
 ;;; Since: ST1
 (defn col-mean [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double sum = 0.0; int64_t n = 0;
@@ -130,24 +120,6 @@
 ;;; Since: ST1
 (defn col-median [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static int __cmp_dbl(const void *a, const void *b) {
-    double x = *(const double *)a, y = *(const double *)b;
-    return (x > y) - (x < y);
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   int64_t n = 0;
@@ -178,24 +150,6 @@
 ;;; Since: ST1
 (defn col-mode [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static int __cmp_dbl(const void *a, const void *b) {
-    double x = *(const double *)a, y = *(const double *)b;
-    return (x > y) - (x < y);
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   int64_t n = 0;
@@ -228,19 +182,6 @@
 ;;; Since: ST1
 (defn col-var [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   /* Two-pass for numerical stability. */
@@ -266,19 +207,6 @@
 ;;; Since: ST1
 (defn col-sd [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double sum = 0.0; int64_t n = 0;
@@ -303,20 +231,6 @@
 ;;; Since: ST1
 (defn col-min [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <float.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double m = 0.0/0.0; int found = 0;
@@ -338,19 +252,6 @@
 ;;; Since: ST1
 (defn col-max [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double m = 0.0/0.0; int found = 0;
@@ -372,19 +273,6 @@
 ;;; Since: ST1
 (defn col-range [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double lo = 0.0/0.0, hi = 0.0/0.0; int found = 0;
@@ -412,24 +300,6 @@
 ;;; Since: ST1
 (defn col-quantile [col : int q : float] : float
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static int __cmp_dbl(const void *a, const void *b) {
-    double x = *(const double *)a, y = *(const double *)b;
-    return (x > y) - (x < y);
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   int64_t n = 0;
@@ -479,19 +349,6 @@
 ;;; Since: ST1
 (defn col-skewness [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double sum = 0.0; int64_t n = 0;
@@ -521,19 +378,6 @@
 ;;; Since: ST1
 (defn col-kurtosis [col : int] : float
   ```c
-  #include <stdint.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   double *vals = (double *)c->values;
   double sum = 0.0; int64_t n = 0;
@@ -561,17 +405,7 @@
 
 (defn __frame-col-by-name [f : int name : cstr] : int
   ```c
-  #include <stdint.h>
-  #include <string.h>
-
   /* Minimal mirror of frame/schema and frame/frame layout. */
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame {
-    int64_t nrows; int64_t ncols;
-    int64_t schema_ptr; int64_t *columns;
-  };
-
   struct __frame *fr = (struct __frame *)(intptr_t)f;
   struct __schema *sc = (struct __schema *)(intptr_t)fr->schema_ptr;
   for (int64_t i = 0; i < sc->arity; i++) {
@@ -704,33 +538,6 @@
 ;;; Since: ST1
 (defn describe [f : int] : int
   ```c
-  #include <stdint.h>
-  #include <stdlib.h>
-  #include <string.h>
-  #include <math.h>
-  #include <stdio.h>
-
-  /* Inline column and frame mirror (same as frame/column.tur). */
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame {
-    int64_t nrows; int64_t ncols;
-    int64_t schema_ptr; int64_t *columns;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static int __cmp_dbl(const void *a, const void *b) {
-    double x = *(const double *)a, y = *(const double *)b;
-    return (x > y) - (x < y);
-  }
-
   struct __frame *fr = (struct __frame *)(intptr_t)f;
   struct __schema *sc = (struct __schema *)(intptr_t)fr->schema_ptr;
 

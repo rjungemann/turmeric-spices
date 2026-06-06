@@ -79,10 +79,10 @@
 ;;; __tourist-state-set -- write mws and routes into the dispatch state.
 (defn __tourist-state-set [mws : int routes : int] : void
   ```c
-  extern int64_t tourist__app__tourist_state_ptr(void);
+  extern int64_t tourist__app__tourist_hystate_hyptr(void);
   typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
   __tourist_app_state *s =
-    (__tourist_app_state *)(intptr_t)tourist__app__tourist_state_ptr();
+    (__tourist_app_state *)(intptr_t)tourist__app__tourist_hystate_hyptr();
   s->mws    = mws;
   s->routes = routes;
   ```)
@@ -90,19 +90,19 @@
 ;;; __tourist-state-mws -- read the mws cons list from the dispatch state.
 (defn __tourist-state-mws [] : int
   ```c
-  extern int64_t tourist__app__tourist_state_ptr(void);
+  extern int64_t tourist__app__tourist_hystate_hyptr(void);
   typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
   return ((__tourist_app_state *)
-    (intptr_t)tourist__app__tourist_state_ptr())->mws;
+    (intptr_t)tourist__app__tourist_hystate_hyptr())->mws;
   ```)
 
 ;;; __tourist-state-routes -- read the routes cons list from the dispatch state.
 (defn __tourist-state-routes [] : int
   ```c
-  extern int64_t tourist__app__tourist_state_ptr(void);
+  extern int64_t tourist__app__tourist_hystate_hyptr(void);
   typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
   return ((__tourist_app_state *)
-    (intptr_t)tourist__app__tourist_state_ptr())->routes;
+    (intptr_t)tourist__app__tourist_hystate_hyptr())->routes;
   ```)
 
 ;; -- Item partition --------------------------------------------------------
@@ -236,8 +236,8 @@
 ;;; server-start expects the handler as an opaque function pointer.
 (defn __tourist-handler-ptr [] : ptr<void>
   ```c
-  extern int64_t tourist__app____tourist_handler(int64_t);
-  return (void *)tourist__app____tourist_handler;
+  extern int64_t tourist__app___un_untourist_hyhandler(int64_t);
+  return (void *)tourist__app___un_untourist_hyhandler;
   ```)
 
 ;; -- Public API ------------------------------------------------------------

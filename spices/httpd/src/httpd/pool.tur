@@ -41,31 +41,42 @@
 (defmodule httpd/pool
   (export pool-new pool-enqueue pool-stop)
 
+;; file-scope-c-block: pthread.h / unistd.h contain static inline function
+;; definitions (e.g. __DARWIN_FD_ISSET in _fd_def.h on macOS 14+) that are
+;; not legal inside a function body.  Hoist all POSIX headers and the shared
+;; struct layout here so every defn below can reference them without
+;; re-including at block scope.
+```c
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+
+struct __httpd_pool {
+  pthread_mutex_t mu;
+  pthread_cond_t  not_empty;
+  pthread_cond_t  not_full;
+  int            *fds;
+  int             cap;
+  int             head;
+  int             tail;
+  int             count;
+  int             stop;
+  void           *handler;
+  pthread_t      *workers;
+  int             nworkers;
+};
+
+struct __httpd_warg { int client_fd; void *handler; };
+```
+
 ;; =============================================================================
 ;; Worker entry -- one long-lived thread per pool slot.
 ;; =============================================================================
 
 (defn pool-worker-loop [arg : ptr<void>] : ptr<void>
   ```c
-  #include <stdlib.h>
-  #include <unistd.h>
-  #include <pthread.h>
-  struct __httpd_pool {
-    pthread_mutex_t mu;
-    pthread_cond_t  not_empty;
-    pthread_cond_t  not_full;
-    int            *fds;
-    int             cap;
-    int             head;
-    int             tail;
-    int             count;
-    int             stop;
-    void           *handler;
-    pthread_t      *workers;
-    int             nworkers;
-  };
-  struct __httpd_warg { int client_fd; void *handler; };
-  extern void *httpd__server__srv_worker_loop(void *);
+  /* Call the non-static trampoline exposed by httpd/server. */
+  extern void *httpd__server__srv_worker_loop_trampoline(void *);
 
   struct __httpd_pool *p = (struct __httpd_pool *)arg;
   for (;;) {
@@ -93,7 +104,7 @@
     wa->handler   = handler;
     /* srv-worker-loop reads from the socket, calls the user handler,
        writes the response, closes the socket, and frees wa.            */
-    httpd__server__srv_worker_loop(wa);
+    httpd__server__srv_worker_loop_trampoline(wa);
   }
   return NULL;
   ```)
@@ -121,23 +132,7 @@
 ;;; Since: H7
 (defn pool-new [size : int handler : ptr<void>] : ptr<void>
   ```c
-  #include <stdlib.h>
-  #include <pthread.h>
-  struct __httpd_pool {
-    pthread_mutex_t mu;
-    pthread_cond_t  not_empty;
-    pthread_cond_t  not_full;
-    int            *fds;
-    int             cap;
-    int             head;
-    int             tail;
-    int             count;
-    int             stop;
-    void           *handler;
-    pthread_t      *workers;
-    int             nworkers;
-  };
-  extern void *httpd__pool__pool_worker_loop(void *);
+  extern void *httpd__pool__pool_hyworker_hyloop(void *);
 
   int n = (int)size;
   if (n < 1) n = 1;
@@ -175,7 +170,7 @@
   int spawned = 0;
   for (int i = 0; i < n; i++) {
     if (pthread_create(&p->workers[i], NULL,
-                       httpd__pool__pool_worker_loop, p) != 0) {
+                       httpd__pool__pool_hyworker_hyloop, p) != 0) {
       break;
     }
     spawned++;
@@ -211,22 +206,6 @@
 ;;; Since: H7
 (defn pool-enqueue [pool : ptr<void> client-fd : int] : void
   ```c
-  #include <unistd.h>
-  #include <pthread.h>
-  struct __httpd_pool {
-    pthread_mutex_t mu;
-    pthread_cond_t  not_empty;
-    pthread_cond_t  not_full;
-    int            *fds;
-    int             cap;
-    int             head;
-    int             tail;
-    int             count;
-    int             stop;
-    void           *handler;
-    pthread_t      *workers;
-    int             nworkers;
-  };
   if (!pool) { close((int)client_fd); return; }
   struct __httpd_pool *p = (struct __httpd_pool *)pool;
   pthread_mutex_lock(&p->mu);
@@ -264,23 +243,6 @@
 ;;; Since: H7
 (defn pool-stop [pool : ptr<void>] : void
   ```c
-  #include <stdlib.h>
-  #include <unistd.h>
-  #include <pthread.h>
-  struct __httpd_pool {
-    pthread_mutex_t mu;
-    pthread_cond_t  not_empty;
-    pthread_cond_t  not_full;
-    int            *fds;
-    int             cap;
-    int             head;
-    int             tail;
-    int             count;
-    int             stop;
-    void           *handler;
-    pthread_t      *workers;
-    int             nworkers;
-  };
   if (!pool) return;
   struct __httpd_pool *p = (struct __httpd_pool *)pool;
   pthread_mutex_lock(&p->mu);

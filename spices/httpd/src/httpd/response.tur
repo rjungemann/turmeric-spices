@@ -39,16 +39,22 @@
           with-header with-body with-status
           free-response)
 
+;; file-scope-c-block: system headers contain static inline function
+;; definitions illegal inside function bodies on macOS 14+ / Xcode 15+.
+```c
+#include <stdlib.h>
+#include <string.h>
+
+struct __httpd_resp {
+  int    status; char  *body; int body_len;
+  char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
+};
+```
+
 ;; -- Internal: allocate an empty Response with a given status -----------
 
 (defn __resp-new [status : int body : cstr] : int
   ```c
-  #include <stdlib.h>
-  #include <string.h>
-  struct __httpd_resp {
-    int    status; char  *body; int body_len;
-    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
-  };
   struct __httpd_resp *r = malloc(sizeof(*r));
   r->status   = (int)status;
   size_t bl   = body ? strlen((const char *)body) : 0;
@@ -82,12 +88,6 @@
 ;;; Since: H4
 (defn with-header [resp : int key : cstr val : cstr] : int
   ```c
-  #include <stdlib.h>
-  #include <string.h>
-  struct __httpd_resp {
-    int    status; char  *body; int body_len;
-    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
-  };
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
   if (r->hdr_count >= r->hdr_cap) {
     int new_cap = r->hdr_cap * 2;
@@ -121,12 +121,6 @@
 ;;; Since: H4
 (defn with-body [resp : int body : cstr] : int
   ```c
-  #include <stdlib.h>
-  #include <string.h>
-  struct __httpd_resp {
-    int    status; char  *body; int body_len;
-    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
-  };
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
   free(r->body);
   const char *b = (const char *)body;
@@ -153,10 +147,6 @@
 ;;; Since: H4
 (defn with-status [resp : int status : int] : int
   ```c
-  struct __httpd_resp {
-    int    status; char  *body; int body_len;
-    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
-  };
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
   r->status = (int)status;
   return resp;
@@ -176,11 +166,6 @@
 ;;; Since: H4
 (defn free-response [resp : int] : void
   ```c
-  #include <stdlib.h>
-  struct __httpd_resp {
-    int    status; char  *body; int body_len;
-    char **hdr_keys; char **hdr_vals; int hdr_count; int hdr_cap;
-  };
   if (resp == 0) return;
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
   free(r->body);

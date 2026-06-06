@@ -34,6 +34,112 @@
                                   col-quantile col-min col-max])
   (import stats/cov :refer [cor])
 
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#define DIST_NORMAL  1
+#define DIST_T       2
+#define DIST_CHI2    3
+#define DIST_F       4
+#define DIST_UNIFORM 5
+#define DIST_EXP     8
+#define DIST_BETA    9
+#define DIST_GAMMA  10
+
+typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
+
+struct __frame_col {
+  int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+  void *validity; void *values; void *offsets;
+};
+struct __schema { int64_t arity; int64_t *fields_ptr; };
+struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+struct __cons { int64_t value; int64_t next; };
+
+typedef struct {
+  const char *name; double statistic; double df1; double df2;
+  double p_value; int64_t alt_tag; double estimate;
+  double ci_low; double ci_high; double conf_level;
+} __test_result_t;
+
+static inline int __valid(void *validity, int64_t i) {
+  if (!validity) return 1;
+  uint8_t *bm = (uint8_t *)validity;
+  return (bm[i >> 3] >> (i & 7)) & 1;
+}
+static int __cmp_dbl_ts(const void *a, const void *b) {
+  double x=*(const double *)a,y=*(const double *)b; return (x>y)-(x<y);
+}
+static void __col_stats(int64_t ch, double *mean, double *var, int64_t *n) {
+  struct __frame_col *c = (struct __frame_col *)(intptr_t)ch;
+  double *v = (double *)c->values;
+  double s=0.0; *n=0;
+  for(int64_t i=0;i<c->length;i++) if(__valid(c->validity,i)){s+=v[i];(*n)++;}
+  *mean = *n ? s/(double)*n : 0.0/0.0;
+  double ss=0.0;
+  for(int64_t i=0;i<c->length;i++) if(__valid(c->validity,i)){double d=v[i]-*mean;ss+=d*d;}
+  *var = *n>=2 ? ss/(double)(*n-1) : 0.0/0.0;
+}
+static double __ibeta_ts(double x, double aa, double bb) {
+  if(x<=0.0)return 0.0;if(x>=1.0)return 1.0;
+  int sw=0;if(x>(aa+1.0)/(aa+bb+2.0)){double t=aa;aa=bb;bb=t;x=1.0-x;sw=1;}
+  double lb=lgamma(aa)+lgamma(bb)-lgamma(aa+bb);
+  double front=exp(aa*log(x)+bb*log(1.0-x)-lb)/aa;
+  double fpmin=1e-300,c=1.0,dd=1.0-(aa+bb)*x/(aa+1.0);
+  if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
+  for(int m=1;m<=200;m++){
+    double m2=2.0*(double)m;
+    double num=((double)m*(bb-(double)m)*x)/((aa+m2-1.0)*(aa+m2));
+    dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
+    num=-(aa+(double)m)*(aa+bb+(double)m)*x/((aa+m2)*(aa+m2+1.0));
+    dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
+    if(fabs(del-1.0)<1e-12)break;
+  }
+  double val=front*h; return sw?1.0-val:val;
+}
+static double __pt_ts(double t, double df) {
+  double ib=__ibeta_ts(df/(df+t*t),df/2.0,0.5);
+  return t>=0.0?1.0-0.5*ib:0.5*ib;
+}
+static double __qt_ts(double p, double df) {
+  if(p<=0.0)return -1.0/0.0; if(p>=1.0)return 1.0/0.0;
+  double lo=-1e10,hi=1e10;
+  for(int i=0;i<200;i++){double m=0.5*(lo+hi);if(__pt_ts(m,df)<p)lo=m;else hi=m;if(hi-lo<1e-12)break;}
+  return 0.5*(lo+hi);
+}
+static double __igamma_ts(double a, double x) {
+  if(x<=0.0)return 0.0;
+  if(x>a+1.0){double fpmin=1e-300,b=x+1.0-a,c=1.0/fpmin,dd=1.0/b,h=dd;
+    for(int i=1;i<=200;i++){double an=-(double)i*((double)i-a);b+=2.0;c=b+an/c;if(fabs(c)<fpmin)c=fpmin;dd=b+an*dd;if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double del=dd*c;h*=del;if(fabs(del-1.0)<1e-12)break;}
+    return 1.0-exp(-x+a*log(x)-lgamma(a))*h;}
+  double ap=a,sum=1.0/a,del=sum;
+  for(int i=0;i<200;i++){ap++;del*=x/ap;sum+=del;if(fabs(del)<fabs(sum)*1e-12)break;}
+  return sum*exp(-x+a*log(x)-lgamma(a));
+}
+static double __pf_ts(double x,double d1,double d2){return x<=0.0?0.0:__ibeta_ts(d1*x/(d1*x+d2),d1/2.0,d2/2.0);}
+static double __qf_ts(double p,double d1,double d2){
+  double lo=0.0,hi=1e10;
+  for(int i=0;i<200;i++){double m=0.5*(lo+hi);if(__pf_ts(m,d1,d2)<p)lo=m;else hi=m;if(hi-lo<1e-12)break;}
+  return 0.5*(lo+hi);
+}
+```
+
+;;; int->float -- cast an integer to float (int64_t -> double).
+(defn int->float [n : int] : float
+  ```c return (double)(int64_t)n; ```)
+
+;;; sqrt -- square root (delegates to C sqrt).
+(defn sqrt [x : float] : float
+  ```c return sqrt(x); ```)
+
+;;; nan -- return a float NaN value.
+(defn nan [] : float
+  ```c return 0.0/0.0; ```)
+
+
 ;;; alt-two-sided -- alt-tag constant for two-sided tests.
 ;;; Since: ST5
 (defn alt-two-sided [] : int ```c return 0; ```)
@@ -49,14 +155,6 @@
 ;; Internal test-result struct layout.
 (defn __tr-alloc [] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <math.h>
-  typedef struct {
-    const char *name; double statistic; double df1; double df2;
-    double p_value; int64_t alt_tag; double estimate;
-    double ci_low; double ci_high; double conf_level;
-  } __test_result_t;
   __test_result_t *r = (__test_result_t *)malloc(sizeof(__test_result_t));
   r->name=""; r->statistic=0.0/0.0; r->df1=0.0/0.0; r->df2=0.0/0.0;
   r->p_value=0.0/0.0; r->alt_tag=0; r->estimate=0.0/0.0;
@@ -70,13 +168,6 @@
                          p-value : float alt-tag : int estimate : float
                          ci-low : float ci-high : float conf-level : float] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  typedef struct {
-    const char *name; double statistic; double df1; double df2;
-    double p_value; int64_t alt_tag; double estimate;
-    double ci_low; double ci_high; double conf_level;
-  } __test_result_t;
   __test_result_t *r = (__test_result_t *)malloc(sizeof(__test_result_t));
   r->name=(const char *)(intptr_t)name;
   r->statistic=statistic; r->df1=df1; r->df2=df2;
@@ -89,12 +180,11 @@
 ;;; Since: ST5
 (defn test-result-free [r : int] : void
   ```c
-  #include <stdlib.h>
   free((void *)(intptr_t)r);
   ```)
 
 ;; Accessors.
-(defn test-result-name       [r : int] : cstr  ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return (int64_t)(intptr_t)((__tr*)(intptr_t)r)->name; ```)
+(defn test-result-name       [r : int] : cstr  ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->name; ```)
 (defn test-result-statistic  [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->s; ```)
 (defn test-result-df1        [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->d1; ```)
 (defn test-result-df2        [r : int] : float ```c typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr; return ((__tr*)(intptr_t)r)->d2; ```)
@@ -140,9 +230,9 @@
   (let [n    (col-count col)
         xbar (col-mean col)
         s    (col-sd col)
-        se   (/ s (sqrt (float n)))
+        se   (/ s (sqrt (int->float n)))
         t    (/ (- xbar mu) se)
-        df   (float (- n 1))
+        df   (int->float (- n 1))
         pv   (__p-t-sided t df alt-tag)
         a    (/ (- 1.0 conf-level) 2.0)
         tc   (qt (- 1.0 a) df)
@@ -166,62 +256,7 @@
 ;;; Since: ST5
 (defn t-test-2samp [a : int b : int pooled : int alt-tag : int conf-level : float] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-  #include <string.h>
-
   /* We inline summary and test logic here to avoid inter-defn calls. */
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static void __col_stats(int64_t ch, double *mean, double *var, int64_t *n) {
-    struct __frame_col *c = (struct __frame_col *)(intptr_t)ch;
-    double *v = (double *)c->values;
-    double s=0.0; *n=0;
-    for(int64_t i=0;i<c->length;i++) if(__valid(c->validity,i)){s+=v[i];(*n)++;}
-    *mean = *n ? s/(double)*n : 0.0/0.0;
-    double ss=0.0;
-    for(int64_t i=0;i<c->length;i++) if(__valid(c->validity,i)){double d=v[i]-*mean;ss+=d*d;}
-    *var = *n>=2 ? ss/(double)(*n-1) : 0.0/0.0;
-  }
-
-  /* pt via regularized incomplete beta. */
-  static double __ibeta_t(double x, double aa, double bb) {
-    if(x<=0.0)return 0.0;if(x>=1.0)return 1.0;
-    int sw=0;if(x>(aa+1.0)/(aa+bb+2.0)){double t=aa;aa=bb;bb=t;x=1.0-x;sw=1;}
-    double lb=lgamma(aa)+lgamma(bb)-lgamma(aa+bb);
-    double front=exp(aa*log(x)+bb*log(1.0-x)-lb)/aa;
-    double fpmin=1e-300,c=1.0,dd=1.0-(aa+bb)*x/(aa+1.0);
-    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
-    for(int m=1;m<=200;m++){
-      double m2=2.0*(double)m;
-      double num=((double)m*(bb-(double)m)*x)/((aa+m2-1.0)*(aa+m2));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
-      num=-(aa+(double)m)*(aa+bb+(double)m)*x/((aa+m2)*(aa+m2+1.0));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
-      if(fabs(del-1.0)<1e-12)break;
-    }
-    double val=front*h; return sw?1.0-val:val;
-  }
-  static double __pt(double t, double df) {
-    double ib=__ibeta_t(df/(df+t*t),df/2.0,0.5);
-    return t>=0.0?1.0-0.5*ib:0.5*ib;
-  }
-  /* Bisection quantile for t. */
-  static double __qt(double p, double df) {
-    if(p<=0.0)return -1.0/0.0; if(p>=1.0)return 1.0/0.0;
-    double lo=-1e10,hi=1e10;
-    for(int i=0;i<200;i++){double m=0.5*(lo+hi);if(__pt(m,df)<p)lo=m;else hi=m;if(hi-lo<1e-12)break;}
-    return 0.5*(lo+hi);
-  }
-
   double ma, mb, va, vb; int64_t na, nb;
   __col_stats(a, &ma, &va, &na);
   __col_stats(b, &mb, &vb, &nb);
@@ -244,12 +279,12 @@
   }
 
   double pv;
-  if (alt_tag==0) { double pt2=__pt(t<0.0?t:-t,df); pv=2.0*pt2; }
-  else if (alt_tag==1) pv=__pt(t,df);
-  else pv=1.0-__pt(t,df);
+  if (alt_tag==0) { double pt2=__pt_ts(t<0.0?t:-t,df); pv=2.0*pt2; }
+  else if (alt_tag==1) pv=__pt_ts(t,df);
+  else pv=1.0-__pt_ts(t,df);
 
   double alpha=(1.0-conf_level)/2.0;
-  double tc=__qt(1.0-alpha,df);
+  double tc=__qt_ts(1.0-alpha,df);
 
   /* SE of difference for CI. */
   double se_diff;
@@ -257,11 +292,6 @@
   else { double sp2=((double)(na-1)*va+(double)(nb-1)*vb)/(double)(na+nb-2);
          se_diff=sqrt(sp2*(1.0/(double)na+1.0/(double)nb)); }
 
-  typedef struct {
-    const char *name; double statistic; double df1; double df2;
-    double p_value; int64_t alt_tag; double estimate;
-    double ci_low; double ci_high; double conf_level;
-  } __test_result_t;
   __test_result_t *r = (__test_result_t *)malloc(sizeof(__test_result_t));
   r->name     = pooled ? "Two Sample t-test" : "Welch Two Sample t-test";
   r->statistic = t; r->df1=df; r->df2=0.0/0.0; r->p_value=pv;
@@ -285,44 +315,6 @@
 ;;; Since: ST5
 (defn t-test-paired [a : int b : int alt-tag : int conf-level : float] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static double __ibeta_p(double x, double aa, double bb) {
-    if(x<=0.0)return 0.0;if(x>=1.0)return 1.0;
-    int sw=0;if(x>(aa+1.0)/(aa+bb+2.0)){double t=aa;aa=bb;bb=t;x=1.0-x;sw=1;}
-    double lb=lgamma(aa)+lgamma(bb)-lgamma(aa+bb);
-    double front=exp(aa*log(x)+bb*log(1.0-x)-lb)/aa;
-    double fpmin=1e-300,c=1.0,dd=1.0-(aa+bb)*x/(aa+1.0);
-    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
-    for(int m=1;m<=200;m++){
-      double m2=2.0*(double)m;
-      double num=((double)m*(bb-(double)m)*x)/((aa+m2-1.0)*(aa+m2));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
-      num=-(aa+(double)m)*(aa+bb+(double)m)*x/((aa+m2)*(aa+m2+1.0));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
-      if(fabs(del-1.0)<1e-12)break;
-    }
-    double val=front*h;return sw?1.0-val:val;
-  }
-  static double __pt_p(double t, double df){double ib=__ibeta_p(df/(df+t*t),df/2.0,0.5);return t>=0.0?1.0-0.5*ib:0.5*ib;}
-  static double __qt_p(double p, double df){
-    if(p<=0.0)return -1.0/0.0;if(p>=1.0)return 1.0/0.0;
-    double lo=-1e10,hi=1e10;
-    for(int i=0;i<200;i++){double m=0.5*(lo+hi);if(__pt_p(m,df)<p)lo=m;else hi=m;if(hi-lo<1e-12)break;}
-    return 0.5*(lo+hi);
-  }
-
   struct __frame_col *ca=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb=(struct __frame_col *)(intptr_t)b;
   double *va=(double *)ca->values, *vb=(double *)cb->values;
@@ -341,15 +333,14 @@
   double t=mean/se;
   double df=(double)(n-1);
   double pv;
-  if(alt_tag==0){double pt2=__pt_p(t<0.0?t:-t,df);pv=2.0*pt2;}
-  else if(alt_tag==1)pv=__pt_p(t,df);
-  else pv=1.0-__pt_p(t,df);
+  if(alt_tag==0){double pt2=__pt_ts(t<0.0?t:-t,df);pv=2.0*pt2;}
+  else if(alt_tag==1)pv=__pt_ts(t,df);
+  else pv=1.0-__pt_ts(t,df);
 
   double alpha=(1.0-conf_level)/2.0;
-  double tc=__qt_p(1.0-alpha,df);
+  double tc=__qt_ts(1.0-alpha,df);
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="Paired t-test";r->statistic=t;r->df1=df;r->df2=0.0/0.0;r->p_value=pv;
   r->alt_tag=alt_tag;r->estimate=mean;r->ci_low=mean-tc*se;r->ci_high=mean+tc*se;r->conf_level=conf_level;
   return (int64_t)(intptr_t)r;
@@ -366,45 +357,6 @@
 ;;; Since: ST5
 (defn var-test [a : int b : int alt-tag : int conf-level : float] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
-  /* ibeta for F CDF. */
-  static double __ibeta_f(double x,double aa,double bb){
-    if(x<=0.0)return 0.0;if(x>=1.0)return 1.0;
-    int sw=0;if(x>(aa+1.0)/(aa+bb+2.0)){double t=aa;aa=bb;bb=t;x=1.0-x;sw=1;}
-    double lb=lgamma(aa)+lgamma(bb)-lgamma(aa+bb);
-    double front=exp(aa*log(x)+bb*log(1.0-x)-lb)/aa;
-    double fpmin=1e-300,c=1.0,dd=1.0-(aa+bb)*x/(aa+1.0);
-    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
-    for(int m=1;m<=200;m++){
-      double m2=2.0*(double)m;
-      double num=((double)m*(bb-(double)m)*x)/((aa+m2-1.0)*(aa+m2));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
-      num=-(aa+(double)m)*(aa+bb+(double)m)*x/((aa+m2)*(aa+m2+1.0));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
-      if(fabs(del-1.0)<1e-12)break;
-    }
-    double val=front*h;return sw?1.0-val:val;
-  }
-  static double __pf(double x,double d1,double d2){return x<=0.0?0.0:__ibeta_f(d1*x/(d1*x+d2),d1/2.0,d2/2.0);}
-  static double __qf(double p,double d1,double d2){
-    double lo=0.0,hi=1e10;
-    for(int i=0;i<200;i++){double m=0.5*(lo+hi);if(__pf(m,d1,d2)<p)lo=m;else hi=m;if(hi-lo<1e-12)break;}
-    return 0.5*(lo+hi);
-  }
-
   struct __frame_col *ca=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb=(struct __frame_col *)(intptr_t)b;
   double *va2=(double *)ca->values,*vb2=(double *)cb->values;
@@ -419,18 +371,17 @@
   double varb=nb>=2?ssb/(double)(nb-1):0.0/0.0;
   double F=vara/varb;
   double df1=(double)(na-1),df2=(double)(nb-1);
-  double pf_val=__pf(F,df1,df2);
+  double pf_val=__pf_ts(F,df1,df2);
   double pv;
   if(alt_tag==0)pv=2.0*(pf_val<0.5?pf_val:1.0-pf_val);
   else if(alt_tag==2)pv=1.0-pf_val;
   else pv=pf_val;
 
   double alpha=(1.0-conf_level)/2.0;
-  double cilo=F/__qf(1.0-alpha,df1,df2);
-  double cihi=F*__qf(1.0-alpha,df2,df1);
+  double cilo=F/__qf_ts(1.0-alpha,df1,df2);
+  double cihi=F*__qf_ts(1.0-alpha,df2,df1);
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="F test to compare two variances";r->statistic=F;r->df1=df1;r->df2=df2;r->p_value=pv;
   r->alt_tag=alt_tag;r->estimate=F;r->ci_low=cilo;r->ci_high=cihi;r->conf_level=conf_level;
   return (int64_t)(intptr_t)r;
@@ -447,71 +398,33 @@
 ;;; Since: ST5
 (defn cor-test [a : int b : int alt-tag : int conf-level : float] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static double __ibeta_c(double x,double aa,double bb){
-    if(x<=0.0)return 0.0;if(x>=1.0)return 1.0;
-    int sw=0;if(x>(aa+1.0)/(aa+bb+2.0)){double t=aa;aa=bb;bb=t;x=1.0-x;sw=1;}
-    double lb=lgamma(aa)+lgamma(bb)-lgamma(aa+bb);
-    double front=exp(aa*log(x)+bb*log(1.0-x)-lb)/aa;
-    double fpmin=1e-300,c=1.0,dd=1.0-(aa+bb)*x/(aa+1.0);
-    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
-    for(int m=1;m<=200;m++){
-      double m2=2.0*(double)m;
-      double num=((double)m*(bb-(double)m)*x)/((aa+m2-1.0)*(aa+m2));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
-      num=-(aa+(double)m)*(aa+bb+(double)m)*x/((aa+m2)*(aa+m2+1.0));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
-      if(fabs(del-1.0)<1e-12)break;
-    }
-    double val=front*h;return sw?1.0-val:val;
-  }
-  static double __pt_c(double t,double df){double ib=__ibeta_c(df/(df+t*t),df/2.0,0.5);return t>=0.0?1.0-0.5*ib:0.5*ib;}
-  static double __qt_c(double p,double df){
-    double lo=-1e10,hi=1e10;
-    for(int i=0;i<200;i++){double m=0.5*(lo+hi);if(__pt_c(m,df)<p)lo=m;else hi=m;if(hi-lo<1e-12)break;}
-    return 0.5*(lo+hi);
-  }
-
   struct __frame_col *ca=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb=(struct __frame_col *)(intptr_t)b;
   double *va=(double *)ca->values,*vb=(double *)cb->values;
   int64_t len=ca->length<cb->length?ca->length:cb->length;
   double sa=0.0,sb=0.0; int64_t n=0;
   for(int64_t i=0;i<len;i++) if(__valid(ca->validity,i)&&__valid(cb->validity,i)){sa+=va[i];sb+=vb[i];n++;}
-  if(n<3){typedef struct{const char*name;double s,d1,d2,pv;int64_t at;double e,cl,ch,cf;}__tr;__tr*r=(__tr*)malloc(sizeof(__tr));r->name="Pearson's product-moment correlation";r->s=0.0/0.0;r->d1=(double)(n-2);r->d2=0.0/0.0;r->pv=0.0/0.0;r->at=alt_tag;r->e=0.0/0.0;r->cl=0.0/0.0;r->ch=0.0/0.0;r->cf=conf_level;return(int64_t)(intptr_t)r;}
+  if(n<3){__test_result_t*r=(__test_result_t*)malloc(sizeof(__test_result_t));r->name="Pearson's product-moment correlation";r->statistic=0.0/0.0;r->df1=(double)(n-2);r->df2=0.0/0.0;r->p_value=0.0/0.0;r->alt_tag=alt_tag;r->estimate=0.0/0.0;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=conf_level;return(int64_t)(intptr_t)r;}
   double ma=sa/(double)n,mb=sb/(double)n,sab=0.0,ssa=0.0,ssb=0.0;
   for(int64_t i=0;i<len;i++) if(__valid(ca->validity,i)&&__valid(cb->validity,i)){double da=va[i]-ma,db=vb[i]-mb;sab+=da*db;ssa+=da*da;ssb+=db*db;}
   double r_val=sab/sqrt(ssa*ssb);
   double t=r_val*sqrt((double)(n-2)/(1.0-r_val*r_val));
   double df=(double)(n-2);
   double pv;
-  if(alt_tag==0){double pt2=__pt_c(t<0.0?t:-t,df);pv=2.0*pt2;}
-  else if(alt_tag==1)pv=__pt_c(t,df);
-  else pv=1.0-__pt_c(t,df);
+  if(alt_tag==0){double pt2=__pt_ts(t<0.0?t:-t,df);pv=2.0*pt2;}
+  else if(alt_tag==1)pv=__pt_ts(t,df);
+  else pv=1.0-__pt_ts(t,df);
 
   /* Fisher z CI for r. */
   double z=0.5*log((1.0+r_val)/(1.0-r_val));
   double se_z=1.0/sqrt((double)(n-3));
   /* Use normal approx for CI on z, then transform back. */
   double z_crit=1.959963985; /* qnorm(0.975) */
-  if(conf_level!=0.95){ double alpha=(1.0-conf_level)/2.0;z_crit=__qt_c(1.0-alpha,(double)(n-3)); }
+  if(conf_level!=0.95){ double alpha=(1.0-conf_level)/2.0;z_crit=__qt_ts(1.0-alpha,(double)(n-3)); }
   double zlo=z-z_crit*se_z,zhi=z+z_crit*se_z;
   double rlo=tanh(zlo),rhi=tanh(zhi);
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *res=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *res=(__test_result_t *)malloc(sizeof(__test_result_t));
   res->name="Pearson's product-moment correlation";res->statistic=t;res->df1=df;res->df2=0.0/0.0;
   res->p_value=pv;res->alt_tag=alt_tag;res->estimate=r_val;res->ci_low=rlo;res->ci_high=rhi;res->conf_level=conf_level;
   return (int64_t)(intptr_t)res;
@@ -528,39 +441,6 @@
 ;;; Since: ST6
 (defn anova-oneway [cols : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __cons { int64_t value; int64_t next; };
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static double __ibeta_a(double x,double aa,double bb){
-    if(x<=0.0)return 0.0;if(x>=1.0)return 1.0;
-    int sw=0;if(x>(aa+1.0)/(aa+bb+2.0)){double t=aa;aa=bb;bb=t;x=1.0-x;sw=1;}
-    double lb=lgamma(aa)+lgamma(bb)-lgamma(aa+bb);
-    double front=exp(aa*log(x)+bb*log(1.0-x)-lb)/aa;
-    double fpmin=1e-300,c=1.0,dd=1.0-(aa+bb)*x/(aa+1.0);
-    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
-    for(int m=1;m<=200;m++){
-      double m2=2.0*(double)m;
-      double num=((double)m*(bb-(double)m)*x)/((aa+m2-1.0)*(aa+m2));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
-      num=-(aa+(double)m)*(aa+bb+(double)m)*x/((aa+m2)*(aa+m2+1.0));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
-      if(fabs(del-1.0)<1e-12)break;
-    }
-    double val=front*h;return sw?1.0-val:val;
-  }
-  static double __pf_a(double x,double d1,double d2){return x<=0.0?0.0:__ibeta_a(d1*x/(d1*x+d2),d1/2.0,d2/2.0);}
-
   /* Count groups and collect stats. */
   int64_t k=0;
   for(struct __cons *p=(struct __cons *)(intptr_t)cols;p;p=(struct __cons *)(intptr_t)p->next) k++;
@@ -599,12 +479,11 @@
   double df1=(double)(k-1),df2=(double)(N-k);
   double MSB=SSB/df1,MSW=SSW/df2;
   double F=MSB/MSW;
-  double pv=1.0-__pf_a(F,df1,df2);
+  double pv=1.0-__pf_ts(F,df1,df2);
 
   free(group_means);free(group_ns);
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="One-way ANOVA";r->statistic=F;r->df1=df1;r->df2=df2;r->p_value=pv;
   r->alt_tag=2;r->estimate=0.0/0.0;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
   return (int64_t)(intptr_t)r;
@@ -622,29 +501,6 @@
 ;;; Since: ST6
 (defn chi2-gof [observed : int expected : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static double __igamma_g(double a, double x) {
-    if(x<=0.0)return 0.0;
-    if(x>a+1.0){double fpmin=1e-300,b=x+1.0-a,c=1.0/fpmin,dd=1.0/b,h=dd;
-      for(int i=1;i<=200;i++){double an=-(double)i*((double)i-a);b+=2.0;c=b+an/c;if(fabs(c)<fpmin)c=fpmin;dd=b+an*dd;if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double del=dd*c;h*=del;if(fabs(del-1.0)<1e-12)break;}
-      return 1.0-exp(-x+a*log(x)-lgamma(a))*h;}
-    double ap=a,sum=1.0/a,del=sum;
-    for(int i=0;i<200;i++){ap++;del*=x/ap;sum+=del;if(fabs(del)<fabs(sum)*1e-12)break;}
-    return sum*exp(-x+a*log(x)-lgamma(a));
-  }
-
   struct __frame_col *co=(struct __frame_col *)(intptr_t)observed;
   struct __frame_col *ce=(struct __frame_col *)(intptr_t)expected;
   double *vo=(double *)co->values, *ve=(double *)ce->values;
@@ -656,10 +512,9 @@
     }
   }
   df--; /* df = k-1 */
-  double pv=1.0-__igamma_g((double)df/2.0,chi2/2.0);
+  double pv=1.0-__igamma_ts((double)df/2.0,chi2/2.0);
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="Chi-squared goodness-of-fit test";r->statistic=chi2;r->df1=(double)df;r->df2=0.0/0.0;
   r->p_value=pv;r->alt_tag=2;r->estimate=0.0/0.0;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
   return (int64_t)(intptr_t)r;
@@ -677,33 +532,6 @@
 ;;; Since: ST6
 (defn chi2-contingency [f : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __schema { int64_t arity; int64_t *fields_ptr; };
-  struct __frame {
-    int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static double __igamma_ct(double a, double x) {
-    if(x<=0.0)return 0.0;
-    if(x>a+1.0){double fpmin=1e-300,b=x+1.0-a,c=1.0/fpmin,dd=1.0/b,h=dd;
-      for(int i=1;i<=200;i++){double an=-(double)i*((double)i-a);b+=2.0;c=b+an/c;if(fabs(c)<fpmin)c=fpmin;dd=b+an*dd;if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double del=dd*c;h*=del;if(fabs(del-1.0)<1e-12)break;}
-      return 1.0-exp(-x+a*log(x)-lgamma(a))*h;}
-    double ap=a,sum=1.0/a,del=sum;
-    for(int i=0;i<200;i++){ap++;del*=x/ap;sum+=del;if(fabs(del)<fabs(sum)*1e-12)break;}
-    return sum*exp(-x+a*log(x)-lgamma(a));
-  }
-
   struct __frame *fr=(struct __frame *)(intptr_t)f;
   int64_t nrows=fr->nrows, ncols=fr->ncols;
 
@@ -731,10 +559,9 @@
   free(row_sums);free(col_sums);
 
   double df=(double)((nrows-1)*(ncols-1));
-  double pv=1.0-__igamma_ct(df/2.0,chi2/2.0);
+  double pv=1.0-__igamma_ts(df/2.0,chi2/2.0);
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="Pearson's Chi-squared test";r->statistic=chi2;r->df1=df;r->df2=0.0/0.0;
   r->p_value=pv;r->alt_tag=2;r->estimate=0.0/0.0;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
   return (int64_t)(intptr_t)r;
@@ -751,20 +578,6 @@
 ;;; Since: ST6
 (defn mann-whitney [a : int b : int alt-tag : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *ca=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb=(struct __frame_col *)(intptr_t)b;
   double *va=(double *)ca->values,*vb=(double *)cb->values;
@@ -802,8 +615,7 @@
   else if(alt_tag==1) pv=0.5*(1.0+erf(z/1.41421356237309504880));
   else pv=1.0-0.5*(1.0+erf(z/1.41421356237309504880));
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="Wilcoxon rank sum test (Mann-Whitney U)";r->statistic=U;r->df1=0.0/0.0;r->df2=0.0/0.0;
   r->p_value=pv;r->alt_tag=alt_tag;r->estimate=U;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
   return (int64_t)(intptr_t)r;
@@ -820,20 +632,6 @@
 ;;; Since: ST6
 (defn wilcoxon-signed-rank [a : int b : int alt-tag : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-
   struct __frame_col *ca=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb=(struct __frame_col *)(intptr_t)b;
   double *va=(double *)ca->values,*vb=(double *)cb->values;
@@ -868,8 +666,7 @@
   else if(alt_tag==1) pv=0.5*(1.0+erf(z/1.41421356237309504880));
   else pv=1.0-0.5*(1.0+erf(z/1.41421356237309504880));
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="Wilcoxon signed rank test";r->statistic=Wp;r->df1=0.0/0.0;r->df2=0.0/0.0;
   r->p_value=pv;r->alt_tag=alt_tag;r->estimate=Wp;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
   return (int64_t)(intptr_t)r;
@@ -888,28 +685,8 @@
 ;;; Since: ST6
 (defn ks-test-1samp [col : int d-dist : int alt-tag : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static int __cmp_dbl(const void *a, const void *b) {
-    double x=*(const double *)a,y=*(const double *)b; return (x>y)-(x<y);
-  }
-
-  /* We call the cdf function via the Turmeric interpreter is not possible here;
-     instead we inline the logic for the distribution types we support.
-     For a one-sample KS test the caller is expected to pass a dist handle
+  /* For a one-sample KS test the caller is expected to pass a dist handle
      from stats/dist; we read its tag and parameters. */
-  typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
   __dist_t *dist = (__dist_t *)(intptr_t)d_dist;
 
   struct __frame_col *c=(struct __frame_col *)(intptr_t)col;
@@ -917,8 +694,7 @@
   int64_t n=0;
   for(int64_t i=0;i<c->length;i++) if(__valid(c->validity,i)) n++;
   if(!n){
-    typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-    __tr *r=(__tr *)malloc(sizeof(__tr));
+    __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
     r->name="One-sample Kolmogorov-Smirnov test";r->statistic=0.0/0.0;r->df1=0.0/0.0;r->df2=0.0/0.0;
     r->p_value=0.0/0.0;r->alt_tag=alt_tag;r->estimate=0.0/0.0;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
     return (int64_t)(intptr_t)r;
@@ -927,63 +703,33 @@
   double *tmp=(double *)malloc((size_t)n*sizeof(double));
   int64_t k=0;
   for(int64_t i=0;i<c->length;i++) if(__valid(c->validity,i)) tmp[k++]=v[i];
-  qsort(tmp,(size_t)n,sizeof(double),__cmp_dbl);
+  qsort(tmp,(size_t)n,sizeof(double),__cmp_dbl_ts);
 
-  /* CDF inline for normal only (common case); others use bisection on ibeta/igamma. */
-  #define DIST_NORMAL  1
-  #define DIST_UNIFORM 5
-  #define DIST_EXP     8
-
-  static double __ibeta_ks(double x,double aa,double bb){
-    if(x<=0.0)return 0.0;if(x>=1.0)return 1.0;
-    int sw=0;if(x>(aa+1.0)/(aa+bb+2.0)){double t=aa;aa=bb;bb=t;x=1.0-x;sw=1;}
-    double lb=lgamma(aa)+lgamma(bb)-lgamma(aa+bb);
-    double front=exp(aa*log(x)+bb*log(1.0-x)-lb)/aa;
-    double fpmin=1e-300,c=1.0,dd=1.0-(aa+bb)*x/(aa+1.0);
-    if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double h=dd;
-    for(int m=1;m<=200;m++){
-      double m2=2.0*(double)m;
-      double num=((double)m*(bb-(double)m)*x)/((aa+m2-1.0)*(aa+m2));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;h*=dd*c;
-      num=-(aa+(double)m)*(aa+bb+(double)m)*x/((aa+m2)*(aa+m2+1.0));
-      dd=1.0+num*dd;if(fabs(dd)<fpmin)dd=fpmin;c=1.0+num/c;if(fabs(c)<fpmin)c=fpmin;dd=1.0/dd;double del=dd*c;h*=del;
-      if(fabs(del-1.0)<1e-12)break;
-    }
-    double val=front*h;return sw?1.0-val:val;
-  }
-  static double __igamma_ks(double a,double x){
-    if(x<=0.0)return 0.0;
-    if(x>a+1.0){double fpmin=1e-300,b=x+1.0-a,c=1.0/fpmin,dd=1.0/b,h=dd;
-      for(int i=1;i<=200;i++){double an=-(double)i*((double)i-a);b+=2.0;c=b+an/c;if(fabs(c)<fpmin)c=fpmin;dd=b+an*dd;if(fabs(dd)<fpmin)dd=fpmin;dd=1.0/dd;double del=dd*c;h*=del;if(fabs(del-1.0)<1e-12)break;}
-      return 1.0-exp(-x+a*log(x)-lgamma(a))*h;}
-    double ap=a,sum=1.0/a,del=sum;
-    for(int i=0;i<200;i++){ap++;del*=x/ap;sum+=del;if(fabs(del)<fabs(sum)*1e-12)break;}
-    return sum*exp(-x+a*log(x)-lgamma(a));
-  }
-
-  double cdf_ks(double xv){
-    switch(dist->tag){
-      case 1: {double z=(xv-dist->p1)/(dist->p2*1.41421356237309504880);return 0.5*(1.0+erf(z));}
-      case 2: {double vv=dist->p1,ib=__ibeta_ks(vv/(vv+xv*xv),vv/2.0,0.5);return xv>=0.0?1.0-0.5*ib:0.5*ib;}
-      case 3: return __igamma_ks(dist->p1/2.0,xv/2.0);
-      case 4: {double d1=dist->p1,d2=dist->p2;return xv<=0.0?0.0:__ibeta_ks(d1*xv/(d1*xv+d2),d1/2.0,d2/2.0);}
-      case 5: {double aa=dist->p1,bb=dist->p2;if(xv<=aa)return 0.0;if(xv>=bb)return 1.0;return(xv-aa)/(bb-aa);}
-      case 8: return xv<=0.0?0.0:1.0-exp(-dist->p1*xv);
-      case 9: return __ibeta_ks(xv,dist->p1,dist->p2);
-      case 10: return __igamma_ks(dist->p1,dist->p2*xv);
-      default: return 0.0/0.0;
-    }
-  }
+  #define __CDF_KS(xv, dist_ptr, out) do { \
+    double _xv=(xv); \
+    switch((dist_ptr)->tag){ \
+      case DIST_NORMAL:  {double _z=(_xv-(dist_ptr)->p1)/((dist_ptr)->p2*1.41421356237309504880);(out)=0.5*(1.0+erf(_z));} break; \
+      case DIST_T:       {double _vv=(dist_ptr)->p1,_ib=__ibeta_ts(_vv/(_vv+_xv*_xv),_vv/2.0,0.5);(out)=_xv>=0.0?1.0-0.5*_ib:0.5*_ib;} break; \
+      case DIST_CHI2:    (out)=__igamma_ts((dist_ptr)->p1/2.0,_xv/2.0); break; \
+      case DIST_F:       {double _d1=(dist_ptr)->p1,_d2=(dist_ptr)->p2;(out)=_xv<=0.0?0.0:__ibeta_ts(_d1*_xv/(_d1*_xv+_d2),_d1/2.0,_d2/2.0);} break; \
+      case DIST_UNIFORM: {double _aa=(dist_ptr)->p1,_bb=(dist_ptr)->p2;(out)=_xv<=_aa?0.0:_xv>=_bb?1.0:(_xv-_aa)/(_bb-_aa);} break; \
+      case DIST_EXP:     (out)=_xv<=0.0?0.0:1.0-exp(-(dist_ptr)->p1*_xv); break; \
+      case DIST_BETA:    (out)=__ibeta_ts(_xv,(dist_ptr)->p1,(dist_ptr)->p2); break; \
+      case DIST_GAMMA:   (out)=__igamma_ts((dist_ptr)->p1,(dist_ptr)->p2*_xv); break; \
+      default: (out)=0.0/0.0; break; \
+    } \
+  } while(0)
 
   double D=0.0;
   for(int64_t i=0;i<n;i++){
     double Fn_hi=(double)(i+1)/(double)n;
     double Fn_lo=(double)i/(double)n;
-    double Fx=cdf_ks(tmp[i]);
+    double Fx=0.0; __CDF_KS(tmp[i], dist, Fx);
     double d_hi=fabs(Fn_hi-Fx), d_lo=fabs(Fn_lo-Fx);
     double d=d_hi>d_lo?d_hi:d_lo;
     if(d>D)D=d;
   }
+  #undef __CDF_KS
   free(tmp);
 
   /* Kolmogorov distribution p-value (asymptotic). */
@@ -996,8 +742,7 @@
   }
   pv=2.0*pv; if(pv<0.0)pv=0.0; if(pv>1.0)pv=1.0;
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="One-sample Kolmogorov-Smirnov test";r->statistic=D;r->df1=0.0/0.0;r->df2=0.0/0.0;
   r->p_value=pv;r->alt_tag=alt_tag;r->estimate=D;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
   return (int64_t)(intptr_t)r;
@@ -1014,23 +759,6 @@
 ;;; Since: ST6
 (defn ks-test-2samp [a : int b : int alt-tag : int] : int
   ```c
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdlib.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  static inline int __valid(void *validity, int64_t i) {
-    if (!validity) return 1;
-    uint8_t *bm = (uint8_t *)validity;
-    return (bm[i >> 3] >> (i & 7)) & 1;
-  }
-  static int __cmp_dbl(const void *a, const void *b) {
-    double x=*(const double *)a,y=*(const double *)b; return (x>y)-(x<y);
-  }
-
   struct __frame_col *ca=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *cb=(struct __frame_col *)(intptr_t)b;
   int64_t na=0,nb=0;
@@ -1042,8 +770,8 @@
   int64_t ka=0,kb=0;
   for(int64_t i=0;i<ca->length;i++) if(__valid(ca->validity,i)) ta[ka++]=((double *)ca->values)[i];
   for(int64_t i=0;i<cb->length;i++) if(__valid(cb->validity,i)) tb[kb++]=((double *)cb->values)[i];
-  qsort(ta,(size_t)na,sizeof(double),__cmp_dbl);
-  qsort(tb,(size_t)nb,sizeof(double),__cmp_dbl);
+  qsort(ta,(size_t)na,sizeof(double),__cmp_dbl_ts);
+  qsort(tb,(size_t)nb,sizeof(double),__cmp_dbl_ts);
 
   double D=0.0; int64_t ia=0,ib=0;
   while(ia<na&&ib<nb){
@@ -1066,8 +794,7 @@
   }
   pv=2.0*pv; if(pv<0.0)pv=0.0; if(pv>1.0)pv=1.0;
 
-  typedef struct{const char*name;double statistic,df1,df2,p_value;int64_t alt_tag;double estimate,ci_low,ci_high,conf_level;}__tr;
-  __tr *r=(__tr *)malloc(sizeof(__tr));
+  __test_result_t *r=(__test_result_t *)malloc(sizeof(__test_result_t));
   r->name="Two-sample Kolmogorov-Smirnov test";r->statistic=D;r->df1=0.0/0.0;r->df2=0.0/0.0;
   r->p_value=pv;r->alt_tag=alt_tag;r->estimate=D;r->ci_low=0.0/0.0;r->ci_high=0.0/0.0;r->conf_level=0.95;
   return (int64_t)(intptr_t)r;

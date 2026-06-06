@@ -4,6 +4,47 @@
   (export bootstrap bootstrap-2samp permutation-test
           train-test-split cv-folds cv-folds-stratified)
 
+```c
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
+
+struct __frame_col {
+  int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+  void *validity; void *values; void *offsets;
+};
+struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+struct __schema { int64_t arity; struct __field *fields; };
+struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+struct __cons { int64_t value; int64_t next; };
+
+typedef struct { uint64_t state; uint64_t inc; } __rng_t;
+typedef struct {
+  const char *name; double statistic; double df1; double df2;
+  double p_value; int64_t alt_tag; double estimate;
+  double ci_low; double ci_high; double conf_level;
+} __test_result_t;
+
+static uint32_t __pcg32_next(__rng_t *r) {
+  uint64_t os=r->state;
+  r->state=os*6364136223846793005ULL+(r->inc|1);
+  uint32_t xsh=(uint32_t)(((os>>18u)^os)>>27u);
+  uint32_t rot=(uint32_t)(os>>59u);
+  return (xsh>>rot)|(xsh<<((-rot)&31));
+}
+static double __rng_uniform(__rng_t *r) {
+  return ((double)__pcg32_next(r)+0.5)/4294967296.0;
+}
+static int64_t __rng_int_range(__rng_t *r, int64_t lo, int64_t hi) {
+  uint64_t range=(uint64_t)(hi-lo);
+  uint64_t threshold=(uint64_t)(-(int64_t)range)%range;
+  uint32_t v;
+  do { v=__pcg32_next(r); } while((uint64_t)v<threshold);
+  return lo+(int64_t)(v%range);
+}
+```
+
 ;;; bootstrap -- one-sample bootstrap confidence interval.
 ;;;
 ;;; Parameters:
@@ -20,36 +61,6 @@
 ;;; Since: ST8
 (defn bootstrap [col : int stat-fn : int n-reps : int conf-level : float method : int rng : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  /* PCG32 state matches rng.tur layout: { uint64_t state; uint64_t inc; } */
-  typedef struct { uint64_t state; uint64_t inc; } __rng_t;
-
-  static uint32_t _pcg32_next(__rng_t *r){
-    uint64_t os=r->state;
-    r->state=os*6364136223846793005ULL+(r->inc|1);
-    uint32_t xsh=(uint32_t)(((os>>18u)^os)>>27u);
-    uint32_t rot=(uint32_t)(os>>59u);
-    return (xsh>>rot)|(xsh<<((-rot)&31));
-  }
-  static double _rng_uniform(__rng_t *r){
-    return ((double)_pcg32_next(r)+0.5)/4294967296.0;
-  }
-  static int64_t _rng_int_range(__rng_t *r, int64_t lo, int64_t hi){
-    uint64_t range=(uint64_t)(hi-lo);
-    uint64_t threshold=(uint64_t)(-(int64_t)range)%range;
-    uint32_t v;
-    do { v=_pcg32_next(r); } while((uint64_t)v<threshold);
-    return lo+(int64_t)(v%range);
-  }
-
   struct __frame_col *cc=(struct __frame_col *)(intptr_t)col;
   int64_t n=cc->length;
   double *cv=(double *)cc->values;
@@ -82,7 +93,7 @@
   /* Draw bootstrap samples */
   double *tmp=(double *)malloc((size_t)(n*sizeof(double)));
   for(int64_t b=0;b<n_reps;b++){
-    for(int64_t i=0;i<n;i++) tmp[i]=cv[_rng_int_range(rp,0,n)];
+    for(int64_t i=0;i<n;i++) tmp[i]=cv[__rng_int_range(rp,0,n)];
     if(fn_tag==1){
       double sm=0.0; for(int64_t i=0;i<n;i++) sm+=tmp[i]; sm/=(double)n;
       double sv=0.0; for(int64_t i=0;i<n;i++) sv+=(tmp[i]-sm)*(tmp[i]-sm);
@@ -176,11 +187,6 @@
   free(reps);
 
   /* Build test-result. */
-  typedef struct {
-    const char *name; double statistic; double df1; double df2;
-    double p_value; int64_t alt_tag; double estimate;
-    double ci_low; double ci_high; double conf_level;
-  } __test_result_t;
   __test_result_t *tr=(__test_result_t *)malloc(sizeof(__test_result_t));
   tr->name="bootstrap";tr->statistic=obs;tr->df1=NAN;tr->df2=NAN;
   tr->p_value=NAN;tr->alt_tag=0;tr->estimate=obs;
@@ -205,27 +211,6 @@
 ;;; Since: ST8
 (defn bootstrap-2samp [a : int b : int stat-fn : int n-reps : int conf-level : float method : int rng : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  typedef struct { uint64_t state; uint64_t inc; } __rng_t;
-  static uint32_t _pcg32n(__rng_t *r){
-    uint64_t os=r->state; r->state=os*6364136223846793005ULL+(r->inc|1);
-    uint32_t x=(uint32_t)(((os>>18u)^os)>>27u); uint32_t rot=(uint32_t)(os>>59u);
-    return (x>>rot)|(x<<((-rot)&31));
-  }
-  static int64_t _rint(__rng_t *r,int64_t lo,int64_t hi){
-    uint64_t range=(uint64_t)(hi-lo); uint64_t th=(uint64_t)(-(int64_t)range)%range;
-    uint32_t v; do{v=_pcg32n(r);}while((uint64_t)v<th);
-    return lo+(int64_t)(v%range);
-  }
-
   struct __frame_col *ac=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *bc2=(struct __frame_col *)(intptr_t)b;
   int64_t na=ac->length, nb=bc2->length;
@@ -254,8 +239,8 @@
   double *ta=(double *)malloc((size_t)(na*sizeof(double)));
   double *tb=(double *)malloc((size_t)(nb*sizeof(double)));
   for(int64_t r=0;r<n_reps;r++){
-    for(int64_t i=0;i<na;i++) ta[i]=av[_rint(rp,0,na)];
-    for(int64_t i=0;i<nb;i++) tb[i]=bv[_rint(rp,0,nb)];
+    for(int64_t i=0;i<na;i++) ta[i]=av[__rng_int_range(rp,0,na)];
+    for(int64_t i=0;i<nb;i++) tb[i]=bv[__rng_int_range(rp,0,nb)];
     _STAT2(ta,na,tb,nb,fn_tag,reps[r]);
   }
   free(ta);free(tb);
@@ -273,11 +258,6 @@
   (void)method; /* BCa for 2-samp not implemented; falls back to percentile */
   free(reps);
 
-  typedef struct {
-    const char *name;double statistic;double df1;double df2;
-    double p_value;int64_t alt_tag;double estimate;
-    double ci_low;double ci_high;double conf_level;
-  } __test_result_t;
   __test_result_t *tr=(__test_result_t *)malloc(sizeof(__test_result_t));
   tr->name="bootstrap-2samp";tr->statistic=obs;tr->df1=NAN;tr->df2=NAN;
   tr->p_value=NAN;tr->alt_tag=0;tr->estimate=obs;
@@ -302,27 +282,6 @@
 ;;; Since: ST8
 (defn permutation-test [a : int b : int stat-fn : int n-reps : int alt-tag : int rng : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  typedef struct { uint64_t state; uint64_t inc; } __rng_t;
-  static uint32_t _pcgp(__rng_t *r){
-    uint64_t os=r->state;r->state=os*6364136223846793005ULL+(r->inc|1);
-    uint32_t x=(uint32_t)(((os>>18u)^os)>>27u);uint32_t rot=(uint32_t)(os>>59u);
-    return (x>>rot)|(x<<((-rot)&31));
-  }
-  static int64_t _rintp(__rng_t *r,int64_t lo,int64_t hi){
-    uint64_t range=(uint64_t)(hi-lo);uint64_t th=(uint64_t)(-(int64_t)range)%range;
-    uint32_t v;do{v=_pcgp(r);}while((uint64_t)v<th);
-    return lo+(int64_t)(v%range);
-  }
-
   struct __frame_col *ac=(struct __frame_col *)(intptr_t)a;
   struct __frame_col *bc2=(struct __frame_col *)(intptr_t)b;
   int64_t na=ac->length,nb=bc2->length,ntot=na+nb;
@@ -348,7 +307,7 @@
     memcpy(perm,pool,(size_t)(ntot*sizeof(double)));
     /* Fisher-Yates shuffle. */
     for(int64_t i=ntot-1;i>0;i--){
-      int64_t j=_rintp(rp,0,i+1);
+      int64_t j=__rng_int_range(rp,0,i+1);
       double tmp=perm[i];perm[i]=perm[j];perm[j]=tmp;
     }
     double pma=0,pmb=0;
@@ -363,11 +322,6 @@
 
   double p_value=(double)(cnt+1)/(double)(n_reps+1);
 
-  typedef struct {
-    const char *name;double statistic;double df1;double df2;
-    double p_value;int64_t alt_tag;double estimate;
-    double ci_low;double ci_high;double conf_level;
-  } __test_result_t;
   __test_result_t *tr=(__test_result_t *)malloc(sizeof(__test_result_t));
   tr->name="permutation-test";tr->statistic=obs;tr->df1=NAN;tr->df2=NAN;
   tr->p_value=p_value;tr->alt_tag=alt_tag;tr->estimate=obs;
@@ -389,31 +343,6 @@
 ;;; Since: ST8
 (defn train-test-split [f : int test-frac : float stratify-col : int rng : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-  #include <math.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
-  struct __cons { int64_t value; int64_t next; };
-  typedef struct { uint64_t state; uint64_t inc; } __rng_t;
-  static uint32_t _pcgt(__rng_t *r){
-    uint64_t os=r->state;r->state=os*6364136223846793005ULL+(r->inc|1);
-    uint32_t x=(uint32_t)(((os>>18u)^os)>>27u);uint32_t rot=(uint32_t)(os>>59u);
-    return (x>>rot)|(x<<((-rot)&31));
-  }
-  static int64_t _rintt(__rng_t *r,int64_t lo,int64_t hi){
-    uint64_t range=(uint64_t)(hi-lo);uint64_t th=(uint64_t)(-(int64_t)range)%range;
-    uint32_t v;do{v=_pcgt(r);}while((uint64_t)v<th);
-    return lo+(int64_t)(v%range);
-  }
-
   struct __frame *fr=(struct __frame *)(intptr_t)f;
   struct __schema *sc=(struct __schema *)(intptr_t)fr->schema_ptr;
   int64_t n=fr->nrows;
@@ -428,7 +357,7 @@
   __rng_t *rp=(__rng_t *)(intptr_t)rng;
   (void)stratify_col; /* simple random split only for now */
   for(int64_t i=n-1;i>0;i--){
-    int64_t j=_rintt(rp,0,i+1);
+    int64_t j=__rng_int_range(rp,0,i+1);
     int64_t tmp=idx[i];idx[i]=idx[j];idx[j]=tmp;
   }
 
@@ -516,29 +445,12 @@
 ;;; Since: ST8
 (defn cv-folds [n : int k : int shuffle? : int rng : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-
-  struct __cons { int64_t value; int64_t next; };
-  typedef struct { uint64_t state; uint64_t inc; } __rng_t;
-  static uint32_t _pcgcv(__rng_t *r){
-    uint64_t os=r->state;r->state=os*6364136223846793005ULL+(r->inc|1);
-    uint32_t x=(uint32_t)(((os>>18u)^os)>>27u);uint32_t rot=(uint32_t)(os>>59u);
-    return (x>>rot)|(x<<((-rot)&31));
-  }
-  static int64_t _rintcv(__rng_t *r,int64_t lo,int64_t hi){
-    uint64_t range=(uint64_t)(hi-lo);uint64_t th=(uint64_t)(-(int64_t)range)%range;
-    uint32_t v;do{v=_pcgcv(r);}while((uint64_t)v<th);
-    return lo+(int64_t)(v%range);
-  }
-
   int64_t *idx=(int64_t *)malloc((size_t)(n*sizeof(int64_t)));
   for(int64_t i=0;i<n;i++) idx[i]=i;
-  if(shuffle?){
+  if(shuffle_qu){
     __rng_t *rp=(__rng_t *)(intptr_t)rng;
     for(int64_t i=n-1;i>0;i--){
-      int64_t j=_rintcv(rp,0,i+1);
+      int64_t j=__rng_int_range(rp,0,i+1);
       int64_t tmp=idx[i];idx[i]=idx[j];idx[j]=tmp;
     }
   }
@@ -593,27 +505,6 @@
 ;;; Since: ST8
 (defn cv-folds-stratified [col : int k : int shuffle? : int rng : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __cons { int64_t value; int64_t next; };
-  typedef struct { uint64_t state; uint64_t inc; } __rng_t;
-  static uint32_t _pcgst(__rng_t *r){
-    uint64_t os=r->state;r->state=os*6364136223846793005ULL+(r->inc|1);
-    uint32_t x=(uint32_t)(((os>>18u)^os)>>27u);uint32_t rot=(uint32_t)(os>>59u);
-    return (x>>rot)|(x<<((-rot)&31));
-  }
-  static int64_t _rintst(__rng_t *r,int64_t lo,int64_t hi){
-    uint64_t range=(uint64_t)(hi-lo);uint64_t th=(uint64_t)(-(int64_t)range)%range;
-    uint32_t v;do{v=_pcgst(r);}while((uint64_t)v<th);
-    return lo+(int64_t)(v%range);
-  }
-
   struct __frame_col *cc=(struct __frame_col *)(intptr_t)col;
   int64_t n=cc->length;
   double *cv2=(double *)cc->values;
@@ -645,11 +536,11 @@
   free(fill);free(classes);
 
   /* Optionally shuffle within each class. */
-  if(shuffle?){
+  if(shuffle_qu){
     __rng_t *rp=(__rng_t *)(intptr_t)rng;
     for(int64_t j=0;j<n_cls;j++){
       for(int64_t i=cls_cnt[j]-1;i>0;i--){
-        int64_t ji=_rintst(rp,0,i+1);
+        int64_t ji=__rng_int_range(rp,0,i+1);
         int64_t tmp=cls_idx[j][i];cls_idx[j][i]=cls_idx[j][ji];cls_idx[j][ji]=tmp;
       }
     }

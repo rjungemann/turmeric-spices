@@ -65,18 +65,50 @@
   (import httpd/pool     :refer [pool-new pool-enqueue pool-stop])
   (export server-start server-start-pool server-start-spawn server-stop)
 
+;; file-scope-c-block: system headers like <pthread.h> and <sys/socket.h>
+;; contain static inline function definitions (e.g. __DARWIN_FD_ISSET on
+;; macOS 14+ / Xcode 15+) that are not legal inside a function body.
+;; Hoist all POSIX headers and the shared struct layouts here.
+```c
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <errno.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+struct __httpd_rawreq { char *bytes; int len; };
+
+struct __httpd_warg { int client_fd; void *handler; };
+
+struct __httpd_server {
+  int           listen_fd;
+  void         *handler;
+  volatile int  stop_flag;
+  void         *listener_thread;
+  void         *pool;
+};
+
+/* Forward-declare the Turmeric-generated static function so the non-static
+   trampoline below can reference it before the actual definition. */
+static void * httpd__server__srv_hyworker_hyloop(void *);
+/* Non-static trampoline exported so pool.tur (separate TU) can call
+   srv-worker-loop without violating the static-only rule. */
+void * httpd__server__srv_worker_loop_trampoline(void *arg) {
+  return httpd__server__srv_hyworker_hyloop(arg);
+}
+```
+
 ;; =============================================================================
 ;; Low-level POSIX socket primitives (inline-C, local to this module)
 ;; =============================================================================
 
 (defn srv-make-listener [port : int] : int
   ```c
-  #include <stdio.h>
-  #include <string.h>
-  #include <unistd.h>
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) return -1;
   int yes = 1;
@@ -99,8 +131,6 @@
 
 (defn srv-accept-one [listen-fd : int] : int
   ```c
-  #include <sys/socket.h>
-  #include <errno.h>
   int lf = (int)listen_fd;
   if (lf < 0) return -1;
   for (;;) {
@@ -113,14 +143,12 @@
 
 (defn srv-close-fd [fd : int] : void
   ```c
-  #include <unistd.h>
   int f = (int)fd;
   if (f >= 0) close(f);
   ```)
 
 (defn srv-shutdown-fd [fd : int] : void
   ```c
-  #include <sys/socket.h>
   int f = (int)fd;
   if (f >= 0) shutdown(f, SHUT_RDWR);
   ```)
@@ -131,11 +159,6 @@
 ;; peer half-closes).
 (defn srv-recv-request [client-fd : int] : int
   ```c
-  #include <stdlib.h>
-  #include <string.h>
-  #include <strings.h>
-  #include <unistd.h>
-  struct __httpd_rawreq { char *bytes; int len; };
   int cf = (int)client_fd;
   if (cf < 0) return 0;
 
@@ -209,20 +232,16 @@
 
 (defn srv-raw-bytes [raw : int] : cstr
   ```c
-  struct __httpd_rawreq { char *bytes; int len; };
   return ((struct __httpd_rawreq *)(intptr_t)raw)->bytes;
   ```)
 
 (defn srv-raw-len [raw : int] : int
   ```c
-  struct __httpd_rawreq { char *bytes; int len; };
   return (int64_t)((struct __httpd_rawreq *)(intptr_t)raw)->len;
   ```)
 
 (defn srv-raw-free [raw : int] : void
   ```c
-  #include <stdlib.h>
-  struct __httpd_rawreq { char *bytes; int len; };
   if (raw == 0) return;
   struct __httpd_rawreq *r = (struct __httpd_rawreq *)(intptr_t)raw;
   free(r->bytes);
@@ -233,8 +252,6 @@
 ;; success, -1 on error.  EPIPE / EINTR retried as appropriate.
 (defn srv-write-all [fd : int buf : cstr len : int] : int
   ```c
-  #include <unistd.h>
-  #include <errno.h>
   int f = (int)fd;
   if (f < 0) return -1;
   const char *p = (const char *)buf;
@@ -265,8 +282,6 @@
 
 (defn srv-worker-loop [arg : ptr<void>] : ptr<void>
   ```c
-  #include <stdlib.h>
-  struct __httpd_warg { int client_fd; void *handler; };
   ```
   (let [warg-int (srv-warg->int arg)
         client-fd (srv-warg-fd warg-int)
@@ -298,19 +313,16 @@
 
 (defn srv-warg-fd [arg : int] : int
   ```c
-  struct __httpd_warg { int client_fd; void *handler; };
   return (int64_t)((struct __httpd_warg *)(intptr_t)arg)->client_fd;
   ```)
 
 (defn srv-warg-handler [arg : int] : ptr<void>
   ```c
-  struct __httpd_warg { int client_fd; void *handler; };
   return ((struct __httpd_warg *)(intptr_t)arg)->handler;
   ```)
 
 (defn srv-warg-free [arg : int] : void
   ```c
-  #include <stdlib.h>
   free((void *)(intptr_t)arg);
   ```)
 
@@ -322,12 +334,8 @@
 ;; Spawn a detached worker thread for one connection.
 (defn srv-spawn-worker [handler : ptr<void> client-fd : int] : void
   ```c
-  #include <stdlib.h>
-  #include <unistd.h>
-  #include <pthread.h>
-  struct __httpd_warg { int client_fd; void *handler; };
   /* Forward decl: srv-worker-loop is defined in this same translation unit. */
-  extern void *httpd__server__srv_worker_loop(void *);
+  extern void *httpd__server__srv_hyworker_hyloop(void *);
   struct __httpd_warg *wa = malloc(sizeof(*wa));
   if (!wa) {
     close((int)client_fd);
@@ -336,7 +344,7 @@
   wa->client_fd = (int)client_fd;
   wa->handler   = (void *)handler;
   pthread_t tid;
-  if (pthread_create(&tid, NULL, httpd__server__srv_worker_loop, wa) != 0) {
+  if (pthread_create(&tid, NULL, httpd__server__srv_hyworker_hyloop, wa) != 0) {
     free(wa);
     close((int)client_fd);
     return;
@@ -350,14 +358,6 @@
 
 (defn srv-state-new [listen-fd : int handler : ptr<void>] : ptr<void>
   ```c
-  #include <stdlib.h>
-  struct __httpd_server {
-    int           listen_fd;
-    void         *handler;
-    volatile int  stop_flag;
-    void         *listener_thread;
-    void         *pool;
-  };
   struct __httpd_server *s = malloc(sizeof(*s));
   s->listen_fd       = (int)listen_fd;
   s->handler         = (void *)handler;
@@ -374,38 +374,22 @@
 
 (defn srv-state-listen-fd [s : int] : int
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   return (int64_t)((struct __httpd_server *)(intptr_t)s)->listen_fd;
   ```)
 
 (defn srv-state-handler-ptr [s : int] : ptr<void>
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   return ((struct __httpd_server *)(intptr_t)s)->handler;
   ```)
 
 (defn srv-state-stopping? [s : int] : int
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   __sync_synchronize();
   return ((struct __httpd_server *)(intptr_t)s)->stop_flag ? 1 : 0;
   ```)
 
 (defn srv-state-mark-stopping [s : ptr<void>] : void
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   struct __httpd_server *sv = (struct __httpd_server *)s;
   sv->stop_flag = 1;
   __sync_synchronize();
@@ -413,12 +397,6 @@
 
 (defn srv-state-close-listen [s : ptr<void>] : void
   ```c
-  #include <sys/socket.h>
-  #include <unistd.h>
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   struct __httpd_server *sv = (struct __httpd_server *)s;
   if (sv->listen_fd >= 0) {
     shutdown(sv->listen_fd, SHUT_RDWR);
@@ -429,52 +407,31 @@
 
 (defn srv-state-set-thread [s : ptr<void> tid : ptr<void>] : void
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   ((struct __httpd_server *)s)->listener_thread = tid;
   ```)
 
 (defn srv-state-get-thread [s : ptr<void>] : ptr<void>
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   return ((struct __httpd_server *)s)->listener_thread;
   ```)
 
 (defn srv-state-set-pool [s : ptr<void> pool : ptr<void>] : void
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   ((struct __httpd_server *)s)->pool = (void *)pool;
   ```)
 
 (defn srv-state-pool [s : int] : ptr<void>
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   return ((struct __httpd_server *)(intptr_t)s)->pool;
   ```)
 
 (defn srv-state-pool-int [s : int] : int
   ```c
-  struct __httpd_server {
-    int listen_fd; void *handler; volatile int stop_flag; void *listener_thread;
-    void *pool;
-  };
   return (int64_t)(intptr_t)((struct __httpd_server *)(intptr_t)s)->pool;
   ```)
 
 (defn srv-state-free [s : ptr<void>] : void
   ```c
-  #include <stdlib.h>
   free(s);
   ```)
 
@@ -494,12 +451,10 @@
 
 (defn srv-spawn-listener [s : ptr<void>] : ptr<void>
   ```c
-  #include <stdlib.h>
-  #include <pthread.h>
-  extern void *httpd__server__srv_listener_loop(void *);
+  extern void *httpd__server__srv_hylistener_hyloop(void *);
   pthread_t *tid = malloc(sizeof(*tid));
   if (!tid) return NULL;
-  if (pthread_create(tid, NULL, httpd__server__srv_listener_loop, s) != 0) {
+  if (pthread_create(tid, NULL, httpd__server__srv_hylistener_hyloop, s) != 0) {
     free(tid);
     return NULL;
   }
@@ -508,8 +463,6 @@
 
 (defn srv-join-listener [tid : ptr<void>] : void
   ```c
-  #include <stdlib.h>
-  #include <pthread.h>
   if (!tid) return;
   pthread_t *t = (pthread_t *)tid;
   pthread_join(*t, NULL);

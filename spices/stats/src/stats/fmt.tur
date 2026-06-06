@@ -9,6 +9,37 @@
                                test-result-estimate test-result-ci-low
                                test-result-ci-high test-result-conf-level])
 
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdio.h>
+
+typedef struct {
+  const char *name; double statistic; double df1; double df2;
+  double p_value; int64_t alt_tag; double estimate;
+  double ci_low; double ci_high; double conf_level;
+} __test_result_t;
+
+typedef struct {
+  int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
+  int64_t fitted; int64_t residuals;
+  double r_squared; double adj_r_squared; double sigma;
+  int64_t df_residual; int64_t df_model; int64_t n_obs;
+  int64_t names;
+} __lm_fit_t;
+
+struct __frame_col {
+  int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
+  void *validity; void *values; void *offsets;
+};
+struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+struct __schema { int64_t arity; struct __field *fields; };
+struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+struct __cons { int64_t value; int64_t next; };
+```
+
 ;;; test->str -- format a test-result as a string (R-style).
 ;;;
 ;;; Parameters:
@@ -20,17 +51,6 @@
 ;;; Since: ST5
 (defn test->str [r : int] : cstr
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdio.h>
-  #include <string.h>
-
-  typedef struct {
-    const char *name; double statistic; double df1; double df2;
-    double p_value; int64_t alt_tag; double estimate;
-    double ci_low; double ci_high; double conf_level;
-  } __test_result_t;
   __test_result_t *tr = (__test_result_t *)(intptr_t)r;
 
   const char *alt_str = tr->alt_tag == 1 ? "less"
@@ -70,7 +90,7 @@
       "sample estimates: %.6g\n", tr->estimate);
   }
 
-  return (int64_t)(intptr_t)strdup(buf);
+  return strdup(buf);
   ```)
 
 ;;; print-test -- print a test-result to stdout.
@@ -84,17 +104,8 @@
 ;;; Since: ST5
 (defn print-test [r : int] : void
   ```c
-  #include <stdint.h>
-  #include <stdio.h>
-
   /* We call test->str logic inline rather than via interpreter dispatch. */
-  typedef struct {
-    const char *name; double statistic; double df1; double df2;
-    double p_value; int64_t alt_tag; double estimate;
-    double ci_low; double ci_high; double conf_level;
-  } __test_result_t;
   __test_result_t *tr = (__test_result_t *)(intptr_t)r;
-  #include <math.h>
   const char *alt_str = tr->alt_tag == 1 ? "less"
                       : tr->alt_tag == 2 ? "greater"
                       : "two.sided";
@@ -126,26 +137,7 @@
 ;;; Since: ST7
 (defn fit->str [fit : int] : cstr
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdio.h>
-  #include <string.h>
-
   /* lm-fit layout -- see stats/regress.tur. */
-  typedef struct {
-    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
-    int64_t fitted; int64_t residuals;
-    double r_squared; double adj_r_squared; double sigma;
-    int64_t df_residual; int64_t df_model; int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __cons { int64_t value; int64_t next; };
-
   __lm_fit_t *f = (__lm_fit_t *)(intptr_t)fit;
   struct __frame_col *coefs_col   = (struct __frame_col *)(intptr_t)f->coefs;
   struct __frame_col *se_col      = (struct __frame_col *)(intptr_t)f->se;
@@ -177,7 +169,7 @@
     f->sigma, (long long)f->df_residual,
     f->r_squared, f->adj_r_squared);
 
-  return (int64_t)(intptr_t)strdup(buf);
+  return strdup(buf);
   ```)
 
 ;;; print-fit -- print an lm-fit summary to stdout.
@@ -191,25 +183,6 @@
 ;;; Since: ST7
 (defn print-fit [fit : int] : void
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <math.h>
-  #include <stdio.h>
-  #include <string.h>
-
-  typedef struct {
-    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
-    int64_t fitted; int64_t residuals;
-    double r_squared; double adj_r_squared; double sigma;
-    int64_t df_residual; int64_t df_model; int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __cons { int64_t value; int64_t next; };
-
   __lm_fit_t *f = (__lm_fit_t *)(intptr_t)fit;
   struct __frame_col *coefs_col = (struct __frame_col *)(intptr_t)f->coefs;
   struct __frame_col *se_col    = (struct __frame_col *)(intptr_t)f->se;
@@ -247,27 +220,6 @@
 ;;; Since: ST7
 (defn fit-coefs-frame [fit : int] : int
   ```c
-  #include <stdlib.h>
-  #include <stdint.h>
-  #include <string.h>
-  #include <math.h>
-
-  typedef struct {
-    int64_t coefs; int64_t se; int64_t t_values; int64_t p_values;
-    int64_t fitted; int64_t residuals;
-    double r_squared; double adj_r_squared; double sigma;
-    int64_t df_residual; int64_t df_model; int64_t n_obs;
-    int64_t names;
-  } __lm_fit_t;
-  struct __frame_col {
-    int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
-    void *validity; void *values; void *offsets;
-  };
-  struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
-  struct __schema { int64_t arity; struct __field *fields; };
-  struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
-  struct __cons { int64_t value; int64_t next; };
-
   __lm_fit_t *f = (__lm_fit_t *)(intptr_t)fit;
   struct __frame_col *coefs_col = (struct __frame_col *)(intptr_t)f->coefs;
   int64_t p1 = coefs_col->length;
