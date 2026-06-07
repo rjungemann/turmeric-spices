@@ -1,3 +1,8 @@
+# Remove stray `tur` build artifacts that land in the repo root when tur is
+# invoked from here (matches the patterns in .gitignore).
+clean:
+    rm -f *__*.c *__*.h *.so *.manifest event.c event.h tur.lock .DS_Store
+
 # Render markdown guides under docs/guides/ to HTML (served at /guides/).
 guides:
     python3 tools/genguides.py docs/guides/ --out docs/html/guides/
@@ -48,3 +53,39 @@ vendor-katex version:
 # Validate turmeric+sweet-exp code pairs in all spice READMEs.
 check-docs:
     python3 tools/check-guide-pairs.py --spices
+
+# Symlink vendor/tur/tur onto PATH at PREFIX/bin (default ~/.local/bin).
+# Run `./scripts/install-tur.sh` first to populate vendor/tur/. The symlink
+# keeps the binary next to its stdlib so the exe-walk resolver still works.
+local-install prefix="~/.local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    PREFIX="${prefix/#\~/$HOME}"
+    SRC="$PWD/vendor/tur/tur"
+    DEST="$PREFIX/bin/tur"
+    if [ ! -x "$SRC" ]; then
+        echo "error: $SRC not found -- run ./scripts/install-tur.sh first" >&2
+        exit 1
+    fi
+    mkdir -p "$PREFIX/bin"
+    ln -sf "$SRC" "$DEST"
+    echo "linked $DEST -> $SRC"
+    case ":$PATH:" in *":$PREFIX/bin:"*) ;; *)
+        echo "note: $PREFIX/bin is not on PATH" >&2 ;;
+    esac
+
+# Remove the symlink created by `just local-install`.
+local-uninstall prefix="~/.local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    PREFIX="${prefix/#\~/$HOME}"
+    DEST="$PREFIX/bin/tur"
+    if [ -L "$DEST" ]; then
+        rm "$DEST"
+        echo "removed $DEST"
+    elif [ -e "$DEST" ]; then
+        echo "error: $DEST exists but is not a symlink -- leaving it alone" >&2
+        exit 1
+    else
+        echo "nothing to remove at $DEST"
+    fi
