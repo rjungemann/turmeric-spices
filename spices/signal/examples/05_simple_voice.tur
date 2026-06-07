@@ -1,0 +1,48 @@
+;; 05_simple_voice -- Phase 5 capstone example.
+;;
+;; A "simple voice" wires together every module in the spice:
+;;
+;;   sine oscillator                          (osc)
+;;     -> effects-chain [gain, low-pass]      (compose + shaper + filter)
+;;     -> multiplied by an ADSR envelope      (core pair-signals + shaper)
+;;
+;; The result is a single Signal Sample: a 2 Hz tone, gently low-passed and
+;; shaped by an amplitude envelope. Because the low-pass filter is stateful,
+;; the values depend on the order samples are taken; the reference values in
+;; the comments were produced by sampling left-to-right at the times shown.
+
+(defmodule signal/examples/05_simple_voice
+  (import signal/core     :refer [constant sample pair-signals])
+  (import signal/osc      :refer [sine])
+  (import signal/filter   :refer [low-pass])
+  (import signal/shaper   :refer [gain multiply])
+  (import signal/envelope :refer [ADSRParams adsr-fixed])
+  (import signal/compose  :refer [effects-chain])
+
+(defn main [] : int
+  (let [unused (constant 0.0)
+
+        ;; Carrier: a 2 Hz sine. Oscillators ignore their input signal.
+        osc    ((sine 2.0 0.0) unused)
+
+        ;; Timbre: attenuate to 0.8 then low-pass (alpha 0.5). effects-chain
+        ;; returns a ptr<void> carrier; re-bind it as a ^fat signal closure.
+        ^fat chain : (fn [float] float)
+             (effects-chain (vec-of (gain 0.8) (low-pass 0.5)) osc)
+
+        ;; Amplitude: a short ADSR, gate held 0.5s.
+        env    ((adsr-fixed (make-struct ADSRParams 0.1 0.1 0.6 0.2) 0.5) unused)
+
+        ;; Voice = filtered carrier * envelope, via a product signal.
+        ml     (multiply)
+        ^fat voice : (fn [float] float) (ml (pair-signals chain env))]
+
+    (println (sample voice 0.0))    ;; 0          (sine starts at 0)
+    (println (sample voice 0.05))   ;; ~0.117557  (rising attack)
+    (println (sample voice 0.1))    ;; ~0.497980  (attack peak region)
+    (println (sample voice 0.25))   ;; ~0.149394  (sustain, filtered)
+    (println (sample voice 0.6)))   ;; ~0.151475  (release, decaying)
+
+  0)
+
+) ;; end defmodule

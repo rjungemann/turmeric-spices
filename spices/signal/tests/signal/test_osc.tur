@@ -1,0 +1,50 @@
+;; test_osc -- correctness tests for signal/osc.
+;;
+;; Each oscillator is an SF; apply it to a placeholder input (oscillators
+;; ignore their input) and sample at characteristic time points. Values are
+;; compared with a tolerance because sine goes through libm.
+;;
+;; main returns the failure count, so `tur test` reports a non-zero exit as a
+;; failing test.
+
+(defmodule signal/tests/test_osc
+  (import signal/core :refer [constant sample])
+  (import signal/osc  :refer [sine square sawtooth triangle])
+
+;;; near? -- absolute-tolerance float comparison (no libm dependency).
+(defn near? [a :float b :float] :bool
+  (let [d (- a b)]
+    (if (< d 0.0) (< (- 0.0 d) 0.0001) (< d 0.0001))))
+
+;;; fail-unless -- print label and count 1 when the assertion is false.
+(defn fail-unless [cond :bool label :cstr] :int
+  (if cond 0 (do (println label) 1)))
+
+(defn main [] : int
+  (let [unused (constant 0.0)
+        s1   ((sine 1.0 0.0) unused)
+        sq   ((square 1.0 0.5) unused)
+        saw  ((sawtooth 1.0) unused)
+        tri  ((triangle 1.0) unused)
+        f (+ ;; sine 1 Hz: zero crossings and peak.
+             (fail-unless (near? (sample s1 0.0) 0.0)  "FAIL: sine @ 0.0")
+             (fail-unless (near? (sample s1 0.25) 1.0) "FAIL: sine @ 0.25 (peak)")
+             (fail-unless (near? (sample s1 0.5) 0.0)  "FAIL: sine @ 0.5")
+             (fail-unless (near? (sample s1 0.75) -1.0) "FAIL: sine @ 0.75 (trough)")
+             ;; square 1 Hz, 50% duty: +1 first half, -1 second half.
+             (fail-unless (near? (sample sq 0.25) 1.0)  "FAIL: square on-phase")
+             (fail-unless (near? (sample sq 0.75) -1.0) "FAIL: square off-phase")
+             ;; sawtooth 1 Hz: ramps in [0, 1).
+             (fail-unless (near? (sample saw 0.0) 0.0)  "FAIL: sawtooth @ 0.0")
+             (fail-unless (near? (sample saw 0.5) 0.5)  "FAIL: sawtooth @ 0.5")
+             ;; triangle 1 Hz: -1 at start, 0 at quarter, +1 at midpoint.
+             (fail-unless (near? (sample tri 0.0) -1.0) "FAIL: triangle @ 0.0")
+             (fail-unless (near? (sample tri 0.25) 0.0) "FAIL: triangle @ 0.25")
+             (fail-unless (near? (sample tri 0.5) 1.0)  "FAIL: triangle @ 0.5 (peak)")
+             (fail-unless (near? (sample tri 0.75) 0.0) "FAIL: triangle @ 0.75"))]
+    (if (= f 0)
+      (println "PASS test_osc")
+      (println "test_osc: failures above"))
+    f))
+
+) ;; end defmodule signal/tests/test_osc

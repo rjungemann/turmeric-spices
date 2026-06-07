@@ -11,35 +11,10 @@
 ;; =============================================================================
 
 ;;; ADSRParams -- parameters for an ADSR envelope.
-(defstruct ADSRParams [attack :float decay :float sustain :float release :float])
-
-;;; __adsr_attack -- extract attack field from ADSRParams struct pointer.
-(defn __adsr_attack [p] :float
-  ```c
-  typedef struct { double attack; double decay; double sustain; double release; } ADSRParams_;
-  return ((ADSRParams_ *)(intptr_t)p)->attack;
-  ```)
-
-;;; __adsr_decay -- extract decay field from ADSRParams struct pointer.
-(defn __adsr_decay [p] :float
-  ```c
-  typedef struct { double attack; double decay; double sustain; double release; } ADSRParams_;
-  return ((ADSRParams_ *)(intptr_t)p)->decay;
-  ```)
-
-;;; __adsr_sustain -- extract sustain field from ADSRParams struct pointer.
-(defn __adsr_sustain [p] :float
-  ```c
-  typedef struct { double attack; double decay; double sustain; double release; } ADSRParams_;
-  return ((ADSRParams_ *)(intptr_t)p)->sustain;
-  ```)
-
-;;; __adsr_release -- extract release field from ADSRParams struct pointer.
-(defn __adsr_release [p] :float
-  ```c
-  typedef struct { double attack; double decay; double sustain; double release; } ADSRParams_;
-  return ((ADSRParams_ *)(intptr_t)p)->release;
-  ```)
+;;;
+;;; `:copy` so the struct can be passed by value into `adsr-fixed` and have
+;;; its fields read with `.field` access -- no pointer/intptr bit-casting.
+(defstruct ADSRParams :copy [attack :float decay :float sustain :float release :float])
 
 ;;; __adsr_fixed_sample -- compute ADSR envelope value at time t.
 (defn __adsr_fixed_sample [attack :float decay :float sustain :float release :float gate-dur :float t :float] :float
@@ -70,14 +45,16 @@
 ;;;   A Signal Function: sig -> (fn [t] envelope-value).
 ;;;
 ;;; Example:
-;;;   ((adsr-fixed (ADSRParams 0.01 0.1 0.7 0.3) 0.5) (constant ()))
-(defn adsr-fixed [params gate-duration :float]
-  (let [pv params gd gate-duration]
+;;;   ((adsr-fixed (make-struct ADSRParams 0.01 0.1 0.7 0.3) 0.5) (constant 0.0))
+(defn adsr-fixed [params : ADSRParams gate-duration :float]
+  (let [a  (.attack params)
+        d  (.decay params)
+        s  (.sustain params)
+        r  (.release params)
+        gd gate-duration]
     (fn [^fat _sig]
       (fn [t :float] :float
-        (__adsr_fixed_sample
-          (__adsr_attack pv) (__adsr_decay pv) (__adsr_sustain pv) (__adsr_release pv)
-          gd t)))))
+        (__adsr_fixed_sample a d s r gd t)))))
 
 ;;; adsr-gen -- one-shot ADSR with a unit (1.0s) gate duration.
 ;;;
@@ -89,7 +66,7 @@
 ;;;
 ;;; Example:
 ;;;   ((adsr-gen (make-struct ADSRParams 0.01 0.1 0.7 0.2)) (constant 0.0))
-(defn adsr-gen [params]
+(defn adsr-gen [params : ADSRParams]
   (adsr-fixed params 1.0))
 
 ) ;; end defmodule signal/envelope

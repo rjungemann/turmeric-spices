@@ -7,40 +7,74 @@ oscillators, filters, shapers, ADSR envelopes, and SF-pipeline composition.
 
 ## Status
 
-The Tier 1 surface is written and `:exports` is pruned to match, but
-the spice is currently not exercisable end-to-end against turmeric
-`main`. Two distinct gaps both have to clear before any caller (the
-Phase 1 example, `test_core`, or downstream importers) works:
+The Tier 1 surface ships and runs end-to-end against turmeric `main`.
+All six modules `tur check` clean, all five examples run and print the
+values in their comments, and the full `tests/signal/` suite passes:
 
-1. `^fat name : (fn ...)` parameter annotations are dropped across the
-   `(defmodule ... (export ...))` boundary, so any caller of an
-   exported fat-typed defn (`sample`, every oscillator/filter/shaper
-   SF, `effects-chain`) gets a `TUR-E0001` `expected (fn [] : ?)` at
-   the call site. Tracked at
-   `docs/reported/defmodule-loses-fat-fn-type-annotation.md` in the
-   turmeric repo. The same bug also breaks `signal/compose`'s
-   in-module `(__apply-sf ...)` self-call, so `tur check
-   src/signal/compose.tur` itself fails today.
-2. Once (1) clears, the SF-pipeline shape still needs the
-   `int<->ptr<void>` carrier bridge fix tracked at
-   `docs/reported/vec-typed-fat-closure-readback-fixture-regressed-codegen.md`
-   (it produces 4 `-Wint-conversion` errors at the apply-sf body and
-   the `vec-push!` call sites).
+```
+$ tur test tests/signal
+PASS test_compose
+PASS test_core
+PASS test_envelope
+PASS test_filter
+PASS test_osc
+PASS test_shaper
+......
+6 tests, 6 passed, 0 failed
+```
 
-`src/signal/{core,osc,filter,shaper,envelope}.tur` all `tur check`
-clean (after the `pair` / `(as float ...)` workarounds the rebuild
-applied to dodge two other defmodule scoping gaps for `Pair`).
-`compose.tur` does NOT check clean. The Phase 1 example does NOT run.
-`tests/signal/test_core.tur` does NOT pass. The Tier 1 surface
-remains the *intended* shipping shape and the source layout matches
-the plan; only the runnability gates remain.
+This is the surface area an honest version of the previous spice would
+have shipped. Tier 2 -- wavetable / FM / Karplus-Strong / granular,
+voice / poly-synth / step-sequencer, resonant filters -- is explicitly
+out of scope until each lands behind a real consumer and a dedicated
+plan. See `docs/upcoming/tur-signal-rebuild-plan.md` in the turmeric
+repo.
 
-This is the surface area an honest version of the previous spice
-would have shipped. Tier 2 -- wavetable/FM/Karplus-Strong/granular,
-voice / poly-synth / step-sequencer, resonant filters -- is
-explicitly out of scope until each lands behind a real consumer
-and a dedicated plan. See
-`docs/upcoming/tur-signal-rebuild-plan.md` in the turmeric repo.
+---
+
+## Concepts
+
+A **`Signal A`** is conceptually a function from time to a value:
+`(fn [t :float] A)`. The common case is `Signal Sample`, where a sample
+is a `:float`: `(fn [t :float] :float)`.
+
+An **`SF A B`** (Signal Function) maps a signal to a signal. Every
+oscillator, filter, and shaper constructor returns an SF; apply it to a
+signal to get a signal back:
+
+```turmeric
+(let [tone   ((sine 440.0 0.0) (constant 0.0))   ;; SF applied -> Signal
+      shaped ((gain 0.5) tone)]                   ;; SF applied -> Signal
+  (sample shaped 0.0))                            ;; sample the result
+```
+
+The Pair-consuming mixers (`mix`, `add`, `multiply`) consume the
+`Signal (Pair Sample Sample)` shape produced by `pair-signals`.
+
+### Calling conventions worth knowing
+
+A few constructors need a specific call shape:
+
+- **Captureless shapers** (`invert`, `abs-sf`, `add`, `multiply`) take no
+  parameters. Bind the SF to a name first, then apply it -- don't apply
+  the bare `(invert)` result inline:
+
+  ```turmeric
+  (let [iv (invert)]
+    (sample (iv (constant 0.5)) 0.0))   ;; -0.5
+  ```
+
+- **`map-signal`** and **`effects-chain`** return a closure carried as a
+  raw pointer. Re-bind the result as a `^fat` signal before sampling:
+
+  ```turmeric
+  (let [^fat m : (fn [float] float)
+             (map-signal (fn [x :float] :float (* x 3.0)) (constant 2.0))]
+    (sample m 0.0))                      ;; 6.0
+  ```
+
+- **`ADSRParams`** is a `:copy` struct; build it with `make-struct` and
+  pass it by value to `adsr-fixed` / `adsr-gen`.
 
 ---
 
@@ -55,13 +89,65 @@ and a dedicated plan. See
 | `signal/envelope` | `ADSRParams`, `adsr-fixed`, `adsr-gen`                                                   |
 | `signal/compose`  | `effects-chain`                                                                          |
 
-A `Signal Sample` is `(fn [t :float] :float)`. An `SF Sample Sample`
-is the closure `(fn [^fat sig : (fn [float] float)] (fn [t :float] :float ...))`
-returned by every shaper / filter / oscillator constructor: apply it
-to a signal to get a signal.
+### `signal/core`
 
-Pair-consuming mixers (`mix`, `add`, `multiply`) consume the
-`Signal (Pair Sample Sample)` shape produced by `pair-signals`.
+| Symbol | Signature | Produces |
+|---|---|---|
+| `constant val` | `:float -> Signal Sample` | a signal that always emits `val` |
+| `time-signal t` | `:float -> :float` | the identity signal (value == query time) |
+| `sample sig t` | `Signal Sample, :float -> :float` | evaluate `sig` at time `t` |
+| `map-signal f sig` | `(fn [float] float), Signal -> Signal` | apply `f` pointwise |
+| `pair-signals a b` | `Signal, Signal -> Signal (Pair Sample Sample)` | zip two signals |
+
+### `signal/osc`
+
+Each oscillator is an `SF () Sample` -- it ignores its input signal.
+
+| Symbol | Produces |
+|---|---|
+| `sine freq phase` | `sin(2*pi*freq*t + phase)` |
+| `square freq duty` | `+1` for the on-portion of each cycle, `-1` otherwise |
+| `sawtooth freq` | rising ramp in `[0, 1)` |
+| `triangle freq` | rises `-1 -> 1` then falls `1 -> -1` each cycle |
+
+### `signal/filter`
+
+First-order IIR filters; each application owns its own state cell.
+
+| Symbol | Produces |
+|---|---|
+| `low-pass alpha` | EMA: `y = alpha*x + (1-alpha)*prev` |
+| `high-pass alpha` | `x - low_pass(x)` |
+
+### `signal/shaper`
+
+| Symbol | Kind | Produces |
+|---|---|---|
+| `gain g` | SF | `g * x` |
+| `offset c` | SF | `x + c` |
+| `invert` | SF (captureless) | `-x` |
+| `abs-sf` | SF (captureless) | `\|x\|` |
+| `saturate-tanh drive` | SF | `tanh(drive*x) / tanh(drive)` |
+| `hard-clip limit` | SF | clip to `[-limit, +limit]` |
+| `clip lo hi` | SF | clip to `[lo, hi]` |
+| `scale in-lo in-hi out-lo out-hi x` | pure `:float -> :float` | linear remap |
+| `mix alpha` | SF over Pair | `alpha*x + (1-alpha)*y` |
+| `add` | SF over Pair (captureless) | `x + y` |
+| `multiply` | SF over Pair (captureless) | `x * y` |
+
+### `signal/envelope`
+
+| Symbol | Produces |
+|---|---|
+| `ADSRParams attack decay sustain release` | typed `:copy` struct |
+| `adsr-fixed params gate-duration` | `SF () Sample` (analytic ADSR) |
+| `adsr-gen params` | `adsr-fixed` with a unit (1.0s) gate |
+
+### `signal/compose`
+
+| Symbol | Produces |
+|---|---|
+| `effects-chain effects input` | applies a `Vec` of SFs left-to-right to `input` |
 
 ---
 
@@ -84,63 +170,64 @@ Then `tur fetch`.
 
 ## Quick start
 
-The Phase 1 example, working today:
-
 ```turmeric
 (defmodule my/app
-  (import signal/core :refer [constant time-signal sample])
+  (import signal/core     :refer [constant sample pair-signals])
+  (import signal/osc      :refer [sine])
+  (import signal/filter   :refer [low-pass])
+  (import signal/shaper   :refer [gain multiply])
+  (import signal/envelope :refer [ADSRParams adsr-fixed])
+  (import signal/compose  :refer [effects-chain]))
 
 (defn main [] : int
+  ;; A constant and the time identity.
   (let [c (constant 0.5)]
-    (println (sample c 0.0))                ;; 0.5
-    (println (sample c 9999.0)))            ;; 0.5
-  (println (time-signal 0.25))              ;; 0.25
+    (println (sample c 0.0)))                 ;; 0.5
+
+  ;; An oscillator sampled at its peak.
+  (let [s1 ((sine 1.0 0.0) (constant 0.0))]
+    (println (sample s1 0.25)))               ;; ~1.0
+
+  ;; A sine through a low-pass filter (stateful: sample in order).
+  (let [tone   ((sine 440.0 0.0) (constant 0.0))
+        tone-f ((low-pass 0.3) tone)]
+    (println (sample tone-f 0.0)))
+
+  ;; An ADSR envelope sampled mid-attack.
+  (let [params (make-struct ADSRParams 0.01 0.1 0.7 0.3)
+        env    ((adsr-fixed params 0.5) (constant 0.0))]
+    (println (sample env 0.005)))             ;; ~0.5
+
+  ;; A simple voice: sine -> [gain, low-pass] -> * envelope.
+  (let [osc ((sine 2.0 0.0) (constant 0.0))
+        ^fat chain : (fn [float] float)
+             (effects-chain (vec-of (gain 0.8) (low-pass 0.5)) osc)
+        env ((adsr-fixed (make-struct ADSRParams 0.1 0.1 0.6 0.2) 0.5)
+             (constant 0.0))
+        ml  (multiply)
+        ^fat voice : (fn [float] float) (ml (pair-signals chain env))]
+    (println (sample voice 0.05)))            ;; ~0.1176
+
   0)
-
-) ;; end defmodule
-```
-
-The Phase 2-5 patterns (oscillators, filters, shapers, envelopes,
-`effects-chain`) are written and `tur check`-clean but blocked
-from caller-side exercise until the upstream codegen fix lands.
-The intended call shapes look like:
-
-```turmeric
-;; oscillator at t = 0.25
-(let [unused (constant 0.0)
-      s1     ((sine 1.0 0.0) unused)]
-  (sample s1 0.25))                          ;; ~1.0 (sin pi/2)
-
-;; sine driven through a low-pass filter
-(let [unused (constant 0.0)
-      tone   ((sine 440.0 0.0) unused)
-      tone-f ((low-pass 0.3) tone)]
-  (sample tone-f 0.001))
-
-;; ADSR envelope
-(let [params (make-struct ADSRParams 0.01 0.1 0.7 0.3)
-      env-sf (adsr-fixed params 0.5)
-      env    (env-sf (constant 0.0))]
-  (sample env 0.005))                        ;; ~0.5 (mid-attack)
-
-;; effects chain
-(let [v   (vec-new)]
-  (vec-push! v (gain 0.5))
-  (vec-push! v (low-pass 0.3))
-  (let [^fat out : (fn [float] #{} float)
-                (effects-chain v ((sine 440.0 0.0) (constant 0.0)))]
-    (out 0.0)))
 ```
 
 ---
 
 ## Examples
 
+Five runnable, per-phase examples live under `examples/`:
+
 ```sh
 cd spices/signal
-tur run examples/01_constant_and_time.tur
-# Currently fails at (sample c 0.0) -- see Status above.
+tur run examples/01_constant_and_time.tur     # constant + time-signal
+tur run examples/02_oscillators.tur           # sine/square/sawtooth/triangle
+tur run examples/03_filters_and_shapers.tur   # filters + scalar shapers
+tur run examples/04_envelopes.tur             # ADSR
+tur run examples/05_simple_voice.tur          # capstone: every module wired together
 ```
+
+Each prints sample values that match the hand-computed references in its
+comments.
 
 ---
 
@@ -148,8 +235,10 @@ tur run examples/01_constant_and_time.tur
 
 ```sh
 cd spices/signal
-for f in src/signal/*.tur; do tur check "$f"; done
-# 5/6 clean; compose.tur fails -- see Status above.
-tur run tests/signal/test_core.tur
-# Currently fails -- see Status above.
+for f in src/signal/*.tur; do tur check "$f"; done   # all clean
+tur test tests/signal                                 # all pass
 ```
+
+Modules that call libm (`signal/osc`, `signal/shaper`) carry a
+`__tur_autolink__: -lm` directive so any program importing them links
+against the math library automatically.
