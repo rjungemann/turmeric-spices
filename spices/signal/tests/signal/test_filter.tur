@@ -1,0 +1,49 @@
+;; test_filter -- correctness tests for signal/filter.
+;;
+;; First-order IIR filters are stateful: each `sample` call advances the
+;; instance's internal cell. Feeding a constant 1.0 ("step") input gives a
+;; deterministic exponential step response we can check against the recurrence
+;;   low-pass:  y[n] = alpha*x + (1-alpha)*y[n-1],  y[-1] = 0
+;;   high-pass: emits x - low_pass(x)
+;; with alpha = 0.5.
+;;
+;; main returns the failure count for `tur test`.
+
+(defmodule signal/tests/test_filter
+  (import signal/core   :refer [constant sample])
+  (import signal/filter :refer [low-pass high-pass])
+
+(defn near? [a :float b :float] :bool
+  (let [d (- a b)]
+    (if (< d 0.0) (< (- 0.0 d) 0.0001) (< d 0.0001))))
+
+(defn fail-unless [cond :bool label :cstr] :int
+  (if cond 0 (do (println label) 1)))
+
+(defn main [] : int
+  (let [lp ((low-pass 0.5) (constant 1.0))
+        ;; sample lp four times in order; capture the running step response.
+        l0 (sample lp 0.0)     ;; 0.5
+        l1 (sample lp 0.0)     ;; 0.75
+        l2 (sample lp 0.0)     ;; 0.875
+        l3 (sample lp 0.0)     ;; 0.9375
+        hp ((high-pass 0.5) (constant 1.0))
+        h0 (sample hp 0.0)     ;; 0.5
+        h1 (sample hp 0.0)     ;; 0.25
+        h2 (sample hp 0.0)     ;; 0.125
+        f (+ (fail-unless (near? l0 0.5)    "FAIL: low-pass step[0]")
+             (fail-unless (near? l1 0.75)   "FAIL: low-pass step[1]")
+             (fail-unless (near? l2 0.875)  "FAIL: low-pass step[2]")
+             (fail-unless (near? l3 0.9375) "FAIL: low-pass step[3]")
+             (fail-unless (near? h0 0.5)    "FAIL: high-pass step[0]")
+             (fail-unless (near? h1 0.25)   "FAIL: high-pass step[1]")
+             (fail-unless (near? h2 0.125)  "FAIL: high-pass step[2]")
+             ;; Two independent instances must not share state.
+             (fail-unless (near? (sample ((low-pass 0.5) (constant 1.0)) 0.0) 0.5)
+                          "FAIL: low-pass instances share state"))]
+    (if (= f 0)
+      (println "PASS test_filter")
+      (println "test_filter: failures above"))
+    f))
+
+) ;; end defmodule signal/tests/test_filter

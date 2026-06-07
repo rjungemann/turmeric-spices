@@ -27,8 +27,12 @@
 ;; =============================================================================
 
 ;;; __shaper_fabs -- absolute value of a float.
+;;;
+;;; The autolink directive links libm (-lm) for every program that pulls in
+;;; this module's shapers, so fabs/tanh resolve at link time.
 (defn __shaper_fabs [x :float] :float
   ```c
+  /* __tur_autolink__: -lm */
   extern double fabs(double);
   return fabs(x);
   ```)
