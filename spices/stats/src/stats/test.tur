@@ -49,27 +49,42 @@
 #define DIST_BETA    9
 #define DIST_GAMMA  10
 
+#ifndef __STATS_DIST_T_DEFINED
+#define __STATS_DIST_T_DEFINED
 typedef struct { int64_t tag; double p1, p2; int64_t ip1; } __dist_t;
-
+#endif
+#ifndef __STATS_FRAME_COL_DEFINED
+#define __STATS_FRAME_COL_DEFINED
 struct __frame_col {
   int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
   void *validity; void *values; void *offsets;
 };
+#endif
+#ifndef __STATS_FRAME_TYPES_DEFINED
+#define __STATS_FRAME_TYPES_DEFINED
 struct __schema { int64_t arity; int64_t *fields_ptr; };
 struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+#endif
+#ifndef __STATS_CONS_DEFINED
+#define __STATS_CONS_DEFINED
 struct __cons { int64_t value; int64_t next; };
-
+#endif
+#ifndef __STATS_TEST_RESULT_T_DEFINED
+#define __STATS_TEST_RESULT_T_DEFINED
 typedef struct {
   const char *name; double statistic; double df1; double df2;
   double p_value; int64_t alt_tag; double estimate;
   double ci_low; double ci_high; double conf_level;
 } __test_result_t;
-
+#endif
+#ifndef __STATS_VALID_DEFINED
+#define __STATS_VALID_DEFINED
 static inline int __valid(void *validity, int64_t i) {
   if (!validity) return 1;
   uint8_t *bm = (uint8_t *)validity;
   return (bm[i >> 3] >> (i & 7)) & 1;
 }
+#endif
 static int __cmp_dbl_ts(const void *a, const void *b) {
   double x=*(const double *)a,y=*(const double *)b; return (x>y)-(x<y);
 }

@@ -8,5 +8,5 @@
 #include <stdlib.h>
 #include <string.h>
 
-void * signal__compose__effects_hychain(int64_t, double);
+void * signal__compose__effects_hychain(int64_t, int64_t);
 #endif /* TUR_signal__compose_H */

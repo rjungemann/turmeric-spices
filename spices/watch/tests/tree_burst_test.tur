@@ -130,31 +130,30 @@
     return strstr(h ? h : "", n ? n : "") != NULL;
     ```)
 
+  ;; Walk a cons-list of watch events and push each one into batch, then free the cells.
+  (defn __drain-cons-into-batch [batch : int ev : int] #{Unsafe} : int
+    ```c
+    typedef struct __tur_cons_s __tur_cons_cell;
+    __tur_cons_cell *cell = (__tur_cons_cell *)(intptr_t)ev;
+    while (cell) {
+      __tur_cons_cell *next = (__tur_cons_cell *)(intptr_t)cell->tail;
+      if (cell->head) watch__debounce__debounce_hybatch_hypush(batch, cell->head);
+      free(cell);
+      cell = next;
+    }
+    return 0;
+    ```)
+
   ;; Drain watch events into a debounce-batch until no more arrive within
   ;; `timeout-ms`.  Returns the batch (caller must free).
   (defn drain-into-batch [w : int timeout-ms : int] #{Unsafe} : int
     (let [batch (debounce-batch-make)]
       (do
         (let [ev (watch-drain w timeout-ms 0)]
-          ;; watch-drain returns a cons-list; we only pop the head here since
-          ;; WTNF4 watch-drain still returns single-event cons lists.
-          ;; The real multi-event dedup comes from coalesce below.
-          (let [head (if (not (= ev 0))
-                       (let [h 0]
-                         ```c
-                         typedef struct __tur_cons_s __tur_cons_cell;
-                         __tur_cons_cell *cell = (__tur_cons_cell *)(intptr_t)ev;
-                         while (cell) {
-                           __tur_cons_cell *next = (__tur_cons_cell *)(intptr_t)cell->tail;
-                           if (cell->head) watch__debounce__debounce_batch_push(batch, cell->head);
-                           free(cell);
-                           cell = next;
-                         }
-                         return 0;
-                         ```
-                       )
-                       0)]
-            head))
+          ;; WTNF4: watch-drain returns a cons-list; drain it into batch.
+          (if (not (= ev 0))
+            (__drain-cons-into-batch batch ev)
+            0))
         batch)))
 
   ;; Collect all events that arrive within the burst window (5 s total,
@@ -169,7 +168,7 @@
           __tur_cons_cell *cell = (__tur_cons_cell *)(intptr_t)ev;
           while (cell) {
             __tur_cons_cell *next = (__tur_cons_cell *)(intptr_t)cell->tail;
-            if (cell->head) watch__debounce__debounce_batch_push(batch, cell->head);
+            if (cell->head) watch__debounce__debounce_hybatch_hypush(batch, cell->head);
             free(cell);
             cell = next;
           }

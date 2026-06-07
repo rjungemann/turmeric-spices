@@ -8,6 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct ADSRParams {
+    double attack;
+    double decay;
+    double sustain;
+    double release;
+} ADSRParams;
+
 void * signal__envelope__adsr_hyfixed(int64_t, double);
 void * signal__envelope__adsr_hygen(int64_t);
 #endif /* TUR_signal__envelope_H */

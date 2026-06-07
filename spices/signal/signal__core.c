@@ -36,7 +36,7 @@ static void * signal__core___un_unsig_hypair(double a, double b) {
         struct { double fst; double snd; } *p = malloc(sizeof(*p));
   p->fst = a;
   p->snd = b;
-  return (int64_t)(intptr_t)p;
+  return p;
   
 }
 

@@ -17,23 +17,34 @@
 #include <string.h>
 #include <math.h>
 
+#ifndef __STATS_FRAME_COL_DEFINED
+#define __STATS_FRAME_COL_DEFINED
 struct __frame_col {
   int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
   void *validity; void *values; void *offsets;
 };
+#endif
+#ifndef __STATS_CONS_DEFINED
+#define __STATS_CONS_DEFINED
 struct __cons { int64_t value; int64_t next; };
+#endif
+#ifndef __STATS_FRAME_TYPES_DEFINED
+#define __STATS_FRAME_TYPES_DEFINED
 struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
 struct __schema { int64_t arity; struct __field *fields; };
 struct __frame {
   int64_t nrows; int64_t ncols;
   int64_t schema_ptr; int64_t *columns;
 };
-
+#endif
+#ifndef __STATS_VALID_DEFINED
+#define __STATS_VALID_DEFINED
 static inline int __valid(void *validity, int64_t i) {
   if (!validity) return 1;
   uint8_t *bm = (uint8_t *)validity;
   return (bm[i >> 3] >> (i & 7)) & 1;
 }
+#endif
 typedef struct { double val; int64_t idx; } __pair_t;
 typedef double (*__pairfn_t)(int64_t, int64_t);
 static int __cmp_pair(const void *x, const void *y) {

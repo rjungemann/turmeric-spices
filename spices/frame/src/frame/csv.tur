@@ -454,9 +454,9 @@
 (defn __csv-parse-timestamp [s : cstr] : int
   ```c
   #include <stdint.h>
-  extern int64_t frame__csv____csv_parse_date32(const char *);
+  extern int64_t frame__csv___un_uncsv_hyparse_hydate32(const char *);
   const char *p = (const char *)(intptr_t)s;
-  int64_t days = frame__csv____csv_parse_date32(p);
+  int64_t days = frame__csv___un_uncsv_hyparse_hydate32(p);
   int hh = (p[11]-'0')*10 + (p[12]-'0');
   int mm = (p[14]-'0')*10 + (p[15]-'0');
   int ss = (p[17]-'0')*10 + (p[18]-'0');
@@ -479,12 +479,12 @@
   struct __csv_table {
     int64_t n_rows; int64_t n_cols; char **headers; char ***cells;
   };
-  extern bool frame__csv____csv_is_null_(const char *s, const char *null_str);
-  extern bool frame__csv____csv_try_int64(const char *s);
-  extern bool frame__csv____csv_try_float64(const char *s);
-  extern bool frame__csv____csv_try_bool(const char *s);
-  extern bool frame__csv____csv_try_date32(const char *s);
-  extern bool frame__csv____csv_try_timestamp(const char *s);
+  extern bool frame__csv___un_uncsv_hyis_hynull_qu(const char *s, const char *null_str);
+  extern bool frame__csv___un_uncsv_hytry_hyint64(const char *s);
+  extern bool frame__csv___un_uncsv_hytry_hyfloat64(const char *s);
+  extern bool frame__csv___un_uncsv_hytry_hybool(const char *s);
+  extern bool frame__csv___un_uncsv_hytry_hydate32(const char *s);
+  extern bool frame__csv___un_uncsv_hytry_hytimestamp(const char *s);
 
   struct __csv_table *t = (struct __csv_table *)(intptr_t)tbl;
   if (!t) return 6; /* utf8 */
@@ -494,13 +494,13 @@
   int saw_any = 0;
   for (int64_t r = 0; r < scan; r++) {
     const char *s = (t->cells[r] && t->cells[r][c]) ? t->cells[r][c] : "";
-    if (frame__csv____csv_is_null_(s, (const char *)(intptr_t)null_str)) continue;
+    if (frame__csv___un_uncsv_hyis_hynull_qu(s, (const char *)(intptr_t)null_str)) continue;
     saw_any = 1;
-    if (can_int   && !frame__csv____csv_try_int64(s))     can_int   = 0;
-    if (can_float && !frame__csv____csv_try_float64(s))   can_float = 0;
-    if (can_bool  && !frame__csv____csv_try_bool(s))      can_bool  = 0;
-    if (can_date  && !frame__csv____csv_try_date32(s))    can_date  = 0;
-    if (can_ts    && !frame__csv____csv_try_timestamp(s)) can_ts    = 0;
+    if (can_int   && !frame__csv___un_uncsv_hytry_hyint64(s))     can_int   = 0;
+    if (can_float && !frame__csv___un_uncsv_hytry_hyfloat64(s))   can_float = 0;
+    if (can_bool  && !frame__csv___un_uncsv_hytry_hybool(s))      can_bool  = 0;
+    if (can_date  && !frame__csv___un_uncsv_hytry_hydate32(s))    can_date  = 0;
+    if (can_ts    && !frame__csv___un_uncsv_hytry_hytimestamp(s)) can_ts    = 0;
     if (!can_int && !can_float && !can_bool && !can_date && !can_ts) break;
   }
   if (!saw_any)  return 6; /* utf8 for all-null column */

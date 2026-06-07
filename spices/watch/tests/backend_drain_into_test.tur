@@ -63,6 +63,7 @@
   ;; Background thread: wait ms, then write `content` to `path`.
   (defn schedule-write [path : cstr content : cstr ms : int] #{Unsafe} : int
     ```c
+    /* __tur_include__: #include <stdio.h> */
     /* __tur_include__: #include <pthread.h> */
     /* __tur_include__: typedef struct { char *path; char *content; int ms; } TurBdiWrite; */
     /* __tur_include__: static void *tur_bdi_write(void *arg) { TurBdiWrite *a = (TurBdiWrite *)arg; usleep((useconds_t)a->ms * 1000u); FILE *f = fopen(a->path, "w"); if (f) { if (a->content) fputs(a->content, f); fclose(f); } free(a->path); free(a->content); free(a); return NULL; } */

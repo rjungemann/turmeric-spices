@@ -30,7 +30,6 @@ static void * signal__envelope____fn_30(void * __env_p_33, void * _sig) {
         return __t1;
 }
 
-ADSRParams ADSRParams_8;
 static double signal__envelope____adsr_attack(int64_t p) {
         typedef struct { double attack; double decay; double sustain; double release; } ADSRParams_;
   return ((ADSRParams_ *)(intptr_t)p)->attack;

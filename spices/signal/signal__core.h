@@ -10,7 +10,7 @@
 
 void * signal__core__constant(double);
 double signal__core__time_hysignal(double);
-double signal__core__sample(double, double);
-int64_t signal__core__map_hysignal(double, double);
-void * signal__core__pair_hysignals(double, double);
+double signal__core__sample(int64_t, double);
+int64_t signal__core__map_hysignal(int64_t, int64_t);
+void * signal__core__pair_hysignals(int64_t, int64_t);
 #endif /* TUR_signal__core_H */

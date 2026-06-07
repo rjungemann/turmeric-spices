@@ -2,7 +2,8 @@
 
 (defmodule stats/tests/rng
   (import stats/rng  :refer [rng-make rng-free rng-uniform rng-int-range
-                               rng-uint32 rng-shuffle! rng-shuffled rng-sample])
+                               rng-uint32 rng-shuffle! rng-shuffled
+                               rng-sample-indices])
   (import test/assert :refer [assert-eq assert-true])
   (import test/suite  :refer [describe it])
   (import test/runner :refer [run-all])
@@ -31,9 +32,10 @@
 
   (describe "stats/rng"
     (it "rng-make returns non-zero handle"
-      (let [r (rng-make 42 1)]
-        (assert-true (not= r 0))
-        (rng-free r)))
+      (let [r  (rng-make 42 1)
+            ok (not= r 0)]
+        (rng-free r)
+        (assert-true ok)))
 
     (it "rng-uniform returns values in [0,1)"
       (let [r  (rng-make 0 0)
@@ -57,16 +59,15 @@
     (it "rng-shuffle! returns a list of the same length"
       (let [r   (rng-make 7 0)
             xs  (t-cons 1 (t-cons 2 (t-cons 3 (t-cons 4 (t-cons 5 (t-nil))))))
-            sh  (rng-shuffle! r xs)
-            len (t-list-len sh)
+            len (t-list-len xs)
             ok  (= len 5)]
+        (rng-shuffle! r xs)
         (rng-free r)
         (assert-true ok)))
 
-    (it "rng-sample returns k items"
+    (it "rng-sample-indices returns k indices"
       (let [r   (rng-make 99 0)
-            xs  (t-cons 10 (t-cons 20 (t-cons 30 (t-cons 40 (t-cons 50 (t-nil))))))
-            s   (rng-sample r xs 3)
+            s   (rng-sample-indices r 5 3 0)
             len (t-list-len s)
             ok  (= len 3)]
         (rng-free r)

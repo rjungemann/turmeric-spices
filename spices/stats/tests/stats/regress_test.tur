@@ -12,18 +12,24 @@
     return fabs(x - y) <= tol;
     ```)
 
-  (defn ok? [r : int] : bool
+  (defn result-ok? [r : int] : bool
     ```c
     #include <stdint.h>
+    #ifndef __STATS_CONS_DEFINED
+    #define __STATS_CONS_DEFINED
     struct __cons { int64_t value; int64_t next; };
+    #endif
     struct __cons *c = (struct __cons *)(intptr_t)r;
     return c && c->value == 0;
     ```)
 
-  (defn unwrap [r : int] : int
+  (defn result-unwrap [r : int] : int
     ```c
     #include <stdint.h>
+    #ifndef __STATS_CONS_DEFINED
+    #define __STATS_CONS_DEFINED
     struct __cons { int64_t value; int64_t next; };
+    #endif
     struct __cons *outer = (struct __cons *)(intptr_t)r;
     struct __cons *inner = (struct __cons *)(intptr_t)outer->next;
     return inner->value;
@@ -39,10 +45,13 @@
       int64_t df_residual; int64_t df_model; int64_t n_obs;
       int64_t names;
     } __lm_fit_t;
+    #ifndef __STATS_FRAME_COL_DEFINED
+    #define __STATS_FRAME_COL_DEFINED
     struct __frame_col {
       int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
       void *validity; void *values; void *offsets;
     };
+    #endif
     __lm_fit_t *f = (__lm_fit_t *)(intptr_t)fit;
     struct __frame_col *cc = (struct __frame_col *)(intptr_t)f->coefs;
     return ((double *)cc->values)[i];
@@ -67,10 +76,13 @@
     ```c
     #include <stdlib.h>
     #include <stdint.h>
+    #ifndef __STATS_FRAME_COL_DEFINED
+    #define __STATS_FRAME_COL_DEFINED
     struct __frame_col {
       int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
       void *validity; void *values; void *offsets;
     };
+    #endif
     int64_t n=5;
     int64_t bytes=n*sizeof(double),rounded=(bytes+63)&~((int64_t)63);
     void *buf=malloc((size_t)(sizeof(int64_t)+rounded));*(int64_t *)buf=rounded;
@@ -85,20 +97,28 @@
     ```c
     #include <stdlib.h>
     #include <stdint.h>
+    #ifndef __STATS_CONS_DEFINED
+    #define __STATS_CONS_DEFINED
     struct __cons { int64_t value; int64_t next; };
+    #endif
     struct __cons *c = (struct __cons *)malloc(sizeof(*c));
     c->value = v; c->next = n;
     return (int64_t)(intptr_t)c;
     ```)
   (defn t-nil [] : int ```c return 0; ```)
+  (defn cstr-as-int [s : cstr] : int
+    ```c return (int64_t)(intptr_t)s; ```)
 
   (defn col-at [col : int i : int] : float
     ```c
     #include <stdint.h>
+    #ifndef __STATS_FRAME_COL_DEFINED
+    #define __STATS_FRAME_COL_DEFINED
     struct __frame_col {
       int64_t type_tag; int64_t length; int64_t null_count; int64_t refcount;
       void *validity; void *values; void *offsets;
     };
+    #endif
     struct __frame_col *fc = (struct __frame_col *)(intptr_t)col;
     return ((double *)fc->values)[i];
     ```)
@@ -106,14 +126,24 @@
   (defn frame-nrows [f : int] : int
     ```c
     #include <stdint.h>
+    #ifndef __STATS_FRAME_TYPES_DEFINED
+    #define __STATS_FRAME_TYPES_DEFINED
+    struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+    struct __schema { int64_t arity; struct __field *fields; };
     struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+    #endif
     return ((struct __frame *)(intptr_t)f)->nrows;
     ```)
 
   (defn frame-ncols [f : int] : int
     ```c
     #include <stdint.h>
+    #ifndef __STATS_FRAME_TYPES_DEFINED
+    #define __STATS_FRAME_TYPES_DEFINED
+    struct __field { int64_t name_ptr; int64_t type_tag; int64_t nullable; };
+    struct __schema { int64_t arity; struct __field *fields; };
     struct __frame { int64_t nrows; int64_t ncols; int64_t schema_ptr; int64_t *columns; };
+    #endif
     return ((struct __frame *)(intptr_t)f)->ncols;
     ```)
 
@@ -125,14 +155,14 @@
       (let [x   (make-col 1.0 2.0 3.0 4.0 5.0)
             y   (make-col 3.0 5.0 7.0 9.0 11.0)
             xs  (t-cons x (t-nil))
-            nms (t-cons 0 (t-nil)) ;; names = list of 0-ptrs (ok for smoke test)
-            res (ols y xs nms 1)
-            ok? (ok? res)
-            fit (unwrap res)
-            b0  (lmfit-coef fit 0) ;; intercept
-            b1  (lmfit-coef fit 1) ;; slope
-            r2  (lmfit-r2 fit)]
-        (assert-true (and ok? (approx= b0 1.0 1e-6)
+            nms (t-cons (cstr-as-int "x") (t-nil))
+            res   (ols y xs nms 1)
+            ok    (result-ok? res)
+            fit   (result-unwrap res)
+            b0    (lmfit-coef fit 0) ;; intercept
+            b1    (lmfit-coef fit 1) ;; slope
+            r2    (lmfit-r2 fit)]
+        (assert-true (and ok (approx= b0 1.0 1e-6)
                                (approx= b1 2.0 1e-6)
                                (approx= r2 1.0 1e-9)))))
 
@@ -140,8 +170,8 @@
       (let [x   (make-col 1.0 2.0 3.0 4.0 5.0)
             y   (make-col 3.0 5.0 7.0 9.0 11.0)
             xs  (t-cons x (t-nil))
-            nms (t-cons 0 (t-nil))
-            fit (unwrap (ols y xs nms 1))
+            nms (t-cons (cstr-as-int "x") (t-nil))
+            fit (result-unwrap (ols y xs nms 1))
             new-xs (t-cons x (t-nil))
             pred   (predict fit new-xs)
             p0     (col-at pred 0) ;; should be 3.0
@@ -153,8 +183,8 @@
       (let [x   (make-col 1.0 2.0 3.0 4.0 5.0)
             y   (make-col 3.0 5.0 7.0 9.0 11.0)
             xs  (t-cons x (t-nil))
-            nms (t-cons 0 (t-nil))
-            fit (unwrap (ols y xs nms 1))
+            nms (t-cons (cstr-as-int "x") (t-nil))
+            fit (result-unwrap (ols y xs nms 1))
             df  (diagnostics fit)
             nr  (frame-nrows df)
             nc  (frame-ncols df)
