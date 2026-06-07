@@ -45,17 +45,17 @@
 ;;; Since: T5
 (defn tls-httpd-init [] : int
   ```c
-  /* httpd_register_tls_impl is a file-scope static emitted by
-   * stdlib/httpd.tur in the same TU; the codegen places a forward
-   * declaration of it at the top of the TU, so we can call it here
-   * without a local prototype. */
-  httpd_register_tls_impl(
-    (int64_t)(intptr_t)&tls__conn__tls_wrap_fd,
-    (int64_t)(intptr_t)&tls__conn__tls_handshake,
-    (int64_t)(intptr_t)&tls__conn__tls_read,
-    (int64_t)(intptr_t)&tls__conn__tls_write,
-    (int64_t)(intptr_t)&tls__conn__tls_shutdown,
-    (int64_t)(intptr_t)&tls__conn__tls_free);
+  /* httpd_hyregister_hytls_hyimpl is a file-scope static emitted by
+   * stdlib/httpd.tur in the same TU; declare it here for spice-only
+   * builds where the stdlib TU is not present. */
+  extern void httpd_hyregister_hytls_hyimpl(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+  httpd_hyregister_hytls_hyimpl(
+    (int64_t)(intptr_t)&tls__conn__tls_hywrap_hyfd,
+    (int64_t)(intptr_t)&tls__conn__tls_hyhandshake,
+    (int64_t)(intptr_t)&tls__conn__tls_hyread,
+    (int64_t)(intptr_t)&tls__conn__tls_hywrite,
+    (int64_t)(intptr_t)&tls__conn__tls_hyshutdown,
+    (int64_t)(intptr_t)&tls__conn__tls_hyfree);
   return 0;
   ```)
 

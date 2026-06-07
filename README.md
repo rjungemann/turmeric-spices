@@ -1,6 +1,8 @@
 # turmeric-spices
 
-Official monorepo of first-party spices for the [Turmeric](https://github.com/rjungemann/turmeric) ecosystem.
+[![CI](https://github.com/rjungemann/turmeric-spices/actions/workflows/ci.yml/badge.svg)](https://github.com/rjungemann/turmeric-spices/actions/workflows/ci.yml)
+
+Official monorepo of first-party spices for the [Turmeric](https://github.com/rjungemann/turmeric) ecosystem. The badge above is aggregate across **all** spices on both Linux and macOS — it turns red if any matrix leg fails.
 
 **Canonical repo:** https://github.com/rjungemann/turmeric-spices
 

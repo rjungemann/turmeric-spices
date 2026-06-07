@@ -44,7 +44,7 @@
                                   route-handler route-call-handler])
   (import tourist/router  :refer [router-match captures-free])
   (import tourist/param   :refer [tourist-ctx-strip-path])
-  (export url-map! cascade! cascade-with! mount!
+  (export url-map! cascade! cascade-with! mount! passes!
           subapp-item? subapp-call)
 
 ;; -- Cons list helpers ------------------------------------------------------
@@ -472,10 +472,28 @@
         sa   (__subapp-alloc 1 data)]
     (route-new "__subapp" sa 0)))
 
+;;; passes! -- build a pass-through status list for cascade-with!.
+;;;
+;;; Variadic constructor that returns the opaque status-list handle
+;;; cascade-with! expects. Prefer this over hand-building a cons chain.
+;;;
+;;; Parameters:
+;;;   & statuses :int -- one or more HTTP status codes to treat as fall-through
+;;;
+;;; Returns:
+;;;   :int -- opaque status-list handle; pass to cascade-with!.
+;;;
+;;; Example:
+;;;   (cascade-with! (passes! 404 405 503) primary fallback)
+;;;
+;;; Since: v0.2.0
+(defn passes! [& statuses : int] : int
+  statuses)
+
 ;;; cascade-with! -- cascade with a custom pass-through status list.
 ;;;
 ;;; Parameters:
-;;;   passes :int -- cons list of :int status codes that cause fall-through
+;;;   passes :int -- status-list handle from passes!
 ;;;   & apps :int -- handlers to try in order
 ;;;
 ;;; Returns:
@@ -483,8 +501,7 @@
 ;;;
 ;;; Example:
 ;;;   ;; Also pass through 503 (maintenance mode of first app)
-;;;   (cascade-with! (cons 404 (cons 405 (cons 503 0)))
-;;;                  primary fallback)
+;;;   (cascade-with! (passes! 404 405 503) primary fallback)
 ;;;
 ;;; Since: v0.2.0
 (defn cascade-with! [passes : int & apps : int] : int
