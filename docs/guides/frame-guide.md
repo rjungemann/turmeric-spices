@@ -6,7 +6,7 @@
 >
 > All ops are eager and immutable: every call returns a new frame whose
 > underlying columns are refcount-shared with the source. Pair with
-> [`tur-sqlite`](../../spices/sqlite/) for SQL round-trips, with PyArrow /
+> [`tur-sqlite`](https://github.com/rjungemann/turmeric-spices/tree/main/spices/sqlite) for SQL round-trips, with PyArrow /
 > DuckDB / Polars via the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html),
 > or hand cells to [`tur-plutovg`](plutovg-guide.md) for charts.
 

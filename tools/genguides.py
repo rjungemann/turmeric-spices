@@ -50,7 +50,7 @@ def build_categories_from_meta(meta_by_stem: dict, all_stems: set) -> list:
     return [{'name': name, 'guides': buckets[name]} for name in cat_names]
 
 
-STYLE_REL = '../api/style.css'
+STYLE_REL = '/styles/style.css'
 
 SIDEBAR_GLOBALS = '''\
       <hr class="sidebar-divider">

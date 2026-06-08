@@ -8,8 +8,8 @@
 > A `.tur.md` file is a strict superset of CommonMark: ordinary markdown that
 > renders cleanly in GitHub / VS Code / Obsidian / pandoc, where fenced code
 > blocks tagged `turmeric` or `sweet-exp` are executable cells. Pair with
-> [`tur-frame`](frame-guide.md) for data loading, [`tur-plot`](../../spices/plot/)
-> for figures, or [`tur-stats`](../../spices/stats/) for analysis.
+> [`tur-frame`](frame-guide.md) for data loading, [`tur-plot`](https://github.com/rjungemann/turmeric-spices/tree/main/spices/plot)
+> for figures, or [`tur-stats`](https://github.com/rjungemann/turmeric-spices/tree/main/spices/stats) for analysis.
 
 This guide walks through the workflow:
 
