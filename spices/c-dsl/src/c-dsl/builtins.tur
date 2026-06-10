@@ -19,16 +19,6 @@
 
   (import c-dsl/pp :refer [c-include-sys])
 
-;;; __cons1 -- local one-element cons-list constructor. stdlib's runtime
-;;; `cons` is not in scope under project-mode defmodule compilation, so
-;;; inline a minimal builder matching the __tur_cons cell shape.
-(defn __cons1 [h : cstr] : int
-  ```c struct __cdsl_cons { int64_t head; int64_t tail; } *c = malloc(sizeof(*c));
-  c->head = (int64_t)(intptr_t)h;
-  c->tail = 0;
-  return (int64_t)(intptr_t)c;
-  ```)
-
 ;; --- stdio.h ---
 
 ;;; c-decl-printf -- extern declaration for printf.
@@ -166,7 +156,7 @@
 ;;;
 ;;; Since: P1
 (defn c-decls-stdio [] : int
-  (__cons1 (c-include-sys "stdio.h")))
+  (cons (c-include-sys "stdio.h") 0))
 
 ;;; c-decls-stdlib -- #include <stdlib.h> plus common stdlib declarations.
 ;;;
@@ -175,7 +165,7 @@
 ;;;
 ;;; Since: P1
 (defn c-decls-stdlib [] : int
-  (__cons1 (c-include-sys "stdlib.h")))
+  (cons (c-include-sys "stdlib.h") 0))
 
 ;;; c-decls-string -- #include <string.h> plus common string declarations.
 ;;;
@@ -184,7 +174,7 @@
 ;;;
 ;;; Since: P1
 (defn c-decls-string [] : int
-  (__cons1 (c-include-sys "string.h")))
+  (cons (c-include-sys "string.h") 0))
 
 ;;; c-decls-math -- #include <math.h> plus common math declarations.
 ;;;
@@ -193,6 +183,6 @@
 ;;;
 ;;; Since: P1
 (defn c-decls-math [] : int
-  (__cons1 (c-include-sys "math.h")))
+  (cons (c-include-sys "math.h") 0))
 
 ) ;; end defmodule c-dsl/builtins
