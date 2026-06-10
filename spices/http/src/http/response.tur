@@ -105,9 +105,19 @@
 ;;; Since: P5
 (defn response-json [resp : int] : ptr<void>
   ```c
-  #include <yyjson.h>
   #include <string.h>
   #include <stdlib.h>
+  /* yyjson is optional. When the header is absent the function still links
+     but returns an err at runtime instead of failing the build. */
+  #if defined(__has_include)
+  #  if __has_include(<yyjson.h>)
+  #    define __TUR_HTTP_HAVE_YYJSON 1
+  #  endif
+  #endif
+  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
+  struct __pr *res = malloc(sizeof(*res));
+  #ifdef __TUR_HTTP_HAVE_YYJSON
+  #include <yyjson.h>
   struct __resp {
     int    status;
     char  *body;
@@ -121,8 +131,6 @@
   yyjson_read_err err;
   yyjson_doc *doc = yyjson_read_opts((char *)body, strlen(body),
                                      YYJSON_READ_NOFLAG, NULL, &err);
-  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __pr *res = malloc(sizeof(*res));
   if (!doc) {
     const char *msg = err.msg ? err.msg : "JSON parse error";
     size_t mlen = strlen(msg);
@@ -135,6 +143,13 @@
   *np = doc;
   res->is_ok = true; res->ok_val = (int64_t)(intptr_t)np; res->err_val = 0;
   return res;
+  #else
+  (void)resp;
+  res->is_ok = false; res->ok_val = 0;
+  res->err_val = (int64_t)(intptr_t)
+    "response-json not supported: rebuild tur-http with yyjson available";
+  return res;
+  #endif
   ```)
 
 ) ;; end defmodule http/response

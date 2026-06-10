@@ -1,4 +1,11 @@
-;; http/client.tur -- HTTP/HTTPS client via mbedTLS.
+;; http/client.tur -- HTTP/HTTPS client.
+;;
+;; Plain http:// requests go over raw POSIX sockets and have no native
+;; dependencies. https:// is implemented via mbedTLS and is gated at
+;; compile time on `__has_include(<mbedtls/ssl.h>)` -- when the mbedTLS
+;; headers are not on the include path, the spice still builds and
+;; http:// works, but an https:// call returns an err whose message
+;; tells the caller to rebuild with mbedTLS available.
 ;;
 ;; All five public functions return result<response-handle>.
 ;; TLS certificate verification is disabled (MBEDTLS_SSL_VERIFY_NONE).
@@ -36,14 +43,28 @@
 ;; headers is a cons-list of alternating key/value :cstr strings (or 0 = nil).
 (defn __do-request [method : cstr url : cstr body : cstr headers : int] : ptr<void>
   ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdio.h>
+  #include <unistd.h>
+  #include <sys/socket.h>
+  #include <netdb.h>
+
+  /* TLS is optional. Detect mbedTLS at compile time; when absent, https://
+     URLs return a runtime err rather than failing the build. */
+  #if defined(__has_include)
+  #  if __has_include(<mbedtls/ssl.h>)
+  #    define __TUR_HTTP_TLS 1
+  #  endif
+  #endif
+
+  #ifdef __TUR_HTTP_TLS
   #include <mbedtls/net_sockets.h>
   #include <mbedtls/ssl.h>
   #include <mbedtls/entropy.h>
   #include <mbedtls/ctr_drbg.h>
   #include <mbedtls/error.h>
-  #include <stdlib.h>
-  #include <string.h>
-  #include <stdio.h>
+  #endif
 
   struct __cons { int64_t value; int64_t next; };
   struct __cr   { bool is_ok; int64_t ok_val; int64_t err_val; };
@@ -116,9 +137,10 @@
   size_t resp_cap = 65536;
   char  *resp_buf = malloc(resp_cap);
   size_t resp_len = 0;
-  int ret;
 
   if (use_tls) {
+  #ifdef __TUR_HTTP_TLS
+    int ret;
     mbedtls_net_context      server_fd;
     mbedtls_entropy_context  entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
@@ -181,32 +203,51 @@
     mbedtls_ssl_free(&ssl); mbedtls_ssl_config_free(&conf);
     mbedtls_ctr_drbg_free(&ctr_drbg); mbedtls_entropy_free(&entropy);
     mbedtls_net_free(&server_fd);
+  #else
+    free(resp_buf);
+    struct __cr *res = malloc(sizeof(*res));
+    res->is_ok = false; res->ok_val = 0;
+    res->err_val = (int64_t)(intptr_t)
+      "https:// not supported: rebuild tur-http with mbedTLS available";
+    return res;
+  #endif
   } else {
-    mbedtls_net_context server_fd;
-    mbedtls_net_init(&server_fd);
-    if ((ret = mbedtls_net_connect(&server_fd, host, port_str,
-                                   MBEDTLS_NET_PROTO_TCP)) != 0) {
+    /* Plain HTTP via raw POSIX sockets -- no native deps. */
+    struct addrinfo hints; struct addrinfo *ai = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, port_str, &hints, &ai) != 0 || !ai) {
       free(resp_buf);
-      char *emsg = malloc(128); mbedtls_strerror(ret, emsg, 128);
       struct __cr *res = malloc(sizeof(*res));
-      res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
-      mbedtls_net_free(&server_fd);
+      res->is_ok = false; res->ok_val = 0;
+      res->err_val = (int64_t)(intptr_t)"getaddrinfo failed";
       return res;
     }
+    int sfd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+    if (sfd < 0 || connect(sfd, ai->ai_addr, (socklen_t)ai->ai_addrlen) != 0) {
+      if (sfd >= 0) close(sfd);
+      freeaddrinfo(ai);
+      free(resp_buf);
+      struct __cr *res = malloc(sizeof(*res));
+      res->is_ok = false; res->ok_val = 0;
+      res->err_val = (int64_t)(intptr_t)"connect failed";
+      return res;
+    }
+    freeaddrinfo(ai);
     size_t wr = 0;
     while (wr < (size_t)req_len) {
-      ret = mbedtls_net_send(&server_fd, (const unsigned char *)req_buf + wr,
-                              (size_t)req_len - wr);
-      if (ret < 0) break;
-      wr += (size_t)ret;
+      ssize_t n = send(sfd, req_buf + wr, (size_t)req_len - wr, 0);
+      if (n <= 0) break;
+      wr += (size_t)n;
     }
     while (1) {
       if (resp_len + 4096 > resp_cap) { resp_cap *= 2; resp_buf = realloc(resp_buf, resp_cap); }
-      ret = mbedtls_net_recv(&server_fd, (unsigned char *)resp_buf + resp_len, 4096);
-      if (ret <= 0) break;
-      resp_len += (size_t)ret;
+      ssize_t n = recv(sfd, resp_buf + resp_len, 4096, 0);
+      if (n <= 0) break;
+      resp_len += (size_t)n;
     }
-    mbedtls_net_free(&server_fd);
+    close(sfd);
   }
 
   resp_buf[resp_len] = '\0';
