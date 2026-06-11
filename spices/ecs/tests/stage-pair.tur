@@ -18,12 +18,9 @@
 
 ;; Component IDs are just bit positions. The test invents two
 ;; disjoint bits so the two systems don't conflict.
-;; defn rather than def -- top-level `def` doesn't preserve the value
-;; through to call sites here (it reads as 0). Filed against a future
-;; gap-finder; defn-as-constant is the working idiom for now.
-(defn pos-cid [] : int 0)
-(defn vel-cid [] : int 1)
-(defn hp-cid  [] : int 2)
+(def pos-cid 0)
+(def vel-cid 1)
+(def hp-cid  2)
 
 ;; Heap-allocated accumulator + mutex-protected helpers. Each system
 ;; body bumps the same int64_t through accum-add! so the final value
@@ -75,8 +72,8 @@
 (defn main [] : int
   (let [accum (make-accum)
         world (:: accum :int)]
-    (let [physics (make-system (cid-bit (pos-cid)) (cid-bit (pos-cid)) physics-impl)
-          render  (make-system (cid-bit (hp-cid))  (cid-bit (hp-cid))  render-impl)]
+    (let [physics (make-system (cid-bit pos-cid) (cid-bit pos-cid) physics-impl)
+          render  (make-system (cid-bit hp-cid)  (cid-bit hp-cid)  render-impl)]
       ;; Sequential run.
       (accum-reset! accum)
       (stage-run-seq physics render world)
