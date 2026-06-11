@@ -1,0 +1,83 @@
+;;; ecs/stage -- sequential and parallel system schedulers.
+;;;
+;;; `stage-run-seq` calls each System's run-fn in the order given.
+;;;
+;;; `stage-run-pair-parallel` runs exactly two non-conflicting Systems
+;;; concurrently on a fresh OS thread. The arity-2 surface keeps the
+;;; FFI plumbing simple; an arity-N wave-scheduled variant lands once
+;;; the conflict-graph code is written (E2 follow-up). Conflicting
+;;; pairs fall back to sequential execution.
+;;;
+;;; Since: E2
+
+(defmodule ecs/stage
+  (export stage-run-seq stage-run-pair-parallel)
+
+(import ecs/system :refer [System system-run! system-conflicts?])
+
+;;; stage-run-seq -- run System `a` then System `b` sequentially.
+;;; Since: E2
+(defn stage-run-seq [a : System b : System w : int] : nil
+  (system-run! a w)
+  (system-run! b w))
+
+;;; stage-pair-task -- pthread-callable worker. Reads {fn,world} from
+;;; arg and invokes the fn. Top-level so it has a stable C symbol
+;;; pthread_create can target. The leading non-underscore name keeps
+;;; the mangler off the symbol; the resulting C name is
+;;; `ecs__stage__stage_hypair_hytask`.
+;;;
+;;; Since: E2
+(defn stage-pair-task [arg : ptr<void>] : ptr<void>
+  ```c
+  typedef struct {
+    void  (*fn)(int64_t);
+    int64_t world;
+  } __ecs_pair_arg;
+  __ecs_pair_arg *t = (__ecs_pair_arg *)arg;
+  t->fn(t->world);
+  return NULL;
+  ```)
+
+;;; stage-pair-parallel-raw -- spawn one OS thread to run `a-fn` and
+;;; run `b-fn` inline on the calling thread. Joins both before
+;;; returning. Allocates the task arg on the stack -- safe because
+;;; pthread_join is always called before this defn returns.
+;;;
+;;; Since: E2
+(defn stage-pair-parallel-raw
+  [a-fn : ptr<void>
+   b-fn : ptr<void>
+   w    : int]
+  : nil
+  ```c
+  #include <pthread.h>
+  typedef struct {
+    void  (*fn)(int64_t);
+    int64_t world;
+  } __ecs_pair_arg;
+  __ecs_pair_arg task;
+  task.fn    = (void (*)(int64_t))(uintptr_t)a_fn;
+  task.world = w;
+  pthread_t th;
+  pthread_create(&th, NULL, ecs__stage__stage_hypair_hytask, &task);
+  /* Run system b inline on the calling thread while a runs in parallel. */
+  void (*bfn)(int64_t) = (void (*)(int64_t))(uintptr_t)b_fn;
+  bfn(w);
+  pthread_join(th, NULL);
+  ```)
+
+;;; stage-run-pair-parallel -- run two non-conflicting Systems in
+;;; parallel, or sequentially if they conflict. Returns once both
+;;; Systems have completed.
+;;; Since: E2
+(defn stage-run-pair-parallel
+  [a : System
+   b : System
+   w : int]
+  : nil
+  (if (system-conflicts? a b)
+    (stage-run-seq a b w)
+    (stage-pair-parallel-raw (.run-fn a) (.run-fn b) w)))
+
+) ;; end defmodule ecs/stage

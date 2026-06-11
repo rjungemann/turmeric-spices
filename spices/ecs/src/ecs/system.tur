@@ -1,0 +1,130 @@
+;;; ecs/system -- System value + conflict detection.
+;;;
+;;; A System bundles a body function with the read/write component sets
+;;; it touches. The reads/writes are bitmasks over component IDs: each
+;;; component gets a unique bit, the mask is the OR of the bits its
+;;; system touches. Conflict between two systems is one-bit-AND: if
+;;; either system writes a bit that the other reads or writes, they
+;;; conflict and cannot run in parallel.
+;;;
+;;; The `run-fn` field is a `ptr<void>` pointing at a top-level defn
+;;; with signature `[w : int] : nil`. Turmeric coerces a top-level defn
+;;; name to `ptr<void>` at the make-system call site automatically (the
+;;; same pattern stdlib's thread-spawn-fn uses); no inline-C trampoline
+;;; per system is needed.
+;;;
+;;; The plan's `(defsystem name params :reads ... :writes ... body)`
+;;; macro requires emitting two top-level forms (the impl defn and the
+;;; def of the System value) from one invocation, which is blocked by
+;;; gap E (see
+;;; docs/reported/macro-cannot-emit-multiple-top-level-forms.md). Until
+;;; E lands, users write the impl and the System value by hand:
+;;;
+;;;   (defn physics-impl [w : int] : nil ...)
+;;;   (def  physics (make-system PHYSICS-READS PHYSICS-WRITES physics-impl))
+;;;
+;;; Since: E2 (initial)
+
+(defmodule ecs/system
+  (export System make-system system-reads-mask system-writes-mask
+          system-run-fn system-run! system-conflicts?
+          cid-bit)
+
+;;; System -- a runnable bundle (reads-mask, writes-mask, run-fn).
+;;; :copy so it flows through Turmeric values cleanly.
+;;; Since: E2
+(defstruct System :copy
+  [reads-mask  : int
+   writes-mask : int
+   run-fn      : ptr<void>])
+
+;;; make-system -- bundle a top-level defn with its read/write masks.
+;;;
+;;; Parameters:
+;;;   reads-mask  -- OR of component-id bits the system reads
+;;;   writes-mask -- OR of component-id bits the system writes
+;;;   run-fn      -- ptr<void> to a top-level defn (signature `[w : int] : nil`)
+;;;
+;;; Returns:
+;;;   A System value.
+;;;
+;;; Example:
+;;;   (def physics
+;;;     (make-system
+;;;       (bit-or (cid-bit POS-CID) (cid-bit VEL-CID))   ;; reads
+;;;       (cid-bit POS-CID)                                ;; writes
+;;;       physics-impl))                                  ;; defn ptr
+;;;
+;;; Since: E2
+(defn make-system [reads-mask : int writes-mask : int run-fn : ptr<void>] : System
+  (make-struct System reads-mask writes-mask run-fn))
+
+;;; system-reads-mask -- accessor for the System's reads bitmask.
+;;; Since: E2
+(defn system-reads-mask [s : System] : int (.reads-mask s))
+
+;;; system-writes-mask -- accessor for the System's writes bitmask.
+;;; Since: E2
+(defn system-writes-mask [s : System] : int (.writes-mask s))
+
+;;; system-run-fn -- accessor for the System's run-fn pointer.
+;;; Since: E2
+(defn system-run-fn [s : System] : ptr<void> (.run-fn s))
+
+;;; system-run! -- invoke the System's run-fn against a world handle.
+;;;
+;;; The fn pointer carries the void-returning `[w : int] : nil` shape;
+;;; we cast it explicitly here so callers don't have to write inline-C.
+;;;
+;;; Parameters:
+;;;   s -- System value
+;;;   w -- world handle (an :int that the system's run-fn understands)
+;;;
+;;; Since: E2
+(defn system-run! [s : System w : int] : nil
+  ```c
+  void (*fn)(int64_t) = (void (*)(int64_t))(uintptr_t)s.run_fn;
+  fn(w);
+  ```)
+
+;;; system-conflicts? -- true if two systems cannot run concurrently.
+;;;
+;;; The Robin Hood / dataflow rule: a write/read or write/write overlap
+;;; on any component bit forces sequential ordering. Pure read/read is
+;;; safe.
+;;;
+;;; Parameters:
+;;;   a -- System value
+;;;   b -- System value
+;;;
+;;; Returns:
+;;;   true if either system's writes-mask overlaps the other's
+;;;   reads-or-writes mask; false if both systems can run in parallel.
+;;;
+;;; Example:
+;;;   (system-conflicts? physics render)  ;; physics writes Pos, render reads Pos -> true
+;;;
+;;; Since: E2
+(defn system-conflicts? [a : System b : System] : bool
+  ```c
+  int64_t aw = a.writes_mask;
+  int64_t ar = a.reads_mask;
+  int64_t bw = b.writes_mask;
+  int64_t br = b.reads_mask;
+  return (aw & (br | bw)) != 0 || (bw & (ar | aw)) != 0;
+  ```)
+
+;;; cid-bit -- pack a component ID (0..62) into its single-bit mask.
+;;;
+;;; Example:
+;;;   (def POS-CID 0)
+;;;   (def VEL-CID 1)
+;;;   (def physics-reads (bit-or (cid-bit POS-CID) (cid-bit VEL-CID)))
+;;;
+;;; Since: E2
+(defn cid-bit [cid : int] : int
+  ```c
+  return (int64_t)((uint64_t)1 << (uint64_t)cid);
+  ```)
+
+) ;; end defmodule ecs/system
