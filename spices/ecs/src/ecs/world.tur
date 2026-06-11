@@ -1,0 +1,117 @@
+;;; ecs/world -- defworld + defcomponent macros and entity bookkeeping.
+;;;
+;;; A `defworld` lowers to a `defstruct` with one storage handle per
+;;; declared component plus a `gens` vector that tracks generation
+;;; counters for every entity slot the world has ever allocated. Field
+;;; names match the component type names, so component access is plain
+;;; field access: `(.Pos w)` is the dense storage for `Pos`. This is the
+;;; central E0 typing trick -- the world's component set is structurally
+;;; visible on the type.
+;;;
+;;; For E0, defworld is arity-capped at four components (matches the
+;;; arity-N pattern the plan accepts for E1' queries -- see
+;;; docs/upcoming/ecs-spice-plan.md). Lifting to truly variadic is gated
+;;; on the same elaborator work as E1 variadic queries.
+;;;
+;;; Per-component named accessors (`set-Pos!`, `get-Pos`, `spawn-Pos!`)
+;;; that the plan describes require compile-time identifier synthesis
+;;; (str -> sym) which the macro evaluator does not yet expose. See
+;;; docs/reported/ecs-macro-symbol-synthesis-missing.md. The E0 surface
+;;; is therefore the polymorphic `dense-set!` / `dense-get` family on
+;;; the storage field.
+;;;
+;;; Since: E0
+
+(defmodule ecs/world
+  (export defcomponent defworld
+          world-alloc-entity! world-despawn!)
+
+;;; defcomponent -- mark a type as a component (E0 documentation marker).
+;;;
+;;; For E0 this emits nothing beyond `nil`; the underlying type stays
+;;; untouched. The macro is provided so existing call sites continue to
+;;; elaborate when E2d wires associated-type storage selection in. The
+;;; arity allows trailing keyword pairs (e.g. `:storage :dense`) so the
+;;; eventual surface lands without churn.
+;;;
+;;; Since: E0
+(defmacro defcomponent [T] nil)
+
+;;; defworld -- declare a closed world type carrying typed storages.
+;;;
+;;; Syntax:
+;;;   (defworld Name [Comp1 Comp2 ...])     ;; up to four components in E0
+;;;
+;;; Lowers to:
+;;;   (defstruct Name [gens : int Comp1 : int Comp2 : int ...])
+;;;
+;;; Since: E0
+(defmacro defworld [name comps]
+  (if (empty? comps)
+    `(defstruct ~name [gens : int])
+    (if (empty? (rest comps))
+      `(defstruct ~name
+         [gens : int
+          ~(first comps) : int])
+      (if (empty? (rest (rest comps)))
+        `(defstruct ~name
+           [gens : int
+            ~(first comps) : int
+            ~(second comps) : int])
+        (if (empty? (rest (rest (rest comps))))
+          `(defstruct ~name
+             [gens : int
+              ~(first comps) : int
+              ~(second comps) : int
+              ~(first (rest (rest comps))) : int])
+          `(defstruct ~name
+             [gens : int
+              ~(first comps) : int
+              ~(second comps) : int
+              ~(first (rest (rest comps))) : int
+              ~(second (rest (rest comps))) : int]))))))
+
+;;; world-alloc-entity! -- allocate the next entity slot.
+;;;
+;;; Takes the world's `gens` vec (callers pass `(.gens w)`), grows it by
+;;; one, and returns the new Entity at generation 0.
+;;;
+;;; Since: E0
+(defn world-alloc-entity! [gens : int] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  struct __tur_vec { int64_t *data; size_t len; size_t cap; };
+  struct __tur_vec *v = (struct __tur_vec *)(intptr_t)gens;
+  if (v->len >= v->cap) {
+    size_t nc = v->cap ? v->cap * 2 : 4;
+    int64_t *nd = (int64_t *)realloc(v->data, nc * sizeof(int64_t));
+    v->data = nd; v->cap = nc;
+  }
+  int64_t idx = (int64_t)v->len;
+  v->data[v->len++] = 0;
+  uint64_t e = ((uint64_t)0 << 32) | ((uint64_t)idx & 0xFFFFFFFFULL);
+  return (int64_t)e;
+  ```)
+
+;;; world-despawn! -- bump the generation of an entity slot.
+;;;
+;;; Component data in dense storages is *not* cleared; subsequent
+;;; `dense-get` reads still return the old bits. Aliveness is established
+;;; by comparing the handle's generation against `gens[index]`. Returns
+;;; true on success, false if the slot index is out of range.
+;;;
+;;; Since: E0
+(defn world-despawn! [gens : int e : int] : bool
+  ```c
+  #include <stdint.h>
+  struct __tur_vec { int64_t *data; size_t len; size_t cap; };
+  struct __tur_vec *v = (struct __tur_vec *)(intptr_t)gens;
+  uint64_t idx = (uint64_t)e & 0xFFFFFFFFULL;
+  if (idx >= v->len) return false;
+  v->data[idx] = v->data[idx] + 1;
+  return true;
+  ```)
+
+) ;; end defmodule ecs/world

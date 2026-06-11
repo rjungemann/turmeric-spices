@@ -1,0 +1,38 @@
+;; E0 smoke test: spawn 1000 entities, populate a Health component for each,
+;; then iterate the Health storage and sum the values. The test passes if
+;; the printed sum equals 0 + 1 + ... + 999 = 499500.
+;;
+;; Components are stored as int handles in dense storage (the only carrier
+;; available without :copy structs landing on the generic inline-C path).
+;; Multi-field components arrive once heap-handle components or sized vecs
+;; over struct rows wire through -- see E1' / E2c in the plan.
+
+(defmodule spawn1k_test
+  (export)
+
+(import ecs/entity  :refer [entity-index])
+(import ecs/storage :refer [dense-new dense-len dense-set! dense-get])
+(import ecs/world   :refer [defcomponent defworld world-alloc-entity!])
+
+(defcomponent Health)
+
+(defworld GameWorld [Health])
+
+(defn main [] : int
+  (let [w (make-struct GameWorld (vec-new) (dense-new))]
+    (do
+      (let [^mut i 0]
+        (while (< i 1000)
+          (let [e (world-alloc-entity! (.gens w))]
+            (dense-set! (.Health w) (entity-index e) i))
+          (set! i (+ i 1))))
+      (let [^mut sum 0
+            ^mut j   0
+            n        (dense-len (.Health w))]
+        (while (< j n)
+          (set! sum (+ sum (dense-get (.Health w) j)))
+          (set! j (+ j 1)))
+        (println sum)
+        (if (= sum 499500) 0 1)))))
+
+) ;; end defmodule spawn1k_test

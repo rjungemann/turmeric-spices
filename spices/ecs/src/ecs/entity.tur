@@ -1,0 +1,58 @@
+;;; ecs/entity -- generationally-versioned opaque Entity handle.
+;;;
+;;; An Entity packs a 32-bit index and a 32-bit generation counter into a
+;;; single 64-bit int (low 32 = index, high 32 = generation). Generation
+;;; tracking is what lets dense storage reuse despawned slots while still
+;;; rejecting stale handles at runtime.
+;;;
+;;; Since: E0
+
+(defmodule ecs/entity
+  (export Entity entity-new entity-index entity-generation
+          entity=? ENTITY_NIL)
+
+;;; Entity -- opaque generational handle.
+;;; Since: E0
+(defopaque Entity :int)
+
+;;; ENTITY_NIL -- sentinel for "no such entity". Index 0xFFFFFFFF, gen 0.
+(def ENTITY_NIL 4294967295)
+
+;;; entity-new -- pack (index, generation) into an Entity.
+;;;
+;;; Parameters:
+;;;   idx -- entity slot index (must fit in u32)
+;;;   gen -- generation counter (must fit in u32)
+;;;
+;;; Returns:
+;;;   Packed Entity handle.
+;;;
+;;; Since: E0
+(defn entity-new [idx : int gen : int] : int
+  ```c
+  uint64_t e = ((uint64_t)gen << 32) | ((uint64_t)idx & 0xFFFFFFFFULL);
+  return (int64_t)e;
+  ```)
+
+;;; entity-index -- unpack the slot index.
+;;; Since: E0
+(defn entity-index [e : int] : int
+  ```c
+  return (int64_t)((uint64_t)e & 0xFFFFFFFFULL);
+  ```)
+
+;;; entity-generation -- unpack the generation counter.
+;;; Since: E0
+(defn entity-generation [e : int] : int
+  ```c
+  return (int64_t)(((uint64_t)e >> 32) & 0xFFFFFFFFULL);
+  ```)
+
+;;; entity=? -- structural equality on Entity handles.
+;;; Since: E0
+(defn entity=? [a : int b : int] : bool
+  ```c
+  return a == b;
+  ```)
+
+) ;; end defmodule ecs/entity

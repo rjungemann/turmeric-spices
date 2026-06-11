@@ -1,0 +1,90 @@
+;;; ecs/storage -- dense storage keyed by entity index.
+;;;
+;;; Dense storage is the v1 default: a parallel array indexed by an Entity's
+;;; slot index, with a separate "present" bitmap so we can distinguish a slot
+;;; that holds a real component from one that was never set or has been
+;;; cleared. Lookup is O(1) and iteration is contiguous.
+;;;
+;;; The handle is an :int (pointer to a heap-allocated control block);
+;;; element typing flows through the type parameter A on `dense-set!` /
+;;; `dense-get`. Sparse (HAMT) and tag (bitset) storages land in E1'.
+;;;
+;;; Since: E0
+
+(defmodule ecs/storage
+  (export dense-new dense-len dense-set! dense-get dense-has? dense-free)
+
+;;; dense-new -- allocate an empty dense storage. Returns an :int handle.
+;;; Since: E0
+(defn dense-new [] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  __ecs_dense *s = (__ecs_dense *)calloc(1, sizeof(*s));
+  return (int64_t)(intptr_t)s;
+  ```)
+
+;;; dense-len -- logical length (one past the largest written index).
+;;; Since: E0
+(defn dense-len [s : int] : int
+  ```c
+  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
+  return (int64_t)st->len;
+  ```)
+
+;;; dense-set! -- write a value at entity slot idx, marking it present.
+;;; Since: E0
+(defn dense-set! [A] [s : int idx : int val : A] : nil
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
+  if ((size_t)idx >= st->cap) {
+    size_t want = (size_t)idx + 1;
+    size_t nc = st->cap ? st->cap : 4;
+    while (nc < want) nc *= 2;
+    int64_t *nd = (int64_t *)realloc(st->data, nc * sizeof(int64_t));
+    uint8_t *np = (uint8_t *)realloc(st->present, nc);
+    memset(np + st->cap, 0, nc - st->cap);
+    st->data = nd; st->present = np; st->cap = nc;
+  }
+  st->data[idx] = (int64_t)val;
+  st->present[idx] = 1;
+  if ((size_t)idx + 1 > st->len) st->len = (size_t)idx + 1;
+  ```)
+
+;;; dense-has? -- is slot idx populated?
+;;; Since: E0
+(defn dense-has? [s : int idx : int] : bool
+  ```c
+  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
+  if ((size_t)idx >= st->cap) return false;
+  return st->present[idx] != 0;
+  ```)
+
+;;; dense-get -- read the value at slot idx (typed A). Caller must
+;;; has?-check first; absent slots return unspecified bits.
+;;; Since: E0
+(defn dense-get [A] [s : int idx : int] : A
+  ```c
+  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
+  return (int64_t)st->data[idx];
+  ```)
+
+;;; dense-free -- release the storage's backing arrays.
+;;; Since: E0
+(defn dense-free [s : int] : nil
+  ```c
+  #include <stdlib.h>
+  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
+  if (st) { free(st->data); free(st->present); free(st); }
+  ```)
+
+) ;; end defmodule ecs/storage
