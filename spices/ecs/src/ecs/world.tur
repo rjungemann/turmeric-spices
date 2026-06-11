@@ -14,11 +14,17 @@
 ;;; on the same elaborator work as E1 variadic queries.
 ;;;
 ;;; Per-component named accessors (`set-Pos!`, `get-Pos`, `spawn-Pos!`)
-;;; that the plan describes require compile-time identifier synthesis
-;;; (str -> sym) which the macro evaluator does not yet expose. See
-;;; docs/reported/ecs-macro-symbol-synthesis-missing.md. The E0 surface
-;;; is therefore the polymorphic `dense-set!` / `dense-get` family on
-;;; the storage field.
+;;; that the plan describes need three macro features in concert:
+;;; compile-time identifier synthesis (gap A, shipped), top-level
+;;; emission of multiple forms (gap E, shipped), and unquote in type
+;;; position (gap G, OPEN -- see
+;;; docs/reported/macro-unquote-in-type-position-rejected.md). With
+;;; the first two in but the third still open, the macro can mint the
+;;; identifier names but cannot type-parameterize the generated defns
+;;; over the component type. The accessors stay deferred until gap G
+;;; closes. The current surface is the polymorphic `dense-set!` /
+;;; `dense-get` family on the storage field; users add a typed-let
+;;; binding to recover the component type.
 ;;;
 ;;; Since: E0
 

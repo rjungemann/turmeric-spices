@@ -28,7 +28,7 @@
 (defmodule ecs/system
   (export System make-system system-reads-mask system-writes-mask
           system-run-fn system-run! system-conflicts?
-          cid-bit)
+          cid-bit defsystem)
 
 ;;; System -- a runnable bundle (reads-mask, writes-mask, run-fn).
 ;;; :copy so it flows through Turmeric values cleanly.
@@ -126,5 +126,34 @@
   ```c
   return (int64_t)((uint64_t)1 << (uint64_t)cid);
   ```)
+
+;;; defsystem -- declare a System and its implementation in one form.
+;;;
+;;; Syntax:
+;;;   (defsystem name reads-mask writes-mask body)
+;;;
+;;; Expands to two top-level forms (via top-level `do` splicing -- gap E):
+;;;   (defn name-impl [w : int] : nil body)
+;;;   (def  name      (make-system reads-mask writes-mask name-impl))
+;;;
+;;; The implementation is a top-level defn so its C function pointer is
+;;; stable; Turmeric coerces a top-level defn name to `ptr<void>` at the
+;;; make-system call site automatically.
+;;;
+;;; Example:
+;;;   (def pos-cid 0)
+;;;   (def vel-cid 1)
+;;;   (defsystem physics
+;;;     (bit-or (cid-bit pos-cid) (cid-bit vel-cid))   ;; reads
+;;;     (cid-bit pos-cid)                                ;; writes
+;;;     (println "physics tick"))
+;;;   ;; physics-impl and physics both exist at top level.
+;;;
+;;; Since: E2
+(defmacro defsystem [name reads-mask writes-mask body]
+  (let [impl-name (str->sym (str-append (symbol-name name) "-impl"))]
+    `(do
+       (defn ~impl-name [w : int] : nil ~body)
+       (def  ~name (make-system ~reads-mask ~writes-mask ~impl-name)))))
 
 ) ;; end defmodule ecs/system

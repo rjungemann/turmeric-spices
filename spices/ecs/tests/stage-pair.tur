@@ -4,6 +4,9 @@
 ;; by mutex inside the impl). The final value must be the same in
 ;; both orderings.
 ;;
+;; Now uses the `defsystem` macro (one form -> two top-level defns, via
+;; gap E's top-level (do ...) splice).
+;;
 ;; Expected output:
 ;;   2000               -- sequential total
 ;;   2000               -- parallel total
@@ -13,7 +16,7 @@
 (defmodule stage_pair_test
   (export)
 
-(import ecs/system :refer [System make-system system-conflicts? cid-bit])
+(import ecs/system :refer [System make-system system-conflicts? cid-bit defsystem])
 (import ecs/stage  :refer [stage-run-seq stage-run-pair-parallel])
 
 ;; Component IDs are just bit positions. The test invents two
@@ -55,15 +58,21 @@
   pthread_mutex_unlock(&mu);
   ```)
 
-;; Two system impls. Each takes a world handle that's really our
-;; accum pointer cast to int. Both bump the shared accumulator.
-(defn physics-impl [w : int] : nil
+;; Two systems via the defsystem macro. Each expansion emits both
+;; <name>-impl (the body) and <name> (the System struct holding the
+;; fn-ptr and masks). Masks are disjoint so the parallel scheduler
+;; can run them concurrently.
+(defsystem physics
+  (cid-bit pos-cid)               ;; reads
+  (cid-bit pos-cid)               ;; writes
   (let [^mut i 0]
     (while (< i 500)
       (accum-add! (:: w :ptr<void>) 1)
       (set! i (+ i 1)))))
 
-(defn render-impl [w : int] : nil
+(defsystem render
+  (cid-bit hp-cid)                ;; reads
+  (cid-bit hp-cid)                ;; writes
   (let [^mut i 0]
     (while (< i 1500)
       (accum-add! (:: w :ptr<void>) 1)
@@ -72,26 +81,23 @@
 (defn main [] : int
   (let [accum (make-accum)
         world (:: accum :int)]
-    (let [physics (make-system (cid-bit pos-cid) (cid-bit pos-cid) physics-impl)
-          render  (make-system (cid-bit hp-cid)  (cid-bit hp-cid)  render-impl)]
-      ;; Sequential run.
+    ;; Sequential run.
+    (accum-reset! accum)
+    (stage-run-seq physics render world)
+    (let [seq-total (accum-read accum)]
+      (println seq-total)                       ;; expect 2000
+      ;; Reset, then parallel run -- non-conflicting masks.
       (accum-reset! accum)
-      (stage-run-seq physics render world)
-      (let [seq-total (accum-read accum)]
-        (println seq-total)                       ;; expect 2000
-        ;; Reset, then parallel run -- non-conflicting (physics writes
-        ;; POS, render writes HP, no overlap with each other's reads).
-        (accum-reset! accum)
-        (stage-run-pair-parallel physics render world)
-        (let [par-total (accum-read accum)]
-          (println par-total)                     ;; expect 2000
-          (if (system-conflicts? physics render)
-            (println "conflict-check-broken")
-            (println "conflict-check-ok"))
-          (if (and (= seq-total 2000)
-                   (and (= par-total 2000)
-                        (not (system-conflicts? physics render))))
-            (do (println "ok") 0)
-            (do (println "FAIL") 1)))))))
+      (stage-run-pair-parallel physics render world)
+      (let [par-total (accum-read accum)]
+        (println par-total)                     ;; expect 2000
+        (if (system-conflicts? physics render)
+          (println "conflict-check-broken")
+          (println "conflict-check-ok"))
+        (if (and (= seq-total 2000)
+                 (and (= par-total 2000)
+                      (not (system-conflicts? physics render))))
+          (do (println "ok") 0)
+          (do (println "FAIL") 1))))))
 
 ) ;; end defmodule stage_pair_test
