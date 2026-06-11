@@ -105,9 +105,24 @@ Filed in the main repo's `docs/reported/` and
    primary (smallest-set iteration) or a dense-then-test fallback.
    Today, use sparse/tag components only via filters inside the body.
 
+6. **`defsystem` `:writes` lists are NOT enforced at compile time.**
+   The ECS plan calls this "the single biggest delta vs. Haskell
+   ECSes" and claims compile-time gating of `set-X!` access on
+   `:writes` membership. The shipped `defsystem` collects `:writes`
+   as a runtime bitmask used by the scheduler for wave assignment,
+   but a system declaring `:writes [Pos]` and calling
+   `(dense-set! (.Vel w) ...)` in its body compiles and runs without
+   diagnostic. If the user lies in the declaration, the scheduler's
+   wave grouping is wrong and runtime races appear. See
+   [docs/reported/ecs-defsystem-write-caps-not-enforced.md](../../../turmeric/docs/reported/ecs-defsystem-write-caps-not-enforced.md)
+   for triage and three implementation paths (Path A: per-component
+   `WriteCap` linear capabilities, recommended).
+
 None of these change the plan; (1)-(3) are upstream fixes that
 ship the original plan's API more directly, (5) is a query-engine
-follow-up.
+follow-up, (6) is the only one that's a real gap against the plan's
+spec'd surface (the plan promises it; the spice doesn't deliver it
+yet).
 
 ## License
 
