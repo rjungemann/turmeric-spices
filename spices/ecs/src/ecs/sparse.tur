@@ -1,0 +1,277 @@
+;;; ecs/sparse -- sparse storage keyed by entity index (Robin Hood).
+;;;
+;;; Open-addressed Robin Hood hash table from entity-index (u32) to a
+;;; value of type A. Use this when "few entities have this component"
+;;; (e.g. `Hp` on a world full of decorative props) -- dense storage
+;;; wastes one element-sized slot per entity that doesn't carry the
+;;; component; sparse storage costs ~17 bytes (key, value, probe-dist)
+;;; per *populated* slot regardless of the world's entity range.
+;;;
+;;; The control block carries a parallel `uint8_t probe_dist[]` array:
+;;; `probe_dist[i] == 0` means slot i is empty; `probe_dist[i] = d > 0`
+;;; means the entry at slot i sits at displacement (d - 1) from its
+;;; ideal slot. Insert does the Robin Hood swap (newer high-displacement
+;;; entries swap past resident low-displacement ones); delete does
+;;; backward-shift guided by `probe_dist` (no rehash math in the shift
+;;; loop). Lookup short-circuits when its own probe distance exceeds the
+;;; resident's -- the RH invariant guarantees the key cannot appear
+;;; later in the chain.
+;;;
+;;; Element type A is reflected into the inline-C body via `__TUR_TY_A__`
+;;; (same per-instantiation monomorphization path used by ecs/storage).
+;;; Struct-by-value components need `sparse-get-w` for the witness reason
+;;; documented in
+;;; docs/reported/generic-return-type-not-inferred-from-context.md.
+;;;
+;;; The Robin Hood port follows martinus/robin-hood-hashing v3.11.5
+;;; (`src/include/robin_hood.h` lines 1377-1410 for shiftUp/shiftDown).
+;;; The fix history is in
+;;; docs/reported/ecs-sparse-backward-shift-loses-wrapping-entries.md;
+;;; the bug the rewrite closes was a linear-probe / RH-backward-shift
+;;; algorithm mismatch.
+;;;
+;;; Since: E1' (initial linear-probe version); rewritten to Robin Hood E1' patch 1.
+
+(defmodule ecs/sparse
+  (export sparse-new sparse-len sparse-set! sparse-get sparse-get-w
+          sparse-has? sparse-del! sparse-free)
+
+;;; sparse-new -- allocate an empty sparse storage. Returns an :int handle.
+;;; Since: E1'
+(defn sparse-new [] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  typedef struct {
+    uint64_t *keys;
+    void     *vals;
+    uint8_t  *probe_dist;   /* 0 = empty, d > 0 = displacement (d - 1) */
+    size_t    cap;
+    size_t    count;
+    size_t    elem_sz;
+  } __ecs_sparse;
+  __ecs_sparse *s = (__ecs_sparse *)calloc(1, sizeof(*s));
+  return (int64_t)(intptr_t)s;
+  ```)
+
+;;; sparse-len -- live entry count.
+;;; Since: E1'
+(defn sparse-len [s : int] : int
+  ```c
+  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
+  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
+  return (int64_t)st->count;
+  ```)
+
+;;; sparse-has? -- is there an entry at this entity index? Short-circuits
+;;; on the RH monotonicity invariant: once the probing key's displacement
+;;; exceeds the resident's, the resident would have been swapped past on
+;;; insertion -- so the key isn't in the table.
+;;; Since: E1'
+(defn sparse-has? [s : int idx : int] : bool
+  ```c
+  #include <stdint.h>
+  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
+  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
+  if (st->cap == 0) return false;
+  uint64_t mask = (uint64_t)(st->cap - 1);
+  uint64_t k = (uint64_t)idx;
+  uint64_t h = k * 0x9E3779B97F4A7C15ULL; h ^= h >> 32;
+  size_t p = (size_t)(h & mask);
+  size_t d = 0;
+  for (size_t guard = 0; guard < st->cap; guard++) {
+    uint8_t pd = st->probe_dist[p];
+    if (pd == 0) return false;
+    if (st->keys[p] == k) return true;
+    if (d > (size_t)(pd - 1)) return false;          /* RH short-circuit */
+    p = (p + 1) & mask;
+    d++;
+  }
+  return false;
+  ```)
+
+;;; sparse-set! -- write a value at entity index idx (Robin Hood insert).
+;;; If a probe would exceed the byte-sized `probe_dist` saturation point
+;;; (252 -- leaves headroom), or the load factor would exceed 0.75, the
+;;; table grows and rehashes before the insert proceeds. The byte cap is
+;;; in practice unreachable for tables that fit in addressable memory
+;;; (load 0.75 has expected longest probe ~2 * ln(cap)).
+;;; Since: E1'
+(defn sparse-set! [A] [s : int idx : int val : A] : nil
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
+  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
+  if (st->elem_sz == 0) st->elem_sz = sizeof(__TUR_TY_A__);
+
+  /* Grow when count >= 0.75 * cap (or cap == 0). RH-rehash inline. */
+  if (st->cap == 0 || (st->count + 1) * 4 > st->cap * 3) {
+    size_t new_cap = st->cap ? st->cap * 2 : 16;
+    uint64_t *new_keys = (uint64_t *)malloc(new_cap * sizeof(uint64_t));
+    void     *new_vals = malloc(new_cap * st->elem_sz);
+    uint8_t  *new_pd   = (uint8_t  *)calloc(new_cap, 1);
+    /* keys default doesn't matter (probe_dist == 0 means empty). */
+    uint64_t new_mask = (uint64_t)(new_cap - 1);
+    for (size_t i = 0; i < st->cap; i++) {
+      if (st->probe_dist[i] == 0) continue;
+      uint64_t mk = st->keys[i];
+      uint64_t mh = mk * 0x9E3779B97F4A7C15ULL; mh ^= mh >> 32;
+      size_t mp = (size_t)(mh & new_mask);
+      size_t md = 0;
+      uint64_t cur_k = mk;
+      /* Use a stack-buffer copy so we can swap struct-by-value entries. */
+      __TUR_TY_A__ cur_v;
+      memcpy(&cur_v, (char *)st->vals + i * st->elem_sz, st->elem_sz);
+      for (;;) {
+        if (new_pd[mp] == 0) {
+          new_keys[mp] = cur_k;
+          memcpy((char *)new_vals + mp * st->elem_sz, &cur_v, st->elem_sz);
+          new_pd[mp] = (uint8_t)(md + 1);
+          break;
+        }
+        size_t rd = (size_t)(new_pd[mp] - 1);
+        if (md > rd) {
+          /* Swap cur with resident. */
+          uint64_t tk = new_keys[mp];   new_keys[mp] = cur_k;   cur_k = tk;
+          __TUR_TY_A__ tv;
+          memcpy(&tv, (char *)new_vals + mp * st->elem_sz, st->elem_sz);
+          memcpy((char *)new_vals + mp * st->elem_sz, &cur_v, st->elem_sz);
+          cur_v = tv;
+          uint8_t td = new_pd[mp];      new_pd[mp]   = (uint8_t)(md + 1);
+          md = (size_t)(td - 1);
+        }
+        mp = (mp + 1) & new_mask;
+        md++;
+      }
+    }
+    free(st->keys); free(st->vals); free(st->probe_dist);
+    st->keys = new_keys; st->vals = new_vals; st->probe_dist = new_pd; st->cap = new_cap;
+  }
+
+  /* Robin Hood insert. */
+  uint64_t mask = (uint64_t)(st->cap - 1);
+  uint64_t k = (uint64_t)idx;
+  uint64_t h = k * 0x9E3779B97F4A7C15ULL; h ^= h >> 32;
+  size_t p = (size_t)(h & mask);
+  size_t d = 0;
+  uint64_t cur_k = k;
+  __TUR_TY_A__ cur_v = val;
+  for (;;) {
+    if (st->probe_dist[p] == 0) {
+      st->keys[p] = cur_k;
+      memcpy((char *)st->vals + p * st->elem_sz, &cur_v, st->elem_sz);
+      st->probe_dist[p] = (uint8_t)(d + 1);
+      st->count++;
+      return;
+    }
+    if (st->keys[p] == cur_k && d <= (size_t)(st->probe_dist[p] - 1)) {
+      /* Existing key -- update value, keep displacement. */
+      memcpy((char *)st->vals + p * st->elem_sz, &cur_v, st->elem_sz);
+      return;
+    }
+    size_t rd = (size_t)(st->probe_dist[p] - 1);
+    if (d > rd) {
+      uint64_t tk = st->keys[p];   st->keys[p] = cur_k;   cur_k = tk;
+      __TUR_TY_A__ tv;
+      memcpy(&tv, (char *)st->vals + p * st->elem_sz, st->elem_sz);
+      memcpy((char *)st->vals + p * st->elem_sz, &cur_v, st->elem_sz);
+      cur_v = tv;
+      uint8_t td = st->probe_dist[p]; st->probe_dist[p] = (uint8_t)(d + 1);
+      d = (size_t)(td - 1);
+    }
+    p = (p + 1) & mask;
+    d++;
+  }
+  ```)
+
+;;; sparse-get -- int-carrier read (raw ints / opaques / pointers).
+;;; Returns unspecified bits if the slot is empty; has?-check first.
+;;; Since: E1'
+(defn sparse-get [A] [s : int idx : int] : A
+  ```c
+  #include <stdint.h>
+  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
+  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
+  uint64_t mask = (uint64_t)(st->cap - 1);
+  uint64_t k = (uint64_t)idx;
+  uint64_t h = k * 0x9E3779B97F4A7C15ULL; h ^= h >> 32;
+  size_t p = (size_t)(h & mask);
+  while (st->keys[p] != k || st->probe_dist[p] == 0) p = (p + 1) & mask;
+  return ((__TUR_TY_A__ *)st->vals)[p];
+  ```)
+
+;;; sparse-get-w -- struct-component variant; takes a discarded witness.
+;;; See ecs/storage's `dense-get-w` for the rationale.
+;;; Since: E1'
+(defn sparse-get-w [A] [s : int idx : int _witness : A] : A
+  ```c
+  #include <stdint.h>
+  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
+  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
+  (void)_witness;
+  uint64_t mask = (uint64_t)(st->cap - 1);
+  uint64_t k = (uint64_t)idx;
+  uint64_t h = k * 0x9E3779B97F4A7C15ULL; h ^= h >> 32;
+  size_t p = (size_t)(h & mask);
+  while (st->keys[p] != k || st->probe_dist[p] == 0) p = (p + 1) & mask;
+  return ((__TUR_TY_A__ *)st->vals)[p];
+  ```)
+
+;;; sparse-del! -- remove the entry at idx (returns false if absent).
+;;; Backward-shift is driven entirely by `probe_dist`: keep shifting
+;;; while the next slot's probe-dist >= 2 (i.e. its displacement >= 1).
+;;; No rehash arithmetic in the loop, no wrap-around math beyond the
+;;; one-line `(cur + 1) & mask`.
+;;; Since: E1'
+(defn sparse-del! [s : int idx : int] : bool
+  ```c
+  #include <string.h>
+  #include <stdint.h>
+  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
+  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
+  if (st->cap == 0) return false;
+  uint64_t mask = (uint64_t)(st->cap - 1);
+  uint64_t k = (uint64_t)idx;
+  uint64_t h = k * 0x9E3779B97F4A7C15ULL; h ^= h >> 32;
+  size_t p = (size_t)(h & mask);
+  size_t d = 0;
+  for (size_t guard = 0; guard < st->cap; guard++) {
+    uint8_t pd = st->probe_dist[p];
+    if (pd == 0) return false;
+    if (st->keys[p] == k) goto found;
+    if (d > (size_t)(pd - 1)) return false;          /* RH short-circuit */
+    p = (p + 1) & mask;
+    d++;
+  }
+  return false;
+found: {
+    size_t cur = p;
+    for (;;) {
+      size_t nxt = (cur + 1) & mask;
+      if (st->probe_dist[nxt] < 2) break;            /* empty or at-home */
+      st->keys[cur] = st->keys[nxt];
+      memcpy((char *)st->vals + cur * st->elem_sz,
+             (char *)st->vals + nxt * st->elem_sz, st->elem_sz);
+      st->probe_dist[cur] = (uint8_t)(st->probe_dist[nxt] - 1);
+      cur = nxt;
+    }
+    st->probe_dist[cur] = 0;
+    st->count--;
+    return true;
+  }
+  ```)
+
+;;; sparse-free -- release backing arrays.
+;;; Since: E1'
+(defn sparse-free [s : int] : nil
+  ```c
+  #include <stdlib.h>
+  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
+  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
+  if (st) { free(st->keys); free(st->vals); free(st->probe_dist); free(st); }
+  ```)
+
+) ;; end defmodule ecs/sparse

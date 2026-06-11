@@ -1,0 +1,45 @@
+;; E1' patch-1 regression: the workload from
+;; docs/reported/ecs-sparse-backward-shift-loses-wrapping-entries.md.
+;; Insert 500 entries at odd indices 1, 3, ..., 999 (cap grows to 1024,
+;; load ~0.49), delete every-other one, count survivors and tally any
+;; del that returned false.
+;;
+;; Expected output:
+;;   500    -- sparse-len after inserts
+;;   250    -- sparse-len after deletes (was 253 before the RH rewrite)
+;;   0      -- lost counter (was 3 before; specifically 857, 945, 993)
+;;
+;; If the lost counter ever climbs above 0, the Robin Hood invariant
+;; has been broken again -- check sparse-set!'s swap loop and
+;; sparse-del!'s shift loop in src/ecs/sparse.tur.
+
+(defmodule sparse_rt_large
+  (export)
+
+(import ecs/sparse :refer [sparse-new sparse-len sparse-set!
+                            sparse-del! sparse-free])
+
+(defn main [] : int
+  (let [s (sparse-new)]
+    (do
+      (let [^mut i 0]
+        (while (< i 500)
+          (sparse-set! s (+ (* i 2) 1) i)
+          (set! i (+ i 1))))
+      (println (sparse-len s))
+      (let [^mut j 0
+            ^mut lost 0]
+        (while (< j 500)
+          (when (= 0 (mod j 2))
+            (let [idx (+ (* j 2) 1)]
+              (when (not (sparse-del! s idx))
+                (set! lost (+ lost 1)))))
+          (set! j (+ j 1)))
+        (println (sparse-len s))
+        (println lost)
+        (sparse-free s)
+        (if (and (= (sparse-len (sparse-new)) 0)
+                 (= lost 0))
+          0 1)))))
+
+) ;; end defmodule sparse_rt_large

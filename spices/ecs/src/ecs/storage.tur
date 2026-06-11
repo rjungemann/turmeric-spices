@@ -5,23 +5,29 @@
 ;;; that holds a real component from one that was never set or has been
 ;;; cleared. Lookup is O(1) and iteration is contiguous.
 ;;;
-;;; The handle is an :int (pointer to a heap-allocated control block);
-;;; element typing flows through the type parameter A on `dense-set!` /
-;;; `dense-get`. Sparse (HAMT) and tag (bitset) storages land in E1'.
+;;; The handle is an :int (pointer to a heap-allocated control block). The
+;;; element type A is reflected into the inline-C body through the
+;;; `__TUR_TY_A__` template marker, so per-instantiation monomorphization
+;;; sizes the data array correctly for both int-carried opaques and
+;;; by-value structs.
 ;;;
-;;; Since: E0
+;;; Since: E0; struct support added in E1' after the ABI fix landed
+;;; (see docs/reported/generic-inline-c-struct-arg-monomorphises-to-int64.md).
 
 (defmodule ecs/storage
-  (export dense-new dense-len dense-set! dense-get dense-has? dense-free)
+  (export dense-new dense-len dense-set! dense-get dense-get-w
+          dense-has? dense-free)
 
 ;;; dense-new -- allocate an empty dense storage. Returns an :int handle.
+;;; The element-size field is filled lazily on the first dense-set! so the
+;;; handle stays type-erased at the storage level.
 ;;; Since: E0
 (defn dense-new [] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
   #include <stdint.h>
-  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *s = (__ecs_dense *)calloc(1, sizeof(*s));
   return (int64_t)(intptr_t)s;
   ```)
@@ -30,29 +36,31 @@
 ;;; Since: E0
 (defn dense-len [s : int] : int
   ```c
-  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
   return (int64_t)st->len;
   ```)
 
 ;;; dense-set! -- write a value at entity slot idx, marking it present.
+;;; Sizes the data array on first use according to sizeof(A).
 ;;; Since: E0
 (defn dense-set! [A] [s : int idx : int val : A] : nil
   ```c
   #include <stdlib.h>
   #include <string.h>
-  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
+  if (st->elem_sz == 0) st->elem_sz = sizeof(__TUR_TY_A__);
   if ((size_t)idx >= st->cap) {
     size_t want = (size_t)idx + 1;
     size_t nc = st->cap ? st->cap : 4;
     while (nc < want) nc *= 2;
-    int64_t *nd = (int64_t *)realloc(st->data, nc * sizeof(int64_t));
-    uint8_t *np = (uint8_t *)realloc(st->present, nc);
-    memset(np + st->cap, 0, nc - st->cap);
-    st->data = nd; st->present = np; st->cap = nc;
+    st->data = realloc(st->data, nc * st->elem_sz);
+    st->present = (uint8_t *)realloc(st->present, nc);
+    memset(st->present + st->cap, 0, nc - st->cap);
+    st->cap = nc;
   }
-  st->data[idx] = (int64_t)val;
+  ((__TUR_TY_A__ *)st->data)[idx] = val;
   st->present[idx] = 1;
   if ((size_t)idx + 1 > st->len) st->len = (size_t)idx + 1;
   ```)
@@ -61,20 +69,39 @@
 ;;; Since: E0
 (defn dense-has? [s : int idx : int] : bool
   ```c
-  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
   if ((size_t)idx >= st->cap) return false;
   return st->present[idx] != 0;
   ```)
 
-;;; dense-get -- read the value at slot idx (typed A). Caller must
-;;; has?-check first; absent slots return unspecified bits.
+;;; dense-get -- read the value at slot idx (typed A). Use this when A is
+;;; an int-carrier type (raw int, opaque :int, pointer). For by-value
+;;; struct components use `dense-get-w` and pass a witness, because the
+;;; elaborator does not bind A from return-type context alone (see
+;;; docs/reported/generic-return-type-not-inferred-from-context.md).
+;;; Caller must has?-check first; absent slots return unspecified bytes.
 ;;; Since: E0
 (defn dense-get [A] [s : int idx : int] : A
   ```c
-  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
-  return (int64_t)st->data[idx];
+  return ((__TUR_TY_A__ *)st->data)[idx];
+  ```)
+
+;;; dense-get-w -- struct-component variant of dense-get. Takes an
+;;; ignored witness argument whose only purpose is to bind A at the call
+;;; site so the inline-C body specializes to the right C type and size.
+;;; The witness is *not* used at runtime; pass any constant of type A
+;;; (e.g. a zero-initialized struct). Folded away once the elaborator
+;;; learns to bind generic returns from caller context.
+;;; Since: E1'
+(defn dense-get-w [A] [s : int idx : int _witness : A] : A
+  ```c
+  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
+  __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
+  (void)_witness;
+  return ((__TUR_TY_A__ *)st->data)[idx];
   ```)
 
 ;;; dense-free -- release the storage's backing arrays.
@@ -82,7 +109,7 @@
 (defn dense-free [s : int] : nil
   ```c
   #include <stdlib.h>
-  typedef struct { int64_t *data; uint8_t *present; size_t len; size_t cap; } __ecs_dense;
+  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
   if (st) { free(st->data); free(st->present); free(st); }
   ```)

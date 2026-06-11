@@ -1,0 +1,110 @@
+;;; ecs/tag -- bitset storage for zero-payload "has component X" tags.
+;;;
+;;; A tag is a payload-less marker: `Dead`, `Frozen`, `Player`. The
+;;; underlying representation is a bitset over entity index space, one
+;;; bit per slot. Set/clear/test are O(1) constant-time on the index;
+;;; iteration is fast (skip whole zero words at a time).
+;;;
+;;; Tags interoperate with dense/sparse storages through the `with` /
+;;; `without` query filters in ecs/query: a `with [Dead]` filter walks
+;;; the Dead tag bitset, a `without [Dead]` filter skips entities whose
+;;; bit is set.
+;;;
+;;; Since: E1'
+
+(defmodule ecs/tag
+  (export tag-new tag-cap tag-count tag-set! tag-clear!
+          tag-has? tag-free)
+
+;;; tag-new -- allocate an empty tag bitset. Returns an :int handle.
+;;; Since: E1'
+(defn tag-new [] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <stdint.h>
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *t = (__ecs_tag *)calloc(1, sizeof(*t));
+  return (int64_t)(intptr_t)t;
+  ```)
+
+;;; tag-cap -- highest representable bit index (capacity in bits).
+;;; Since: E1'
+(defn tag-cap [t : int] : int
+  ```c
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
+  return (int64_t)tg->cap_bits;
+  ```)
+
+;;; __tag-grow -- internal: ensure bitset can hold at least bit `idx`.
+(defn __tag-grow [t : int idx : int] : nil
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
+  size_t need_word = ((size_t)idx >> 6) + 1;
+  if (need_word <= tg->n_words) return;
+  size_t nw = tg->n_words ? tg->n_words : 1;
+  while (nw < need_word) nw *= 2;
+  tg->words = (uint64_t *)realloc(tg->words, nw * sizeof(uint64_t));
+  memset(tg->words + tg->n_words, 0, (nw - tg->n_words) * sizeof(uint64_t));
+  tg->n_words = nw;
+  tg->cap_bits = nw * 64;
+  ```)
+
+;;; tag-set! -- mark entity slot idx as tagged.
+;;; Since: E1'
+(defn tag-set! [t : int idx : int] : nil
+  (__tag-grow t idx)
+  ```c
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
+  tg->words[(size_t)idx >> 6] |= ((uint64_t)1) << ((size_t)idx & 63);
+  ```)
+
+;;; tag-clear! -- mark entity slot idx as untagged.
+;;; Since: E1'
+(defn tag-clear! [t : int idx : int] : nil
+  ```c
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
+  if ((size_t)idx >= tg->cap_bits) return;
+  tg->words[(size_t)idx >> 6] &= ~(((uint64_t)1) << ((size_t)idx & 63));
+  ```)
+
+;;; tag-has? -- is entity slot idx tagged?
+;;; Since: E1'
+(defn tag-has? [t : int idx : int] : bool
+  ```c
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
+  if ((size_t)idx >= tg->cap_bits) return false;
+  return (tg->words[(size_t)idx >> 6] >> ((size_t)idx & 63)) & 1;
+  ```)
+
+;;; tag-count -- popcount: number of set bits across the bitset.
+;;; Since: E1'
+(defn tag-count [t : int] : int
+  ```c
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
+  int64_t total = 0;
+  for (size_t i = 0; i < tg->n_words; i++) {
+    total += (int64_t)__builtin_popcountll(tg->words[i]);
+  }
+  return total;
+  ```)
+
+;;; tag-free -- release the bitset's word buffer.
+;;; Since: E1'
+(defn tag-free [t : int] : nil
+  ```c
+  #include <stdlib.h>
+  typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
+  __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
+  if (tg) { free(tg->words); free(tg); }
+  ```)
+
+) ;; end defmodule ecs/tag

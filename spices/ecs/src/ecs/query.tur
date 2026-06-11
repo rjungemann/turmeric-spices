@@ -1,0 +1,116 @@
+;;; ecs/query -- imperative for-each iteration over component storages.
+;;;
+;;; E1' surface: `for-each1` .. `for-each3` iterate every entity slot in
+;;; the union of the listed dense storages, calling the body once per
+;;; slot where *all* of the listed components are present. The body is
+;;; spliced inline (no closure allocation) and gets the entity index
+;;; plus one int-carried value per component bound under the names the
+;;; caller supplies.
+;;;
+;;; For struct-by-value components, replace the macro-generated
+;;; `dense-get` call with a hand-written `dense-get-w` in the body; the
+;;; macro stays int-carrier only until the elaborator binds generic
+;;; returns from context (see
+;;; docs/reported/generic-return-type-not-inferred-from-context.md).
+;;;
+;;; Filters: `world-tagged?` and `world-untagged?` consult a tag storage
+;;; for a single entity slot; combine them with `when` / `unless` inside
+;;; the body to express `with` / `without` constraints.
+;;;
+;;; The arity cap of three matches the plan's E1' explicit cap; lifting
+;;; to true variadic queries is gated on the same elaborator work as
+;;; the E1 row-typed iterator (see docs/upcoming/ecs-spice-plan.md).
+;;;
+;;; Macros are written with explicit `(list ...)` construction rather
+;;; than backquote because the macro evaluator currently mangles do/let
+;;; forms whose backquote bodies contain a `~(dot-sym ...)` unquote
+;;; (filed separately under
+;;; docs/reported/macro-backquote-dot-sym-drops-siblings.md).
+;;;
+;;; Since: E1'
+
+(defmodule ecs/query
+  (export for-each1 for-each2 for-each3
+          world-tagged? world-untagged?)
+
+;;; for-each1 -- iterate entities with component A1 present.
+;;; (for-each1 world A1 e v1 body)  -- e and v1 are the binding names
+;;; Since: E1'
+(defmacro for-each1 [world A1 e v1 body]
+  (list let
+    (vec __s1  (list (dot-sym A1) world)
+         __cap (list dense-len __s1)
+         (quote ^mut) __i 0)
+    (list while (list < __i __cap)
+      (list do
+        (list when (list dense-has? __s1 __i)
+          (list let (vec e __i
+                         v1 (list dense-get __s1 __i))
+            body))
+        (list set! __i (list + __i 1))))))
+
+;;; for-each2 -- iterate entities with components A1 and A2 both present.
+;;; (for-each2 world A1 A2 e v1 v2 body)
+;;; Since: E1'
+(defmacro for-each2 [world A1 A2 e v1 v2 body]
+  (list let
+    (vec __s1  (list (dot-sym A1) world)
+         __s2  (list (dot-sym A2) world)
+         __cap (list if (list >= (list dense-len __s1) (list dense-len __s2))
+                  (list dense-len __s1)
+                  (list dense-len __s2))
+         (quote ^mut) __i 0)
+    (list while (list < __i __cap)
+      (list do
+        (list when (list and
+                     (list dense-has? __s1 __i)
+                     (list dense-has? __s2 __i))
+          (list let (vec e  __i
+                         v1 (list dense-get __s1 __i)
+                         v2 (list dense-get __s2 __i))
+            body))
+        (list set! __i (list + __i 1))))))
+
+;;; for-each3 -- iterate entities with A1, A2, A3 all present.
+;;; (for-each3 world A1 A2 A3 e v1 v2 v3 body)
+;;; Since: E1'
+(defmacro for-each3 [world A1 A2 A3 e v1 v2 v3 body]
+  (list let
+    (vec __s1  (list (dot-sym A1) world)
+         __s2  (list (dot-sym A2) world)
+         __s3  (list (dot-sym A3) world)
+         __cap (list if (list >= (list dense-len __s1) (list dense-len __s2))
+                  (list if (list >= (list dense-len __s1) (list dense-len __s3))
+                       (list dense-len __s1) (list dense-len __s3))
+                  (list if (list >= (list dense-len __s2) (list dense-len __s3))
+                       (list dense-len __s2) (list dense-len __s3)))
+         (quote ^mut) __i 0)
+    (list while (list < __i __cap)
+      (list do
+        (list when (list and
+                     (list dense-has? __s1 __i)
+                     (list and
+                       (list dense-has? __s2 __i)
+                       (list dense-has? __s3 __i)))
+          (list let (vec e  __i
+                         v1 (list dense-get __s1 __i)
+                         v2 (list dense-get __s2 __i)
+                         v3 (list dense-get __s3 __i))
+            body))
+        (list set! __i (list + __i 1))))))
+
+;;; world-tagged? -- true if entity slot idx carries the named tag in the
+;;; world's tag storage. Pulls the tag field via `.<TagName>` -- the tag
+;;; field on the world struct must hold a `tag-new` handle.
+;;; (world-tagged? world Player e)
+;;; Since: E1'
+(defmacro world-tagged? [world Tag e]
+  (list tag-has? (list (dot-sym Tag) world) e))
+
+;;; world-untagged? -- inverse of world-tagged?. Sugar for "the entity
+;;; does NOT carry this tag".
+;;; Since: E1'
+(defmacro world-untagged? [world Tag e]
+  (list not (list tag-has? (list (dot-sym Tag) world) e)))
+
+) ;; end defmodule ecs/query
