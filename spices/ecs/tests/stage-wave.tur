@@ -1,0 +1,87 @@
+;; E2 arity-N wave scheduler smoke test. Builds a Stage with five
+;; systems that touch three component bits (POS, VEL, HP) in patterns
+;; that force the greedy first-fit grouping to use two waves:
+;;
+;;   sys-a : reads POS, writes POS               (wave 0)
+;;   sys-b : reads VEL, writes VEL               (wave 0; disjoint from a)
+;;   sys-c : reads HP,  writes HP                (wave 0; disjoint from a, b)
+;;   sys-d : reads POS, writes POS               (wave 1; conflicts with a)
+;;   sys-e : reads VEL, writes VEL               (wave 1; conflicts with b)
+;;
+;; All five systems bump a shared mutex-protected accumulator. The total
+;; after one stage-run! must equal the sum of each system's increment
+;; regardless of which wave it was scheduled into.
+;;
+;; Expected output:
+;;   2     -- two waves
+;;   5500  -- 100 + 200 + 400 + 800 + 4000 across all five systems
+;;   ok
+
+(defmodule stage_wave_test
+  (export)
+
+(import ecs/system :refer [System make-system cid-bit defsystem])
+(import ecs/stage  :refer [Stage stage-new stage-add! stage-len stage-n-waves
+                            stage-run! stage-free!])
+
+(def pos-cid 0)
+(def vel-cid 1)
+(def hp-cid  2)
+
+(defn make-accum [] : ptr<void>
+  ```c
+  #include <stdlib.h>
+  int64_t *p = (int64_t *)calloc(1, sizeof(int64_t));
+  return p;
+  ```)
+
+(defn accum-read [p : ptr<void>] : int
+  ```c
+  return *(int64_t *)p;
+  ```)
+
+(defn accum-add! [p : ptr<void> delta : int] : nil
+  ```c
+  #include <pthread.h>
+  static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+  pthread_mutex_lock(&mu);
+  *(int64_t *)p += delta;
+  pthread_mutex_unlock(&mu);
+  ```)
+
+(defsystem sys-a (cid-bit pos-cid) (cid-bit pos-cid)
+  (accum-add! (:: w :ptr<void>) 100))
+
+(defsystem sys-b (cid-bit vel-cid) (cid-bit vel-cid)
+  (accum-add! (:: w :ptr<void>) 200))
+
+(defsystem sys-c (cid-bit hp-cid)  (cid-bit hp-cid)
+  (accum-add! (:: w :ptr<void>) 400))
+
+(defsystem sys-d (cid-bit pos-cid) (cid-bit pos-cid)
+  (accum-add! (:: w :ptr<void>) 800))
+
+(defsystem sys-e (cid-bit vel-cid) (cid-bit vel-cid)
+  (accum-add! (:: w :ptr<void>) 4000))
+
+(defn main [] : int
+  (let [stage (stage-new)
+        accum (make-accum)
+        world (:: accum :int)]
+    (do
+      (stage-add! stage sys-a)
+      (stage-add! stage sys-b)
+      (stage-add! stage sys-c)
+      (stage-add! stage sys-d)
+      (stage-add! stage sys-e)
+      (stage-run! stage world)
+      (println (stage-n-waves stage))   ;; 2
+      (println (accum-read accum))      ;; 5500
+      (let [ok (and (= (stage-n-waves stage) 2)
+                    (= (accum-read accum) 5500))]
+        (stage-free! stage)
+        (if ok
+          (do (println "ok") 0)
+          (do (println "FAIL") 1))))))
+
+) ;; end defmodule stage_wave_test
