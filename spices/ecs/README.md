@@ -67,23 +67,28 @@ Each exits 0 on success.
 
 ## Known limitations (E1')
 
-Filed in the main repo's `docs/reported/`:
+Filed in the main repo's `docs/reported/` and
+[`docs/upcoming/ecs-prereq-plan.md`](../../../turmeric/docs/upcoming/ecs-prereq-plan.md):
 
-1. **Per-component named accessors (`set-Pos!`, `get-Pos`) cannot be
-   emitted by `defworld`.** The macro evaluator does not expose
-   `str->sym`. The current surface is polymorphic
-   `dense-set!` / `dense-get` on the typed storage field. See
-   [docs/reported/ecs-macro-symbol-synthesis-missing.md](../../../turmeric/docs/reported/ecs-macro-symbol-synthesis-missing.md).
+1. ~~Per-component named accessors (`set-Pos!`, `get-Pos`) cannot be
+   emitted by `defworld`.~~ **Fixed** -- `str->sym` is shipped
+   (`src/compiler/elab_macros.c:321-326`); a `defworld` upgrade that
+   emits per-component accessors is queued as the next spice change.
+   See [docs/reported/ecs-macro-symbol-synthesis-missing.md](../../../turmeric/docs/reported/ecs-macro-symbol-synthesis-missing.md).
 
-2. **Generic `[A]` returns don't infer from caller context.** Forces
-   the `dense-get-w` / `sparse-get-w` witness-passing variant for
-   struct components. See
-   [docs/reported/generic-return-type-not-inferred-from-context.md](../../../turmeric/docs/reported/generic-return-type-not-inferred-from-context.md).
+2. ~~Generic `[A]` returns don't infer from caller context.~~ **Mostly
+   fixed.** Typed bindings (`(let [p : Pos (dense-get s i)] ...)`),
+   `::` ascription, and enclosing defn return types all bind A
+   correctly now. The remaining case is bare `(let [p (dense-get s
+   i)] ...)` followed by struct field access -- A defaults to the
+   int carrier there. Use `dense-get-w` / `sparse-get-w` (witness
+   variants) or annotate the binding.
 
-3. **Backquote silently drops sibling forms when a `~(dot-sym ...)`
-   unquote appears in the same macro body.** Forces `(list ...)` form
-   construction throughout `ecs/query.tur`. See
-   [docs/reported/macro-backquote-dot-sym-drops-siblings.md](../../../turmeric/docs/reported/macro-backquote-dot-sym-drops-siblings.md).
+3. ~~Backquote silently drops sibling forms when a `~(dot-sym ...)`
+   unquote appears in the same macro body.~~ **Fixed** on probe.
+   `ecs/query.tur`'s macros are still written in `(list ...)` style
+   for the moment; a rewrite-to-backquote sweep is queued as a
+   separate change.
 
 4. ~~Sparse backward-shift deletion leaks ~1% of entries whose probe
    chain wraps the table.~~ **Fixed** by rewriting `ecs/sparse` as a
@@ -100,8 +105,9 @@ Filed in the main repo's `docs/reported/`:
    primary (smallest-set iteration) or a dense-then-test fallback.
    Today, use sparse/tag components only via filters inside the body.
 
-None of these change the plan; they shape the *surface ergonomics*
-of E1', not what eventually ships.
+None of these change the plan; (1)-(3) are upstream fixes that
+ship the original plan's API more directly, (5) is a query-engine
+follow-up.
 
 ## License
 

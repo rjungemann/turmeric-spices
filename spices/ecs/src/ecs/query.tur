@@ -8,10 +8,11 @@
 ;;; caller supplies.
 ;;;
 ;;; For struct-by-value components, replace the macro-generated
-;;; `dense-get` call with a hand-written `dense-get-w` in the body; the
-;;; macro stays int-carrier only until the elaborator binds generic
-;;; returns from context (see
-;;; docs/reported/generic-return-type-not-inferred-from-context.md).
+;;; `dense-get` call with a hand-written `dense-get-w` in the body, or
+;;; annotate the binding (`(let [p : Pos (dense-get s i)] ...)`); the
+;;; macro stays int-carrier only so it works uniformly across element
+;;; types without forcing the caller to know which dispatch path the
+;;; elaborator will pick.
 ;;;
 ;;; Filters: `world-tagged?` and `world-untagged?` consult a tag storage
 ;;; for a single entity slot; combine them with `when` / `unless` inside
@@ -20,12 +21,6 @@
 ;;; The arity cap of three matches the plan's E1' explicit cap; lifting
 ;;; to true variadic queries is gated on the same elaborator work as
 ;;; the E1 row-typed iterator (see docs/upcoming/ecs-spice-plan.md).
-;;;
-;;; Macros are written with explicit `(list ...)` construction rather
-;;; than backquote because the macro evaluator currently mangles do/let
-;;; forms whose backquote bodies contain a `~(dot-sym ...)` unquote
-;;; (filed separately under
-;;; docs/reported/macro-backquote-dot-sym-drops-siblings.md).
 ;;;
 ;;; Since: E1'
 
