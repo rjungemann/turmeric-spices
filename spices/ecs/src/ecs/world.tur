@@ -37,6 +37,7 @@
 
 (defmodule ecs/world
   (export defcomponent defworld defcomponent-accessors
+          defcomponent-class defcomponent-class-instance
           world-alloc-entity! world-despawn!)
 
 ;;; defcomponent -- mark a type as a component (E0 documentation marker).
@@ -110,6 +111,53 @@
               ~(second comps) : int
               ~(first (rest (rest comps))) : int
               ~(second (rest (rest comps))) : int]))))))
+
+;;; defcomponent-class -- declare a `Has<Comp>` typeclass with one
+;;; method `<Comp>-storage-of` that returns the component's dense
+;;; storage handle from any world that has the component.
+;;;
+;;; Syntax:
+;;;   (defcomponent-class Pos)
+;;;     ;; emits: (defclass HasPos [W]
+;;;     ;;          (Pos-storage-of [^borrow w] : int))
+;;;
+;;; Per-world instances are emitted by `defcomponent-class-instance`
+;;; (one per (world, component) pair). Once both are in scope, the
+;;; method `(Pos-storage-of w)` dispatches by the receiver's runtime
+;;; type to return the right field of the world struct.
+;;;
+;;; *Monomorphic* call sites work today; the polymorphic-wrapper
+;;; surface (the ECS plan's "typeclass-bounded systems") needs more
+;;; elaborator work -- see gap H in the prereq plan. The class is
+;;; declared with an untyped `[^borrow w]` parameter rather than `[w :
+;;; W]` for the same reason; the typed-parameter shape is what trips
+;;; the gap H item 2 SEGV (now bailing with a clean diagnostic but
+;;; still not functioning).
+;;;
+;;; Since: E2 (depends on gap A + gap E + gap G; SEGV-safe under gap H
+;;; item 2's defensive fix)
+(defmacro defcomponent-class [comp-name]
+  (let [class-name  (str->sym (str-append "Has" (symbol-name comp-name)))
+        method-name (str->sym (str-append (symbol-name comp-name) "-storage-of"))]
+    `(defclass ~class-name [W]
+       (~method-name [^borrow w] : int))))
+
+;;; defcomponent-class-instance -- bind a (world, component) pair into
+;;; the `Has<Comp>` typeclass, threading the method through to the
+;;; world's `.<Comp>` field.
+;;;
+;;; Syntax:
+;;;   (defcomponent-class-instance GameWorld Pos)
+;;;     ;; emits: (definstance HasPos [GameWorld]
+;;;     ;;          (Pos-storage-of [w] (.Pos w)))
+;;;
+;;; Since: E2
+(defmacro defcomponent-class-instance [world-name comp-name]
+  (let [class-name  (str->sym (str-append "Has" (symbol-name comp-name)))
+        method-name (str->sym (str-append (symbol-name comp-name) "-storage-of"))
+        field       (dot-sym comp-name)]
+    `(definstance ~class-name [~world-name]
+       (~method-name [w] (~field w)))))
 
 ;;; world-alloc-entity! -- allocate the next entity slot.
 ;;;
