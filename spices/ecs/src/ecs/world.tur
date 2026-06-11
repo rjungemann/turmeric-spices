@@ -8,28 +8,35 @@
 ;;; central E0 typing trick -- the world's component set is structurally
 ;;; visible on the type.
 ;;;
-;;; For E0, defworld is arity-capped at four components (matches the
-;;; arity-N pattern the plan accepts for E1' queries -- see
-;;; docs/upcoming/ecs-spice-plan.md). Lifting to truly variadic is gated
-;;; on the same elaborator work as E1 variadic queries.
+;;; Per-component named accessors are available via the
+;;; `defcomponent-accessors` macro:
 ;;;
-;;; Per-component named accessors (`set-Pos!`, `get-Pos`, `spawn-Pos!`)
-;;; that the plan describes need three macro features in concert:
-;;; compile-time identifier synthesis (gap A, shipped), top-level
-;;; emission of multiple forms (gap E, shipped), and unquote in type
-;;; position (gap G, OPEN -- see
-;;; docs/reported/macro-unquote-in-type-position-rejected.md). With
-;;; the first two in but the third still open, the macro can mint the
-;;; identifier names but cannot type-parameterize the generated defns
-;;; over the component type. The accessors stay deferred until gap G
-;;; closes. The current surface is the polymorphic `dense-set!` /
-;;; `dense-get` family on the storage field; users add a typed-let
-;;; binding to recover the component type.
+;;;   (defstruct Pos [x : int y : int])
+;;;   (defstruct Vel [x : int y : int])
+;;;   (defworld GameWorld [Pos Vel])
+;;;   (defcomponent-accessors GameWorld Pos)
+;;;     ;; emits:
+;;;     ;; (defn get-Pos  [w : GameWorld e : int] : Pos  ...)
+;;;     ;; (defn set-Pos! [w : GameWorld e : int v : Pos] : nil ...)
+;;;     ;; (defn has-Pos? [w : GameWorld e : int] : bool ...)
+;;;   (defcomponent-accessors GameWorld Vel)
+;;;     ;; same trio for Vel
 ;;;
-;;; Since: E0
+;;; The accessors are thin wrappers over `dense-set!` / `dense-get` /
+;;; `dense-has?`. They are deliberately *not* emitted by `defworld`
+;;; itself so that tests/programs that use bare-int components without
+;;; an underlying defstruct continue to type-check; only call
+;;; `defcomponent-accessors` when the component name names a real
+;;; defstruct.
+;;;
+;;; Arity is capped at four components for now -- variadic emit lands
+;;; with E1 / variadic-HKT rows.
+;;;
+;;; Since: E0 (defstruct emission); E2 (accessor emission via
+;;; defcomponent-accessors -- depends on gaps A + E + G)
 
 (defmodule ecs/world
-  (export defcomponent defworld
+  (export defcomponent defworld defcomponent-accessors
           world-alloc-entity! world-despawn!)
 
 ;;; defcomponent -- mark a type as a component (E0 documentation marker).
@@ -43,13 +50,40 @@
 ;;; Since: E0
 (defmacro defcomponent [T] nil)
 
+;;; defcomponent-accessors -- emit `get-<Comp>` / `set-<Comp>!` /
+;;; `has-<Comp>?` for one (world, component) pair. Used internally by
+;;; `defworld`; can also be called directly if a user is mixing
+;;; hand-written and macro-generated parts of a world.
+;;;
+;;; Each accessor wraps the corresponding `dense-*` operation against
+;;; the storage field named after the component type (`(.Pos w)`,
+;;; `(.Vel w)`, ...). The typed-let binding in `get-<Comp>` propagates
+;;; the component type into the generic `dense-get`'s A parameter so
+;;; struct-by-value components round-trip cleanly without a witness arg.
+;;;
+;;; Since: E2
+(defmacro defcomponent-accessors [world-name comp-name]
+  (let [getter (str->sym (str-append "get-"  (symbol-name comp-name)))
+        setter (str->sym (str-append "set-"  (symbol-name comp-name) "!"))
+        haser  (str->sym (str-append "has-"  (symbol-name comp-name) "?"))
+        field  (dot-sym comp-name)]
+    `(do
+       (defn ~getter [^borrow w : ~world-name e : int] : ~comp-name
+         (let [p : ~comp-name (dense-get (~field w) e)] p))
+       (defn ~setter [^borrow w : ~world-name e : int v : ~comp-name] : nil
+         (dense-set! (~field w) e v))
+       (defn ~haser [^borrow w : ~world-name e : int] : bool
+         (dense-has? (~field w) e)))))
+
 ;;; defworld -- declare a closed world type carrying typed storages.
 ;;;
 ;;; Syntax:
-;;;   (defworld Name [Comp1 Comp2 ...])     ;; up to four components in E0
+;;;   (defworld Name [Comp1 Comp2 ...])     ;; up to four components
 ;;;
-;;; Lowers to:
-;;;   (defstruct Name [gens : int Comp1 : int Comp2 : int ...])
+;;; Lowers to a defstruct only. Per-component accessors are emitted
+;;; separately via `defcomponent-accessors`; see this module's top
+;;; docstring for the rationale (component names can name bare-int
+;;; "marker" components without an underlying defstruct).
 ;;;
 ;;; Since: E0
 (defmacro defworld [name comps]

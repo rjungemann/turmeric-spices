@@ -1,0 +1,40 @@
+;; E2 + gap G regression: defcomponent-accessors emits typed
+;; (get-<Comp>, set-<Comp>!, has-<Comp>?) accessors that round-trip
+;; struct-by-value components through dense storage. Verifies that
+;; unquote in type position works (gap G), str->sym name synthesis
+;; works (gap A), and multi-top-form emit works (gap E) -- all three
+;; in concert produce a typed accessor family from one macro call.
+;;
+;; Expected output:
+;;   7    -- get-Pos returned Pos with x=7
+;;   8    -- get-Pos returned Pos with y=8
+;;   true -- has-Pos? returns true after set
+;;   ok
+
+(defmodule defcomponent_accessors_test
+  (export)
+
+(import ecs/entity  :refer [entity-index])
+(import ecs/storage :refer [dense-new dense-set! dense-get dense-has?])
+(import ecs/world   :refer [defworld defcomponent-accessors world-alloc-entity!])
+
+(defstruct Pos [x : int y : int])
+
+(defworld GameWorld [Pos])
+(defcomponent-accessors GameWorld Pos)
+
+(defn main [] : int
+  (let [w (make-struct GameWorld (vec-new) (dense-new))
+        e (world-alloc-entity! (.gens w))]
+    (set-Pos! w (entity-index e) (make-struct Pos 7 8))
+    (let [p (get-Pos w (entity-index e))
+          present (has-Pos? w (entity-index e))]
+      (println (.x p))                 ;; 7
+      (println (.y p))                 ;; 8
+      (println present)                ;; true
+      (if (and (= (.x p) 7)
+               (and (= (.y p) 8) present))
+        (do (println "ok") 0)
+        (do (println "FAIL") 1)))))
+
+) ;; end defmodule defcomponent_accessors_test
