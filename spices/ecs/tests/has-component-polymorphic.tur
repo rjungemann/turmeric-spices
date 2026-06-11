@@ -1,0 +1,48 @@
+;; E2 + gap H item 3 regression: a system that's polymorphic over
+;; any world carrying HasPos. The wrapper takes `^borrow w : W` (a
+;; bare type variable), constrained on `(HasPos W)`, and threads
+;; through to the typeclass method. With gap H items 1, 2, and 3 all
+;; in, the wrapper parses, dispatches, and runs cleanly over a
+;; by-value struct world.
+;;
+;; This is the plan's "typeclass-bounded systems" surface end-to-end:
+;;
+;;   (defn count-pos [W] [(HasPos W)] [^borrow w : W] : int
+;;     (Pos-storage-of w))
+;;
+;; Both GameWorld and AltWorld implement HasPos, and the same wrapper
+;; dispatches to the right instance for each.
+;;
+;; Expected output:
+;;   42
+;;   77
+;;   ok
+
+(defmodule has_component_polymorphic_test
+  (export)
+
+(import ecs/world :refer [defcomponent-class defcomponent-class-instance])
+
+(defstruct GameWorld [Pos : int])
+(defstruct AltWorld  [Pos : int Vel : int])
+
+(defcomponent-class Pos)
+(defcomponent-class-instance GameWorld Pos)
+(defcomponent-class-instance AltWorld  Pos)
+
+;; Polymorphic wrapper -- the plan's spec'd "typeclass-bounded systems"
+;; shape, end-to-end, over by-value struct worlds.
+(defn count-pos [W] [(HasPos W)] [^borrow w : W] : int
+  (Pos-storage-of w))
+
+(defn main [] : int
+  (let [g (make-struct GameWorld 42)
+        a (make-struct AltWorld 77 0)]
+    (println (count-pos g))          ;; 42
+    (println (count-pos a))          ;; 77
+    (if (and (= (count-pos g) 42)
+             (= (count-pos a) 77))
+      (do (println "ok") 0)
+      (do (println "FAIL") 1))))
+
+) ;; end defmodule has_component_polymorphic_test
