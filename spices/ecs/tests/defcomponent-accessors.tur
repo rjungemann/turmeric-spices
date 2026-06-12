@@ -17,21 +17,28 @@
 (import ecs/entity  :refer [entity-index])
 (import ecs/storage :refer [dense-new dense-set! dense-get dense-has?])
 (import ecs/world   :refer [defworld defcomponent-accessors world-alloc-entity!])
+;; I4: defcomponent-accessors emits cap-taking set-Comp! / get-Comp.
+(import ecs/cap     :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
 
 (defstruct Pos [x : int y : int])
 
 (defworld GameWorld [Pos])
 (defcomponent-accessors GameWorld Pos)
 
+(def Pos-cid 0)
+
 (defn main [] : int
-  (let [w (make-struct GameWorld (vec-new) (dense-new))
-        e (world-alloc-entity! (.gens w))]
-    (set-Pos! w (entity-index e) (make-struct Pos 7 8))
-    (let [p (get-Pos w (entity-index e))
+  (let [w   (make-struct GameWorld (vec-new) (dense-new))
+        e   (world-alloc-entity! (.gens w))
+        wc  (:: (make-write-cap Pos-cid) (WriteCap Pos))
+        rc  (:: (make-read-cap  Pos-cid) (ReadCap  Pos))]
+    (set-Pos! wc w (entity-index e) (make-struct Pos 7 8))
+    (let [p (get-Pos rc w (entity-index e))
           present (has-Pos? w (entity-index e))]
       (println (.x p))                 ;; 7
       (println (.y p))                 ;; 8
       (println present)                ;; true
+      (use-cap! wc)
       (if (and (= (.x p) 7)
                (and (= (.y p) 8) present))
         (do (println "ok") 0)

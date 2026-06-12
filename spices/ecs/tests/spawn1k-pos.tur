@@ -7,7 +7,7 @@
   (export)
 
 (import ecs/entity  :refer [entity-index])
-(import ecs/storage :refer [dense-new dense-len dense-set! dense-get-w])
+(import ecs/storage :refer [dense-new dense-len dense-set! dense-get])
 (import ecs/world   :refer [defcomponent defworld world-alloc-entity!])
 
 (defstruct Pos [x : int y : int])
@@ -29,7 +29,7 @@
             ^mut j   0
             n        (dense-len (.Pos w))]
         (while (< j n)
-          (let [p (dense-get-w (.Pos w) j (make-struct Pos 0 0))]
+          (let [p : Pos (dense-get (.Pos w) j)]
             (set! sum (+ sum (.x p))))
           (set! j (+ j 1)))
         (println sum)

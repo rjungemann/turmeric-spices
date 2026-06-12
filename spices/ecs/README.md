@@ -19,15 +19,16 @@ session, which unblocked the E1 surface. See
 - `ecs/entity` -- generationally-versioned opaque `Entity` (low 32 = index,
   high 32 = generation), construct/pack/unpack helpers.
 - `ecs/storage` -- dense storage: `(dense-new) -> int`, `dense-set!`,
-  `dense-get` (int-carrier read), `dense-get-w` (struct-carrier read with
-  witness), `dense-has?`, `dense-len`, `dense-free`. Per-instantiation
+  `dense-get`, `dense-has?`, `dense-len`, `dense-free`. Per-instantiation
   monomorphization sizes the data array correctly for both int-carried
-  opaques and by-value structs.
-- `ecs/sparse` -- open-addressed hash storage: `sparse-new/len/set!/
-  get/get-w/has?/del!/free`. Linear-probe with backward-shift deletion;
-  rehash at load factor 0.75. Use when "few entities carry this
-  component" -- ~16 bytes per *populated* slot vs dense's one
-  element-sized slot per *world entity*.
+  opaques and by-value structs; annotate the let binding
+  (`(let [p : Pos (dense-get s i)] ...)`) to drive the generic into a
+  struct-specialised clone.
+- `ecs/sparse` -- open-addressed Robin Hood hash storage:
+  `sparse-new/len/set!/get/has?/del!/free`. Backward-shift deletion
+  driven by `probe_dist`; rehash at load factor 0.75. Use when "few
+  entities carry this component" -- ~16 bytes per *populated* slot vs
+  dense's one element-sized slot per *world entity*.
 - `ecs/tag` -- bitset storage for zero-payload markers (`Dead`,
   `Frozen`, `Player`). `tag-new/cap/count/set!/clear!/has?/free`. O(1)
   set/test, popcount via `__builtin_popcountll`.
@@ -88,7 +89,7 @@ session, which unblocked the E1 surface. See
 
 ```sh
 tur run tests/spawn1k.tur                 # E0 int-carrier dense (sum = 499500)
-tur run tests/spawn1k-pos.tur             # E1' multi-field Pos via dense-get-w (sum = 499500)
+tur run tests/spawn1k-pos.tur             # E1' multi-field Pos via dense-get (sum = 499500)
 tur run tests/sparse-rt.tur               # E1' sparse insert / get / has / del
 tur run tests/sparse-rt-large.tur         # E1' patch-1 RH regression (500/250/0)
 tur run tests/sparse-stress.tur           # E1' patch-1 10k mixed ops vs bitset (-> ok)
@@ -108,69 +109,52 @@ Each exits 0 on success.
 
 ## Known limitations
 
-Filed in the main repo's `docs/reported/` and
-[`docs/upcoming/ecs-prereq-plan.md`](../../../turmeric/docs/upcoming/ecs-prereq-plan.md):
+Each of the original prerequisite gaps (A-I, archived at
+[`docs/archive/history/ecs-prereq-plan.md`](../../../turmeric/docs/archive/history/ecs-prereq-plan.md))
+has shipped; the residual list below is empirical limits of the
+v1 surface, not language gaps.
 
-1. ~~Per-component named accessors (`set-Pos!`, `get-Pos`) cannot be
-   emitted by `defworld`.~~ **Fixed** -- `str->sym` is shipped
-   (`src/compiler/elab_macros.c:321-326`); a `defworld` upgrade that
-   emits per-component accessors is queued as the next spice change.
-   See [docs/reported/ecs-macro-symbol-synthesis-missing.md](../../../turmeric/docs/reported/ecs-macro-symbol-synthesis-missing.md).
-
-2. ~~Generic `[A]` returns don't infer from caller context.~~ **Mostly
-   fixed.** Typed bindings (`(let [p : Pos (dense-get s i)] ...)`),
-   `::` ascription, and enclosing defn return types all bind A
-   correctly now. The remaining case is bare `(let [p (dense-get s
-   i)] ...)` followed by struct field access -- A defaults to the
-   int carrier there. Use `dense-get-w` / `sparse-get-w` (witness
-   variants) or annotate the binding.
-
-3. ~~Backquote silently drops sibling forms when a `~(dot-sym ...)`
-   unquote appears in the same macro body.~~ **Fixed** on probe.
-   `ecs/query.tur`'s macros are still written in `(list ...)` style
-   for the moment; a rewrite-to-backquote sweep is queued as a
-   separate change.
-
-4. ~~Sparse backward-shift deletion leaks ~1% of entries whose probe
-   chain wraps the table.~~ **Fixed** by rewriting `ecs/sparse` as a
-   full Robin Hood table with a parallel `uint8_t probe_dist[]` array
-   (insert does the RH swap, delete consults `probe_dist`, lookup
-   short-circuits on the RH monotonicity invariant). Regression covered
-   by `tests/sparse-rt-large.tur` (500-entry repro) and
-   `tests/sparse-stress.tur` (10,000 mixed ops cross-checked against a
-   ground-truth bitset). See
-   [docs/reported/ecs-sparse-backward-shift-loses-wrapping-entries.md](../../../turmeric/docs/reported/ecs-sparse-backward-shift-loses-wrapping-entries.md).
-
-5. **`for-eachN` iterates dense storages only.** Listing a sparse or
+1. **`for-eachN` iterates dense storages only.** Listing a sparse or
    tag component on the primary loop would either need a different
    primary (smallest-set iteration) or a dense-then-test fallback.
    Today, use sparse/tag components only via filters inside the body.
 
-6. **`defsystem` `:writes` lists are NOT enforced at compile time.**
-   The ECS plan calls this "the single biggest delta vs. Haskell
-   ECSes" and claims compile-time gating of `set-X!` access on
-   `:writes` membership. The shipped `defsystem` collects `:writes`
-   as a runtime bitmask used by the scheduler for wave assignment,
-   but a system declaring `:writes [Pos]` and calling
-   `(dense-set! (.Vel w) ...)` in its body compiles and runs without
-   diagnostic. If the user lies in the declaration, the scheduler's
-   wave grouping is wrong and runtime races appear. See
-   [docs/reported/ecs-defsystem-write-caps-not-enforced.md](../../../turmeric/docs/reported/ecs-defsystem-write-caps-not-enforced.md)
-   for triage and three implementation paths (Path A: per-component
-   `WriteCap` linear capabilities, recommended).
+### Breaking change in the I3-I4 ship (2026-06-11)
 
-None of these change the plan; (1)-(3) are upstream fixes that
-ship the original plan's API more directly, (5) is a query-engine
-follow-up, (6) is the only one that's a real gap against the plan's
-spec'd surface (the plan promises it; the spice doesn't deliver it
-yet).
+`defsystem`'s `:reads`/`:writes` are component-name vectors, not
+bitmask ints. Per-component CIDs use the `<Comp>-cid` titlecase
+convention (`Pos-cid`, not `pos-cid`). Required imports at the call
+site:
 
-7. ~~`query-world` called from a row-polymorphic context fails to link.~~
-   **Fixed.** The relay-vs-carrier classifier in
-   `src/compiler/emit_module.c` now ignores row-kinded named tyvars
-   when deciding whether a call requires specialization; rows are
-   phantom so the carrier definition suffices and gets emitted. See
-   [docs/reported/row-polymorphic-defn-call-from-row-polymorphic-context-missing-codegen.md](../../../turmeric/docs/reported/row-polymorphic-defn-call-from-row-polymorphic-context-missing-codegen.md).
+```turmeric
+(import ecs/system :refer [defsystem])
+(import ecs/cap    :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
+```
+
+Then:
+
+```turmeric
+;; Before (E2 surface):
+(defsystem physics
+  (cid-bit pos-cid)
+  (cid-bit pos-cid)
+  body)
+
+;; After (I3 surface):
+(defsystem physics
+  [Pos]
+  [Pos]
+  body)
+```
+
+`defcomponent-accessors` now emits `set-<Comp>!` / `get-<Comp>` that
+require a `WriteCap<Comp>` / `ReadCap<Comp>` first arg; pass either
+the `<Comp>-write-cap` / `<Comp>-read-cap` bound by `defsystem` in
+body scope, or a freshly minted cap from `make-write-cap` /
+`make-read-cap` (gated by the call site's declared `:writes`). A body
+that writes a component it did not declare now fails to elaborate.
+See the original report at
+[docs/archive/history/ecs-defsystem-write-caps-not-enforced.md](../../../turmeric/docs/archive/history/ecs-defsystem-write-caps-not-enforced.md).
 
 ## License
 

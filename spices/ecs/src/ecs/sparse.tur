@@ -21,20 +21,18 @@
 ;;; (same per-instantiation monomorphization path used by ecs/storage).
 ;;; For struct-by-value components, A is inferred from a typed binding,
 ;;; an explicit `::` ascription, or an enclosing defn's return type.
-;;; `sparse-get-w` (witness variant) is provided for the bare-let case
-;;; where no type annotation is available -- see `sparse-get` docstring.
 ;;;
 ;;; The Robin Hood port follows martinus/robin-hood-hashing v3.11.5
 ;;; (`src/include/robin_hood.h` lines 1377-1410 for shiftUp/shiftDown).
 ;;; The fix history is in
-;;; docs/reported/ecs-sparse-backward-shift-loses-wrapping-entries.md;
+;;; docs/archive/history/ecs-sparse-backward-shift-loses-wrapping-entries.md;
 ;;; the bug the rewrite closes was a linear-probe / RH-backward-shift
 ;;; algorithm mismatch.
 ;;;
 ;;; Since: E1' (initial linear-probe version); rewritten to Robin Hood E1' patch 1.
 
 (defmodule ecs/sparse
-  (export sparse-new sparse-len sparse-set! sparse-get sparse-get-w
+  (export sparse-new sparse-len sparse-set! sparse-get
           sparse-has? sparse-del! sparse-free)
 
 ;;; sparse-new -- allocate an empty sparse storage. Returns an :int handle.
@@ -196,23 +194,6 @@
   #include <stdint.h>
   typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
   __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
-  uint64_t mask = (uint64_t)(st->cap - 1);
-  uint64_t k = (uint64_t)idx;
-  uint64_t h = k * 0x9E3779B97F4A7C15ULL; h ^= h >> 32;
-  size_t p = (size_t)(h & mask);
-  while (st->keys[p] != k || st->probe_dist[p] == 0) p = (p + 1) & mask;
-  return ((__TUR_TY_A__ *)st->vals)[p];
-  ```)
-
-;;; sparse-get-w -- struct-component variant; takes a discarded witness.
-;;; See ecs/storage's `dense-get-w` for the rationale.
-;;; Since: E1'
-(defn sparse-get-w [A] [s : int idx : int _witness : A] : A
-  ```c
-  #include <stdint.h>
-  typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
-  __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
-  (void)_witness;
   uint64_t mask = (uint64_t)(st->cap - 1);
   uint64_t k = (uint64_t)idx;
   uint64_t h = k * 0x9E3779B97F4A7C15ULL; h ^= h >> 32;

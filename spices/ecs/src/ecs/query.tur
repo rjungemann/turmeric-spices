@@ -26,7 +26,7 @@
 ;;; when an outer wrapper (e.g. stdlib `when`) intervened during
 ;;; expansion. Fixed by stacking expansion-module visibility in the
 ;;; elaborator (see
-;;; ../../../turmeric/docs/reported/cross-module-wrapper-macro-vec-arg-elaborated-as-expression.md).
+;;; ../../../turmeric/docs/archive/history/cross-module-wrapper-macro-vec-arg-elaborated-as-expression.md).
 ;;;
 ;;; The explicit `for-each1` .. `for-each8` helpers are kept as direct
 ;;; exports for callers that prefer the spelled-out form (and for
@@ -34,8 +34,8 @@
 ;;; `for-each` internally.
 ;;;
 ;;; For struct-by-value components, the macro stays int-carrier only; in the
-;;; body use `dense-get-w` directly or annotate the binding
-;;; (`(let [p : Pos (dense-get s i)] ...)`).
+;;; body annotate the binding (`(let [p : Pos (dense-get s i)] ...)`)
+;;; to drive the generic into a struct-specialised clone.
 ;;;
 ;;; Filters: `world-tagged?` and `world-untagged?` consult a tag storage for
 ;;; a single entity slot. Combine them with `when` / `unless` inside the
@@ -180,13 +180,13 @@
 ;;; (world-tagged? world Player e)
 ;;; Since: E1'
 (defmacro world-tagged? [world Tag e]
-  (list tag-has? (list (dot-sym Tag) world) e))
+  `(tag-has? (~(dot-sym Tag) ~world) ~e))
 
 ;;; world-untagged? -- inverse of world-tagged?. Sugar for "the entity
 ;;; does NOT carry this tag".
 ;;; Since: E1'
 (defmacro world-untagged? [world Tag e]
-  (list not (list tag-has? (list (dot-sym Tag) world) e)))
+  `(not (tag-has? (~(dot-sym Tag) ~world) ~e)))
 
 ;;; Query -- row-typed query handle, parameterised by *rows* of input and
 ;;; output component types. The rows are phantom: the variadic-HKT-rows
@@ -272,6 +272,6 @@
 ;;;
 ;;; Since: E1
 (defmacro run-query! [q world]
-  (list q world))
+  `(~q ~world))
 
 ) ;; end defmodule ecs/query

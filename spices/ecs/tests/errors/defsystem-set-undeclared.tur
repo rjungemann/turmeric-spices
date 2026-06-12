@@ -1,0 +1,38 @@
+;; I4 + I3 integration negative: a system declares :writes [Pos] and
+;; tries to write Vel through the typed accessor set-Vel!.  Because
+;; Vel is not in :writes, Vel-write-cap is not bound in the body's
+;; scope, so the set-Vel! call fails to resolve its cap argument.
+;;
+;; This is the spec'd "writes to a component you didn't list is a
+;; compile-time error" promise from `ecs-spice-plan.md` -- now landed.
+
+(defmodule defsystem_set_undeclared_test
+  (export)
+
+(import ecs/entity  :refer [entity-index])
+(import ecs/storage :refer [dense-new])
+(import ecs/world   :refer [defworld defcomponent-accessors world-alloc-entity!])
+(import ecs/system  :refer [System make-system system-run! defsystem])
+(import ecs/cap     :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
+
+(defstruct Pos [x : int y : int])
+(defstruct Vel [x : int y : int])
+
+(defworld GameWorld [Pos Vel])
+(defcomponent-accessors GameWorld Pos)
+(defcomponent-accessors GameWorld Vel)
+
+(def Pos-cid 0)
+(def Vel-cid 1)
+
+;; Declares :writes [Pos] but the body tries to write Vel.  The body
+;; has Pos-write-cap in scope but no Vel-write-cap, so set-Vel!'s
+;; first arg cannot resolve.
+(defsystem rogue
+  []
+  [Pos]
+  (let [gw : GameWorld (:: w GameWorld)
+        e               (world-alloc-entity! (.gens gw))]
+    (set-Vel! Vel-write-cap gw (entity-index e) (make-struct Vel 0 0))))
+
+) ;; end defmodule defsystem_set_undeclared_test

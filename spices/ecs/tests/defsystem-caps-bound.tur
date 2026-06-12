@@ -1,0 +1,32 @@
+;; I3 regression: defsystem under the new component-name-vector form
+;; binds <Comp>-write-cap / <Comp>-read-cap in scope inside the body
+;; and auto-consumes write-caps at body end so the system body type-
+;; checks under -Xsubstructural.
+;;
+;; Expected output:
+;;   physics tick
+;;   ok
+
+(defmodule defsystem_caps_bound_test
+  (export)
+
+(import ecs/system :refer [System make-system system-run! defsystem])
+(import ecs/cap    :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
+
+(defstruct Pos [x : int])
+(defstruct Vel [x : int])
+
+(def Pos-cid 0)
+(def Vel-cid 1)
+
+(defsystem physics
+  [Pos Vel]                  ;; :reads
+  [Pos]                      ;; :writes
+  (println "physics tick"))
+
+(defn main [] : int
+  (system-run! physics 0)
+  (println "ok")
+  0)
+
+) ;; end defmodule defsystem_caps_bound_test

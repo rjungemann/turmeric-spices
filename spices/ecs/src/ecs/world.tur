@@ -62,16 +62,41 @@
 ;;; the component type into the generic `dense-get`'s A parameter so
 ;;; struct-by-value components round-trip cleanly without a witness arg.
 ;;;
-;;; Since: E2
+;;; **Cap-gated since I4.** `get-<Comp>` takes `^borrow cap :
+;;; (ReadCap Comp)` as its first parameter and `set-<Comp>!` takes
+;;; `^borrow cap : (WriteCap Comp)`.  Borrow (not consume) so a body
+;;; can write the same component many times per tick without re-
+;;; minting; the linear cap is auto-consumed once by `defsystem`'s
+;;; body-end wrapper.  The deviation from the report (which named
+;;; `^linear` on `set-<Comp>!`) is deliberate -- consuming per-call
+;;; would force every loop iteration to re-borrow via a wrapper,
+;;; which the report itself flags as an ergonomic risk.  The plan's
+;;; load-bearing claim ("writing a component you didn't list is a
+;;; compile-time error") is met as soon as the cap type-gates the
+;;; accessor: a body that never declared `:writes [Vel]` has no
+;;; `(WriteCap Vel)` in scope, so the `set-Vel!` call fails to
+;;; elaborate.
+;;;
+;;; Required imports at the call site:
+;;;   (import ecs/cap :refer [WriteCap ReadCap])
+;;;
+;;; Since: E2 (initial); I4 (cap gating)
 (defmacro defcomponent-accessors [world-name comp-name]
   (let [getter (str->sym (str-append "get-"  (symbol-name comp-name)))
         setter (str->sym (str-append "set-"  (symbol-name comp-name) "!"))
         haser  (str->sym (str-append "has-"  (symbol-name comp-name) "?"))
         field  (dot-sym comp-name)]
     `(do
-       (defn ~getter [^borrow w : ~world-name e : int] : ~comp-name
+       (defn ~getter [^borrow cap : (ReadCap  ~comp-name)
+                      ^borrow w   : ~world-name
+                      e           : int]
+                    : ~comp-name
          (let [p : ~comp-name (dense-get (~field w) e)] p))
-       (defn ~setter [^borrow w : ~world-name e : int v : ~comp-name] : nil
+       (defn ~setter [^borrow cap : (WriteCap ~comp-name)
+                      ^borrow w   : ~world-name
+                      e           : int
+                      v           : ~comp-name]
+                    : nil
          (dense-set! (~field w) e v))
        (defn ~haser [^borrow w : ~world-name e : int] : bool
          (dense-has? (~field w) e)))))
@@ -164,7 +189,7 @@
 ;;; top-level `def <Comp>-write-cap (...)` would leave the linear
 ;;; value un-consumed and trip TUR-E0100. This is the I2 pragmatic
 ;;; deviation from
-;;; `docs/reported/ecs-defsystem-write-caps-not-enforced.md` (which
+;;; `docs/archive/history/ecs-defsystem-write-caps-not-enforced.md` (which
 ;;; named a top-level def); callers say
 ;;; `(mint-GameWorld-Pos-write-cap pos-cid)` to get a
 ;;; `WriteCap<Pos>`.

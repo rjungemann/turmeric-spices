@@ -17,13 +17,19 @@
   (export)
 
 (import ecs/system :refer [System make-system system-conflicts? cid-bit defsystem])
+(import ecs/cap    :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
 (import ecs/stage  :refer [stage-run-seq stage-run-pair-parallel])
 
-;; Component IDs are just bit positions. The test invents two
-;; disjoint bits so the two systems don't conflict.
-(def pos-cid 0)
-(def vel-cid 1)
-(def hp-cid  2)
+;; Component IDs follow the I3 `<Comp>-cid` titlecase convention so
+;; defsystem can derive them from the comp-name vectors.  (E2/E1 tests
+;; used lowercase pos-cid; migrated as part of the I3 surface flip.)
+(defstruct Pos [x : int])
+(defstruct Vel [x : int])
+(defstruct Hp  [x : int])
+
+(def Pos-cid 0)
+(def Vel-cid 1)
+(def Hp-cid  2)
 
 ;; Heap-allocated accumulator + mutex-protected helpers. Each system
 ;; body bumps the same int64_t through accum-add! so the final value
@@ -63,16 +69,16 @@
 ;; fn-ptr and masks). Masks are disjoint so the parallel scheduler
 ;; can run them concurrently.
 (defsystem physics
-  (cid-bit pos-cid)               ;; reads
-  (cid-bit pos-cid)               ;; writes
+  [Pos]                           ;; reads
+  [Pos]                           ;; writes
   (let [^mut i 0]
     (while (< i 500)
       (accum-add! (:: w :ptr<void>) 1)
       (set! i (+ i 1)))))
 
 (defsystem render
-  (cid-bit hp-cid)                ;; reads
-  (cid-bit hp-cid)                ;; writes
+  [Hp]                            ;; reads
+  [Hp]                            ;; writes
   (let [^mut i 0]
     (while (< i 1500)
       (accum-add! (:: w :ptr<void>) 1)

@@ -13,22 +13,23 @@
 ;;; same pattern stdlib's thread-spawn-fn uses); no inline-C trampoline
 ;;; per system is needed.
 ;;;
-;;; The plan's `(defsystem name params :reads ... :writes ... body)`
-;;; macro requires emitting two top-level forms (the impl defn and the
-;;; def of the System value) from one invocation, which is blocked by
-;;; gap E (see
-;;; docs/reported/macro-cannot-emit-multiple-top-level-forms.md). Until
-;;; E lands, users write the impl and the System value by hand:
+;;; The `defsystem` macro emits the impl defn and the `System` value
+;;; from one invocation by splicing two top-level forms via the
+;;; top-level `(do ...)` splice (gap E, fixed 2026-06-11 -- see
+;;; docs/archive/history/macro-cannot-emit-multiple-top-level-forms.md).
 ;;;
-;;;   (defn physics-impl [w : int] : nil ...)
-;;;   (def  physics (make-system PHYSICS-READS PHYSICS-WRITES physics-impl))
-;;;
-;;; Since: E2 (initial)
+;;; Since: E2 (initial); I3 (cap-binding rewrite)
 
 (defmodule ecs/system
   (export System make-system system-reads-mask system-writes-mask
           system-run-fn system-run! system-conflicts?
-          cid-bit defsystem)
+          cid-bit defsystem
+          ;; Internal helpers used by `defsystem` lowering; exported so
+          ;; the macro expansion can resolve them at the call site.
+          defsystem--mask
+          defsystem--with-read-caps
+          defsystem--with-write-caps
+          defsystem--consume-write-caps)
 
 ;;; System -- a runnable bundle (reads-mask, writes-mask, run-fn).
 ;;; :copy so it flows through Turmeric values cleanly.
@@ -127,33 +128,121 @@
   return (int64_t)((uint64_t)1 << (uint64_t)cid);
   ```)
 
+;;; defsystem--mask -- internal helper.  Build the bit-or'd cid-bit
+;;; expression for a comp-name vector.  Empty vector -> 0.
+;;; Takes the whole comps collection as one arg (the macro-time `~@`
+;;; splice does not flatten F_VEC; recurse on the rest-list instead).
+;;; Output is wrapped in quasiquote so CT-eval treats `do`/`let` heads
+;;; as data, not special-form heads -- otherwise the body forms get
+;;; collapsed to their last expression and the println vanishes.
+(defmacro defsystem--mask [comps]
+  (if (empty? comps)
+    0
+    (if (empty? (rest comps))
+      `(cid-bit ~(str->sym (str-append (symbol-name (first comps)) "-cid")))
+      `(bit-or
+         (cid-bit ~(str->sym (str-append (symbol-name (first comps)) "-cid")))
+         (defsystem--mask ~(rest comps))))))
+
+;;; defsystem--with-write-caps -- internal helper.  Wrap `body` in a
+;;; let-chain that binds `<Comp>-write-cap` to a freshly-minted, type-
+;;; ascribed `WriteCap<Comp>` for each comp in `comps`.
+(defmacro defsystem--with-write-caps [body comps]
+  (if (empty? comps)
+    ;; Empty-comps base: wrap in quasiquote so CT-eval treats the body
+    ;; as data, not as a special form that would collapse `(do a b)` to
+    ;; just `b` and drop the user's body forms.
+    `~body
+    (let [comp       (first comps)
+          rest-comps (rest comps)
+          cap-name   (str->sym (str-append (symbol-name comp) "-write-cap"))
+          cid-name   (str->sym (str-append (symbol-name comp) "-cid"))]
+      `(let [~cap-name (:: (make-write-cap ~cid-name) (WriteCap ~comp))]
+         (defsystem--with-write-caps ~body ~rest-comps)))))
+
+;;; defsystem--with-read-caps -- internal helper.  Wrap `body` in a
+;;; let-chain that binds `<Comp>-read-cap` to a freshly-minted, type-
+;;; ascribed `ReadCap<Comp>` for each comp in `comps`.  ReadCap is not
+;;; linear, so no auto-consume needed.
+(defmacro defsystem--with-read-caps [body comps]
+  (if (empty? comps)
+    `~body
+    (let [comp       (first comps)
+          rest-comps (rest comps)
+          cap-name   (str->sym (str-append (symbol-name comp) "-read-cap"))
+          cid-name   (str->sym (str-append (symbol-name comp) "-cid"))]
+      `(let [~cap-name (:: (make-read-cap ~cid-name) (ReadCap ~comp))]
+         (defsystem--with-read-caps ~body ~rest-comps)))))
+
+;;; defsystem--consume-write-caps -- internal helper.  Emit `(use-cap!
+;;; <Comp>-write-cap)` for each comp in `comps`, sequenced via nested
+;;; `do`.  Auto-consume runs at body end so the user is not forced to
+;;; call use-cap! themselves; phase I4 will route writes through
+;;; ^borrow-consuming set-Comp! accessors, at which point this auto-
+;;; consume becomes the single legal consumption.
+(defmacro defsystem--consume-write-caps [comps]
+  (if (empty? comps)
+    nil
+    (let [comp       (first comps)
+          rest-comps (rest comps)
+          cap-name   (str->sym (str-append (symbol-name comp) "-write-cap"))]
+      `(do
+         (use-cap! ~cap-name)
+         (defsystem--consume-write-caps ~rest-comps)))))
+
 ;;; defsystem -- declare a System and its implementation in one form.
 ;;;
-;;; Syntax:
-;;;   (defsystem name reads-mask writes-mask body)
+;;; Syntax (I3, BREAKING -- replaces the prior bitmask-int form):
+;;;   (defsystem name [reads-comp ...] [writes-comp ...] body)
 ;;;
-;;; Expands to two top-level forms (via top-level `do` splicing -- gap E):
-;;;   (defn name-impl [w : int] : nil body)
-;;;   (def  name      (make-system reads-mask writes-mask name-impl))
+;;; Expands to two top-level forms (via top-level `do` splicing):
 ;;;
-;;; The implementation is a top-level defn so its C function pointer is
-;;; stable; Turmeric coerces a top-level defn name to `ptr<void>` at the
-;;; make-system call site automatically.
+;;;   (defn name-impl [w : int] : nil
+;;;     ;; one let per read-comp:   binds <Comp>-read-cap  : (ReadCap  Comp)
+;;;     ;; one let per write-comp:  binds <Comp>-write-cap : (WriteCap Comp)
+;;;     (do
+;;;       body
+;;;       ;; auto-consume each linear write-cap so the body type-checks
+;;;       ;; even before I4 wires set-Comp! accessors to consume them.
+;;;       (use-cap! <Comp>-write-cap) ...))
+;;;
+;;;   (def name (make-system READS-MASK WRITES-MASK name-impl))
+;;;
+;;; Convention: for each comp name `Comp` referenced in :reads or
+;;; :writes, a `<Comp>-cid` binding (matching the comp name verbatim
+;;; with a `-cid` suffix) must be in scope at the macro call site.
+;;; The macro looks up `<Comp>-cid` to build the scheduler bitmasks and
+;;; threads it into the cap mints.  This is what replaces the prior
+;;; lowercase `pos-cid` convention; migrate `(def pos-cid 0)` to
+;;; `(def Pos-cid 0)` when porting to the new form.
+;;;
+;;; Required imports at the call site:
+;;;   (import ecs/cap :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
 ;;;
 ;;; Example:
-;;;   (def pos-cid 0)
-;;;   (def vel-cid 1)
+;;;   (def Pos-cid 0)
+;;;   (def Vel-cid 1)
 ;;;   (defsystem physics
-;;;     (bit-or (cid-bit pos-cid) (cid-bit vel-cid))   ;; reads
-;;;     (cid-bit pos-cid)                                ;; writes
+;;;     [Pos Vel]                  ;; :reads  -- binds Pos-read-cap, Vel-read-cap
+;;;     [Pos]                      ;; :writes -- binds Pos-write-cap (linear)
 ;;;     (println "physics tick"))
 ;;;   ;; physics-impl and physics both exist at top level.
 ;;;
-;;; Since: E2
-(defmacro defsystem [name reads-mask writes-mask body]
+;;; Since: E2 (initial); I3 (cap-binding rewrite)
+(defmacro defsystem [name reads-vec writes-vec body]
   (let [impl-name (str->sym (str-append (symbol-name name) "-impl"))]
     `(do
-       (defn ~impl-name [w : int] : nil ~body)
-       (def  ~name (make-system ~reads-mask ~writes-mask ~impl-name)))))
+       (defn ~impl-name [w : int] : nil
+         (defsystem--with-read-caps
+           (defsystem--with-write-caps
+             (do
+               ~body
+               (defsystem--consume-write-caps ~writes-vec))
+             ~writes-vec)
+           ~reads-vec))
+       (def ~name (make-system
+                    (defsystem--mask ~reads-vec)
+                    (defsystem--mask ~writes-vec)
+                    ~impl-name)))))
 
 ) ;; end defmodule ecs/system

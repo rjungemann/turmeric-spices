@@ -21,12 +21,17 @@
   (export)
 
 (import ecs/system :refer [System make-system cid-bit defsystem])
+(import ecs/cap    :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
 (import ecs/stage  :refer [Stage stage-new stage-add! stage-len stage-n-waves
                             stage-run! stage-free!])
 
-(def pos-cid 0)
-(def vel-cid 1)
-(def hp-cid  2)
+(defstruct Pos [x : int])
+(defstruct Vel [x : int])
+(defstruct Hp  [x : int])
+
+(def Pos-cid 0)
+(def Vel-cid 1)
+(def Hp-cid  2)
 
 (defn make-accum [] : ptr<void>
   ```c
@@ -49,19 +54,19 @@
   pthread_mutex_unlock(&mu);
   ```)
 
-(defsystem sys-a (cid-bit pos-cid) (cid-bit pos-cid)
+(defsystem sys-a [Pos] [Pos]
   (accum-add! (:: w :ptr<void>) 100))
 
-(defsystem sys-b (cid-bit vel-cid) (cid-bit vel-cid)
+(defsystem sys-b [Vel] [Vel]
   (accum-add! (:: w :ptr<void>) 200))
 
-(defsystem sys-c (cid-bit hp-cid)  (cid-bit hp-cid)
+(defsystem sys-c [Hp] [Hp]
   (accum-add! (:: w :ptr<void>) 400))
 
-(defsystem sys-d (cid-bit pos-cid) (cid-bit pos-cid)
+(defsystem sys-d [Pos] [Pos]
   (accum-add! (:: w :ptr<void>) 800))
 
-(defsystem sys-e (cid-bit vel-cid) (cid-bit vel-cid)
+(defsystem sys-e [Vel] [Vel]
   (accum-add! (:: w :ptr<void>) 4000))
 
 (defn main [] : int

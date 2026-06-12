@@ -12,10 +12,10 @@
 ;;; by-value structs.
 ;;;
 ;;; Since: E0; struct support added in E1' after the ABI fix landed
-;;; (see docs/reported/generic-inline-c-struct-arg-monomorphises-to-int64.md).
+;;; (see docs/archive/history/generic-inline-c-struct-arg-monomorphises-to-int64.md).
 
 (defmodule ecs/storage
-  (export dense-new dense-len dense-set! dense-get dense-get-w
+  (export dense-new dense-len dense-set! dense-get
           dense-has? dense-free)
 
 ;;; dense-new -- allocate an empty dense storage. Returns an :int handle.
@@ -78,31 +78,15 @@
 ;;; dense-get -- read the value at slot idx (typed A). The elaborator
 ;;; infers A from a typed binding (`(let [p : Pos (dense-get s i)] ...)`),
 ;;; an explicit `::` ascription, or an enclosing defn's declared return
-;;; type. For a bare `(let [p (dense-get s i)] ...)` followed by struct
-;;; field access, A defaults to the int carrier and reads bytes through
-;;; a reinterpret cast; use `dense-get-w` (witness variant) in that case
-;;; or annotate the let binding. Caller must has?-check first; absent
-;;; slots return unspecified bytes.
+;;; type. A bare `(let [p (dense-get s i)] ...)` followed by struct
+;;; field access defaults A to the int carrier -- annotate the let
+;;; binding when reading a struct component.  Caller must has?-check
+;;; first; absent slots return unspecified bytes.
 ;;; Since: E0
 (defn dense-get [A] [s : int idx : int] : A
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
-  return ((__TUR_TY_A__ *)st->data)[idx];
-  ```)
-
-;;; dense-get-w -- struct-component variant of dense-get. Takes an
-;;; ignored witness argument whose only purpose is to bind A at the call
-;;; site so the inline-C body specializes to the right C type and size.
-;;; The witness is *not* used at runtime; pass any constant of type A
-;;; (e.g. a zero-initialized struct). Folded away once the elaborator
-;;; learns to bind generic returns from caller context.
-;;; Since: E1'
-(defn dense-get-w [A] [s : int idx : int _witness : A] : A
-  ```c
-  typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
-  __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
-  (void)_witness;
   return ((__TUR_TY_A__ *)st->data)[idx];
   ```)
 
