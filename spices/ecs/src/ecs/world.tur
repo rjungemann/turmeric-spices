@@ -152,20 +152,62 @@
 
 ;;; defcomponent-class-instance -- bind a (world, component) pair into
 ;;; the `Has<Comp>` typeclass, threading the method through to the
-;;; world's `.<Comp>` field.
+;;; world's `.<Comp>` field; also emits per-(World, Comp) cap-mint
+;;; helpers
+;;; `mint-<World>-<Comp>-write-cap` / `mint-<World>-<Comp>-read-cap`
+;;; that produce a freshly-typed `WriteCap<Comp>` / `ReadCap<Comp>`
+;;; from a CID.
+;;;
+;;; The minters are emitted as factory *functions* (not top-level
+;;; `def`s) so the resulting `:linear` `WriteCap<Comp>` value lives
+;;; inside the caller's scope and is consumed there -- emitting a
+;;; top-level `def <Comp>-write-cap (...)` would leave the linear
+;;; value un-consumed and trip TUR-E0100. This is the I2 pragmatic
+;;; deviation from
+;;; `docs/reported/ecs-defsystem-write-caps-not-enforced.md` (which
+;;; named a top-level def); callers say
+;;; `(mint-GameWorld-Pos-write-cap pos-cid)` to get a
+;;; `WriteCap<Pos>`.
+;;;
+;;; The mint name carries the world to avoid duplicate-defn errors
+;;; when the same component is registered against multiple worlds
+;;; (e.g. `Pos` against both `GameWorld` and `AltWorld`); this is
+;;; load-bearing for the polymorphic-instance tests today and lines
+;;; up with the semantic fact that a `:reads`/`:writes` set is always
+;;; bound to a single world type at the system site.
 ;;;
 ;;; Syntax:
 ;;;   (defcomponent-class-instance GameWorld Pos)
-;;;     ;; emits: (definstance HasPos [GameWorld]
-;;;     ;;          (Pos-storage-of [w] (.Pos w)))
+;;;     ;; emits:
+;;;     ;;   (definstance HasPos [GameWorld]
+;;;     ;;     (Pos-storage-of [w] (.Pos w)))
+;;;     ;;   (defn mint-GameWorld-Pos-write-cap [cid : int]
+;;;     ;;       : (WriteCap Pos)
+;;;     ;;     (make-write-cap cid))
+;;;     ;;   (defn mint-GameWorld-Pos-read-cap [cid : int]
+;;;     ;;       : (ReadCap Pos)
+;;;     ;;     (make-read-cap cid))
 ;;;
-;;; Since: E2
+;;; Since: E2 (instance binding); I2 (cap minting)
 (defmacro defcomponent-class-instance [world-name comp-name]
-  (let [class-name  (str->sym (str-append "Has" (symbol-name comp-name)))
-        method-name (str->sym (str-append (symbol-name comp-name) "-storage-of"))
-        field       (dot-sym comp-name)]
-    `(definstance ~class-name [~world-name]
-       (~method-name [w] (~field w)))))
+  (let [class-name       (str->sym (str-append "Has" (symbol-name comp-name)))
+        method-name      (str->sym (str-append (symbol-name comp-name) "-storage-of"))
+        field            (dot-sym comp-name)
+        world-dash-comp  (str-append (symbol-name world-name)
+                                     (str-append "-" (symbol-name comp-name)))
+        mint-write-name  (str->sym (str-append "mint-"
+                                               (str-append world-dash-comp
+                                                           "-write-cap")))
+        mint-read-name   (str->sym (str-append "mint-"
+                                               (str-append world-dash-comp
+                                                           "-read-cap")))]
+    `(do
+       (definstance ~class-name [~world-name]
+         (~method-name [w] (~field w)))
+       (defn ~mint-write-name [cid : int] : (WriteCap ~comp-name)
+         (make-write-cap cid))
+       (defn ~mint-read-name  [cid : int] : (ReadCap  ~comp-name)
+         (make-read-cap  cid)))))
 
 ;;; world-alloc-entity! -- allocate the next entity slot.
 ;;;
