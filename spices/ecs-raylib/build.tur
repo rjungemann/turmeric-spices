@@ -1,0 +1,31 @@
+(defpackage tur-ecs-raylib
+  :name        "tur-ecs-raylib"
+  :version     "0.1.0-E3"
+  :description "Raylib companion to tur-ecs: standard 2D components, systems, and a with-game-loop macro for ECS-driven games."
+  :license     "MIT"
+  :spices #{
+    "ecs"    #{:path "../ecs"}
+    "raylib" #{:path "../raylib"}
+    "test"   #{:url    "https://github.com/turmeric-spice/turmeric-spices"
+              :ref    "test-v0.1.0"
+              :subdir "spices/test"
+              :optional true}
+  }
+  :cmake-deps #{
+    "raylib" #{:url     "https://github.com/raysan5/raylib"
+              :ref     "5.5"
+              :options #{:BUILD_SHARED_LIBS "OFF"
+                        :BUILD_EXAMPLES   "OFF"
+                        :BUILD_GAMES      "OFF"}}
+  }
+  :exports #{
+    "ecs-raylib/components" ["Pos2" "Vel2" "Rot" "Radius" "Color"
+                             "pos2-make" "pos2-x" "pos2-y" "pos2-add!"
+                             "vel2-make" "vel2-x" "vel2-y"
+                             "radius-make" "radius-value"
+                             "rot-make" "rot-value"
+                             "color-rgba"]
+    "ecs-raylib/systems"    ["integrate-2d"]
+    "ecs-raylib/render"     ["render-circles" "__raylib-draw-circle"]
+    "ecs-raylib/loop"       ["with-game-loop"]
+  })

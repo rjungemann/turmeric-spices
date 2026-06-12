@@ -1,0 +1,53 @@
+;; E1 lifts the for-each arity cap to 8. This test exercises the
+;; highest-arity dispatch path with 30 entities, each carrying
+;; A=i, B=2i, C=3i, D=4i, E=5i, F=6i, G=7i, H=8i. Per-entity sum is
+;; 36*i; total = 36 * 29*30/2 = 15660.
+
+(defmodule for-each-arity-8-test (export)
+
+(import ecs/entity  :refer [entity-index])
+(import ecs/storage :refer [dense-new dense-len dense-set! dense-get dense-has?])
+(import ecs/world   :refer [defcomponent defworld world-alloc-entity!])
+(import ecs/query   :refer [for-each])
+
+(defcomponent A)
+(defcomponent B)
+(defcomponent C)
+(defcomponent D)
+(defcomponent E)
+(defcomponent F)
+(defcomponent G)
+(defcomponent H)
+
+;; defworld caps at 5 components; we widen for this test inline by
+;; declaring the world struct directly.
+(defstruct EightWorld
+  [gens : int
+   A : int B : int C : int D : int
+   E : int F : int G : int H : int])
+
+(defn main [] : int
+  (let [w (make-struct EightWorld (vec-new)
+            (dense-new) (dense-new) (dense-new) (dense-new)
+            (dense-new) (dense-new) (dense-new) (dense-new))]
+    (do
+      (let [^mut i 0]
+        (while (< i 30)
+          (let [ent (world-alloc-entity! (.gens w))
+                idx (entity-index ent)]
+            (dense-set! (.A w) idx i)
+            (dense-set! (.B w) idx (* 2 i))
+            (dense-set! (.C w) idx (* 3 i))
+            (dense-set! (.D w) idx (* 4 i))
+            (dense-set! (.E w) idx (* 5 i))
+            (dense-set! (.F w) idx (* 6 i))
+            (dense-set! (.G w) idx (* 7 i))
+            (dense-set! (.H w) idx (* 8 i)))
+          (set! i (+ i 1))))
+      (let [^mut total 0]
+        (for-each w [A B C D E F G H] [ent a b c d ee f g h]
+          (set! total (+ total (+ a (+ b (+ c (+ d (+ ee (+ f (+ g h))))))))))
+        (println total)
+        (if (= total 15660) 0 1)))))
+
+) ;; end defmodule

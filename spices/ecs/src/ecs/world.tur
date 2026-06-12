@@ -79,14 +79,14 @@
 ;;; defworld -- declare a closed world type carrying typed storages.
 ;;;
 ;;; Syntax:
-;;;   (defworld Name [Comp1 Comp2 ...])     ;; up to four components
+;;;   (defworld Name [Comp1 Comp2 ...])     ;; up to five components
 ;;;
 ;;; Lowers to a defstruct only. Per-component accessors are emitted
 ;;; separately via `defcomponent-accessors`; see this module's top
 ;;; docstring for the rationale (component names can name bare-int
 ;;; "marker" components without an underlying defstruct).
 ;;;
-;;; Since: E0
+;;; Since: E0 (1..4 components); E1 (5 components)
 (defmacro defworld [name comps]
   (if (empty? comps)
     `(defstruct ~name [gens : int])
@@ -105,12 +105,20 @@
               ~(first comps) : int
               ~(second comps) : int
               ~(first (rest (rest comps))) : int])
-          `(defstruct ~name
-             [gens : int
-              ~(first comps) : int
-              ~(second comps) : int
-              ~(first (rest (rest comps))) : int
-              ~(second (rest (rest comps))) : int]))))))
+          (if (empty? (rest (rest (rest (rest comps)))))
+            `(defstruct ~name
+               [gens : int
+                ~(first comps) : int
+                ~(second comps) : int
+                ~(first (rest (rest comps))) : int
+                ~(second (rest (rest comps))) : int])
+            `(defstruct ~name
+               [gens : int
+                ~(first comps) : int
+                ~(second comps) : int
+                ~(first (rest (rest comps))) : int
+                ~(second (rest (rest comps))) : int
+                ~(first (rest (rest (rest (rest comps))))) : int])))))))
 
 ;;; defcomponent-class -- declare a `Has<Comp>` typeclass with one
 ;;; method `<Comp>-storage-of` that returns the component's dense

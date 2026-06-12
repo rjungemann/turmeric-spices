@@ -6,7 +6,13 @@ real-time games. Long-form plan and rationale:
 
 ## Status
 
-**E1' -- fixed-arity queries.** Shipped 2026-06-11.
+**E1 -- variadic-looking queries + row-typed `Query` value.** Shipped 2026-06-11.
+
+The D1 prerequisite (variadic HKT rows) and all four L6 follow-ups
+(strict row elements, `^&` on defgadt/ADT/deftype, row-polymorphic
+defn/fn, permutation-aware row equality) landed in the main repo this
+session, which unblocked the E1 surface. See
+`../../../turmeric/docs/archive/history/variadic-hkt-rows-missing.md`.
 
 ### What's in
 
@@ -26,29 +32,57 @@ real-time games. Long-form plan and rationale:
   `Frozen`, `Player`). `tag-new/cap/count/set!/clear!/has?/free`. O(1)
   set/test, popcount via `__builtin_popcountll`.
 - `ecs/world` -- `defworld Name [Comp1 ... CompN]` macro (arity-capped
-  at 4 in E0; mixed dense/sparse/tag fields all hold an `:int` handle
+  at 5 in E1; mixed dense/sparse/tag fields all hold an `:int` handle
   and the same `(.Comp w)` syntax works regardless of backend).
   `world-alloc-entity!`, `world-despawn!`.
-- `ecs/query` -- `for-each1`, `for-each2`, `for-each3` imperative
-  iteration over dense storages, with the body spliced inline (no
-  closure allocation). `world-tagged?` / `world-untagged?` consult a
-  tag-bitset field on the world. Compose tag filters with `when` /
-  `unless` inside the body to express `with` / `without` constraints.
+- `ecs/query` -- single user-facing **`for-each`** macro, truly
+  variadic (no arity cap; recursive helper macros walk the component
+  list at expansion time):
+  ```
+  (for-each w [Pos Vel]      [e p v]      body)   ;; 2 components
+  (for-each w [Pos Vel Hp]   [e p v h]    body)   ;; 3 components
+  (for-each w [A B C D]      [e a b c d]  body)   ;; 4 components
+  (for-each w [A B ... J K]  [e a ... j k] body)  ;; 11 components, no cap
+  ```
+  Thin `for-each1`..`for-each3` shims stay exported for back-compat.
+  `world-tagged?` / `world-untagged?` consult a tag-bitset
+  field on the world. Compose tag filters with `when` / `unless` inside
+  the body to express `with` / `without` constraints.
+- `ecs/query` ships **`defquery`** + **`run-query!`** -- the functional
+  packaging from the plan:
+  ```
+  (defquery integrate w GameWorld [Pos Vel] [e p v]
+    (dense-set! (.Pos w) e (+ p v)))
+
+  (run-query! integrate world)
+  ```
+  `defquery` desugars to a `(defn integrate [^borrow w : GameWorld] : nil ...)`
+  whose body is the `for-each` iteration; `run-query!` is sugar for
+  invoking it. The world is taken as `^borrow` so callers can reuse the
+  world value after running the query.
+- `ecs/query` also exposes the row-typed **`Query`** value:
+  ```
+  (defstruct Query [^&in ^&out] (world :int))
+  ```
+  Row arguments are *phantom* -- the variadic-HKT-rows work erases them
+  at codegen, so a `Query` carries only the world handle at runtime,
+  but two `Query`s with different `(in, out)` row arguments are
+  distinguished at the type level. Typical use:
+  ```
+  ;; A Query against GameWorld that reads Pos+Vel and writes Pos:
+  (defn integrate [q : (Query #row{Pos Vel} #row{Pos})] : nil ...)
+  ```
+  Requires `-Xdata-literals` at the consumer's build for the
+  `#row{...}` literal syntax. The spice module itself does not use
+  `#row{...}`, so it builds under the default reader.
 
 ### What's not in (yet)
 
-- Functional `(query [...])` / `run-query!` (the plan's aztecs-style
-  surface). The arity-N macros cover the same iteration shapes; the
-  functional packaging lands after the macro-evaluator gaps below
-  close.
-- Sparse/tag participation in `for-eachN` iteration order. Today the
-  primary iteration in `for-eachN` walks the dense-storage union; a
-  sparse-primary variant (iterate the smallest sparse storage, look up
-  the others) is straightforward but unwritten.
-- Systems and the parallel scheduler -- ships in E2.
+- Sparse/tag participation in `for-each` iteration order. Today the
+  primary iteration walks the dense-storage union; a sparse-primary
+  variant is straightforward but unwritten.
+- Systems and the parallel scheduler -- shipped in E2 prior to this.
 - raylib companion + demo -- ships in E3.
-- Variadic `(query [...])` -- E1 in the plan, gated by variadic HKT
-  rows (`docs/reported/variadic-hkt-rows-missing.md`).
 
 ## Smoke / regression tests
 
@@ -61,11 +95,18 @@ tur run tests/sparse-stress.tur           # E1' patch-1 10k mixed ops vs bitset 
 tur run tests/tag-rt.tur                  # E1' tag set / has / clear / popcount
 tur run tests/integrate2.tur              # E1' for-each2 Pos+Vel integrate (sum = 125750)
 tur run tests/filter-with-without.tur     # E1' tag filters inside body (sum = 1368)
+tur run tests/for-each-variadic.tur       # E1  variadic (for-each w [Pos Vel] ...) (125750)
+tur run tests/for-each-arity-4.tur        # E1  arity-4 dispatch (49500)
+tur run tests/for-each-arity-5.tur        # E1  arity-5 dispatch (18375)
+tur run tests/for-each-arity-8.tur        # E1  arity-8 (15660)
+tur run tests/for-each-arity-12.tur       # E1  arity-12 no-cap demo (3510)
+tur run tests/defquery-integrate.tur      # E1  defquery + run-query! (125750)
+tur run -Xdata-literals tests/query-typed.tur   # E1  row-typed Query value (prints 42)
 ```
 
 Each exits 0 on success.
 
-## Known limitations (E1')
+## Known limitations
 
 Filed in the main repo's `docs/reported/` and
 [`docs/upcoming/ecs-prereq-plan.md`](../../../turmeric/docs/upcoming/ecs-prereq-plan.md):
@@ -123,6 +164,13 @@ ship the original plan's API more directly, (5) is a query-engine
 follow-up, (6) is the only one that's a real gap against the plan's
 spec'd surface (the plan promises it; the spice doesn't deliver it
 yet).
+
+7. ~~`query-world` called from a row-polymorphic context fails to link.~~
+   **Fixed.** The relay-vs-carrier classifier in
+   `src/compiler/emit_module.c` now ignores row-kinded named tyvars
+   when deciding whether a call requires specialization; rows are
+   phantom so the carrier definition suffices and gets emitted. See
+   [docs/reported/row-polymorphic-defn-call-from-row-polymorphic-context-missing-codegen.md](../../../turmeric/docs/reported/row-polymorphic-defn-call-from-row-polymorphic-context-missing-codegen.md).
 
 ## License
 

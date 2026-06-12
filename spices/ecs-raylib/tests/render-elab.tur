@@ -1,0 +1,25 @@
+;; Compile-only smoke test for render-circles: the render system pulls
+;; in <raylib.h> via inline-C, so a full `tur run` here would require
+;; raylib to be installed in cmake-deps. We use `tur emit-c` to confirm
+;; the module elaborates cleanly without trying to link.
+
+(defmodule render-elab-test (export)
+
+(import ecs/storage :refer [dense-new dense-set! dense-get])
+(import ecs/world   :refer [defcomponent defworld])
+(import ecs/query   :refer [for-each])
+(import ecs-raylib/components :refer [Pos2 Radius Color
+                                       pos2-make pos2-x pos2-y
+                                       radius-make radius-value])
+(import ecs-raylib/render     :refer [render-circles __raylib-draw-circle])
+
+(defcomponent Pos2)
+(defcomponent Radius)
+(defcomponent Color)
+(defworld Scene [Pos2 Radius Color])
+
+(render-circles render Scene)
+
+(defn main [] : int 0)
+
+) ;; end defmodule

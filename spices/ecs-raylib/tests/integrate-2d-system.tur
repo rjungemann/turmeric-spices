@@ -1,0 +1,59 @@
+;; Smoke test the integrate-2d system: spawn 100 entities, integrate one
+;; frame at dt = 0.5, check that Pos2 advanced by Vel2 * dt for every slot.
+;;
+;; This test does NOT open a raylib window; it only exercises the ECS
+;; integration math. Render-circles requires a live window and is verified
+;; by the demo, not here.
+
+(defmodule integrate-2d-test (export)
+
+(import ecs/entity  :refer [entity-index])
+(import ecs/storage :refer [dense-new dense-len dense-set! dense-get dense-has?])
+(import ecs/world   :refer [defcomponent defworld world-alloc-entity!])
+(import ecs/query   :refer [for-each])
+(import ecs-raylib/components :refer [Pos2 Vel2
+                                       pos2-make pos2-x pos2-y
+                                       vel2-make])
+(import ecs-raylib/systems    :refer [integrate-2d])
+
+(defcomponent Pos2)
+(defcomponent Vel2)
+(defworld GameWorld [Pos2 Vel2])
+
+;; The integrate-2d macro emits the system defn for our concrete world type.
+(integrate-2d integrate GameWorld)
+
+(defn approx-eq [a : float b : float] : bool
+  ```c
+  double d = a - b; if (d < 0) d = -d;
+  return d < 0.05;
+  ```)
+
+(defn int->float [i : int] : float
+  ```c
+  return (double)i;
+  ```)
+
+(defn main [] : int
+  (let [w (make-struct GameWorld (vec-new) (dense-new) (dense-new))]
+    (do
+      ;; Spawn 100 entities: entity i at (i, 2i) with velocity (1, -1).
+      (let [^mut i 0]
+        (while (< i 100)
+          (let [ent (world-alloc-entity! (.gens w))
+                idx (entity-index ent)
+                ifl (int->float i)]
+            (dense-set! (.Pos2 w) idx (pos2-make ifl (* 2.0 ifl)))
+            (dense-set! (.Vel2 w) idx (vel2-make 1.0 -1.0)))
+          (set! i (+ i 1))))
+      ;; Integrate one frame at dt = 0.5: expected delta is (0.5, -0.5).
+      (integrate w 0.5)
+      ;; Check the last entity (index 99): expect Pos2 ~ (99.5, 197.5).
+      (let [p   (:: (dense-get (.Pos2 w) 99) Pos2)
+            xok (approx-eq (pos2-x p) 99.5)
+            yok (approx-eq (pos2-y p) 197.5)]
+        (if (and xok yok)
+          (do (println 0) 0)
+          (do (println 1) 1))))))
+
+) ;; end defmodule

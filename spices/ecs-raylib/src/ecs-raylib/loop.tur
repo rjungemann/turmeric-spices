@@ -1,0 +1,54 @@
+;;; ecs-raylib/loop -- with-game-loop macro for ECS-driven games.
+;;;
+;;; Wraps the standard raylib boilerplate (init-window / window-should-close /
+;;; begin-drawing / end-drawing / close-window) around the user's per-frame
+;;; body. The body sees `dt` bound to the delta-time of the frame and is free
+;;; to call ECS systems (`(run-query! integrate w dt)`, drawing systems,
+;;; etc.) plus any raylib primitives.
+;;;
+;;; Syntax:
+;;;
+;;;   (with-game-loop w title width height fps
+;;;     body)
+;;;
+;;; Expands to:
+;;;
+;;;   (do
+;;;     (init-window width height title)
+;;;     (set-target-fps fps)
+;;;     (while (not (window-should-close))
+;;;       (let [dt (get-frame-time)]
+;;;         (begin-drawing)
+;;;         (clear-background (raywhite))
+;;;         body
+;;;         (end-drawing)))
+;;;     (close-window))
+;;;
+;;; The body is responsible for invoking integration / render systems
+;;; against `w`. The `dt` binding is in scope throughout. Default clear
+;;; color is raylib's RAYWHITE; override by drawing your own background
+;;; rectangle at the top of the body.
+;;;
+;;; Since: E3
+
+(defmodule ecs-raylib/loop
+  (export with-game-loop)
+
+(import raylib/core  :refer [init-window close-window window-should-close
+                              begin-drawing end-drawing clear-background
+                              set-target-fps get-frame-time])
+(import raylib/color :refer [raywhite])
+
+(defmacro with-game-loop [w title width height fps body]
+  `(do
+     (init-window ~width ~height ~title)
+     (set-target-fps ~fps)
+     (while (not (window-should-close))
+       (let [dt (get-frame-time)]
+         (begin-drawing)
+         (clear-background (raywhite))
+         ~body
+         (end-drawing)))
+     (close-window)))
+
+) ;; end defmodule

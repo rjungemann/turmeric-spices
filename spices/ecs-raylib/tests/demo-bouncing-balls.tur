@@ -1,0 +1,90 @@
+;; tur-ecs-raylib E3 demo: bouncing-balls. Spawns N circle entities
+;; with random initial positions and velocities; each frame applies
+;; integrate-2d, bounces off the window edges, then renders.
+;;
+;; This is the canonical ECS-driven raylib game scaffold the E3 plan
+;; calls out (an "asteroids-or-similar" demo). It is built and emitted
+;; by `tur emit-c` in CI; it does not run in headless test sweeps but
+;; runs interactively when raylib is linked.
+;;
+;; Run with `tur run tests/demo-bouncing-balls.tur` from the spice root
+;; once raylib is on the cmake-deps path.
+
+(defmodule demo-bouncing-balls (export)
+
+(import ecs/entity   :refer [entity-index])
+(import ecs/storage  :refer [dense-new dense-set! dense-get])
+(import ecs/world    :refer [defcomponent defworld world-alloc-entity!])
+(import ecs/query    :refer [for-each])
+(import ecs-raylib/components :refer [Pos2 Vel2 Radius Color
+                                       pos2-make pos2-x pos2-y
+                                       vel2-make vel2-x vel2-y
+                                       radius-make
+                                       pos2-add!])
+(import ecs-raylib/systems    :refer [integrate-2d])
+(import ecs-raylib/render     :refer [render-circles __raylib-draw-circle])
+(import ecs-raylib/loop       :refer [with-game-loop])
+(import raylib/color :refer [red blue green orange purple])
+
+(defcomponent Pos2)
+(defcomponent Vel2)
+(defcomponent Radius)
+(defcomponent Color)
+(defworld Scene [Pos2 Vel2 Radius Color])
+
+;; Emit the standard integrate + render systems against Scene.
+(integrate-2d  integrate Scene)
+(render-circles render   Scene)
+
+;; bounce-walls: per-frame system that flips velocity at window edges.
+;; Written by hand (not yet a standard system) so the demo exercises a
+;; mix of stock and bespoke systems.
+(defn bounce-walls [^borrow w : Scene wmax : float hmax : float] : nil
+  (for-each w [Pos2 Vel2 Radius] [e p v r]
+    (let [px (pos2-x (:: p Pos2))
+          py (pos2-y (:: p Pos2))
+          vx (vel2-x (:: v Vel2))
+          vy (vel2-y (:: v Vel2))
+          rv (radius-value (:: r Radius))
+          flip-x (or (and (< px rv)             (< vx 0.0))
+                     (and (> px (- wmax rv))    (> vx 0.0)))
+          flip-y (or (and (< py rv)             (< vy 0.0))
+                     (and (> py (- hmax rv))    (> vy 0.0)))
+          nvx (if flip-x (* vx -1.0) vx)
+          nvy (if flip-y (* vy -1.0) vy)]
+      (dense-set! (.Vel2 w) e (vel2-make nvx nvy)))))
+
+(defn radius-value [r : Radius] : float
+  ```c
+  return ((double)r) / 1000.0;
+  ```)
+
+;; Spawn one entity with the supplied position / velocity / radius / color.
+(defn spawn-ball [^borrow w : Scene
+                  px : float py : float
+                  vx : float vy : float
+                  r  : float c  : int] : nil
+  (let [ent (world-alloc-entity! (.gens w))
+        idx (entity-index ent)]
+    (dense-set! (.Pos2   w) idx (pos2-make px py))
+    (dense-set! (.Vel2   w) idx (vel2-make vx vy))
+    (dense-set! (.Radius w) idx (radius-make r))
+    (dense-set! (.Color  w) idx c)))
+
+(defn main [] : int
+  (let [w (make-struct Scene (vec-new)
+            (dense-new) (dense-new) (dense-new) (dense-new))]
+    (do
+      (spawn-ball w 100.0  80.0  220.0  170.0 20.0 (red))
+      (spawn-ball w 200.0 200.0 -150.0  240.0 24.0 (blue))
+      (spawn-ball w 350.0 130.0  190.0 -210.0 28.0 (green))
+      (spawn-ball w 500.0 320.0 -280.0 -140.0 16.0 (orange))
+      (spawn-ball w 640.0  60.0   80.0  300.0 30.0 (purple))
+      (with-game-loop w "tur-ecs-raylib :: bouncing-balls" 800 600 60
+        (do
+          (integrate    w dt)
+          (bounce-walls w 800.0 600.0)
+          (render       w)))
+      0)))
+
+) ;; end defmodule
