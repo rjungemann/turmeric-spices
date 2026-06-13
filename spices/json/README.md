@@ -83,46 +83,43 @@ The earlier 2-field cap (from a closure-codegen bug in the main
 turmeric compiler) was lifted 2026-06-12 in the same session that
 introduced this module; arbitrary field counts work today.
 
-## Typed decoding (`json/decode`)
+## Typed decoding (`json/decode` + `Decode` typeclass)
 
 A self-contained tiny scanner (no yyjson dependency in this slice)
-parses a JSON cstr into an opaque doc handle, then exposes per-primitive
-decoders for flat objects:
+parses a JSON cstr into an opaque doc handle; the `Decode` typeclass
+on top dispatches per-type via a return-type ascription:
 
 ```turmeric
-(import json/decode
-  :refer [json-parse-doc json-doc-free json-doc-root
-          json-obj-get json-decode-int json-decode-cstr])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
+(import json/encode)  ;; Decode class lives here alongside derive-json
 
 (let [doc      (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
       root     (unsafe (json-doc-root doc))
-      id       (unsafe (json-decode-int  doc (unsafe (json-obj-get doc root "id"))))
-      name     (unsafe (json-decode-cstr doc (unsafe (json-obj-get doc root "name"))))]
-  (println name)
+      id-r     (:: (decode doc (unsafe (json-obj-get doc root "id")))   (Result int  cstr))
+      name-r   (:: (decode doc (unsafe (json-obj-get doc root "name"))) (Result cstr cstr))]
+  (println (ok-val name-r))
   (unsafe (json-doc-free doc)))
 ```
+
+Each call to `(decode doc val)` returns `(Result T cstr)` where `T` is
+pinned by the ascription; on success the Result is `(ok x)`, on a
+type/format error it carries a short static err message. `Decode`
+instances ship for `int` and `cstr` (with `true`/`false` decoding
+through `Decode [int]` as `1`/`0`).
 
 Scope (intentionally narrow for the minimal slice):
 
 - Flat objects only -- no nested objects or arrays.
-- Integers only -- no floats. `true`/`false` decode through
-  `json-decode-int` as `1`/`0`.
+- Integers only -- no floats.
 - Strings handle the minimal escape set (`\"`, `\\`, `\b`, `\f`,
   `\n`, `\r`, `\t`, `\/`); `\uXXXX` is rejected.
-- Sentinel errors -- `json-decode-int` returns `-1` and
-  `json-decode-cstr` returns `NULL` on a malformed value. No error
-  message context.
 
-**Why plain `defn`s instead of a typed `Decode` typeclass?** The plan
-doc's intended surface was `(defclass Decode [a] (decode : doc -> off
--> Result a cstr))`, but that shape trips three interacting compiler
-issues (carrier ABI for parameterized `Result`, monomorphic `ok`
-constructor, return-type-dispatched typeclass methods inside `(unsafe
-...)`). Filed as
-`docs/reported/typeclass-method-parameterized-result-carrier-mismatch.md`
-in the turmeric repo with a full repro and proposed-fix sketch; the
-typed surface lands here as a follow-up once those issues are
-addressed.
+`derive-json` emits the Encode side for any defstruct. The matching
+`Decode [T]` side for a user-defined defstruct is hand-written today
+(inline-C that allocates the struct, fills it from the per-field
+Decode dispatches, and wraps via `tur_ok`) -- the macro-driven Decode
+side lands once the value-struct-to-carrier boxing helper is in
+place.
 
 ## See also
 

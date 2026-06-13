@@ -11,7 +11,10 @@
 ;; be revisited when those land.
 
 (defmodule json/encode
-  (export derive-json __json-chain __json-obj-build)
+  (export derive-json __json-chain __json-obj-build
+          __decode-field __decode-fields __decode-make-struct)
+
+(import json/decode :refer [json-obj-get])
 
 ;;; Encode -- typeclass for serializing a Turmeric value to a JSON
 ;;; fragment.  The fragment is a self-contained JSON value (number,
@@ -166,21 +169,188 @@
              (cons (encode (~(dot-sym fname) x))
                    (__json-chain ~tail))))))
 
-;;; derive-json -- emit an `Encode` instance for a `defstruct` product type.
+;; -----------------------------------------------------------------------------
+;; Decode typeclass + primitive instances.
+;;
+;; Method signature: `decode : doc -> val-offset -> (Result a cstr)`.
+;; `a` appears only in the return type, so the dispatcher selects the
+;; instance from the call site's ascribed return type:
+;;
+;;   (:: (decode doc off) (Result int  cstr))   ; picks Decode [int]
+;;   (:: (decode doc off) (Result cstr cstr))   ; picks Decode [cstr]
+;;
+;; The Decode class + instances live HERE alongside Encode and
+;; derive-json so the macro-emitted (definstance Decode [T] ...) form
+;; lands in the same module as the class definition (orphan-instance
+;; check passes). The actual scanner functions stay in json/decode and
+;; are imported above.
+;; -----------------------------------------------------------------------------
+
+(defclass Decode [a] (decode [doc : int  val : int] : (Result a cstr)))
+
+;;; Decode [int] -- parse the JSON number at `val` as a 64-bit integer.
+;;; JSON literals `true`/`false` decode as `1`/`0`. Rejects fractional
+;;; or exponent forms, and any non-numeric value.
+(definstance Decode [int] (decode [doc val]
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d || val < 0 || (size_t)val >= d->len) {
+    return tur_err((int64_t)(intptr_t)"decode int: out-of-range val handle");
+  }
+  size_t i = (size_t)val;
+  if (i + 4 <= d->len && memcmp(d->src + i, "true",  4) == 0) return tur_ok((int64_t)1);
+  if (i + 5 <= d->len && memcmp(d->src + i, "false", 5) == 0) return tur_ok((int64_t)0);
+  int sign = 1;
+  if (d->src[i] == '-') { sign = -1; i++; }
+  else if (d->src[i] == '+') { i++; }
+  if (i >= d->len || d->src[i] < '0' || d->src[i] > '9') {
+    return tur_err((int64_t)(intptr_t)"decode int: not a number");
+  }
+  int64_t n = 0;
+  while (i < d->len && d->src[i] >= '0' && d->src[i] <= '9') {
+    n = n * 10 + (d->src[i] - '0');
+    i++;
+  }
+  if (i < d->len && (d->src[i] == '.' || d->src[i] == 'e' || d->src[i] == 'E')) {
+    return tur_err((int64_t)(intptr_t)"decode int: fractional/exponent not supported");
+  }
+  return tur_ok((int64_t)(sign * n));
+  ```))
+
+;;; Decode [cstr] -- parse the JSON string at `val`, returning a freshly
+;;; malloc'd cstr inside `ok` (caller owns it). Supports the minimal
+;;; escape set; `\uXXXX` is rejected with a static err message.
+(definstance Decode [cstr] (decode [doc val]
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d || val < 0 || (size_t)val >= d->len || d->src[val] != '"') {
+    return tur_err((int64_t)(intptr_t)"decode cstr: expected `\"`");
+  }
+  size_t i = (size_t)val + 1;
+  size_t out_len = 0;
+  size_t j = i;
+  while (j < d->len) {
+    char x = d->src[j];
+    if (x == '\\') {
+      if (j + 1 >= d->len) return tur_err((int64_t)(intptr_t)"decode cstr: trailing `\\`");
+      char e = d->src[j + 1];
+      if (e == '"' || e == '\\' || e == '/' || e == 'b' || e == 'f' ||
+          e == 'n' || e == 'r' || e == 't') { out_len++; j += 2; continue; }
+      return tur_err((int64_t)(intptr_t)"decode cstr: unsupported escape");
+    }
+    if (x == '"') break;
+    out_len++; j++;
+  }
+  if (j >= d->len) return tur_err((int64_t)(intptr_t)"decode cstr: unterminated string");
+  char *out = (char *)malloc(out_len + 1);
+  size_t w = 0;
+  j = i;
+  while (j < d->len) {
+    char x = d->src[j];
+    if (x == '"') break;
+    if (x == '\\') {
+      char e = d->src[j + 1];
+      char k = '\0';
+      switch (e) {
+        case '"':  k = '"';  break;
+        case '\\': k = '\\'; break;
+        case '/':  k = '/';  break;
+        case 'b':  k = '\b'; break;
+        case 'f':  k = '\f'; break;
+        case 'n':  k = '\n'; break;
+        case 'r':  k = '\r'; break;
+        case 't':  k = '\t'; break;
+        default: break;
+      }
+      out[w++] = k; j += 2; continue;
+    }
+    out[w++] = x; j++;
+  }
+  out[w] = '\0';
+  return tur_ok((int64_t)(intptr_t)out);
+  ```))
+
+;; Recursive helper for derive-json's Decode side: turn the field list
+;; into a chain of positional arguments to `make-struct`. Each entry
+;; expands to `(ok-val (:: (decode doc (json-obj-get doc val "fname"))
+;; (Result <ftype> cstr)))` so that the field's typed Decode instance
+;; is dispatched via the return-type ascription. No error propagation
+;; yet -- a failed field decode returns the err's int64 as the field
+;; value, which the user can detect via err? if they care; structured
+;; error reporting lands as a follow-up.
+(defmacro __decode-field [fname ftype]
+  `(ok-val
+     (:: (decode doc (unsafe (json-obj-get doc val ~(symbol-name fname))))
+         (Result ~ftype cstr))))
+
+(defmacro __decode-fields [fields]
+  (if (empty? fields)
+    0
+    (let [fld   (first fields)
+          fname (first fld)
+          ftype (first (rest fld))
+          tail  (rest fields)]
+      `(cons (__decode-field ~fname ~ftype)
+             (__decode-fields ~tail)))))
+
+;; The make-struct call with each field's decoded value as a positional
+;; arg. Variadic positional splicing isn't supported at macro time, so
+;; we manually unroll for 1-5 fields (mirroring stdlib's defworld
+;; idiom). For >5 fields, hand-write the Decode instance.
+;;
+;; (Reserved for the Decode-side of derive-json, which is currently
+;; deferred -- see the note above `derive-json` below.)
+(defmacro __decode-make-struct [type-name fields]
+  (if (empty? fields)
+    `(make-struct ~type-name)
+    (if (empty? (rest fields))
+      ;; 1 field
+      `(make-struct ~type-name
+         (__decode-field ~(first (first fields)) ~(first (rest (first fields)))))
+      (if (empty? (rest (rest fields)))
+        ;; 2 fields
+        `(make-struct ~type-name
+           (__decode-field ~(first (first fields))         ~(first (rest (first fields))))
+           (__decode-field ~(first (first (rest fields)))  ~(first (rest (first (rest fields))))))
+        (if (empty? (rest (rest (rest fields))))
+          ;; 3 fields
+          `(make-struct ~type-name
+             (__decode-field ~(first (first fields))                       ~(first (rest (first fields))))
+             (__decode-field ~(first (first (rest fields)))                ~(first (rest (first (rest fields)))))
+             (__decode-field ~(first (first (rest (rest fields))))         ~(first (rest (first (rest (rest fields)))))))
+          (if (empty? (rest (rest (rest (rest fields)))))
+            ;; 4 fields
+            `(make-struct ~type-name
+               (__decode-field ~(first (first fields))                               ~(first (rest (first fields))))
+               (__decode-field ~(first (first (rest fields)))                        ~(first (rest (first (rest fields)))))
+               (__decode-field ~(first (first (rest (rest fields))))                 ~(first (rest (first (rest (rest fields))))))
+               (__decode-field ~(first (first (rest (rest (rest fields)))))          ~(first (rest (first (rest (rest (rest fields))))))))
+            ;; 5 fields (cap)
+            `(make-struct ~type-name
+               (__decode-field ~(first (first fields))                                       ~(first (rest (first fields))))
+               (__decode-field ~(first (first (rest fields)))                                ~(first (rest (first (rest fields)))))
+               (__decode-field ~(first (first (rest (rest fields))))                         ~(first (rest (first (rest (rest fields))))))
+               (__decode-field ~(first (first (rest (rest (rest fields)))))                  ~(first (rest (first (rest (rest (rest fields)))))))
+               (__decode-field ~(first (first (rest (rest (rest (rest fields))))))           ~(first (rest (first (rest (rest (rest (rest fields)))))))))))))))
+
+;;; derive-json -- emit an `Encode` instance for a `defstruct` product
+;;; type. (The matching Decode side is plumbed in macro form below but
+;;; not yet emitted -- see the comment on the macro body for the
+;;; remaining boxing-helper gap.)
 ;;;
 ;;; Syntax:
 ;;;   (derive-json T (f1 t1) (f2 t2) ...)
 ;;;
-;;; Limitations (P2a minimal slice):
-;;;   - defstruct (product) only -- defdata sums and defopaque opt-in
-;;;     land in a follow-up.
-;;;   - Field-name policy is identity (the Turmeric field name is the
-;;;     JSON key verbatim).  `:rename-fields` not honored yet.
-;;;   - The field-type slot is parsed but unused; reserved for :skip / :as.
+;;; Decoding a `defstruct` works today via the Decode typeclass's
+;;; primitive instances + a hand-written `(definstance Decode [T] ...)`
+;;; using inline-C to allocate the struct and wrap it via tur_ok.
 ;;;
-;;; (The earlier 2-field cap from the closure-codegen bug
-;;; `docs/archive/history/typeclass-method-struct-arg-closure-codegen.md`
-;;; in the turmeric repo was lifted 2026-06-12; arbitrary field counts work.)
+;;; Limitations (P2a minimal slice):
+;;;   - defstruct (product) only; defdata sums and defopaque opt-in
+;;;     land in follow-ups.
+;;;   - Field-name policy is identity. `:rename-fields` not honored yet.
 ;;;
 ;;; Example:
 ;;;   (defstruct User [id : int  name : cstr  active : bool])
@@ -188,6 +358,12 @@
 ;;;   ;; (encode (make-struct User 7 "alice" true))
 ;;;   ;;   =>  {"id":7,"name":"alice","active":true}
 (defmacro derive-json [type-name & fields]
+  ;; Decode side intentionally not emitted yet: wrapping a user-defined
+  ;; `defstruct` value in `(ok user)` hits a value-struct-to-carrier ABI
+  ;; gap (polymorphic `ok` casts via `(int64_t)(intptr_t)x`, which fails
+  ;; for value structs that aren't pointer-shaped). Macro infrastructure
+  ;; for the Decode side is in tree (`__decode-field`, `__decode-fields`,
+  ;; `__decode-make-struct`); flip them on once the boxing helper lands.
   `(definstance Encode [~type-name]
      (encode [x] (unsafe (__json-obj-build (__json-chain ~fields))))))
 

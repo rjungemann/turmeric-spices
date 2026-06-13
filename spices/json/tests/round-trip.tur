@@ -1,6 +1,5 @@
-;; P2a round-trip: decode primitive fields out of a JSON object, then re-encode
-;; the values through the Encode typeclass. Exercises the scanner + the plain-
-;; defn decoders + derive-json's Encode side together.
+;; P2a round-trip: decode primitive fields out of a JSON object via the
+;; Decode typeclass, then re-encode through derive-json's Encode side.
 ;;
 ;; Expected:
 ;;   id=42, name="alice"
@@ -9,9 +8,7 @@
 (defmodule round_trip_test (export)
 
 (import json/encode :refer [derive-json])
-(import json/decode
-  :refer [json-parse-doc json-doc-free json-doc-root
-          json-obj-get json-decode-int json-decode-cstr])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
 
 (defn __int->cstr [n : int] #{Unsafe} : cstr
   ```c char *b = (char*)malloc(24); snprintf(b, 24, "%lld", (long long)n); return b; ```)
@@ -34,8 +31,8 @@
 (defn main [] : int
   (let [doc      (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
         root     (unsafe (json-doc-root doc))
-        id       (unsafe (json-decode-int  doc (unsafe (json-obj-get doc root "id"))))
-        name     (unsafe (json-decode-cstr doc (unsafe (json-obj-get doc root "name"))))
+        id       (ok-val (:: (decode doc (unsafe (json-obj-get doc root "id")))   (Result int  cstr)))
+        name     (ok-val (:: (decode doc (unsafe (json-obj-get doc root "name"))) (Result cstr cstr)))
         user     (make-struct User id name)]
     (println (unsafe (__cat4 "id=" (unsafe (__int->cstr id))
                              ", name=\"" (unsafe (__cat4 name "\"" "" "")))))

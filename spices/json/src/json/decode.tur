@@ -22,8 +22,7 @@
 
 (defmodule json/decode
   (export json-parse-doc json-doc-free json-doc-root
-          json-obj-get __json-skip-ws __json-cstr-eq __json-skip-value
-          json-decode-int json-decode-cstr)
+          json-obj-get __json-skip-ws __json-cstr-eq __json-skip-value)
 
 ;; -----------------------------------------------------------------------------
 ;; Doc handle: a (cstr, len) pair allocated on the heap so the spice can hand
@@ -251,113 +250,10 @@
   }
   ```)
 
-;; -----------------------------------------------------------------------------
-;; Primitive decoders (plain defns).
-;;
-;; The plan doc's target surface is a `Decode` typeclass dispatching on
-;; return type via a method `decode : doc -> val-offset -> Result a cstr`.
-;; That surface trips three compiler issues in this slice's session:
-;;
-;;   1. `Result A B` uses the carrier-ABI (int64_t) for parameterized-struct
-;;      values, but typeclass instance methods returning `(Result a cstr)`
-;;      get emitted as `int64_t`-returning shims while inline-C bodies want
-;;      to return a struct-by-value -- the two paths disagree.
-;;   2. stdlib `ok` is monomorphic on `:int`, so `(Result bool cstr)` etc.
-;;      have no usable constructor at the value level.
-;;   3. Return-type-dispatched typeclass methods inside `(unsafe ...)` blocks
-;;      don't monomorphize `(ok-val r)` correctly, leaving `ok_hyval(...)`
-;;      as an undeclared C call.
-;;
-;; The minimal slice ships plain defn decoders that return the value
-;; directly with a sentinel error (-1 for int, NULL for cstr). When the
-;; three issues above are resolved (separate report under
-;; `docs/reported/typeclass-method-parameterized-result-carrier-mismatch.md`
-;; in the turmeric repo), the typeclass surface lands as a follow-up.
-;; -----------------------------------------------------------------------------
-
-;;; json-decode-int -- parse the JSON number at `val` as a 64-bit int.
-;;; Returns the parsed value on success; returns `-1` on a non-numeric
-;;; value, fractional/exponent number, or out-of-range val handle. The
-;;; JSON literals `true` / `false` decode as `1` / `0` (so callers can
-;;; thread booleans through the int decoder until a typeclass surface
-;;; lands). Caller-side distinguishment between a genuine `-1` payload
-;;; and the err sentinel requires an out-of-band signal; this is a
-;;; minimal-slice limitation.
-(defn json-decode-int [doc : int val : int] #{Unsafe} : int
-  ```c
-  typedef struct { char *src; size_t len; } __jdoc;
-  __jdoc *d = (__jdoc *)(intptr_t)doc;
-  if (!d || val < 0 || (size_t)val >= d->len) return (int64_t)-1;
-  size_t i = (size_t)val;
-  if (i + 4 <= d->len && memcmp(d->src + i, "true",  4) == 0) return (int64_t)1;
-  if (i + 5 <= d->len && memcmp(d->src + i, "false", 5) == 0) return (int64_t)0;
-  int sign = 1;
-  if (d->src[i] == '-') { sign = -1; i++; }
-  else if (d->src[i] == '+') { i++; }
-  if (i >= d->len || d->src[i] < '0' || d->src[i] > '9') return (int64_t)-1;
-  int64_t n = 0;
-  while (i < d->len && d->src[i] >= '0' && d->src[i] <= '9') {
-    n = n * 10 + (d->src[i] - '0');
-    i++;
-  }
-  if (i < d->len && (d->src[i] == '.' || d->src[i] == 'e' || d->src[i] == 'E')) {
-    return (int64_t)-1;
-  }
-  return (int64_t)(sign * n);
-  ```)
-
-;;; json-decode-cstr -- parse the JSON string at `val` and return a
-;;; fresh malloc'd cstr (caller owns). Returns NULL on a malformed
-;;; string, an unsupported escape, or an out-of-range val handle.
-;;; Supports the minimal escape set: `\"`, `\\`, `\/`, `\b`, `\f`,
-;;; `\n`, `\r`, `\t`. `\uXXXX` is rejected.
-(defn json-decode-cstr [doc : int val : int] #{Unsafe} : cstr
-  ```c
-  typedef struct { char *src; size_t len; } __jdoc;
-  __jdoc *d = (__jdoc *)(intptr_t)doc;
-  if (!d || val < 0 || (size_t)val >= d->len || d->src[val] != '"') return (char *)NULL;
-  size_t i = (size_t)val + 1;
-  size_t out_len = 0;
-  size_t j = i;
-  while (j < d->len) {
-    char x = d->src[j];
-    if (x == '\\') {
-      if (j + 1 >= d->len) return (char *)NULL;
-      char e = d->src[j + 1];
-      if (e == '"' || e == '\\' || e == '/' || e == 'b' || e == 'f' ||
-          e == 'n' || e == 'r' || e == 't') { out_len++; j += 2; continue; }
-      return (char *)NULL;
-    }
-    if (x == '"') break;
-    out_len++; j++;
-  }
-  if (j >= d->len) return (char *)NULL;
-  char *out = (char *)malloc(out_len + 1);
-  size_t w = 0;
-  j = i;
-  while (j < d->len) {
-    char x = d->src[j];
-    if (x == '"') break;
-    if (x == '\\') {
-      char e = d->src[j + 1];
-      char k = '\0';
-      switch (e) {
-        case '"':  k = '"';  break;
-        case '\\': k = '\\'; break;
-        case '/':  k = '/';  break;
-        case 'b':  k = '\b'; break;
-        case 'f':  k = '\f'; break;
-        case 'n':  k = '\n'; break;
-        case 'r':  k = '\r'; break;
-        case 't':  k = '\t'; break;
-        default: break;
-      }
-      out[w++] = k; j += 2; continue;
-    }
-    out[w++] = x; j++;
-  }
-  out[w] = '\0';
-  return out;
-  ```)
+;; The Decode typeclass + primitive instances live in json/encode.tur (the
+;; module that hosts derive-json), so the macro-emitted (definstance Decode
+;; [T] ...) form lands in the same module as the class and the
+;; orphan-instance check passes. The scanner above is what this module
+;; contributes; the codec surface is consolidated next to derive-json.
 
 ) ;; end defmodule json/decode

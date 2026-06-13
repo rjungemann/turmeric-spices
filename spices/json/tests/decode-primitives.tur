@@ -1,7 +1,6 @@
-;; P2a Decode smoke (minimal slice): scanner + primitive decoders work
-;; against a flat JSON object. The typeclass surface is deferred -- see
-;; docs/reported/typeclass-method-parameterized-result-carrier-mismatch.md
-;; in the turmeric repo.
+;; P2a Decode typed surface: the Decode typeclass dispatches by ascription
+;; on the call's return type. The Decode class lives in json/encode
+;; (alongside derive-json) so we import that to bring `decode` into scope.
 ;;
 ;; Expected:
 ;;   42
@@ -10,9 +9,8 @@
 
 (defmodule decode_primitives_test (export)
 
-(import json/decode
-  :refer [json-parse-doc json-doc-free json-doc-root
-          json-obj-get json-decode-int json-decode-cstr])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
+(import json/encode)
 
 (defn __int->cstr [n : int] #{Unsafe} : cstr
   ```c char *b = (char*)malloc(24); snprintf(b, 24, "%lld", (long long)n); return b; ```)
@@ -23,9 +21,8 @@
         id-off   (unsafe (json-obj-get doc root "id"))
         name-off (unsafe (json-obj-get doc root "name"))
         act-off  (unsafe (json-obj-get doc root "active"))]
-    (println (unsafe (__int->cstr (unsafe (json-decode-int doc id-off)))))
-    (println (unsafe (json-decode-cstr doc name-off)))
-    (println (unsafe (__int->cstr (unsafe (json-decode-int doc act-off)))))
+    (println (unsafe (__int->cstr (ok-val (:: (decode doc id-off)   (Result int  cstr))))))
+    (println           (ok-val (:: (decode doc name-off) (Result cstr cstr))))
+    (println (unsafe (__int->cstr (ok-val (:: (decode doc act-off)  (Result int  cstr))))))
     (unsafe (json-doc-free doc))
-    0))
-)
+    0)))
