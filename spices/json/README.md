@@ -63,11 +63,11 @@ ship for `int`, `bool`, and `cstr`; the macro emits one for any
 ```turmeric
 (import json/encode :refer [derive-json])
 
-(defstruct User [id : int  name : cstr])
-(derive-json User (id int) (name cstr))
+(defstruct User [id : int  name : cstr  active : bool])
+(derive-json User (id int) (name cstr) (active bool))
 
-(println (encode (make-struct User 7 "alice")))
-;; => {"id":7,"name":"alice"}
+(println (encode (make-struct User 7 "alice" true)))
+;; => {"id":7,"name":"alice","active":true}
 ```
 
 This is the **P2a minimal slice** of the spices type-features uplift
@@ -79,13 +79,9 @@ turmeric repo). It deliberately does not yet ship:
 - `:as :carrier` opt-in for `defopaque` wire form.
 - `:rename-fields` / `:only` / `:skip` codec options.
 
-A field-count cap also currently applies: `derive-json` is safe for
-defstructs with up to **two** fields. Three or more fields trip a
-closure-codegen issue reported in
-`docs/reported/typeclass-method-struct-arg-closure-codegen.md`
-(turmeric repo). Hand-written instances exhibit the same failure, so
-this is a compiler limitation, not a macro shape problem; it will
-lift once the underlying bug is fixed.
+The earlier 2-field cap (from a closure-codegen bug in the main
+turmeric compiler) was lifted 2026-06-12 in the same session that
+introduced this module; arbitrary field counts work today.
 
 ## See also
 

@@ -177,19 +177,16 @@
 ;;;   - Field-name policy is identity (the Turmeric field name is the
 ;;;     JSON key verbatim).  `:rename-fields` not honored yet.
 ;;;   - The field-type slot is parsed but unused; reserved for :skip / :as.
-;;;   - Field count cap: works for 1-2 fields. 3+ fields hit a closure-
-;;;     codegen bug in the main compiler (instance method captures the
-;;;     struct arg as a pointer while the dispatch shim passes by
-;;;     value).  See
-;;;     ../../docs/reported/typeclass-method-struct-arg-closure-codegen.md
-;;;     in the turmeric repo.  Hand-written 3-field instances fail the
-;;;     same way; remove this cap when the report's "Validation when
-;;;     fixed" steps land.
+;;;
+;;; (The earlier 2-field cap from the closure-codegen bug
+;;; `docs/archive/history/typeclass-method-struct-arg-closure-codegen.md`
+;;; in the turmeric repo was lifted 2026-06-12; arbitrary field counts work.)
 ;;;
 ;;; Example:
-;;;   (defstruct User [id : int  name : cstr])
-;;;   (derive-json User (id int) (name cstr))
-;;;   ;; (encode (make-struct User 7 "alice"))  =>  {"id":7,"name":"alice"}
+;;;   (defstruct User [id : int  name : cstr  active : bool])
+;;;   (derive-json User (id int) (name cstr) (active bool))
+;;;   ;; (encode (make-struct User 7 "alice" true))
+;;;   ;;   =>  {"id":7,"name":"alice","active":true}
 (defmacro derive-json [type-name & fields]
   `(definstance Encode [~type-name]
      (encode [x] (unsafe (__json-obj-build (__json-chain ~fields))))))
