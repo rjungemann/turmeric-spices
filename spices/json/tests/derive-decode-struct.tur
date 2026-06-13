@@ -1,0 +1,40 @@
+;; derive-json emits both Encode and Decode for a defstruct. Roundtrip a
+;; JSON object into a User struct via the macro-emitted Decode instance,
+;; then re-encode through the Encode side.
+;;
+;; Expected:
+;;   id=42, name="alice"
+;;   {"id":42,"name":"alice"}
+
+(defmodule derive_decode_struct_test (export)
+
+(import json/encode :refer [derive-json])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+
+(defn __int->cstr [n : int] #{Unsafe} : cstr
+  ```c char *b = (char*)malloc(24); snprintf(b, 24, "%lld", (long long)n); return b; ```)
+
+(defn __cat4 [a : cstr b : cstr c : cstr d : cstr] #{Unsafe} : cstr
+  ```c
+  size_t la = a?strlen(a):0, lb = b?strlen(b):0, lc = c?strlen(c):0, ld = d?strlen(d):0;
+  char *o = (char*)malloc(la+lb+lc+ld+1);
+  if (a) memcpy(o, a, la);
+  if (b) memcpy(o+la, b, lb);
+  if (c) memcpy(o+la+lb, c, lc);
+  if (d) memcpy(o+la+lb+lc, d, ld);
+  o[la+lb+lc+ld] = '\0';
+  return o;
+  ```)
+
+(defstruct User [id : int  name : cstr])
+(derive-json User (id int) (name cstr))
+
+(defn main [] : int
+  (let [doc      (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
+        root     (unsafe (json-doc-root doc))
+        user     (ok-val (:: (decode doc root) (Result User cstr)))]
+    (println (unsafe (__cat4 "id=" (unsafe (__int->cstr (.id user)))
+                             ", name=\"" (unsafe (__cat4 (.name user) "\"" "" "")))))
+    (println (encode user))
+    (unsafe (json-doc-free doc))
+    0)))

@@ -358,18 +358,17 @@
 ;;;   ;; (encode (make-struct User 7 "alice" true))
 ;;;   ;;   =>  {"id":7,"name":"alice","active":true}
 (defmacro derive-json [type-name & fields]
-  ;; Prereq 6 (turmeric repo, 2026-06-13) unblocked `(ok user)` for the
-  ;; STANDALONE call site (let-binding then ok-val). Inside a typeclass
-  ;; instance method body the ABI is different: the spec's result_type
-  ;; lowers to the int64 carrier (not the by-value Result__A__B struct)
-  ;; per the dispatch shim convention, and there's no synthesized path
-  ;; from a value-struct A to that int64 carrier without a separate
-  ;; layout-aware boxing mechanism. The macro-driven Decode emission
-  ;; still relies on `(ok (make-struct T ...))` inside an instance
-  ;; method body, so emission stays gated; the `__decode-field` /
-  ;; `__decode-make-struct` plumbing stays in tree for the eventual
-  ;; flip-on. See the report's "Remaining gap" section.
-  `(definstance Encode [~type-name]
-     (encode [x] (unsafe (__json-obj-build (__json-chain ~fields))))))
+  ;; Direction (1) of the open report landed 2026-06-13: Result__T__B's
+  ;; ok_val slot is now a heap pointer to T when T is a value-struct,
+  ;; matching the carrier-box layout byte-for-byte. Both standalone
+  ;; `(ok user)` and instance-method `(ok (make-struct User ...))`
+  ;; compile cleanly. derive-json finally emits both sides.
+  `(do
+     (definstance Encode [~type-name]
+       (encode [x] (unsafe (__json-obj-build (__json-chain ~fields)))))
+     (definstance Decode [~type-name]
+       (decode [doc val]
+         (:: (ok (__decode-make-struct ~type-name ~fields))
+             (Result ~type-name cstr))))))
 
 ) ;; end defmodule json/encode
