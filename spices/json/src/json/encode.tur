@@ -358,12 +358,17 @@
 ;;;   ;; (encode (make-struct User 7 "alice" true))
 ;;;   ;;   =>  {"id":7,"name":"alice","active":true}
 (defmacro derive-json [type-name & fields]
-  ;; Decode side intentionally not emitted yet: wrapping a user-defined
-  ;; `defstruct` value in `(ok user)` hits a value-struct-to-carrier ABI
-  ;; gap (polymorphic `ok` casts via `(int64_t)(intptr_t)x`, which fails
-  ;; for value structs that aren't pointer-shaped). Macro infrastructure
-  ;; for the Decode side is in tree (`__decode-field`, `__decode-fields`,
-  ;; `__decode-make-struct`); flip them on once the boxing helper lands.
+  ;; Prereq 6 (turmeric repo, 2026-06-13) unblocked `(ok user)` for the
+  ;; STANDALONE call site (let-binding then ok-val). Inside a typeclass
+  ;; instance method body the ABI is different: the spec's result_type
+  ;; lowers to the int64 carrier (not the by-value Result__A__B struct)
+  ;; per the dispatch shim convention, and there's no synthesized path
+  ;; from a value-struct A to that int64 carrier without a separate
+  ;; layout-aware boxing mechanism. The macro-driven Decode emission
+  ;; still relies on `(ok (make-struct T ...))` inside an instance
+  ;; method body, so emission stays gated; the `__decode-field` /
+  ;; `__decode-make-struct` plumbing stays in tree for the eventual
+  ;; flip-on. See the report's "Remaining gap" section.
   `(definstance Encode [~type-name]
      (encode [x] (unsafe (__json-obj-build (__json-chain ~fields))))))
 
