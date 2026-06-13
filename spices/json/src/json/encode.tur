@@ -1,0 +1,197 @@
+;; json/encode.tur -- typed JSON serialization via the Encode typeclass.
+;;
+;; This is the P2a "minimal slice" of the spices-type-features uplift plan:
+;; one direction (encode), one shape (defstruct via `derive-json`), no DOM
+;; builder. The `encode` method returns a JSON fragment as a malloc'd cstr
+;; that the caller owns and must free (or let GC handle).
+;;
+;; Decode + defdata sum types + opaque `:as :carrier` opt-in are deferred
+;; to a follow-up commit; the design questions noted in the uplift plan
+;; (field-name renaming, missing-field policy, `:skip` annotations) will
+;; be revisited when those land.
+
+(defmodule json/encode
+  (export derive-json __json-chain __json-obj-build)
+
+;;; Encode -- typeclass for serializing a Turmeric value to a JSON
+;;; fragment.  The fragment is a self-contained JSON value (number,
+;;; string, bool, null, object, or array), not a full document; the
+;;; caller composes fragments into the final payload.
+;;;
+;;; Method:
+;;;   encode : a -> cstr     ;; malloc'd JSON fragment, caller owns
+;;;
+;;; Example:
+;;;   (encode 42)            ;; => "42"
+;;;   (encode "hi")          ;; => "\"hi\""
+;;;   (encode true)          ;; => "true"
+;;;
+;;; Since: P2a (minimal slice, 2026-06-12)
+(defclass Encode [a] (encode [x] : cstr))
+
+;;; Encode [int] -- decimal integer.
+(definstance Encode [int] (encode [x] : cstr
+  ```c
+  /* snprintf into a heap buffer; INT64_MIN is 20 chars + sign + NUL. */
+  char *buf = (char *)malloc(24);
+  snprintf(buf, 24, "%lld", (long long)x);
+  return buf;
+  ```))
+
+;;; Encode [bool] -- the literals "true" / "false".  The returned buffer
+;;; is malloc'd so the caller can free uniformly regardless of payload.
+(definstance Encode [bool] (encode [x] : cstr
+  ```c
+  const char *s = x ? "true" : "false";
+  size_t n = strlen(s);
+  char *buf = (char *)malloc(n + 1);
+  memcpy(buf, s, n + 1);
+  return buf;
+  ```))
+
+;;; Encode [cstr] -- JSON string literal: surrounded by `"`, with the
+;;; minimal RFC 8259 escape set (`"`, `\`, control chars < 0x20).
+;;; Returns "null" for a NULL input rather than aborting -- mirrors
+;;; the behavior of `json-emit` on a missing field.
+(definstance Encode [cstr] (encode [x] : cstr
+  ```c
+  if (x == NULL) {
+    char *buf = (char *)malloc(5);
+    memcpy(buf, "null", 5);
+    return buf;
+  }
+  const char *s = (const char *)x;
+  size_t n = strlen(s);
+  /* Worst case: every byte escapes to \uXXXX (6 bytes) plus the two
+   * surrounding quotes plus the NUL terminator. */
+  char *buf = (char *)malloc(n * 6 + 3);
+  size_t w = 0;
+  buf[w++] = '"';
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)s[i];
+    switch (c) {
+      case '"':  buf[w++] = '\\'; buf[w++] = '"';  break;
+      case '\\': buf[w++] = '\\'; buf[w++] = '\\'; break;
+      case '\b': buf[w++] = '\\'; buf[w++] = 'b';  break;
+      case '\f': buf[w++] = '\\'; buf[w++] = 'f';  break;
+      case '\n': buf[w++] = '\\'; buf[w++] = 'n';  break;
+      case '\r': buf[w++] = '\\'; buf[w++] = 'r';  break;
+      case '\t': buf[w++] = '\\'; buf[w++] = 't';  break;
+      default:
+        if (c < 0x20) {
+          static const char hex[] = "0123456789abcdef";
+          buf[w++] = '\\'; buf[w++] = 'u'; buf[w++] = '0'; buf[w++] = '0';
+          buf[w++] = hex[c >> 4]; buf[w++] = hex[c & 0xF];
+        } else {
+          buf[w++] = (char)c;
+        }
+        break;
+    }
+  }
+  buf[w++] = '"';
+  buf[w] = '\0';
+  return buf;
+  ```))
+
+;; ---------------------------------------------------------------------------
+;; derive-json: emit an Encode instance for a defstruct product type. Lives
+;; in this module (alongside Encode) so the orphan-instance check sees the
+;; macro-emitted definstance as same-module-as-class. The macro takes
+;; explicit `(field-name field-type)` pairs because Turmeric macros cannot
+;; introspect a defstruct's shape at expansion time; the field-type slot is
+;; parsed but currently unused (reserved for future :skip/:as overrides).
+;; ---------------------------------------------------------------------------
+
+;; Runtime helper: walk a cons-list of alternating (key, fragment) cstrs and
+;; emit `{"k1":v1,"k2":v2,...}` into a fresh malloc'd cstr. Frees every
+;; fragment buffer it consumes -- each `(encode ...)` call returns malloc'd
+;; memory the caller is expected to free. Keys must be static string literals
+;; (the macro guarantees this from `symbol-name`), so they are NOT freed.
+(defn __json-obj-build [lst : int] #{Unsafe} : cstr
+  ```c
+  typedef struct __c { int64_t head; int64_t tail; } cons_t;
+  cons_t *p = (cons_t *)(intptr_t)lst;
+  size_t total = 2; /* { } */
+  cons_t *q = p;
+  while (q) {
+    const char *k = (const char *)(intptr_t)q->head;
+    q = (cons_t *)(intptr_t)q->tail;
+    if (!q) break;
+    const char *v = (const char *)(intptr_t)q->head;
+    q = (cons_t *)(intptr_t)q->tail;
+    total += (k ? strlen(k) : 0) + 2 /* quotes */ + 1 /* : */
+           + (v ? strlen(v) : 4 /* "null" */) + 1 /* , */;
+  }
+  char *out = (char *)malloc(total + 1);
+  size_t w = 0;
+  out[w++] = '{';
+  q = p;
+  int written = 0;
+  while (q) {
+    const char *k = (const char *)(intptr_t)q->head;
+    q = (cons_t *)(intptr_t)q->tail;
+    if (!q) break;
+    const char *v = (const char *)(intptr_t)q->head;
+    q = (cons_t *)(intptr_t)q->tail;
+    if (written > 0) out[w++] = ',';
+    out[w++] = '"';
+    if (k) { size_t kn = strlen(k); memcpy(out + w, k, kn); w += kn; }
+    out[w++] = '"';
+    out[w++] = ':';
+    if (v) {
+      size_t vn = strlen(v);
+      memcpy(out + w, v, vn);
+      w += vn;
+      free((void *)v);
+    } else {
+      memcpy(out + w, "null", 4);
+      w += 4;
+    }
+    written++;
+  }
+  out[w++] = '}';
+  out[w] = '\0';
+  return out;
+  ```)
+
+;; Recursive helper macro: turn the cons-list of `(field-name field-type)`
+;; pairs into a chained (cons "k1" (cons (encode (.k1 x)) (cons "k2" ... 0))).
+(defmacro __json-chain [fields]
+  (if (empty? fields)
+    0
+    (let [fld   (first fields)
+          fname (first fld)
+          tail  (rest fields)]
+      `(cons ~(symbol-name fname)
+             (cons (encode (~(dot-sym fname) x))
+                   (__json-chain ~tail))))))
+
+;;; derive-json -- emit an `Encode` instance for a `defstruct` product type.
+;;;
+;;; Syntax:
+;;;   (derive-json T (f1 t1) (f2 t2) ...)
+;;;
+;;; Limitations (P2a minimal slice):
+;;;   - defstruct (product) only -- defdata sums and defopaque opt-in
+;;;     land in a follow-up.
+;;;   - Field-name policy is identity (the Turmeric field name is the
+;;;     JSON key verbatim).  `:rename-fields` not honored yet.
+;;;   - The field-type slot is parsed but unused; reserved for :skip / :as.
+;;;   - Field count cap: works for 1-2 fields. 3+ fields hit a closure-
+;;;     codegen bug in the main compiler (instance method captures the
+;;;     struct arg as a pointer while the dispatch shim passes by
+;;;     value).  See
+;;;     ../../docs/reported/typeclass-method-struct-arg-closure-codegen.md
+;;;     in the turmeric repo.  Hand-written 3-field instances fail the
+;;;     same way; remove this cap when the report's "Validation when
+;;;     fixed" steps land.
+;;;
+;;; Example:
+;;;   (defstruct User [id : int  name : cstr])
+;;;   (derive-json User (id int) (name cstr))
+;;;   ;; (encode (make-struct User 7 "alice"))  =>  {"id":7,"name":"alice"}
+(defmacro derive-json [type-name & fields]
+  `(definstance Encode [~type-name]
+     (encode [x] (unsafe (__json-obj-build (__json-chain ~fields))))))
+
+) ;; end defmodule json/encode

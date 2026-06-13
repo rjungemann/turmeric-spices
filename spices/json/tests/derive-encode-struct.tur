@@ -1,0 +1,21 @@
+;; P2a smoke: derive-json emits an Encode instance for a 2-field defstruct.
+;; Expected output:
+;;   {"id":7,"name":"alice"}
+;;
+;; NOTE: 3+ field structs currently trip a closure-codegen issue in the
+;; main compiler (struct value captured as pointer in the closure env);
+;; see docs/reported/closure-captures-struct-as-pointer-in-typeclass-method.md
+;; in the turmeric repo for the report and repro. The macro itself is
+;; arity-correct -- a hand-written 3-field instance fails the same way.
+
+(defmodule derive_encode_struct_test (export)
+
+(import json/encode :refer [derive-json])
+
+(defstruct User [id : int  name : cstr])
+
+(derive-json User (id int) (name cstr))
+
+(defn main [] : int
+  (println (encode (make-struct User 7 "alice")))
+  0))
