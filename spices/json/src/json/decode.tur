@@ -1,0 +1,363 @@
+;; json/decode.tur -- typed JSON deserialization via the Decode typeclass.
+;;
+;; P2a Decode minimal slice (2026-06-12): a self-contained tiny scanner
+;; (no yyjson dep) + Decode class + primitive instances. Together with
+;; json/encode this completes the round-trip for flat defstruct types.
+;;
+;; Scope: object/string/integer/boolean/null parsing for FLAT objects.
+;; Deliberately NOT supported in this slice:
+;;   - nested objects or arrays
+;;   - floating-point numbers
+;;   - escaped non-ASCII (\uXXXX) inside strings (basic \" \\ \n \r \t \b \f handled)
+;;   - whitespace inside the source counts as significant if "weird"
+;;     (the scanner tolerates ASCII spaces/tabs/newlines but assumes
+;;     well-formed JSON otherwise)
+;;
+;; Usage:
+;;   (let [d  (json-parse-doc s)
+;;         rv (json-doc-root d)]
+;;     (let [r (:: (decode d rv) (Result int cstr))]
+;;       (json-doc-free d)
+;;       r))
+
+(defmodule json/decode
+  (export json-parse-doc json-doc-free json-doc-root
+          json-obj-get __json-skip-ws __json-cstr-eq __json-skip-value
+          json-decode-int json-decode-cstr)
+
+;; -----------------------------------------------------------------------------
+;; Doc handle: a (cstr, len) pair allocated on the heap so the spice can hand
+;; out int handles instead of leaking C pointers across the type boundary.
+;; The cstr we store is a COPY of the input -- the caller's lifetime does not
+;; have to match the doc's.
+;; -----------------------------------------------------------------------------
+
+;;; json-parse-doc -- copy a JSON string into a fresh doc handle. The doc
+;;; owns the underlying bytes until `json-doc-free` is called.
+;;; Returns: an int handle (non-zero on success; 0 on allocation failure).
+(defn json-parse-doc [s : cstr] #{Unsafe} : int
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  if (!s) return (int64_t)0;
+  size_t n = strlen((const char *)s);
+  __jdoc *d = (__jdoc *)malloc(sizeof(__jdoc));
+  if (!d) return (int64_t)0;
+  d->src = (char *)malloc(n + 1);
+  if (!d->src) { free(d); return (int64_t)0; }
+  memcpy(d->src, s, n + 1);
+  d->len = n;
+  return (int64_t)(intptr_t)d;
+  ```)
+
+;;; json-doc-free -- release a doc handle's memory.
+(defn json-doc-free [doc : int] #{Unsafe} : nil
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (d) { if (d->src) free(d->src); free(d); }
+  ```)
+
+;;; json-doc-root -- return the offset of the root value's first
+;;; non-whitespace byte. The "value handle" is just an offset into the
+;;; doc's src buffer; primitive Decode instances and `json-obj-get` all
+;;; operate on (doc, offset) pairs.
+(defn json-doc-root [doc : int] #{Unsafe} : int
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d || !d->src) return -1;
+  size_t i = 0;
+  while (i < d->len && (d->src[i] == ' ' || d->src[i] == '\t' ||
+                        d->src[i] == '\n' || d->src[i] == '\r')) i++;
+  return (int64_t)i;
+  ```)
+
+;; -----------------------------------------------------------------------------
+;; Low-level helpers shared by the scanner and the derive macro.
+;; -----------------------------------------------------------------------------
+
+;;; __json-skip-ws -- advance past ASCII whitespace and return the new
+;;; offset.  Stops on EOF or any other byte.
+(defn __json-skip-ws [doc : int off : int] #{Unsafe} : int
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d) return off;
+  size_t i = (size_t)off;
+  while (i < d->len) {
+    char c = d->src[i];
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') i++;
+    else break;
+  }
+  return (int64_t)i;
+  ```)
+
+;;; __json-skip-value -- given an offset pointing at the first byte of
+;;; a value, return the offset of the byte one past the end of that
+;;; value. Handles flat values (strings, numbers, bool, null) and
+;;; brace-balanced objects/arrays but does NOT validate string escapes
+;;; aggressively -- it tracks a depth counter for `{}`/`[]` and a
+;;; quote-state flag for strings, which is enough to find the boundary
+;;; in well-formed input. Returns -1 on malformed input or EOF.
+(defn __json-skip-value [doc : int off : int] #{Unsafe} : int
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d) return (int64_t)-1;
+  size_t i = (size_t)off;
+  while (i < d->len && (d->src[i] == ' ' || d->src[i] == '\t' ||
+                        d->src[i] == '\n' || d->src[i] == '\r')) i++;
+  if (i >= d->len) return (int64_t)-1;
+  char c = d->src[i];
+  if (c == '"') {
+    /* string: scan to closing quote, handling backslash escape */
+    i++;
+    while (i < d->len) {
+      char x = d->src[i];
+      if (x == '\\') { i += 2; continue; }
+      if (x == '"') { return (int64_t)(i + 1); }
+      i++;
+    }
+    return (int64_t)-1;
+  }
+  if (c == '{' || c == '[') {
+    /* brace-balanced scan with string-state tracking */
+    int depth = 0;
+    int in_str = 0;
+    while (i < d->len) {
+      char x = d->src[i];
+      if (in_str) {
+        if (x == '\\') { i += 2; continue; }
+        if (x == '"') in_str = 0;
+        i++; continue;
+      }
+      if (x == '"') { in_str = 1; i++; continue; }
+      if (x == '{' || x == '[') depth++;
+      else if (x == '}' || x == ']') { depth--; if (depth == 0) return (int64_t)(i + 1); }
+      i++;
+    }
+    return (int64_t)-1;
+  }
+  /* number/bool/null: scan to next structural char */
+  while (i < d->len) {
+    char x = d->src[i];
+    if (x == ',' || x == '}' || x == ']' ||
+        x == ' ' || x == '\t' || x == '\n' || x == '\r') break;
+    i++;
+  }
+  return (int64_t)i;
+  ```)
+
+;;; __json-cstr-eq -- compare the unquoted bytes in `doc[off..off+len)`
+;;; against the C string `key`. Returns true iff lengths and contents
+;;; match. Internal helper for `json-obj-get`'s key matching.
+(defn __json-cstr-eq [doc : int off : int len : int key : cstr] #{Unsafe} : bool
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d || !key) return false;
+  size_t klen = strlen((const char *)key);
+  if (klen != (size_t)len) return false;
+  return memcmp(d->src + (size_t)off, key, klen) == 0;
+  ```)
+
+;;; json-obj-get -- inside an object whose `{` is at `off`, return the
+;;; offset of the value for `key`, or -1 if no such field exists or
+;;; if `off` does not point at an object. Whitespace between tokens
+;;; is tolerated; nested braces inside string values are handled by
+;;; `__json-skip-value`.
+(defn json-obj-get [doc : int off : int key : cstr] #{Unsafe} : int
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d) return (int64_t)-1;
+  size_t i = (size_t)off;
+  while (i < d->len && (d->src[i] == ' ' || d->src[i] == '\t' ||
+                        d->src[i] == '\n' || d->src[i] == '\r')) i++;
+  if (i >= d->len || d->src[i] != '{') return (int64_t)-1;
+  i++;
+  size_t klen = strlen((const char *)key);
+  for (;;) {
+    while (i < d->len && (d->src[i] == ' ' || d->src[i] == '\t' ||
+                          d->src[i] == '\n' || d->src[i] == '\r')) i++;
+    if (i >= d->len) return (int64_t)-1;
+    if (d->src[i] == '}') return (int64_t)-1;
+    if (d->src[i] != '"') return (int64_t)-1;
+    /* read key */
+    size_t kstart = i + 1;
+    i++;
+    while (i < d->len && d->src[i] != '"') {
+      if (d->src[i] == '\\') { i += 2; continue; }
+      i++;
+    }
+    if (i >= d->len) return (int64_t)-1;
+    size_t this_klen = i - kstart;
+    i++; /* past closing quote */
+    while (i < d->len && (d->src[i] == ' ' || d->src[i] == '\t' ||
+                          d->src[i] == '\n' || d->src[i] == '\r')) i++;
+    if (i >= d->len || d->src[i] != ':') return (int64_t)-1;
+    i++;
+    while (i < d->len && (d->src[i] == ' ' || d->src[i] == '\t' ||
+                          d->src[i] == '\n' || d->src[i] == '\r')) i++;
+    if (i >= d->len) return (int64_t)-1;
+    bool matched = (this_klen == klen) &&
+                   (memcmp(d->src + kstart, key, klen) == 0);
+    if (matched) return (int64_t)i;
+    /* skip the value */
+    /* (re-using the same loop logic as __json-skip-value, but inline so
+       we don't pay the dispatch cost from inside a tight scanner) */
+    {
+      size_t vstart = i;
+      char c = d->src[i];
+      if (c == '"') {
+        i++;
+        while (i < d->len) {
+          char x = d->src[i];
+          if (x == '\\') { i += 2; continue; }
+          if (x == '"') { i++; break; }
+          i++;
+        }
+      } else if (c == '{' || c == '[') {
+        int depth = 0; int in_str = 0;
+        while (i < d->len) {
+          char x = d->src[i];
+          if (in_str) {
+            if (x == '\\') { i += 2; continue; }
+            if (x == '"') in_str = 0;
+            i++; continue;
+          }
+          if (x == '"') { in_str = 1; i++; continue; }
+          if (x == '{' || x == '[') depth++;
+          else if (x == '}' || x == ']') { depth--; if (depth == 0) { i++; break; } }
+          i++;
+        }
+      } else {
+        while (i < d->len) {
+          char x = d->src[i];
+          if (x == ',' || x == '}' || x == ']' ||
+              x == ' ' || x == '\t' || x == '\n' || x == '\r') break;
+          i++;
+        }
+      }
+      (void)vstart;
+    }
+    /* skip whitespace and optional comma */
+    while (i < d->len && (d->src[i] == ' ' || d->src[i] == '\t' ||
+                          d->src[i] == '\n' || d->src[i] == '\r')) i++;
+    if (i < d->len && d->src[i] == ',') { i++; continue; }
+    /* no comma -> end of object or malformed */
+    if (i < d->len && d->src[i] == '}') return (int64_t)-1;
+    return (int64_t)-1;
+  }
+  ```)
+
+;; -----------------------------------------------------------------------------
+;; Primitive decoders (plain defns).
+;;
+;; The plan doc's target surface is a `Decode` typeclass dispatching on
+;; return type via a method `decode : doc -> val-offset -> Result a cstr`.
+;; That surface trips three compiler issues in this slice's session:
+;;
+;;   1. `Result A B` uses the carrier-ABI (int64_t) for parameterized-struct
+;;      values, but typeclass instance methods returning `(Result a cstr)`
+;;      get emitted as `int64_t`-returning shims while inline-C bodies want
+;;      to return a struct-by-value -- the two paths disagree.
+;;   2. stdlib `ok` is monomorphic on `:int`, so `(Result bool cstr)` etc.
+;;      have no usable constructor at the value level.
+;;   3. Return-type-dispatched typeclass methods inside `(unsafe ...)` blocks
+;;      don't monomorphize `(ok-val r)` correctly, leaving `ok_hyval(...)`
+;;      as an undeclared C call.
+;;
+;; The minimal slice ships plain defn decoders that return the value
+;; directly with a sentinel error (-1 for int, NULL for cstr). When the
+;; three issues above are resolved (separate report under
+;; `docs/reported/typeclass-method-parameterized-result-carrier-mismatch.md`
+;; in the turmeric repo), the typeclass surface lands as a follow-up.
+;; -----------------------------------------------------------------------------
+
+;;; json-decode-int -- parse the JSON number at `val` as a 64-bit int.
+;;; Returns the parsed value on success; returns `-1` on a non-numeric
+;;; value, fractional/exponent number, or out-of-range val handle. The
+;;; JSON literals `true` / `false` decode as `1` / `0` (so callers can
+;;; thread booleans through the int decoder until a typeclass surface
+;;; lands). Caller-side distinguishment between a genuine `-1` payload
+;;; and the err sentinel requires an out-of-band signal; this is a
+;;; minimal-slice limitation.
+(defn json-decode-int [doc : int val : int] #{Unsafe} : int
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d || val < 0 || (size_t)val >= d->len) return (int64_t)-1;
+  size_t i = (size_t)val;
+  if (i + 4 <= d->len && memcmp(d->src + i, "true",  4) == 0) return (int64_t)1;
+  if (i + 5 <= d->len && memcmp(d->src + i, "false", 5) == 0) return (int64_t)0;
+  int sign = 1;
+  if (d->src[i] == '-') { sign = -1; i++; }
+  else if (d->src[i] == '+') { i++; }
+  if (i >= d->len || d->src[i] < '0' || d->src[i] > '9') return (int64_t)-1;
+  int64_t n = 0;
+  while (i < d->len && d->src[i] >= '0' && d->src[i] <= '9') {
+    n = n * 10 + (d->src[i] - '0');
+    i++;
+  }
+  if (i < d->len && (d->src[i] == '.' || d->src[i] == 'e' || d->src[i] == 'E')) {
+    return (int64_t)-1;
+  }
+  return (int64_t)(sign * n);
+  ```)
+
+;;; json-decode-cstr -- parse the JSON string at `val` and return a
+;;; fresh malloc'd cstr (caller owns). Returns NULL on a malformed
+;;; string, an unsupported escape, or an out-of-range val handle.
+;;; Supports the minimal escape set: `\"`, `\\`, `\/`, `\b`, `\f`,
+;;; `\n`, `\r`, `\t`. `\uXXXX` is rejected.
+(defn json-decode-cstr [doc : int val : int] #{Unsafe} : cstr
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d || val < 0 || (size_t)val >= d->len || d->src[val] != '"') return (char *)NULL;
+  size_t i = (size_t)val + 1;
+  size_t out_len = 0;
+  size_t j = i;
+  while (j < d->len) {
+    char x = d->src[j];
+    if (x == '\\') {
+      if (j + 1 >= d->len) return (char *)NULL;
+      char e = d->src[j + 1];
+      if (e == '"' || e == '\\' || e == '/' || e == 'b' || e == 'f' ||
+          e == 'n' || e == 'r' || e == 't') { out_len++; j += 2; continue; }
+      return (char *)NULL;
+    }
+    if (x == '"') break;
+    out_len++; j++;
+  }
+  if (j >= d->len) return (char *)NULL;
+  char *out = (char *)malloc(out_len + 1);
+  size_t w = 0;
+  j = i;
+  while (j < d->len) {
+    char x = d->src[j];
+    if (x == '"') break;
+    if (x == '\\') {
+      char e = d->src[j + 1];
+      char k = '\0';
+      switch (e) {
+        case '"':  k = '"';  break;
+        case '\\': k = '\\'; break;
+        case '/':  k = '/';  break;
+        case 'b':  k = '\b'; break;
+        case 'f':  k = '\f'; break;
+        case 'n':  k = '\n'; break;
+        case 'r':  k = '\r'; break;
+        case 't':  k = '\t'; break;
+        default: break;
+      }
+      out[w++] = k; j += 2; continue;
+    }
+    out[w++] = x; j++;
+  }
+  out[w] = '\0';
+  return out;
+  ```)
+
+) ;; end defmodule json/decode
