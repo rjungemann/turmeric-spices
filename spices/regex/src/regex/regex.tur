@@ -14,8 +14,8 @@
 ;; regex-match-all returns a cons-list of Match handles (one per match).
 
 (defmodule regex/regex
-  (export Regex Match
-          regex-compile regex-free regex-match regex-match-all regex-replace)
+  (export Regex Match regex-compile regex-free regex-match regex-match-all
+          regex-replace regex-of match-of)
 
 ;;; Regex -- compiled PCRE2 pattern handle.
 ;;; Wraps a heap-allocated `struct { pcre2_code *re; }`. Free with regex-free.
@@ -280,6 +280,20 @@
   free(out_buf);
 
   return tur_ok((int64_t)(intptr_t)final);
+  ```)
+
+;;; regex-of -- extract a typed Regex handle from an ok result returned by regex-compile.
+(defn regex-of [r : ptr<void>] : Regex
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
+
+;;; match-of -- extract a typed Match handle from an ok result returned by regex-match.
+(defn match-of [r : ptr<void>] : Match
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule regex/regex

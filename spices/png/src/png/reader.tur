@@ -7,7 +7,7 @@
 ;; All images are normalized to 8-bit RGBA on read (4 channels).
 
 (defmodule png/reader
-  (export png-read img-free)
+  (export png-read img-free img-of)
 
   (import png/info :refer [Img])
 
@@ -153,6 +153,13 @@
   };
   struct __img *i = (struct __img *)(intptr_t)img;
   if (i) { free(i->pixels); free(i); }
+  ```)
+
+;;; img-of -- extract a typed Img handle from an ok result returned by png-read.
+(defn img-of [r : ptr<void>] : Img
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule png/reader

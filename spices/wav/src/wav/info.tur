@@ -7,9 +7,9 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule wav/info
-  (export Wav
-          wav-open-read wav-open-write wav-close
-          wav-sample-rate wav-channels wav-frame-count wav-format)
+  (export Wav wav-open-read wav-open-write wav-close
+          wav-sample-rate wav-channels wav-frame-count wav-format
+          wav-of)
 
 ;;; Wav -- WAV/audio file handle.
 ;;; Wraps a heap-allocated `struct __wav { SNDFILE*, SF_INFO }`.
@@ -225,6 +225,13 @@
   else if (type == SF_FORMAT_AIFF) return "aiff";
   else if (type == SF_FORMAT_FLAC) return "flac";
   else                             return "unknown";
+  ```)
+
+;;; wav-of -- extract a typed Wav handle from an ok result returned by wav-open-{read,write}.
+(defn wav-of [r : ptr<void>] : Wav
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule wav/info

@@ -5,8 +5,8 @@
 ;; to inspect return values.
 
 (defmodule valkey/client
-  (export Client
-          client-connect client-connect-unix client-close client-ping)
+  (export Client client-connect client-connect-unix client-close client-ping
+          client-of)
 
 ;;; Client -- Valkey/Redis connection handle.
 ;;; Wraps a `redisContext*`. Construct with client-connect (or
@@ -134,6 +134,13 @@
   if (reply) freeReplyObject(reply);
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   r->is_ok = ok; r->ok_val = 0; r->err_val = 0; return r;
+  ```)
+
+;;; client-of -- extract a typed Client handle from an ok result returned by client-connect.
+(defn client-of [r : ptr<void>] : Client
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule valkey/client

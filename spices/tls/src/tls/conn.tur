@@ -16,12 +16,11 @@
 ;; handles, matching the convention in tls/ctx and the postgres spice.
 
 (defmodule tls/conn
+  (import tls/ctx :refer [TlsCtx])
   (export TlsConn tls-conn-null?
           tls-wrap-fd tls-handshake
           tls-read tls-write
           tls-shutdown tls-free)
-
-(import tls/ctx :refer [TlsCtx])
 
 ;;; TlsConn -- per-connection TLS state handle.
 ;;; Wraps a heap-allocated `tls_conn_t*` (mbedTLS ssl_context + net_context).
@@ -39,6 +38,7 @@
   ```c
   return conn == 0;
   ```)
+
 
 ;; Both struct layouts (the public tls_conn_t and the private
 ;; tls_ctx_t from tls/ctx) are duplicated as typedefs in each
