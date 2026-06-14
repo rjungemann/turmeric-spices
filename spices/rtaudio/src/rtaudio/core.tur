@@ -5,7 +5,10 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule rtaudio/core
-  (export audio-new audio-free audio-api)
+  (export Audio audio-new audio-free audio-api audio-of)
+
+;;; Audio -- opaque handle to an RtAudio instance (rtaudio_t).
+(defopaque Audio :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -79,7 +82,7 @@
 ;;;   (audio-free a)
 ;;;
 ;;; Since: RA0
-(defn audio-free [a : int] : void
+(defn audio-free [a : Audio] : void
   ```c
   #include <rtaudio/rtaudio_c.h>
   rtaudio_destroy((rtaudio_t)(intptr_t)a);
@@ -97,10 +100,17 @@
 ;;;   (println (audio-api a))
 ;;;
 ;;; Since: RA0
-(defn audio-api [a : int] : cstr
+(defn audio-api [a : Audio] : cstr
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (char*)rtaudio_api_name(rtaudio_current_api((rtaudio_t)(intptr_t)a));
+  ```)
+
+;;; audio-of -- extract a typed Audio handle from an ok result returned by audio-new.
+(defn audio-of [r : ptr<void>] : Audio
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule rtaudio/core

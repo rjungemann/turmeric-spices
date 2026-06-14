@@ -5,6 +5,7 @@
 ;; GLAD is loaded automatically in make-window after the context is current.
 
 (defmodule opengl/window
+  (import opengl/types :refer [Window])
   (export make-window destroy-window window-should-close? poll-events
           swap-buffers set-clear-color clear with-window)
 
@@ -22,7 +23,7 @@
 ;;;   (let [w (make-window 800 600 "My App")] ...)
 ;;;
 ;;; Since: v0.1.0
-(defn make-window [width : int height : int title : cstr] : int
+(defn make-window [width : int height : int title : cstr] : Window
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -66,7 +67,7 @@
 ;;;   (destroy-window w)
 ;;;
 ;;; Since: v0.1.0
-(defn destroy-window [w : int] : void
+(defn destroy-window [w : Window] : void
   ```c
   #include <GLFW/glfw3.h>
   GLFWwindow *win = (GLFWwindow*)(intptr_t)w;
@@ -86,7 +87,7 @@
 ;;;   (while (not (window-should-close? w)) ...)
 ;;;
 ;;; Since: v0.1.0
-(defn window-should-close? [w : int] : bool
+(defn window-should-close? [w : Window] : bool
   ```c
   #include <GLFW/glfw3.h>
   GLFWwindow *win = (GLFWwindow*)(intptr_t)w;
@@ -116,7 +117,7 @@
 ;;;   (swap-buffers w)
 ;;;
 ;;; Since: v0.1.0
-(defn swap-buffers [w : int] : void
+(defn swap-buffers [w : Window] : void
   ```c
   #include <GLFW/glfw3.h>
   GLFWwindow *win = (GLFWwindow*)(intptr_t)w;

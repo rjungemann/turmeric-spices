@@ -8,6 +8,7 @@
 ;; standard stdlib/list head/tail pattern (0 is the empty-list sentinel).
 
 (defmodule rtaudio/devices
+  (import rtaudio/core :refer [Audio])
   (export device-count device-info device-info-name
           device-info-output-chans device-info-input-chans
           device-info-sample-rates device-default-output
@@ -48,7 +49,7 @@
 ;;;   (let [n (device-count a)] (println n))
 ;;;
 ;;; Since: RA0
-(defn device-count [a : int] : int
+(defn device-count [a : Audio] : int
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (int64_t)rtaudio_device_count((rtaudio_t)(intptr_t)a);
@@ -70,7 +71,7 @@
 ;;;     (device-info-free di))
 ;;;
 ;;; Since: RA0
-(defn device-info [a : int id : int] : int
+(defn device-info [a : Audio id : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -193,7 +194,7 @@
 ;;;   (let [id (device-default-output a)] ...)
 ;;;
 ;;; Since: RA0
-(defn device-default-output [a : int] : int
+(defn device-default-output [a : Audio] : int
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (int64_t)rtaudio_get_default_output_device((rtaudio_t)(intptr_t)a);
@@ -211,7 +212,7 @@
 ;;;   (let [id (device-default-input a)] ...)
 ;;;
 ;;; Since: RA0
-(defn device-default-input [a : int] : int
+(defn device-default-input [a : Audio] : int
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (int64_t)rtaudio_get_default_input_device((rtaudio_t)(intptr_t)a);

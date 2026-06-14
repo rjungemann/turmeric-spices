@@ -4,8 +4,39 @@
 ;; so adding a new keyword variant only requires one change.
 
 (defmodule opengl/types
-  (export draw-usage->gl shader-stage->gl draw-mode->gl index-type->gl
+  (export Vao Vbo Ebo Shader Program Window Texture
+          draw-usage->gl shader-stage->gl draw-mode->gl index-type->gl
           wrap-mode->gl filter-mode->gl attrib-type->gl gl-cap->gl)
+
+;; -------------------------------------------------------------------------
+;; Opaque handle types
+;; -------------------------------------------------------------------------
+;;
+;; GL object names are GLuint (32-bit) and GLFW window pointers are
+;; GLFWwindow*; both fit in int64_t and are nominally distinct so
+;; conflating e.g. a Vao with a Vbo or a Program with a Window is a
+;; compile error.
+
+;;; Vao -- opaque handle to a Vertex Array Object (GLuint).
+(defopaque Vao :int)
+
+;;; Vbo -- opaque handle to a Vertex Buffer Object (GLuint).
+(defopaque Vbo :int)
+
+;;; Ebo -- opaque handle to an Element Buffer Object (GLuint).
+(defopaque Ebo :int)
+
+;;; Shader -- opaque handle to a compiled GL shader (GLuint).
+(defopaque Shader :int)
+
+;;; Program -- opaque handle to a linked GL shader program (GLuint).
+(defopaque Program :int)
+
+;;; Window -- opaque handle to a GLFWwindow* (pointer cast through intptr_t).
+(defopaque Window :int)
+
+;;; Texture -- opaque handle to a GL texture (GLuint).
+(defopaque Texture :int)
 
 ;;; draw-usage->gl -- map a draw-usage keyword to the GL enum integer.
 ;;;

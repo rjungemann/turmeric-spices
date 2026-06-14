@@ -8,6 +8,7 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule rtaudio/stream
+  (import rtaudio/core :refer [Audio])
   (export stream-open stream-start stream-stop stream-close
           stream-latency stream-sample-rate)
 
@@ -56,7 +57,7 @@
 ;;;     (if (ok? r) (stream-start a) (println "stream-open failed")))
 ;;;
 ;;; Since: RA0
-(defn stream-open [a : int out-device : int out-chans : int
+(defn stream-open [a : Audio out-device : int out-chans : int
                    in-device : int in-chans : int
                    format : cstr sample-rate : int buf-frames : int
                    callback : int] : ptr<void>
@@ -110,7 +111,7 @@
 ;;;   (stream-start a)
 ;;;
 ;;; Since: RA0
-(defn stream-start [a : int] : ptr<void>
+(defn stream-start [a : Audio] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <rtaudio/rtaudio_c.h>
@@ -133,7 +134,7 @@
 ;;;   (stream-stop a)
 ;;;
 ;;; Since: RA0
-(defn stream-stop [a : int] : void
+(defn stream-stop [a : Audio] : void
   ```c
   #include <rtaudio/rtaudio_c.h>
   rtaudio_stop_stream((rtaudio_t)(intptr_t)a);
@@ -151,7 +152,7 @@
 ;;;   (stream-close a)
 ;;;
 ;;; Since: RA0
-(defn stream-close [a : int] : void
+(defn stream-close [a : Audio] : void
   ```c
   #include <rtaudio/rtaudio_c.h>
   rtaudio_close_stream((rtaudio_t)(intptr_t)a);
@@ -169,7 +170,7 @@
 ;;;   (println (stream-latency a))
 ;;;
 ;;; Since: RA0
-(defn stream-latency [a : int] : int
+(defn stream-latency [a : Audio] : int
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (int64_t)rtaudio_get_stream_latency((rtaudio_t)(intptr_t)a);
@@ -187,7 +188,7 @@
 ;;;   (println (stream-sample-rate a))
 ;;;
 ;;; Since: RA0
-(defn stream-sample-rate [a : int] : int
+(defn stream-sample-rate [a : Audio] : int
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (int64_t)rtaudio_get_stream_sample_rate((rtaudio_t)(intptr_t)a);

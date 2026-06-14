@@ -5,6 +5,7 @@
 ;; Individual shader objects are deleted automatically after linking.
 
 (defmodule opengl/shaders
+  (import opengl/types :refer [Shader Program])
   (export compile-shader shader-program use-program with-program
           set-uniform-int set-uniform-float
           set-uniform-vec2 set-uniform-vec3 set-uniform-vec4
@@ -24,7 +25,7 @@
 ;;;   (compile-shader ":vertex" vert-src)   ; => :int shader handle
 ;;;
 ;;; Since: v0.1.0
-(defn compile-shader [stage : cstr source : cstr] : int
+(defn compile-shader [stage : cstr source : cstr] : Shader
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -71,7 +72,7 @@
 ;;;   (shader-program vs gs fs)       ; + geometry stage
 ;;;
 ;;; Since: v0.1.0
-(defn shader-program [& shaders] : int
+(defn shader-program [& shaders : Shader] : Program
   ;; The compiler rejects inline-C inside a variadic body (it needs a fixed
   ;; arity signature), so the variadic form just forwards the collected
   ;; cons-list handle to the fixed-arity linker below.
@@ -85,7 +86,7 @@
 ;;; Returns:
 ;;;   Opaque :int program handle.  Individual shaders are deleted after linking.
 ;;;   Prints the driver error log and calls exit(1) if linking fails.
-(defn __shader-program-link [shaders : int] : int
+(defn __shader-program-link [shaders : int] : Program
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -127,7 +128,7 @@
 ;;;   (use-program 0)
 ;;;
 ;;; Since: v0.1.0
-(defn use-program [prog : int] : void
+(defn use-program [prog : Program] : void
   ```c
   #include <glad/gl.h>
   glUseProgram((GLuint)prog);
@@ -162,7 +163,7 @@
 ;;;   (set-uniform-int prog "texture1" 0)
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-int [prog : int name : cstr v : int] : void
+(defn set-uniform-int [prog : Program name : cstr v : int] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -177,7 +178,7 @@
 ;;;   v    -- float value
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-float [prog : int name : cstr v : float] : void
+(defn set-uniform-float [prog : Program name : cstr v : float] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -192,7 +193,7 @@
 ;;;   x y  -- vector components
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-vec2 [prog : int name : cstr x : float y : float] : void
+(defn set-uniform-vec2 [prog : Program name : cstr x : float y : float] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -210,7 +211,7 @@
 ;;;   (set-uniform-vec3 prog "light-pos" 1.5 1.5 1.5)
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-vec3 [prog : int name : cstr x : float y : float z : float] : void
+(defn set-uniform-vec3 [prog : Program name : cstr x : float y : float z : float] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -225,7 +226,7 @@
 ;;;   x y z w   -- vector components
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-vec4 [prog : int name : cstr
+(defn set-uniform-vec4 [prog : Program name : cstr
                          x : float y : float z : float w : float] : void
   ```c
   #include <glad/gl.h>
@@ -244,7 +245,7 @@
 ;;;   (set-uniform-mat4 prog "model" (mat4-ptr model-mat))
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-mat4 [prog : int name : cstr mat : int] : void
+(defn set-uniform-mat4 [prog : Program name : cstr mat : int] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);

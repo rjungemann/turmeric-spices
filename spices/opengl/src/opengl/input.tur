@@ -9,6 +9,7 @@
 ;; Mouse position is returned as a heap-allocated float pair [x y].
 
 (defmodule opengl/input
+  (import opengl/types :refer [Window])
   (export key-pressed? mouse-pos mouse-button-pressed?)
 
 ;;; key-pressed? -- return true on the first frame a key transitions to pressed.
@@ -24,7 +25,7 @@
 ;;;   (key-pressed? w 256)   ; Escape pressed this frame
 ;;;
 ;;; Since: v0.1.0
-(defn key-pressed? [w : int key : int] : bool
+(defn key-pressed? [w : Window key : int] : bool
   ```c
   #include <GLFW/glfw3.h>
   GLFWwindow *win = (GLFWwindow*)(intptr_t)w;
@@ -44,7 +45,7 @@
 ;;;   (let [pos (mouse-pos w)] ...)
 ;;;
 ;;; Since: v0.1.0
-(defn mouse-pos [w : int] : int
+(defn mouse-pos [w : Window] : int
   ```c
   #include <stdlib.h>
   #include <GLFW/glfw3.h>
@@ -97,7 +98,7 @@
 ;;;   (mouse-button-pressed? w 0)   ; left button held
 ;;;
 ;;; Since: v0.1.0
-(defn mouse-button-pressed? [w : int button : int] : bool
+(defn mouse-button-pressed? [w : Window button : int] : bool
   ```c
   #include <GLFW/glfw3.h>
   GLFWwindow *win = (GLFWwindow*)(intptr_t)w;

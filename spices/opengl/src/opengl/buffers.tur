@@ -9,7 +9,7 @@
           upload-vertices upload-indices
           vertex-attrib with-vao)
 
-  (import opengl/types :refer [draw-usage->gl attrib-type->gl])
+  (import opengl/types :refer [Vao Vbo Ebo draw-usage->gl attrib-type->gl])
 
 ;;; make-vao -- generate a Vertex Array Object.
 ;;;
@@ -20,7 +20,7 @@
 ;;;   (let [vao (make-vao)] ...)
 ;;;
 ;;; Since: v0.1.0
-(defn make-vao [] : int
+(defn make-vao [] : Vao
   ```c
   #include <glad/gl.h>
   GLuint vao;
@@ -34,7 +34,7 @@
 ;;;   Opaque :int VBO handle.
 ;;;
 ;;; Since: v0.1.0
-(defn make-vbo [] : int
+(defn make-vbo [] : Vbo
   ```c
   #include <glad/gl.h>
   GLuint vbo;
@@ -48,7 +48,7 @@
 ;;;   Opaque :int EBO handle.
 ;;;
 ;;; Since: v0.1.0
-(defn make-ebo [] : int
+(defn make-ebo [] : Ebo
   ```c
   #include <glad/gl.h>
   GLuint ebo;
@@ -67,7 +67,7 @@
 ;;;   (bind-vao 0)
 ;;;
 ;;; Since: v0.1.0
-(defn bind-vao [vao : int] : void
+(defn bind-vao [vao : Vao] : void
   ```c
   #include <glad/gl.h>
   glBindVertexArray((GLuint)vao);
@@ -79,7 +79,7 @@
 ;;;   vbo -- VBO handle from make-vbo, or 0 to unbind
 ;;;
 ;;; Since: v0.1.0
-(defn bind-vbo [vbo : int] : void
+(defn bind-vbo [vbo : Vbo] : void
   ```c
   #include <glad/gl.h>
   glBindBuffer(GL_ARRAY_BUFFER, (GLuint)vbo);
@@ -91,7 +91,7 @@
 ;;;   ebo -- EBO handle from make-ebo, or 0 to unbind
 ;;;
 ;;; Since: v0.1.0
-(defn bind-ebo [ebo : int] : void
+(defn bind-ebo [ebo : Ebo] : void
   ```c
   #include <glad/gl.h>
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint)ebo);
