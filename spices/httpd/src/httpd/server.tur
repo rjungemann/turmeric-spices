@@ -37,11 +37,10 @@
 ;; contract is "take a (client-fd, handler) pair, fully service the
 ;; connection, return when done".
 ;;
-;; The user handler is a top-level :Unsafe defn of type :int -> :int (Request
-;; handle in, Response handle out), passed as a :ptr<void> function pointer.
-;; Closures cannot be supported in this milestone because Turmeric closure
-;; values do not round-trip through an opaque pointer with their environment
-;; preserved.
+;; The user handler is a captureless top-level defn of type :int -> :int
+;; (Request handle in, Response handle out), declared in the public API as
+;; `(c-fn [int] int)`.  Capturing closures are rejected at compile time,
+;; since the bare C-ABI function-pointer rep has no environment slot.
 ;;
 ;; Internal struct layouts duplicated verbatim in every inline-C block:
 ;;
@@ -356,7 +355,7 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
 ;; Server state + listener thread
 ;; =============================================================================
 
-(defn srv-state-new [listen-fd : int handler : ptr<void>] : ptr<void>
+(defn srv-state-new [listen-fd : int handler : (c-fn [int] int)] : ptr<void>
   ```c
   struct __httpd_server *s = malloc(sizeof(*s));
   s->listen_fd       = (int)listen_fd;
@@ -486,13 +485,13 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
 ;;;
 ;;; Parameters:
 ;;;   port    -- TCP port to bind on (IPv4, INADDR_ANY)
-;;;   handler -- :ptr<void> function pointer with C signature
-;;;              int64_t (*)(int64_t).  In Turmeric, define it as a top-level
-;;;              defn of type [req :int] :int returning a Response handle, and
-;;;              pass the defn name.  The handler is invoked from a worker
-;;;              thread; it must be Send-safe.  The server takes ownership of
-;;;              the Response it returns (it is freed after the response is
-;;;              written, regardless of return value of write).
+;;;   handler -- captureless `(c-fn [int] int)` request handler.  Define
+;;;              it as a top-level defn of type `[req : int] : int`
+;;;              returning a Response handle, and pass the defn name.
+;;;              The handler is invoked from a worker thread; it must be
+;;;              Send-safe.  The server takes ownership of the Response
+;;;              it returns (it is freed after the response is written,
+;;;              regardless of write return value).
 ;;;
 ;;; Returns:
 ;;;   :ptr<void> -- opaque server handle.  Pass to server-stop to shut down,
@@ -508,14 +507,14 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
 ;;;     (server-stop srv))
 ;;;
 ;;; Since: H6 (pool default added in H7)
-(defn server-start [port : int handler : ptr<void>] : ptr<void>
+(defn server-start [port : int handler : (c-fn [int] int)] : ptr<void>
   (server-start-pool port handler (srv-default-pool-size)))
 
 ;;; server-start-pool -- like server-start but with an explicit pool size.
 ;;;
 ;;; Parameters:
 ;;;   port    -- TCP port to bind on
-;;;   handler -- :ptr<void> request handler (see server-start)
+;;;   handler -- (c-fn [int] int) request handler (see server-start)
 ;;;   size    -- number of worker threads in the pool (clamped to >= 1)
 ;;;
 ;;; Returns:
@@ -525,7 +524,7 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
 ;;;   (def srv (server-start-pool 8080 my-handler 32))
 ;;;
 ;;; Since: H7
-(defn server-start-pool [port : int handler : ptr<void> size : int] : ptr<void>
+(defn server-start-pool [port : int handler : (c-fn [int] int) size : int] : ptr<void>
   (let [fd (srv-make-listener port)]
     (if (< fd 0)
       (srv-null-ptr)
@@ -554,7 +553,7 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
 ;;;
 ;;; Parameters:
 ;;;   port    -- TCP port to bind on
-;;;   handler -- :ptr<void> request handler (see server-start)
+;;;   handler -- (c-fn [int] int) request handler (see server-start)
 ;;;
 ;;; Returns:
 ;;;   :ptr<void> -- opaque server handle, or NULL on failure.
@@ -563,7 +562,7 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
 ;;;   (def srv (server-start-spawn 8080 my-handler))
 ;;;
 ;;; Since: H7
-(defn server-start-spawn [port : int handler : ptr<void>] : ptr<void>
+(defn server-start-spawn [port : int handler : (c-fn [int] int)] : ptr<void>
   (let [fd (srv-make-listener port)]
     (if (< fd 0)
       (srv-null-ptr)

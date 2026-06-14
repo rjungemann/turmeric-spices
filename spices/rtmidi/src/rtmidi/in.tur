@@ -108,7 +108,10 @@
 ;;;
 ;;; Parameters:
 ;;;   mi       -- MIDI input handle (ok-val from midi-in-new)
-;;;   callback -- RtMidiCCallback function pointer as :int
+;;;   callback -- captureless C-ABI callback of shape
+;;;               `void (*)(double timeStamp, const unsigned char *msg,
+;;;                         size_t nbytes, void *user)` -- spelled
+;;;               `(c-fn [float (ptr<u8>) int (ptr<void>)] void)`
 ;;;
 ;;; Returns:
 ;;;   void
@@ -117,12 +120,11 @@
 ;;;   (midi-in-set-callback mi my-midi-handler)
 ;;;
 ;;; Since: RM0
-(defn midi-in-set-callback [mi : int callback : int] : void
+(defn midi-in-set-callback
+  [mi : int callback : (c-fn [float ptr<u8> int ptr<void>] void)] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
-  rtmidi_in_set_callback((RtMidiInPtr)(intptr_t)mi,
-                         (RtMidiCCallback)(intptr_t)callback,
-                         NULL);
+  rtmidi_in_set_callback((RtMidiInPtr)(intptr_t)mi, callback, NULL);
   ```)
 
 ;;; midi-in-cancel-callback -- remove the previously registered MIDI input callback.

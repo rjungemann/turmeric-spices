@@ -117,7 +117,7 @@ struct __httpd_warg { int client_fd; void *handler; };
 ;;;
 ;;; Parameters:
 ;;;   size    -- desired number of worker threads (clamped to >= 1).
-;;;   handler -- :ptr<void> request handler; same contract as
+;;;   handler -- (c-fn [int] int) request handler; same contract as
 ;;;              server-start's handler argument (forwarded verbatim
 ;;;              to srv-worker-loop on every dequeued connection).
 ;;;
@@ -130,7 +130,7 @@ struct __httpd_warg { int client_fd; void *handler; };
 ;;;   (def pool (pool-new 8 my-handler))
 ;;;
 ;;; Since: H7
-(defn pool-new [size : int handler : ptr<void>] : ptr<void>
+(defn pool-new [size : int handler : (c-fn [int] int)] : ptr<void>
   ```c
   extern void *httpd__pool__pool_hyworker_hyloop(void *);
 

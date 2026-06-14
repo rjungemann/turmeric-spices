@@ -231,13 +231,13 @@
       (__tourist-opt-extract opt)
       (__tourist-route-dispatch (__tourist-state-routes) req))))
 
-;;; __tourist-handler-ptr -- return __tourist-handler as a :ptr<void>.
+;;; __tourist-handler-ptr -- return __tourist-handler as a typed (c-fn [int] int).
 ;;;
-;;; server-start expects the handler as an opaque function pointer.
-(defn __tourist-handler-ptr [] : ptr<void>
+;;; server-start expects the handler as a bare C-ABI function pointer.
+(defn __tourist-handler-ptr [] : (c-fn [int] int)
   ```c
   extern int64_t tourist__app___un_untourist_hyhandler(int64_t);
-  return (void *)tourist__app___un_untourist_hyhandler;
+  return tourist__app___un_untourist_hyhandler;
   ```)
 
 ;; -- Public API ------------------------------------------------------------

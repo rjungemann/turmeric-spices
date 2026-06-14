@@ -3,9 +3,9 @@
 ;; Servers are lo_server_thread instances; they run message dispatch in a
 ;; background POSIX thread managed by liblo.
 ;;
-;; Note: server-add-method registers a no-op C trampoline for now.  Full
-;; Turmeric-function callback support requires a future FFI callback API that
-;; can marshal a Turmeric closure into a C function pointer at runtime.
+;; server-add-method takes a captureless `(c-fn ...)` handler that is
+;; registered directly with liblo's dispatch loop -- no trampoline needed,
+;; since c-fn parameters lower to the bare C-ABI function pointer.
 
 (defmodule osc/server
   (export server-new server-new-tcp server-free
@@ -121,38 +121,32 @@
 ;;;   s        -- st-ptr (ok-val from server-new)
 ;;;   path     -- OSC address path string (e.g. "/synth/freq"); NULL matches all
 ;;;   typespec -- OSC type tag string (e.g. "f"); NULL matches all
-;;;   handler  -- reserved for future Turmeric FFI callback support; ignored
+;;;   handler  -- captureless C-ABI liblo method handler of shape
+;;;               `int (*)(const char *path, const char *types,
+;;;                        lo_arg **argv, int argc, lo_message msg,
+;;;                        void *user)` -- spelled
+;;;               `(c-fn [cstr cstr ptr<void> int ptr<void> ptr<void>] int)`
 ;;;
 ;;; Returns:
 ;;;   void
 ;;;
-;;; Note:
-;;;   Full Turmeric-function callbacks require a future FFI API.  This
-;;;   implementation registers a no-op C handler so the path/typespec entry
-;;;   exists in the server dispatch table.
-;;;
 ;;; Example:
-;;;   (server-add-method s "/synth/freq" "f" 0)
+;;;   (defn noop-handler [p : cstr t : cstr argv : ptr<void> argc : int
+;;;                       msg : ptr<void> user : ptr<void>] : int
+;;;     0)
+;;;   (server-add-method s "/synth/freq" "f" noop-handler)
 ;;;
 ;;; Since: OSC0
-(defn server-add-method [s : int path : cstr typespec : cstr handler : int] : void
+(defn server-add-method
+  [s : int path : cstr typespec : cstr
+   handler : (c-fn [cstr cstr ptr<void> int ptr<void> ptr<void>] int)] : void
   ```c
   #include <lo/lo.h>
-  /* Stub trampoline -- full Turmeric FFI callback support is deferred.
-     A no-op handler is registered so the method entry exists in liblo's
-     dispatch table.  Replace handler_stub with a real trampoline once
-     the Turmeric callback API is available. */
-  static int handler_stub(const char *p, const char *t,
-                          lo_arg **argv, int argc,
-                          lo_message msg, void *data) {
-    (void)p; (void)t; (void)argv; (void)argc; (void)msg; (void)data;
-    return 0;
-  }
   lo_server_thread st = (lo_server_thread)(intptr_t)s;
   lo_server_thread_add_method(st,
     path ? (const char *)path : NULL,
     typespec ? (const char *)typespec : NULL,
-    handler_stub, NULL);
+    (lo_method_handler)handler, NULL);
   ```)
 
 ;;; server-recv -- dispatch pending OSC messages, blocking up to timeout-ms milliseconds.

@@ -55,8 +55,13 @@
 ;;;           (none)))
 ;;;
 ;;; Since: v0.1.0
-(defn use! [fn : int] : int
-  (route-new "__mw" 0 fn))
+(defn use! [fn : (c-fn [int] int)] : int
+  (route-new "__mw" 0 (__mw-fn->int fn)))
+
+(defn __mw-fn->int [h : (c-fn [int] int)] : int
+  ```c
+  return (int64_t)(intptr_t)h;
+  ```)
 
 ;; -- Internal helpers for tourist/app --------------------------------------
 

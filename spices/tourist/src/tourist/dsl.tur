@@ -166,6 +166,15 @@
       (router-free (route-pattern r))
       (__route-free-struct r))))
 
+;; -- Internal: convert a typed c-fn handler to an int64_t for storage -----
+;; The route struct stores the handler as an int64_t; the DSL surface takes a
+;; (c-fn [int] int) for type safety, and we narrow at the boundary.
+
+(defn __handler->int [h : (c-fn [int] int)] : int
+  ```c
+  return (int64_t)(intptr_t)h;
+  ```)
+
 ;; -- DSL constructors ------------------------------------------------------
 
 ;;; get! -- declare a GET route.
@@ -182,8 +191,8 @@
 ;;;     (fn [req] (text "hi")))
 ;;;
 ;;; Since: v0.1.0
-(defn get! [pattern : cstr handler : int] : int
-  (route-new "GET" (router-compile pattern) handler))
+(defn get! [pattern : cstr handler : (c-fn [int] int)] : int
+  (route-new "GET" (router-compile pattern) (__handler->int handler)))
 
 ;;; post! -- declare a POST route.
 ;;;
@@ -195,8 +204,8 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn post! [pattern : cstr handler : int] : int
-  (route-new "POST" (router-compile pattern) handler))
+(defn post! [pattern : cstr handler : (c-fn [int] int)] : int
+  (route-new "POST" (router-compile pattern) (__handler->int handler)))
 
 ;;; put! -- declare a PUT route.
 ;;;
@@ -208,8 +217,8 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn put! [pattern : cstr handler : int] : int
-  (route-new "PUT" (router-compile pattern) handler))
+(defn put! [pattern : cstr handler : (c-fn [int] int)] : int
+  (route-new "PUT" (router-compile pattern) (__handler->int handler)))
 
 ;;; delete! -- declare a DELETE route.
 ;;;
@@ -221,8 +230,8 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn delete! [pattern : cstr handler : int] : int
-  (route-new "DELETE" (router-compile pattern) handler))
+(defn delete! [pattern : cstr handler : (c-fn [int] int)] : int
+  (route-new "DELETE" (router-compile pattern) (__handler->int handler)))
 
 ;;; any! -- declare a route matching any HTTP method.
 ;;;
@@ -237,7 +246,7 @@
 ;;;   (any! "/catch-all" (fn [req] (text "ok")))
 ;;;
 ;;; Since: v0.1.0
-(defn any! [pattern : cstr handler : int] : int
-  (route-new "" (router-compile pattern) handler))
+(defn any! [pattern : cstr handler : (c-fn [int] int)] : int
+  (route-new "" (router-compile pattern) (__handler->int handler)))
 
 ) ;; end defmodule tourist/dsl
