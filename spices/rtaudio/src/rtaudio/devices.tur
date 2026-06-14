@@ -86,8 +86,16 @@
   di->name         = strdup(info.name);
   di->output_chans = info.output_channels;
   di->input_chans  = info.input_channels;
+  /* rtaudio 6.x dropped a separate num_sample_rates field -- the
+     sample_rates[] array is zero-terminated (or fully populated up to
+     MAX_SAMPLE_RATES, which is 16 as of 6.0.x).  Discover the
+     populated length, then walk it backwards so the cons list ends up
+     in ascending order with the lowest rate at the head. */
+  size_t n_rates = 0;
+  size_t cap = sizeof(info.sample_rates) / sizeof(info.sample_rates[0]);
+  while (n_rates < cap && info.sample_rates[n_rates] != 0) n_rates++;
   int64_t rates = 0;
-  for (unsigned int i = info.num_sample_rates; i-- > 0;) {
+  for (size_t i = n_rates; i-- > 0;) {
     struct { int64_t value; int64_t next; } *cell = malloc(sizeof(*cell));
     cell->value = (int64_t)info.sample_rates[i];
     cell->next  = rates;
