@@ -206,9 +206,25 @@
 ;;; Since: RM0
 (defn midi-in-port-name [mi : int i : int] : cstr
   ```c
+  #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
+  /* rtmidi_get_port_name returns an int status and writes the name into
+     bufOut.  Preflight len with bufOut = NULL, then malloc + call again.
+     Returns an empty string on either failure path; caller does not free
+     the returned cstr (matches the rest of the spice's convention). */
   int len = 0;
-  return (char*)rtmidi_get_port_name((RtMidiPtr)(intptr_t)mi, (unsigned int)i, NULL, &len);
+  if (rtmidi_get_port_name((RtMidiPtr)(intptr_t)mi, (unsigned int)i,
+                           NULL, &len) < 0) {
+    return (char *)"";
+  }
+  char *buf = (char *)malloc((size_t)len);
+  if (!buf) return (char *)"";
+  if (rtmidi_get_port_name((RtMidiPtr)(intptr_t)mi, (unsigned int)i,
+                           buf, &len) < 0) {
+    free(buf);
+    return (char *)"";
+  }
+  return buf;
   ```)
 
 ;;; midi-out-port-name -- return the name of MIDI output port at index i.
@@ -226,9 +242,22 @@
 ;;; Since: RM0
 (defn midi-out-port-name [mo : int i : int] : cstr
   ```c
+  #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
+  /* See midi-in-port-name for the two-call protocol. */
   int len = 0;
-  return (char*)rtmidi_get_port_name((RtMidiPtr)(intptr_t)mo, (unsigned int)i, NULL, &len);
+  if (rtmidi_get_port_name((RtMidiPtr)(intptr_t)mo, (unsigned int)i,
+                           NULL, &len) < 0) {
+    return (char *)"";
+  }
+  char *buf = (char *)malloc((size_t)len);
+  if (!buf) return (char *)"";
+  if (rtmidi_get_port_name((RtMidiPtr)(intptr_t)mo, (unsigned int)i,
+                           buf, &len) < 0) {
+    free(buf);
+    return (char *)"";
+  }
+  return buf;
   ```)
 
 ) ;; end defmodule rtmidi/core
