@@ -34,17 +34,20 @@
 ;; Private: API keyword -> enum helpers
 ;; -------------------------------------------------------------------------
 
-;;; __parse-midi-api -- map a keyword string to an rtmidi_api_t value.
-(defn __parse-midi-api [api : cstr] : int
+;;; _parse-midi-api -- map a keyword string to an `enum RtMidiApi` value.
+;;; Single-underscore prefix so the __TUR_CNAME_ splice in inline-C call
+;;; sites below can resolve it (the splice scanner treats `__` as a
+;;; terminator and won't accept a name that starts with `__`).
+(defn _parse-midi-api [api : cstr] : int
   ```c
   #include <string.h>
   #include <rtmidi/rtmidi_c.h>
-  rtmidi_api_t api_val = RTMIDI_API_UNSPECIFIED;
+  enum RtMidiApi api_val = RTMIDI_API_UNSPECIFIED;
   if (strcmp((const char*)api, ":alsa") == 0)       api_val = RTMIDI_API_LINUX_ALSA;
   else if (strcmp((const char*)api, ":core-midi") == 0) api_val = RTMIDI_API_MACOSX_CORE;
   else if (strcmp((const char*)api, ":winmm") == 0) api_val = RTMIDI_API_WINDOWS_MM;
   else if (strcmp((const char*)api, ":jack") == 0)  api_val = RTMIDI_API_UNIX_JACK;
-  else if (strcmp((const char*)api, ":dummy") == 0) api_val = RTMIDI_API_DUMMY;
+  else if (strcmp((const char*)api, ":dummy") == 0) api_val = RTMIDI_API_RTMIDI_DUMMY;
   return (int64_t)api_val;
   ```)
 
@@ -72,7 +75,7 @@
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
-  rtmidi_api_t api_val = (rtmidi_api_t)(__parse_midi_api(api));
+  enum RtMidiApi api_val = (enum RtMidiApi)(__TUR_CNAME__parse-midi-api__(api));
   RtMidiInPtr mi = rtmidi_in_create(api_val, "Turmeric", 100);
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (mi != NULL && mi->ok) {
@@ -104,7 +107,7 @@
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
-  rtmidi_api_t api_val = (rtmidi_api_t)(__parse_midi_api(api));
+  enum RtMidiApi api_val = (enum RtMidiApi)(__TUR_CNAME__parse-midi-api__(api));
   RtMidiOutPtr mo = rtmidi_out_create(api_val, "Turmeric");
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (mo != NULL && mo->ok) {
