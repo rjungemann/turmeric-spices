@@ -1,0 +1,26 @@
+;; plutovg/types.tur -- opaque handle types for the plutovg spice.
+;;
+;; All plutovg handles are heap-allocated C structs whose pointers we cast
+;; through intptr_t to fit in int64_t.  Wrapping each kind in its own
+;; `defopaque` makes the type checker reject passing a Surface where a
+;; Canvas is expected (or vice versa), without changing the C ABI.
+
+(defmodule plutovg/types
+  (export Canvas Surface Path FontFace Paint)
+
+;;; Canvas -- opaque handle to a plutovg_canvas_t.
+(defopaque Canvas :int)
+
+;;; Surface -- opaque handle to a plutovg_surface_t.
+(defopaque Surface :int)
+
+;;; Path -- opaque handle to a plutovg_path_t.
+(defopaque Path :int)
+
+;;; FontFace -- opaque handle to a plutovg_font_face_t.
+(defopaque FontFace :int)
+
+;;; Paint -- opaque handle to a plutovg_paint_t.
+(defopaque Paint :int)
+
+) ;; end defmodule plutovg/types

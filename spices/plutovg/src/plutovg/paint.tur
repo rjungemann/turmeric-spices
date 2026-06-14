@@ -10,6 +10,7 @@
 ;; Stops handles are opaque :int into a malloc'd float buffer.
 
 (defmodule plutovg/paint
+  (import plutovg/types :refer [Canvas Surface Paint])
   (export ;; Solid colors
           paint-create-color paint-create-color-hex paint-destroy
           ;; Gradient-stop builder
@@ -20,7 +21,7 @@
           ;; Texture
           paint-create-texture
           ;; Canvas binding
-          canvas-set-source)
+          canvas-set-source paint-of)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result-type helpers (layout matches stdlib/result.tur)
@@ -119,7 +120,7 @@
 ;;;   void
 ;;;
 ;;; Since: PV3
-(defn paint-destroy [paint : int] : void
+(defn paint-destroy [paint : Paint] : void
   ```c
   #include <plutovg.h>
   if (paint) plutovg_paint_destroy((plutovg_paint_t *)(intptr_t)paint);
@@ -355,7 +356,7 @@
 ;;;   (paint-create-texture s ":plain" 1.0)
 ;;;
 ;;; Since: PV3
-(defn paint-create-texture [surface : int tex-type : cstr opacity : float] : ptr<void>
+(defn paint-create-texture [surface : Surface tex-type : cstr opacity : float] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -391,11 +392,18 @@
 ;;;   (canvas-set-source c my-paint)
 ;;;
 ;;; Since: PV3
-(defn canvas-set-source [c : int paint : int] : void
+(defn canvas-set-source [c : Canvas paint : Paint] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_paint((plutovg_canvas_t *)(intptr_t)c,
                            (plutovg_paint_t *)(intptr_t)paint);
+  ```)
+
+;;; paint-of -- extract a typed Paint handle from an ok result.
+(defn paint-of [r : ptr<void>] : Paint
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule plutovg/paint

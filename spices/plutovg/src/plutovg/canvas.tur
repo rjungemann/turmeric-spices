@@ -9,6 +9,7 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule plutovg/canvas
+  (import plutovg/types :refer [Canvas Surface Path])
   (export canvas-create canvas-destroy
           canvas-set-source-color canvas-fill-rect
           ;; PV1: path recording
@@ -35,7 +36,8 @@
           ;; PV4: fill rule, blend operator, global opacity
           canvas-set-fill-rule canvas-set-operator canvas-set-opacity
           ;; PV6: arc helpers + draw-image
-          canvas-arc canvas-arc-to canvas-round-rect canvas-draw-image)
+          canvas-arc canvas-arc-to canvas-round-rect canvas-draw-image
+          canvas-of)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -76,7 +78,7 @@
 ;;;     (if (ok? r) (let [c (ok-val r)] ...) (println "create failed")))
 ;;;
 ;;; Since: PV0
-(defn canvas-create [s : int] : ptr<void>
+(defn canvas-create [s : Surface] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -99,7 +101,7 @@
 ;;;   (canvas-destroy c)
 ;;;
 ;;; Since: PV0
-(defn canvas-destroy [c : int] : void
+(defn canvas-destroy [c : Canvas] : void
   ```c
   #include <plutovg.h>
   if (c) plutovg_canvas_destroy((plutovg_canvas_t *)(intptr_t)c);
@@ -121,7 +123,7 @@
 ;;;   (canvas-set-source-color c 1.0 0.0 0.0 1.0)  ; opaque red
 ;;;
 ;;; Since: PV0
-(defn canvas-set-source-color [c : int r : float g : float b : float a : float] : void
+(defn canvas-set-source-color [c : Canvas r : float g : float b : float a : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_rgba((plutovg_canvas_t *)(intptr_t)c,
@@ -144,7 +146,7 @@
 ;;;   (canvas-fill-rect c 10.0 10.0 100.0 50.0)
 ;;;
 ;;; Since: PV0
-(defn canvas-fill-rect [c : int x : float y : float w : float h : float] : void
+(defn canvas-fill-rect [c : Canvas x : float y : float w : float h : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_fill_rect((plutovg_canvas_t *)(intptr_t)c,
@@ -169,7 +171,7 @@
 ;;;   (canvas-move-to c 10.0 10.0)
 ;;;
 ;;; Since: PV1
-(defn canvas-move-to [c : int x : float y : float] : void
+(defn canvas-move-to [c : Canvas x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_move_to((plutovg_canvas_t *)(intptr_t)c,
@@ -190,7 +192,7 @@
 ;;;   (canvas-line-to c 100.0 10.0)
 ;;;
 ;;; Since: PV1
-(defn canvas-line-to [c : int x : float y : float] : void
+(defn canvas-line-to [c : Canvas x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_line_to((plutovg_canvas_t *)(intptr_t)c,
@@ -213,7 +215,7 @@
 ;;;   (canvas-quad-to c 50.0 0.0 100.0 50.0)
 ;;;
 ;;; Since: PV1
-(defn canvas-quad-to [c : int x1 : float y1 : float x : float y : float] : void
+(defn canvas-quad-to [c : Canvas x1 : float y1 : float x : float y : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_quad_to((plutovg_canvas_t *)(intptr_t)c,
@@ -238,7 +240,7 @@
 ;;;   (canvas-cubic-to c 25.0 0.0 75.0 0.0 100.0 50.0)
 ;;;
 ;;; Since: PV1
-(defn canvas-cubic-to [c : int x1 : float y1 : float x2 : float y2 : float
+(defn canvas-cubic-to [c : Canvas x1 : float y1 : float x2 : float y2 : float
                        x : float y : float] : void
   ```c
   #include <plutovg.h>
@@ -260,7 +262,7 @@
 ;;;   (canvas-close-path c)
 ;;;
 ;;; Since: PV1
-(defn canvas-close-path [c : int] : void
+(defn canvas-close-path [c : Canvas] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_close_path((plutovg_canvas_t *)(intptr_t)c);
@@ -286,7 +288,7 @@
 ;;;   (canvas-rect c 0.0 0.0 100.0 50.0)
 ;;;
 ;;; Since: PV1
-(defn canvas-rect [c : int x : float y : float w : float h : float] : void
+(defn canvas-rect [c : Canvas x : float y : float w : float h : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_rect((plutovg_canvas_t *)(intptr_t)c,
@@ -309,7 +311,7 @@
 ;;;   (canvas-ellipse c 50.0 50.0 30.0 20.0)
 ;;;
 ;;; Since: PV1
-(defn canvas-ellipse [c : int cx : float cy : float rx : float ry : float] : void
+(defn canvas-ellipse [c : Canvas cx : float cy : float rx : float ry : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_ellipse((plutovg_canvas_t *)(intptr_t)c,
@@ -331,7 +333,7 @@
 ;;;   (canvas-circle c 50.0 50.0 25.0)
 ;;;
 ;;; Since: PV1
-(defn canvas-circle [c : int cx : float cy : float r : float] : void
+(defn canvas-circle [c : Canvas cx : float cy : float r : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_circle((plutovg_canvas_t *)(intptr_t)c,
@@ -355,7 +357,7 @@
 ;;;   (canvas-fill c)
 ;;;
 ;;; Since: PV1
-(defn canvas-fill [c : int] : void
+(defn canvas-fill [c : Canvas] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)c);
@@ -374,7 +376,7 @@
 ;;;   (canvas-stroke c)
 ;;;
 ;;; Since: PV1
-(defn canvas-stroke [c : int] : void
+(defn canvas-stroke [c : Canvas] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)c);
@@ -393,7 +395,7 @@
 ;;;   (canvas-clip c)
 ;;;
 ;;; Since: PV1
-(defn canvas-clip [c : int] : void
+(defn canvas-clip [c : Canvas] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_clip((plutovg_canvas_t *)(intptr_t)c);
@@ -416,7 +418,7 @@
 ;;;   (canvas-add-path c my-path)
 ;;;
 ;;; Since: PV2
-(defn canvas-add-path [c : int path : int] : void
+(defn canvas-add-path [c : Canvas path : Path] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_add_path((plutovg_canvas_t *)(intptr_t)c,
@@ -434,7 +436,7 @@
 ;;;   void
 ;;;
 ;;; Since: PV2
-(defn canvas-fill-path [c : int path : int] : void
+(defn canvas-fill-path [c : Canvas path : Path] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_fill_path((plutovg_canvas_t *)(intptr_t)c,
@@ -452,7 +454,7 @@
 ;;;   void
 ;;;
 ;;; Since: PV2
-(defn canvas-stroke-path [c : int path : int] : void
+(defn canvas-stroke-path [c : Canvas path : Path] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_stroke_path((plutovg_canvas_t *)(intptr_t)c,
@@ -469,7 +471,7 @@
 ;;; Pairs with canvas-restore.  Saves nest.
 ;;;
 ;;; Since: PV4
-(defn canvas-save [c : int] : void
+(defn canvas-save [c : Canvas] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_save((plutovg_canvas_t *)(intptr_t)c);
@@ -480,7 +482,7 @@
 ;;; Restoring with no matching save is a no-op.
 ;;;
 ;;; Since: PV4
-(defn canvas-restore [c : int] : void
+(defn canvas-restore [c : Canvas] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_restore((plutovg_canvas_t *)(intptr_t)c);
@@ -498,7 +500,7 @@
 ;;;   ty -- y offset
 ;;;
 ;;; Since: PV4
-(defn canvas-translate [c : int tx : float ty : float] : void
+(defn canvas-translate [c : Canvas tx : float ty : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_translate((plutovg_canvas_t *)(intptr_t)c,
@@ -508,7 +510,7 @@
 ;;; canvas-scale -- prepend a scale to the current transform.
 ;;;
 ;;; Since: PV4
-(defn canvas-scale [c : int sx : float sy : float] : void
+(defn canvas-scale [c : Canvas sx : float sy : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_scale((plutovg_canvas_t *)(intptr_t)c,
@@ -522,7 +524,7 @@
 ;;;   radians -- rotation angle
 ;;;
 ;;; Since: PV4
-(defn canvas-rotate [c : int radians : float] : void
+(defn canvas-rotate [c : Canvas radians : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_rotate((plutovg_canvas_t *)(intptr_t)c, (float)radians);
@@ -545,7 +547,7 @@
 ;;;   f  -- vertical translation
 ;;;
 ;;; Since: PV4
-(defn canvas-transform [c : int a : float b : float cc : float d : float
+(defn canvas-transform [c : Canvas a : float b : float cc : float d : float
                         e : float f : float] : void
   ```c
   #include <plutovg.h>
@@ -558,7 +560,7 @@
 ;;; canvas-reset-transform -- reset the current transform to the identity.
 ;;;
 ;;; Since: PV4
-(defn canvas-reset-transform [c : int] : void
+(defn canvas-reset-transform [c : Canvas] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_reset_matrix((plutovg_canvas_t *)(intptr_t)c);
@@ -571,7 +573,7 @@
 ;;; canvas-set-line-width -- set the stroke width in surface units.
 ;;;
 ;;; Since: PV4
-(defn canvas-set-line-width [c : int w : float] : void
+(defn canvas-set-line-width [c : Canvas w : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_line_width((plutovg_canvas_t *)(intptr_t)c, (float)w);
@@ -584,7 +586,7 @@
 ;;;   cap -- ":butt" (default), ":round", or ":square"
 ;;;
 ;;; Since: PV4
-(defn canvas-set-line-cap [c : int cap : cstr] : void
+(defn canvas-set-line-cap [c : Canvas cap : cstr] : void
   ```c
   #include <string.h>
   #include <plutovg.h>
@@ -605,7 +607,7 @@
 ;;;   join -- ":miter" (default), ":round", or ":bevel"
 ;;;
 ;;; Since: PV4
-(defn canvas-set-line-join [c : int join : cstr] : void
+(defn canvas-set-line-join [c : Canvas join : cstr] : void
   ```c
   #include <string.h>
   #include <plutovg.h>
@@ -625,7 +627,7 @@
 ;;; bevels.  The plutovg default is 10.
 ;;;
 ;;; Since: PV4
-(defn canvas-set-miter-limit [c : int limit : float] : void
+(defn canvas-set-miter-limit [c : Canvas limit : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_miter_limit((plutovg_canvas_t *)(intptr_t)c, (float)limit);
@@ -699,7 +701,7 @@
 ;;; canvas-set-dash-offset -- set the phase offset into the dash pattern.
 ;;;
 ;;; Since: PV4
-(defn canvas-set-dash-offset [c : int offset : float] : void
+(defn canvas-set-dash-offset [c : Canvas offset : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_dash_offset((plutovg_canvas_t *)(intptr_t)c, (float)offset);
@@ -714,7 +716,7 @@
 ;;;   dashes -- dash-array handle (from dash-array-create / dash-array-add)
 ;;;
 ;;; Since: PV4
-(defn canvas-set-dash-array [c : int dashes : int] : void
+(defn canvas-set-dash-array [c : Canvas dashes : int] : void
   ```c
   #include <plutovg.h>
   char *buf = (char *)(intptr_t)dashes;
@@ -734,7 +736,7 @@
 ;;;   rule -- ":non-zero" (default) or ":even-odd"
 ;;;
 ;;; Since: PV4
-(defn canvas-set-fill-rule [c : int rule : cstr] : void
+(defn canvas-set-fill-rule [c : Canvas rule : cstr] : void
   ```c
   #include <string.h>
   #include <plutovg.h>
@@ -755,7 +757,7 @@
 ;;;          ":src-atop" ":dst-atop" ":xor"
 ;;;
 ;;; Since: PV4
-(defn canvas-set-operator [c : int op : cstr] : void
+(defn canvas-set-operator [c : Canvas op : cstr] : void
   ```c
   #include <string.h>
   #include <plutovg.h>
@@ -785,7 +787,7 @@
 ;;; value.  Default is 1.0.
 ;;;
 ;;; Since: PV4
-(defn canvas-set-opacity [c : int alpha : float] : void
+(defn canvas-set-opacity [c : Canvas alpha : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_opacity((plutovg_canvas_t *)(intptr_t)c, (float)alpha);
@@ -811,7 +813,7 @@
 ;;; arcs build the path manually with canvas-arc-to.
 ;;;
 ;;; Since: PV6
-(defn canvas-arc [c : int cx : float cy : float r : float
+(defn canvas-arc [c : Canvas cx : float cy : float r : float
                   start-angle : float sweep-angle : float] : void
   ```c
   #include <plutovg.h>
@@ -833,7 +835,7 @@
 ;;;   y           -- destination y
 ;;;
 ;;; Since: PV6
-(defn canvas-arc-to [c : int rx : float ry : float rotation : float
+(defn canvas-arc-to [c : Canvas rx : float ry : float rotation : float
                      large-arc? : bool sweep? : bool
                      x : float y : float] : void
   ```c
@@ -856,7 +858,7 @@
 ;;;   ry -- vertical corner radius
 ;;;
 ;;; Since: PV6
-(defn canvas-round-rect [c : int x : float y : float w : float h : float
+(defn canvas-round-rect [c : Canvas x : float y : float w : float h : float
                          rx : float ry : float] : void
   ```c
   #include <plutovg.h>
@@ -890,7 +892,7 @@
 ;;;   void
 ;;;
 ;;; Since: PV6
-(defn canvas-draw-image [c : int src : int x : float y : float
+(defn canvas-draw-image [c : Canvas src : Surface x : float y : float
                          w : float h : float] : void
   ```c
   #include <plutovg.h>
@@ -912,6 +914,13 @@
                       (float)x, (float)y, (float)w, (float)h);
   plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)c);
   plutovg_canvas_restore((plutovg_canvas_t *)(intptr_t)c);
+  ```)
+
+;;; canvas-of -- extract a typed Canvas handle from an ok result returned by canvas-create.
+(defn canvas-of [r : ptr<void>] : Canvas
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule plutovg/canvas

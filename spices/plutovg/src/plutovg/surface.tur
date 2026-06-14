@@ -6,11 +6,12 @@
 ;; stdlib/result.tur:  ok? / ok-val / err-val.
 
 (defmodule plutovg/surface
+  (import plutovg/types :refer [Surface])
   (export surface-create surface-create-from-data
           surface-destroy
           surface-width surface-height surface-stride surface-data
           ;; PV6: export
-          surface-write-png surface-write-jpeg)
+          surface-write-png surface-write-jpeg surface-of)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -103,7 +104,7 @@
 ;;;   (surface-destroy s)
 ;;;
 ;;; Since: PV0
-(defn surface-destroy [s : int] : void
+(defn surface-destroy [s : Surface] : void
   ```c
   #include <plutovg.h>
   if (s) plutovg_surface_destroy((plutovg_surface_t *)(intptr_t)s);
@@ -121,7 +122,7 @@
 ;;;   (println (surface-width s))
 ;;;
 ;;; Since: PV0
-(defn surface-width [s : int] : int
+(defn surface-width [s : Surface] : int
   ```c
   #include <plutovg.h>
   return (int64_t)plutovg_surface_get_width((plutovg_surface_t *)(intptr_t)s);
@@ -139,7 +140,7 @@
 ;;;   (println (surface-height s))
 ;;;
 ;;; Since: PV0
-(defn surface-height [s : int] : int
+(defn surface-height [s : Surface] : int
   ```c
   #include <plutovg.h>
   return (int64_t)plutovg_surface_get_height((plutovg_surface_t *)(intptr_t)s);
@@ -158,7 +159,7 @@
 ;;;   (println (surface-stride s))
 ;;;
 ;;; Since: PV0
-(defn surface-stride [s : int] : int
+(defn surface-stride [s : Surface] : int
   ```c
   #include <plutovg.h>
   return (int64_t)plutovg_surface_get_stride((plutovg_surface_t *)(intptr_t)s);
@@ -178,7 +179,7 @@
 ;;;   (let [buf (surface-data s)] ...)
 ;;;
 ;;; Since: PV0
-(defn surface-data [s : int] : cstr
+(defn surface-data [s : Surface] : cstr
   ```c
   #include <plutovg.h>
   return (char *)plutovg_surface_get_data((plutovg_surface_t *)(intptr_t)s);
@@ -202,7 +203,7 @@
 ;;;     (if (ok? r) (println "written") (println "failed")))
 ;;;
 ;;; Since: PV6
-(defn surface-write-png [s : int path : cstr] : ptr<void>
+(defn surface-write-png [s : Surface path : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -228,7 +229,7 @@
 ;;;   (surface-write-jpeg s "out.jpg" 90)
 ;;;
 ;;; Since: PV6
-(defn surface-write-jpeg [s : int path : cstr quality : int] : ptr<void>
+(defn surface-write-jpeg [s : Surface path : cstr quality : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -239,6 +240,13 @@
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   r->is_ok = ok; r->ok_val = 0; r->err_val = ok ? 0 : 1;
   return r;
+  ```)
+
+;;; surface-of -- extract a typed Surface handle from an ok result returned by surface-create.
+(defn surface-of [r : ptr<void>] : Surface
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule plutovg/surface

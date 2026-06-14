@@ -11,6 +11,7 @@
 ;;   ":latin1" ":utf8" ":utf16" ":utf32"  (default if unrecognized: ":utf8")
 
 (defmodule plutovg/font
+  (import plutovg/types :refer [Canvas FontFace])
   (export ;; Face lifecycle
           font-face-load-from-file font-face-load-from-data
           font-face-destroy
@@ -23,7 +24,8 @@
           font-cache-add-file font-cache-load-system font-cache-get
           ;; Canvas bridges
           canvas-set-font-face canvas-set-font-size canvas-set-font
-          canvas-fill-text canvas-stroke-text canvas-text-extents)
+          canvas-fill-text canvas-stroke-text canvas-text-extents
+          font-face-of)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result-type helpers (matches stdlib/result.tur layout)
@@ -105,7 +107,7 @@
 ;;; font-face-destroy -- release a font face.
 ;;;
 ;;; Since: PV5
-(defn font-face-destroy [ff : int] : void
+(defn font-face-destroy [ff : FontFace] : void
   ```c
   #include <plutovg.h>
   if (ff) plutovg_font_face_destroy((plutovg_font_face_t *)(intptr_t)ff);
@@ -119,7 +121,7 @@
 ;;; the given font size.
 ;;;
 ;;; Since: PV5
-(defn font-face-ascent [ff : int size : float] : float
+(defn font-face-ascent [ff : FontFace size : float] : float
   ```c
   #include <plutovg.h>
   float ascent = 0.0f, descent = 0.0f, line_gap = 0.0f;
@@ -134,7 +136,7 @@
 ;;; negative) in pixels at the given font size.
 ;;;
 ;;; Since: PV5
-(defn font-face-descent [ff : int size : float] : float
+(defn font-face-descent [ff : FontFace size : float] : float
   ```c
   #include <plutovg.h>
   float ascent = 0.0f, descent = 0.0f, line_gap = 0.0f;
@@ -149,7 +151,7 @@
 ;;; adjacent lines, in pixels at the given font size.
 ;;;
 ;;; Since: PV5
-(defn font-face-line-gap [ff : int size : float] : float
+(defn font-face-line-gap [ff : FontFace size : float] : float
   ```c
   #include <plutovg.h>
   float ascent = 0.0f, descent = 0.0f, line_gap = 0.0f;
@@ -186,7 +188,7 @@
 ;;;       (rect-destroy box)))
 ;;;
 ;;; Since: PV5
-(defn font-face-text-extents [ff : int size : float text : cstr] : ptr<void>
+(defn font-face-text-extents [ff : FontFace size : float text : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -336,7 +338,7 @@
 ;;; touching the current font size.
 ;;;
 ;;; Since: PV5
-(defn canvas-set-font-face [c : int ff : int] : void
+(defn canvas-set-font-face [c : Canvas ff : FontFace] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_font_face((plutovg_canvas_t *)(intptr_t)c,
@@ -346,7 +348,7 @@
 ;;; canvas-set-font-size -- set the canvas's current font size in pixels.
 ;;;
 ;;; Since: PV5
-(defn canvas-set-font-size [c : int size : float] : void
+(defn canvas-set-font-size [c : Canvas size : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_font_size((plutovg_canvas_t *)(intptr_t)c, (float)size);
@@ -355,7 +357,7 @@
 ;;; canvas-set-font -- set face + size in a single call.
 ;;;
 ;;; Since: PV5
-(defn canvas-set-font [c : int ff : int size : float] : void
+(defn canvas-set-font [c : Canvas ff : FontFace size : float] : void
   ```c
   #include <plutovg.h>
   plutovg_canvas_set_font((plutovg_canvas_t *)(intptr_t)c,
@@ -378,7 +380,7 @@
 ;;;   Use canvas-text-extents if you need the bounding box.)
 ;;;
 ;;; Since: PV5
-(defn canvas-fill-text [c : int text : cstr encoding : cstr
+(defn canvas-fill-text [c : Canvas text : cstr encoding : cstr
                         x : float y : float] : void
   ```c
   #include <string.h>
@@ -400,7 +402,7 @@
 ;;; settings.
 ;;;
 ;;; Since: PV5
-(defn canvas-stroke-text [c : int text : cstr encoding : cstr
+(defn canvas-stroke-text [c : Canvas text : cstr encoding : cstr
                           x : float y : float] : void
   ```c
   #include <string.h>
@@ -429,7 +431,7 @@
 ;;;   (ok rect-handle) -- release with rect-destroy.
 ;;;
 ;;; Since: PV5
-(defn canvas-text-extents [c : int text : cstr encoding : cstr] : ptr<void>
+(defn canvas-text-extents [c : Canvas text : cstr encoding : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -451,6 +453,13 @@
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   r->is_ok = true; r->ok_val = (int64_t)(intptr_t)out; r->err_val = 0;
   return r;
+  ```)
+
+;;; font-face-of -- extract a typed FontFace handle from an ok result.
+(defn font-face-of [r : ptr<void>] : FontFace
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
   ```)
 
 ) ;; end defmodule plutovg/font
