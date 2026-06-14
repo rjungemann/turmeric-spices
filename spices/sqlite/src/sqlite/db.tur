@@ -7,7 +7,20 @@
 ;; Use row-get from sqlite/row to access columns by name.
 
 (defmodule sqlite/db
-  (export db-open db-close db-exec db-query db-prepare)
+  (export Db Stmt db-open db-close db-exec db-query db-prepare db-of stmt-of)
+
+;; -------------------------------------------------------------------------
+;; Opaque handle types
+;; -------------------------------------------------------------------------
+
+;;; Db -- opaque handle to a sqlite3 database connection.
+;;; Storage is int64_t (sqlite3* cast). Construct via db-open / db-of;
+;;; coerce in/out of :int with (:: x :Db) / (:: x :int) for inline-C only.
+(defopaque Db :int)
+
+;;; Stmt -- opaque handle to a sqlite3 prepared statement.
+;;; Storage is int64_t (sqlite3_stmt* cast). Construct via db-prepare / stmt-of.
+(defopaque Stmt :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -29,6 +42,22 @@
   r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
   ```)
 
+;;; __ok-db -- create an ok result wrapping a Db handle.
+(defn __ok-db [v : Db] : ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
+;;; __ok-stmt -- create an ok result wrapping a Stmt handle.
+(defn __ok-stmt [v : Stmt] : ptr<void>
+  ```c
+  #include <stdlib.h>
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
+  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+  ```)
+
 ;;; __ok? -- return true if a result is ok.
 (defn __ok? [r : ptr<void>] : bool
   ```c
@@ -38,6 +67,20 @@
 
 ;;; __ok-val -- extract the ok value from a result.
 (defn __ok-val [r : ptr<void>] : int
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
+
+;;; __ok-val-db -- extract the ok value as a Db handle.
+(defn __ok-val-db [r : ptr<void>] : Db
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
+
+;;; __ok-val-stmt -- extract the ok value as a Stmt handle.
+(defn __ok-val-stmt [r : ptr<void>] : Stmt
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
   return res->ok_val;
@@ -66,8 +109,8 @@
 ;; Private: raw SQLite3 C wrappers
 ;; -------------------------------------------------------------------------
 
-;;; __db-open-raw -- open a database; returns sqlite3* as :int (0 on failure).
-(defn __db-open-raw [path : cstr] : int
+;;; __db-open-raw -- open a database; returns sqlite3* as Db (0-handle on failure).
+(defn __db-open-raw [path : cstr] : Db
   ```c
   #include <sqlite3.h>
   sqlite3 *db = NULL;
@@ -79,22 +122,22 @@
   ```)
 
 ;;; __db-close-raw -- close a SQLite3 database handle.
-(defn __db-close-raw [db : int] : void
+(defn __db-close-raw [db : Db] : void
   ```c
   #include <sqlite3.h>
   sqlite3_close((sqlite3 *)(intptr_t)db);
   ```)
 
 ;;; __db-exec-raw -- execute SQL; returns SQLITE error code (0 = SQLITE_OK).
-(defn __db-exec-raw [db : int sql : cstr] : int
+(defn __db-exec-raw [db : Db sql : cstr] : int
   ```c
   #include <sqlite3.h>
   return (int64_t)sqlite3_exec((sqlite3 *)(intptr_t)db,
                                (const char *)sql, NULL, NULL, NULL);
   ```)
 
-;;; __db-prepare-raw -- prepare SQL; returns sqlite3_stmt* as :int (0 on failure).
-(defn __db-prepare-raw [db : int sql : cstr] : int
+;;; __db-prepare-raw -- prepare SQL; returns sqlite3_stmt* as Stmt (0-handle on failure).
+(defn __db-prepare-raw [db : Db sql : cstr] : Stmt
   ```c
   #include <sqlite3.h>
   sqlite3_stmt *stmt = NULL;
@@ -105,14 +148,14 @@
   ```)
 
 ;;; __ncols -- return column count for a prepared statement.
-(defn __ncols [stmt : int] : int
+(defn __ncols [stmt : Stmt] : int
   ```c
   #include <sqlite3.h>
   return (int64_t)sqlite3_column_count((sqlite3_stmt *)(intptr_t)stmt);
   ```)
 
 ;;; __colname-dup -- return a heap-copied column name at index i as :int.
-(defn __colname-dup [stmt : int i : int] : int
+(defn __colname-dup [stmt : Stmt i : int] : int
   ```c
   #include <sqlite3.h>
   #include <string.h>
@@ -125,7 +168,7 @@
   ```)
 
 ;;; __coltext-dup -- return a heap-copied column text value at index i as :int.
-(defn __coltext-dup [stmt : int i : int] : int
+(defn __coltext-dup [stmt : Stmt i : int] : int
   ```c
   #include <sqlite3.h>
   #include <string.h>
@@ -139,7 +182,7 @@
   ```)
 
 ;;; __step-raw -- step a statement; 1=row available, 0=done, -1=error.
-(defn __step-raw [stmt : int] : int
+(defn __step-raw [stmt : Stmt] : int
   ```c
   #include <sqlite3.h>
   int rc = sqlite3_step((sqlite3_stmt *)(intptr_t)stmt);
@@ -149,7 +192,7 @@
   ```)
 
 ;;; __finalize-raw -- finalize a prepared statement.
-(defn __finalize-raw [stmt : int] : void
+(defn __finalize-raw [stmt : Stmt] : void
   ```c
   #include <sqlite3.h>
   sqlite3_finalize((sqlite3_stmt *)(intptr_t)stmt);
@@ -163,7 +206,7 @@
 ;; order by counting down from i to 0, prepending each pair so column 0
 ;; ends up at the head of the list.
 ;;; __build-row -- build an alist from the current statement row position.
-(defn __build-row [stmt : int i : int acc : int] : int
+(defn __build-row [stmt : Stmt i : int acc : int] : int
   (if (< i 0)
     acc
     (__build-row stmt (- i 1)
@@ -173,7 +216,7 @@
 ;; Step through remaining rows, prepending each to acc; finalize when done.
 ;; Rows are returned in reverse SQLite output order (last row at list head).
 ;;; __collect-rows -- collect all result rows from stmt into a cons list.
-(defn __collect-rows [stmt : int ncols : int acc : int] : int
+(defn __collect-rows [stmt : Stmt ncols : int acc : int] : int
   (let [rc (__step-raw stmt)]
     (if (= rc 1)
       (__collect-rows stmt ncols
@@ -196,12 +239,12 @@
 ;;;
 ;;; Example:
 ;;;   (let [r (db-open "app.db")]
-;;;     (if (ok? r) (let [db (ok-val r)] ...) (println "open failed")))
+;;;     (if (ok? r) (let [db (db-of r)] ...) (println "open failed")))
 ;;;
 ;;; Since: P2
 (defn db-open [path : cstr] : ptr<void>
   (let [raw (__db-open-raw path)]
-    (if (not= raw 0) (__ok raw) (__err 0))))
+    (if (not= (:: raw :int) 0) (__ok-db raw) (__err 0))))
 
 ;;; db-close -- close a database handle opened with db-open.
 ;;;
@@ -215,7 +258,7 @@
 ;;;   (db-close db)
 ;;;
 ;;; Since: P2
-(defn db-close [db : int] : ptr<void>
+(defn db-close [db : Db] : ptr<void>
   (do (__db-close-raw db) (__ok 0)))
 
 ;;; db-exec -- execute a SQL statement that returns no rows.
@@ -232,7 +275,7 @@
 ;;;   (db-exec db "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)")
 ;;;
 ;;; Since: P2
-(defn db-exec [db : int sql : cstr] : ptr<void>
+(defn db-exec [db : Db sql : cstr] : ptr<void>
   (let [rc (__db-exec-raw db sql)]
     (if (= rc 0) (__ok 0) (__err 0))))
 
@@ -249,16 +292,16 @@
 ;;; Example:
 ;;;   (let [r (db-prepare db "INSERT INTO users (name) VALUES (?)")]
 ;;;     (if (ok? r)
-;;;       (let [stmt (ok-val r)]
+;;;       (let [stmt (stmt-of r)]
 ;;;         (stmt-bind-text stmt 1 "Alice")
 ;;;         (stmt-step stmt)
 ;;;         (stmt-finalize stmt))
 ;;;       (println "prepare failed")))
 ;;;
 ;;; Since: P2
-(defn db-prepare [db : int sql : cstr] : ptr<void>
+(defn db-prepare [db : Db sql : cstr] : ptr<void>
   (let [raw (__db-prepare-raw db sql)]
-    (if (not= raw 0) (__ok raw) (__err 0))))
+    (if (not= (:: raw :int) 0) (__ok-stmt raw) (__err 0))))
 
 ;;; db-query -- execute a SELECT and collect all rows as a list of alists.
 ;;;
@@ -280,11 +323,44 @@
 ;;;       (println "query failed")))
 ;;;
 ;;; Since: P2
-(defn db-query [db : int sql : cstr] : ptr<void>
+(defn db-query [db : Db sql : cstr] : ptr<void>
   (let [pr (db-prepare db sql)]
     (if (__ok? pr)
-      (let [stmt (__ok-val pr)]
+      (let [stmt (__ok-val-stmt pr)]
         (__ok (__collect-rows stmt (__ncols stmt) (__nil))))
       pr)))
+
+;;; db-of -- extract a typed Db handle from an ok result returned by db-open.
+;;;
+;;; Parameters:
+;;;   r -- result (ptr<void>) from db-open
+;;;
+;;; Returns:
+;;;   The Db handle stored in r. Caller is responsible for first checking
+;;;   (ok? r); reading from an err result yields a stale/zero handle.
+;;;
+;;; Example:
+;;;   (let [r (db-open "app.db")]
+;;;     (if (ok? r) (let [db (db-of r)] ...) (println "open failed")))
+;;;
+;;; Since: P2
+(defn db-of [r : ptr<void>] : Db
+  (__ok-val-db r))
+
+;;; stmt-of -- extract a typed Stmt handle from an ok result returned by db-prepare.
+;;;
+;;; Parameters:
+;;;   r -- result (ptr<void>) from db-prepare
+;;;
+;;; Returns:
+;;;   The Stmt handle stored in r. Caller is responsible for first checking (ok? r).
+;;;
+;;; Example:
+;;;   (let [r (db-prepare db "SELECT 1")]
+;;;     (if (ok? r) (let [stmt (stmt-of r)] ...) (println "prepare failed")))
+;;;
+;;; Since: P2
+(defn stmt-of [r : ptr<void>] : Stmt
+  (__ok-val-stmt r))
 
 ) ;; end defmodule sqlite/db

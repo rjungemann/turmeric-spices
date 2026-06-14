@@ -5,6 +5,7 @@
 ;; All name/value strings are heap-allocated copies stable after stmt finalize.
 
 (defmodule sqlite/row
+  (import sqlite/db :refer [Stmt])
   (export row-get row-keys
           col-count col-name col-int col-real col-text col-type)
 
@@ -20,7 +21,7 @@
 ;;;   (col-count stmt)  ; => 3
 ;;;
 ;;; Since: P2
-(defn col-count [stmt : int] : int
+(defn col-count [stmt : Stmt] : int
   ```c
   #include <sqlite3.h>
   return (int64_t)sqlite3_column_count((sqlite3_stmt *)(intptr_t)stmt);
@@ -39,7 +40,7 @@
 ;;;   (col-name stmt 0)  ; => "id"
 ;;;
 ;;; Since: P2
-(defn col-name [stmt : int i : int] : cstr
+(defn col-name [stmt : Stmt i : int] : cstr
   ```c
   #include <sqlite3.h>
   const char *n = sqlite3_column_name((sqlite3_stmt *)(intptr_t)stmt, (int)i);
@@ -59,7 +60,7 @@
 ;;;   (col-int stmt 0)  ; => 42
 ;;;
 ;;; Since: P2
-(defn col-int [stmt : int i : int] : int
+(defn col-int [stmt : Stmt i : int] : int
   ```c
   #include <sqlite3.h>
   return (int64_t)sqlite3_column_int64((sqlite3_stmt *)(intptr_t)stmt, (int)i);
@@ -78,7 +79,7 @@
 ;;;   (col-real stmt 1)  ; => 3.14
 ;;;
 ;;; Since: P2
-(defn col-real [stmt : int i : int] : float
+(defn col-real [stmt : Stmt i : int] : float
   ```c
   #include <sqlite3.h>
   return sqlite3_column_double((sqlite3_stmt *)(intptr_t)stmt, (int)i);
@@ -97,7 +98,7 @@
 ;;;   (col-text stmt 1)  ; => "Alice"
 ;;;
 ;;; Since: P2
-(defn col-text [stmt : int i : int] : cstr
+(defn col-text [stmt : Stmt i : int] : cstr
   ```c
   #include <sqlite3.h>
   const char *v = (const char *)sqlite3_column_text(
@@ -118,7 +119,7 @@
 ;;;   (col-type stmt 0)  ; => 1 (SQLITE_INTEGER)
 ;;;
 ;;; Since: P2
-(defn col-type [stmt : int i : int] : int
+(defn col-type [stmt : Stmt i : int] : int
   ```c
   #include <sqlite3.h>
   return (int64_t)sqlite3_column_type((sqlite3_stmt *)(intptr_t)stmt, (int)i);
