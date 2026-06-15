@@ -1,17 +1,19 @@
 ;; regex/capture.tur -- capture group accessors for regex-match results.
 ;;
-;; A match-data handle is an opaque :int wrapping a heap-allocated struct
-;; { pcre2_match_data*, const char* subject, size_t subject_len }.
-;; The handle is produced by regex-match / regex-match-all and must be freed
-;; by the caller (or left for GC).
+;; A Match handle is the nominal opaque defined by regex/regex; it wraps a
+;; heap-allocated struct { pcre2_match_data*, char* subject, size_t len,
+;; int match_count, pcre2_code* re }. Produced by regex-match /
+;; regex-match-all and freed by the caller (or left for GC).
 
 (defmodule regex/capture
   (export capture-count capture-at capture-named)
 
-;;; capture-count -- number of captured substrings in a match result.
+(import regex/regex :refer [Match])
+
+;;; capture-count -- number of captured substrings in a Match.
 ;;;
 ;;; Parameters:
-;;;   match -- :int match handle from regex-match
+;;;   match -- Match handle from regex-match
 ;;;
 ;;; Returns:
 ;;;   :int -- number of captured groups (0 = only full match in group 0)
@@ -19,8 +21,8 @@
 ;;; Example:
 ;;;   (capture-count m)  ; => 2
 ;;;
-;;; Since: P6
-(defn capture-count [match : int] : int
+;;; Since: P6 (typed in 0.2.0)
+(defn capture-count [match : Match] : int
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -38,7 +40,7 @@
 ;;; capture-at -- substring captured by a numbered group.
 ;;;
 ;;; Parameters:
-;;;   match -- :int match handle from regex-match
+;;;   match -- Match handle from regex-match
 ;;;   idx   -- group index (0 = full match, 1 = first capture group, ...)
 ;;;
 ;;; Returns:
@@ -48,8 +50,8 @@
 ;;;   (capture-at m 0)  ; full match
 ;;;   (capture-at m 1)  ; first capture group
 ;;;
-;;; Since: P6
-(defn capture-at [match : int idx : int] : cstr
+;;; Since: P6 (typed in 0.2.0)
+(defn capture-at [match : Match idx : int] : cstr
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -79,7 +81,7 @@
 ;;; capture-named -- substring captured by a named group.
 ;;;
 ;;; Parameters:
-;;;   match -- :int match handle from regex-match
+;;;   match -- Match handle from regex-match
 ;;;   name  -- group name as it appears in the pattern (e.g. "year")
 ;;;
 ;;; Returns:
@@ -88,8 +90,8 @@
 ;;; Example:
 ;;;   (capture-named m "year")
 ;;;
-;;; Since: P6
-(defn capture-named [match : int name : cstr] : cstr
+;;; Since: P6 (typed in 0.2.0)
+(defn capture-named [match : Match name : cstr] : cstr
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>

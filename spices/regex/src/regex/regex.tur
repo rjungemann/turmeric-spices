@@ -1,59 +1,49 @@
 ;; regex/regex.tur -- PCRE2 regex compile, match, and replace.
 ;;
-;; Pattern handles are heap-allocated pcre2_code* wrapped in a thin struct.
-;; Match handles carry the match-data, subject string, and the compiled re
-;; (for named-group lookup in regex/capture).
+;; Public handles are nominally distinct opaques:
+;;   Regex -- compiled pattern (wraps pcre2_code*)
+;;   Match -- match-data + subject snapshot + source pattern ref
+;; Both lower to int64 at runtime, but the type checker treats them as
+;; distinct nominal identities so swapping a Match for a Regex (or either
+;; for a raw :int) is a compile error.
 ;;
-;; regex-match-all returns a cons-list of match handles (one per match).
+;; Result-returning entry points are typed as `(Result Regex cstr)` etc.
+;; so `(ok-val r)` carries the correct ok-arm type without needing a
+;; per-call-site `(:: ... (Result Regex cstr))` ascription.
+;;
+;; regex-match-all returns a cons-list of Match handles (one per match).
 
 (defmodule regex/regex
-  (export regex-compile regex-free regex-match regex-match-all regex-replace)
+  (export Regex Match
+          regex-compile regex-free regex-match regex-match-all regex-replace)
 
-;; Private result helpers matching stdlib/result.tur layout
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __rr *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0;
-  return r;
-  ```)
+;;; Regex -- compiled PCRE2 pattern handle.
+;;; Wraps a heap-allocated `struct { pcre2_code *re; }`. Free with regex-free.
+;;; Since: 0.2.0
+(defopaque Regex :int)
 
-(defn __err [msg : cstr] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __rr *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = (int64_t)(intptr_t)msg;
-  return r;
-  ```)
+;;; Match -- result of a successful match against a Regex.
+;;; Wraps a heap-allocated match-data + subject snapshot. Consumed by
+;;; capture-at / capture-named / capture-count.
+;;; Since: 0.2.0
+(defopaque Match :int)
 
-;; Private cons helpers matching stdlib/list.tur layout
-(defn __cons [v : int n : int] : int
-  ```c
-  #include <stdlib.h>
-  struct __lc { int64_t value; int64_t next; };
-  struct __lc *c = malloc(sizeof(*c));
-  c->value = v; c->next = n;
-  return (int64_t)(intptr_t)c;
-  ```)
-
-;;; regex-compile -- compile a PCRE2 pattern into a reusable regex handle.
+;;; regex-compile -- compile a PCRE2 pattern into a reusable Regex handle.
 ;;;
 ;;; Parameters:
 ;;;   pattern -- PCRE2 pattern string, e.g. "(?P<year>\\d{4})-(?P<month>\\d{2})"
 ;;;   flags   -- option flags as :int (0 for defaults, or PCRE2_CASELESS = 0x00000008)
 ;;;
 ;;; Returns:
-;;;   result<:int> -- ok(regex-handle) on success, err(:cstr message) on failure.
-;;;   Free with regex-free when done.
+;;;   (Result Regex cstr) -- ok(Regex) on success, err(msg) on parse failure.
+;;;   Free the Regex with regex-free when done.
 ;;;
 ;;; Example:
 ;;;   (let [r (regex-compile "\\d+" 0)]
 ;;;     (when (ok? r) (regex-match (ok-val r) "abc123")))
 ;;;
-;;; Since: P6
-(defn regex-compile [pattern : cstr flags : int] : ptr<void>
+;;; Since: P6 (typed as Result in 0.2.0)
+(defn regex-compile [pattern : cstr flags : int] : (Result Regex cstr)
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -66,33 +56,29 @@
     PCRE2_ZERO_TERMINATED,
     (uint32_t)flags,
     &errcode, &erroffset, NULL);
-  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __rr *res = malloc(sizeof(*res));
   if (!re) {
     char buf[256];
     pcre2_get_error_message(errcode, (PCRE2_UCHAR8 *)buf, sizeof(buf));
     size_t blen = strlen(buf) + 32;
     char *emsg = malloc(blen);
     snprintf(emsg, blen, "offset %zu: %s", erroffset, buf);
-    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
-    return res;
+    return tur_err((int64_t)(intptr_t)emsg);
   }
   struct __re_wrap { pcre2_code *re; } *w = malloc(sizeof(*w));
   w->re = re;
-  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)w; res->err_val = 0;
-  return res;
+  return tur_ok((int64_t)(intptr_t)w);
   ```)
 
-;;; regex-free -- free a compiled regex handle.
+;;; regex-free -- free a compiled Regex handle.
 ;;;
 ;;; Parameters:
-;;;   re -- :int regex handle (unwrapped ok-val from regex-compile)
+;;;   re -- Regex handle (unwrapped ok-val from regex-compile)
 ;;;
 ;;; Example:
 ;;;   (regex-free (ok-val r))
 ;;;
-;;; Since: P6
-(defn regex-free [re : int] : void
+;;; Since: P6 (typed as Regex in 0.2.0)
+(defn regex-free [re : Regex] : void
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -102,22 +88,22 @@
   free(w);
   ```)
 
-;;; regex-match -- match a compiled regex against a subject string (first match only).
+;;; regex-match -- match a compiled Regex against a subject string (first match only).
 ;;;
 ;;; Parameters:
-;;;   re      -- :int regex handle from regex-compile
+;;;   re      -- Regex handle from regex-compile
 ;;;   subject -- string to search
 ;;;
 ;;; Returns:
-;;;   result<:int> -- ok(match-handle) on match, err(:cstr) on no-match or error.
+;;;   (Result Match cstr) -- ok(Match) on match, err(msg) on no-match or error.
 ;;;   Use capture-at / capture-named from regex/capture to inspect.
 ;;;
 ;;; Example:
 ;;;   (let [m (regex-match re "hello 42 world")]
 ;;;     (when (ok? m) (capture-at (ok-val m) 0)))
 ;;;
-;;; Since: P6
-(defn regex-match [re : int subject : cstr] : ptr<void>
+;;; Since: P6 (typed in 0.2.0)
+(defn regex-match [re : Regex subject : cstr] : (Result Match cstr)
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -131,7 +117,6 @@
     int               match_count;
     pcre2_code       *re;
   };
-  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
 
   struct __re_wrap *w = (struct __re_wrap *)(intptr_t)re;
   const char *sub = (const char *)subject;
@@ -140,7 +125,6 @@
   pcre2_match_data *md = pcre2_match_data_create_from_pattern(w->re, NULL);
   int rc = pcre2_match(w->re, (PCRE2_SPTR8)sub, sub_len, 0, 0, md, NULL);
 
-  struct __rr *res = malloc(sizeof(*res));
   if (rc < 0) {
     pcre2_match_data_free(md);
     char buf[128];
@@ -148,8 +132,7 @@
     size_t bl = strlen(buf);
     char *emsg = malloc(bl + 1);
     memcpy(emsg, buf, bl + 1);
-    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
-    return res;
+    return tur_err((int64_t)(intptr_t)emsg);
   }
 
   char *sub_copy = malloc(sub_len + 1);
@@ -162,26 +145,25 @@
   m->match_count = rc;
   m->re          = w->re;
 
-  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)m; res->err_val = 0;
-  return res;
+  return tur_ok((int64_t)(intptr_t)m);
   ```)
 
 ;;; regex-match-all -- find all non-overlapping matches in a subject string.
 ;;;
 ;;; Parameters:
-;;;   re      -- :int regex handle from regex-compile
+;;;   re      -- Regex handle from regex-compile
 ;;;   subject -- string to search
 ;;;
 ;;; Returns:
-;;;   :int -- cons-list of match handles (may be empty / nil-value if no matches).
-;;;   Each element is a match handle usable with capture-at / capture-named.
+;;;   :int -- cons-list of Match handles (may be empty / nil if no matches).
+;;;   Each element is a Match usable with capture-at / capture-named.
 ;;;
 ;;; Example:
 ;;;   (let [ms (regex-match-all re "one 1 two 2")]
 ;;;     (for [m ms] (println (capture-at m 0))))
 ;;;
-;;; Since: P6
-(defn regex-match-all [re : int subject : cstr] : int
+;;; Since: P6 (typed in 0.2.0)
+(defn regex-match-all [re : Regex subject : cstr] : int
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
@@ -242,27 +224,26 @@
 ;;; regex-replace -- replace matches of a pattern with a replacement string.
 ;;;
 ;;; Parameters:
-;;;   re          -- :int regex handle from regex-compile
+;;;   re          -- Regex handle from regex-compile
 ;;;   subject     -- input string
 ;;;   replacement -- replacement string; use $1, $2 for backreferences
 ;;;   global      -- if non-zero, replace all matches; otherwise replace first only
 ;;;
 ;;; Returns:
-;;;   result<:cstr> -- ok(result-string) or err(:cstr message)
+;;;   (Result cstr cstr) -- ok(result-string) or err(message)
 ;;;
 ;;; Example:
 ;;;   (regex-replace re "hello world" "there" 0)  ; replace first
 ;;;   (regex-replace re "aaa" "b" 1)              ; replace all
 ;;;
-;;; Since: P6
-(defn regex-replace [re : int subject : cstr replacement : cstr global : int] : ptr<void>
+;;; Since: P6 (typed in 0.2.0)
+(defn regex-replace [re : Regex subject : cstr replacement : cstr global : int] : (Result cstr cstr)
   ```c
   #define PCRE2_CODE_UNIT_WIDTH 8
   #include <pcre2.h>
   #include <stdlib.h>
   #include <string.h>
   struct __re_wrap { pcre2_code *re; };
-  struct __rr { bool is_ok; int64_t ok_val; int64_t err_val; };
 
   struct __re_wrap *w = (struct __re_wrap *)(intptr_t)re;
   const char *sub  = (const char *)subject;
@@ -282,7 +263,6 @@
     (PCRE2_SPTR8)repl, strlen(repl),
     (PCRE2_UCHAR8 *)out_buf, &out_len);
 
-  struct __rr *res = malloc(sizeof(*res));
   if (rc < 0) {
     free(out_buf);
     char buf[128];
@@ -290,8 +270,7 @@
     size_t bl = strlen(buf);
     char *emsg = malloc(bl + 1);
     memcpy(emsg, buf, bl + 1);
-    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
-    return res;
+    return tur_err((int64_t)(intptr_t)emsg);
   }
 
   /* out_len is updated by pcre2_substitute to the output length */
@@ -300,8 +279,7 @@
   final[out_len] = '\0';
   free(out_buf);
 
-  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)final; res->err_val = 0;
-  return res;
+  return tur_ok((int64_t)(intptr_t)final);
   ```)
 
 ) ;; end defmodule regex/regex
