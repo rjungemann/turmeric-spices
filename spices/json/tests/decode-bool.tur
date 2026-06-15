@@ -1,0 +1,43 @@
+;; P2a Decode [bool] -- accept literal true/false; reject non-boolean
+;; (numbers, strings) with an err.
+;;
+;; The Result helpers are inlined into each call (rather than threaded
+;; through a typed helper fn) to avoid the open polymorphic-ok carrier/
+;; by-value ABI bug -- this fixture is intentionally written to exercise
+;; only the Decode [bool] instance, not the surrounding ABI seam.
+;;
+;; Expected:
+;;   1
+;;   0
+;;   err
+;;   err
+
+(defmodule decode_bool_test (export)
+
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
+(import json/encode)
+
+(defn show [b : bool] : void
+  (if b (println "1") (println "0")))
+
+(defn main [] : int
+  (let [doc  (unsafe (json-parse-doc "{\"a\":true,\"b\":false,\"c\":42,\"d\":\"true\"}"))
+        root (unsafe (json-doc-root doc))
+        a    (unsafe (json-obj-get doc root "a"))
+        b    (unsafe (json-obj-get doc root "b"))
+        c    (unsafe (json-obj-get doc root "c"))
+        d    (unsafe (json-obj-get doc root "d"))]
+    (if (err? (:: (decode doc a) (Result bool cstr)))
+      (println "err")
+      (show (ok-val (:: (decode doc a) (Result bool cstr)))))
+    (if (err? (:: (decode doc b) (Result bool cstr)))
+      (println "err")
+      (show (ok-val (:: (decode doc b) (Result bool cstr)))))
+    (if (err? (:: (decode doc c) (Result bool cstr)))
+      (println "err")
+      (show (ok-val (:: (decode doc c) (Result bool cstr)))))
+    (if (err? (:: (decode doc d) (Result bool cstr)))
+      (println "err")
+      (show (ok-val (:: (decode doc d) (Result bool cstr)))))
+    (unsafe (json-doc-free doc))
+    0)))

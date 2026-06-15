@@ -272,6 +272,22 @@
   return tur_ok((int64_t)(intptr_t)out);
   ```))
 
+;;; Decode [bool] -- accept literal `true` / `false` at `val`; reject
+;;; anything else (including numeric `0`/`1`) so the spice keeps strict
+;;; JSON-boolean semantics.
+(definstance Decode [bool] (decode [doc val]
+  ```c
+  typedef struct { char *src; size_t len; } __jdoc;
+  __jdoc *d = (__jdoc *)(intptr_t)doc;
+  if (!d || val < 0 || (size_t)val >= d->len) {
+    return tur_err((int64_t)(intptr_t)"decode bool: out-of-range val handle");
+  }
+  size_t i = (size_t)val;
+  if (i + 4 <= d->len && memcmp(d->src + i, "true",  4) == 0) return tur_ok((int64_t)1);
+  if (i + 5 <= d->len && memcmp(d->src + i, "false", 5) == 0) return tur_ok((int64_t)0);
+  return tur_err((int64_t)(intptr_t)"decode bool: not a boolean");
+  ```))
+
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry
 ;; expands to `(ok-val (:: (decode doc (json-obj-get doc val "fname"))
