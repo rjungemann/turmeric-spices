@@ -1,0 +1,102 @@
+;;; ecs/sized-world -- sized-defworld macro for bounded-capacity worlds.
+;;;
+;;; Lowers `sized-defworld Name [Comp1 Comp2 ...]` to a polymorphic
+;;; defstruct `(Name n)` whose component fields are typed
+;;; (SizedDense n Comp) -- one storage per declared component -- plus
+;;; a `live` counter. Callers materialise a concrete world by
+;;; ascription:
+;;;
+;;;   (let [w : (GameWorld (Static 64)) (make-game-world 64)] ...)
+;;;
+;;; Per-storage capacity allocation comes from the runtime int arg
+;;; passed to the generated `make-<world-name>` constructor; the
+;;; type-level `n` is the load-bearing part -- it threads through
+;;; every field so the SZ8 cross-parameter unifier proves
+;;; rectangularity across components statically.
+;;;
+;;; The polymorphic form was chosen for slice 3 (over a monomorphic
+;;; (defworld GameWorld (Static 64) [Pos Vel]) sugar) because the
+;;; defstruct field-type slot in turmeric 0.20.0 does not yet accept
+;;; an unquote-spliced list (the quasi-quote / defstruct field-type
+;;; parser interaction); reported separately. A monomorphic alias is
+;;; trivially expressed via `(deftype GW64 (GameWorld (Static 64)))`.
+;;;
+;;; Arity is capped at four components for slice 3.
+;;;
+;;; Since: E2c slice 3 -- see docs/upcoming/ecs-sized-world-plan.md.
+
+(defmodule ecs/sized-world
+  (export sized-defworld)
+
+(import ecs/sized-storage :refer [SizedDense sized-dense-new])
+
+;; Slice 3 unrolled per-arity (1..4). Each branch builds the
+;; field list and constructor args as quasi-quoted forms inline,
+;; sidestepping the macro-helper return-value problem.
+
+(defmacro sized-defworld [name comps]
+  (let [ctor-name (str->sym (str-append "make-" (symbol-name name)))]
+    (if (empty? comps)
+      `(do
+         (defstruct ~name [n] (live int))
+         (defn ~ctor-name [n] [k : int] : (~name n)
+           (make-struct ~name 0)))
+      (if (empty? (rest comps))
+        (let [c1 (first comps)]
+          `(do
+             (defstruct ~name [n]
+               (~c1 (SizedDense n ~c1))
+               (live int))
+             (defn ~ctor-name [n] [k : int] : (~name n)
+               (make-struct ~name
+                            (:: (sized-dense-new k) (SizedDense n ~c1))
+                            0))))
+        (if (empty? (rest (rest comps)))
+          (let [c1 (first comps)
+                c2 (first (rest comps))]
+            `(do
+               (defstruct ~name [n]
+                 (~c1 (SizedDense n ~c1))
+                 (~c2 (SizedDense n ~c2))
+                 (live int))
+               (defn ~ctor-name [n] [k : int] : (~name n)
+                 (make-struct ~name
+                              (:: (sized-dense-new k) (SizedDense n ~c1))
+                              (:: (sized-dense-new k) (SizedDense n ~c2))
+                              0))))
+          (if (empty? (rest (rest (rest comps))))
+            (let [c1 (first comps)
+                  c2 (first (rest comps))
+                  c3 (first (rest (rest comps)))]
+              `(do
+                 (defstruct ~name [n]
+                   (~c1 (SizedDense n ~c1))
+                   (~c2 (SizedDense n ~c2))
+                   (~c3 (SizedDense n ~c3))
+                   (live int))
+                 (defn ~ctor-name [n] [k : int] : (~name n)
+                   (make-struct ~name
+                                (:: (sized-dense-new k) (SizedDense n ~c1))
+                                (:: (sized-dense-new k) (SizedDense n ~c2))
+                                (:: (sized-dense-new k) (SizedDense n ~c3))
+                                0))))
+            (let [c1 (first comps)
+                  c2 (first (rest comps))
+                  c3 (first (rest (rest comps)))
+                  c4 (first (rest (rest (rest comps))))]
+              `(do
+                 (defstruct ~name [n]
+                   (~c1 (SizedDense n ~c1))
+                   (~c2 (SizedDense n ~c2))
+                   (~c3 (SizedDense n ~c3))
+                   (~c4 (SizedDense n ~c4))
+                   (live int))
+                 (defn ~ctor-name [n] [k : int] : (~name n)
+                   (make-struct ~name
+                                (:: (sized-dense-new k) (SizedDense n ~c1))
+                                (:: (sized-dense-new k) (SizedDense n ~c2))
+                                (:: (sized-dense-new k) (SizedDense n ~c3))
+                                (:: (sized-dense-new k) (SizedDense n ~c4))
+                                0))))))))))
+
+) ;; end defmodule ecs/sized-world
