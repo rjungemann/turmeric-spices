@@ -1,0 +1,32 @@
+;; E2c slice 1 negative regression -- sized-dense-zip-len shares `n`
+;; across its two SizedDense parameters. When the callers pin `n` to
+;; distinct literal sizes ((Static 2) vs (Static 3)), the SZ8 cross-
+;; parameter unifier rejects the call at compile time with TUR-E0260
+;; -- replacing the prior runtime min-cap probe with a static
+;; guarantee.
+;;
+;; Companion to the accept case: tests/sized-dense-rt.tur.
+;;
+;; Compile with -Xsized-types.
+;; Expected: TUR-E0260 with "shares size variable 'n'" + "argument 1
+;; has size 2" + "argument 2 has size 3".
+
+(defmodule sized_dense_cross_param_reject_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense sized-dense-new
+                                   sized-dense-zip-len])
+
+(defn mk-2 [] : (SizedDense (Static 2) int)
+  (:: (sized-dense-new 2) :SizedDense))
+
+(defn mk-3 [] : (SizedDense (Static 3) int)
+  (:: (sized-dense-new 3) :SizedDense))
+
+(defn main [] : int
+  ;; ERROR: TUR-E0260 -- (Static 2) cannot unify with (Static 3) for
+  ;; the shared `n` of sized-dense-zip-len's two parameters.
+  (sized-dense-zip-len (mk-2) (mk-3))
+  0)
+
+) ;; end defmodule sized_dense_cross_param_reject_test

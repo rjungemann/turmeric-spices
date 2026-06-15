@@ -1,0 +1,53 @@
+;; E2c slice 1 -- (SizedDense n A) round-trip + cross-parameter
+;; rectangularity probe.
+;;
+;; Allocates two (SizedDense (Static 4) int) storages, populates both,
+;; verifies values round-trip, then calls sized-dense-zip-len -- whose
+;; signature shares `n` across both parameters. The call elaborates
+;; without a runtime min-cap probe because the SZ8 cross-parameter
+;; unifier proves the two storages have matching size indices.
+;;
+;; Expected output:
+;;   4
+;;   4
+;;   10
+;;   20
+;;   30
+;;   40
+;;   4
+
+(defmodule sized_dense_rt_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense
+                                   sized-dense-new sized-dense-len
+                                   sized-dense-set! sized-dense-get
+                                   sized-dense-free sized-dense-zip-len])
+
+(defn populate-int! [s : (SizedDense (Static 4) int) base : int] : nil
+  (do
+    (sized-dense-set! s 0 (+ base 0))
+    (sized-dense-set! s 1 (+ base 1))
+    (sized-dense-set! s 2 (+ base 2))
+    (sized-dense-set! s 3 (+ base 3))))
+
+(defn main [] : int
+  (let [a : (SizedDense (Static 4) int) (sized-dense-new 4)
+        b : (SizedDense (Static 4) int) (sized-dense-new 4)]
+    (do
+      (populate-int! a 10)
+      (populate-int! b 100)
+      (println (sized-dense-len a))            ;; 4
+      (println (sized-dense-len b))            ;; 4
+      (println (sized-dense-get a 0))          ;; 10
+      (println (+ (sized-dense-get a 1) 9))    ;; 20  (11 + 9)
+      (println (- (sized-dense-get a 2) (- 0 18))) ;; 30 (12 + 18)
+      (println (+ (sized-dense-get a 3) 27))   ;; 40
+      ;; Cross-parameter unification: a and b share n=(Static 4),
+      ;; so sized-dense-zip-len type-checks without a runtime probe.
+      (println (sized-dense-zip-len a b))      ;; 4
+      (sized-dense-free a)
+      (sized-dense-free b)
+      0)))
+
+) ;; end defmodule sized_dense_rt_test
