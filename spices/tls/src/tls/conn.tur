@@ -16,9 +16,29 @@
 ;; handles, matching the convention in tls/ctx and the postgres spice.
 
 (defmodule tls/conn
-  (export tls-wrap-fd tls-handshake
+  (export TlsConn tls-conn-null?
+          tls-wrap-fd tls-handshake
           tls-read tls-write
           tls-shutdown tls-free)
+
+(import tls/ctx :refer [TlsCtx])
+
+;;; TlsConn -- per-connection TLS state handle.
+;;; Wraps a heap-allocated `tls_conn_t*` (mbedTLS ssl_context + net_context).
+;;; Construct with tls-wrap-fd; release with tls-free (does NOT close the
+;;; underlying fd -- the caller owns that lifecycle).
+;;; tls-wrap-fd returns a null handle on allocation or ssl_setup failure;
+;;; test with tls-conn-null? before passing the handle on.
+;;; Since: 0.2.0
+(defopaque TlsConn :int)
+
+;;; tls-conn-null? -- true if `conn` is the failure-sentinel returned by tls-wrap-fd.
+;;; Replaces the `(= conn 0)` literal-int test now that TlsConn is nominal.
+;;; Since: 0.2.0
+(defn tls-conn-null? [conn : TlsConn] : bool
+  ```c
+  return conn == 0;
+  ```)
 
 ;; Both struct layouts (the public tls_conn_t and the private
 ;; tls_ctx_t from tls/ctx) are duplicated as typedefs in each
@@ -56,7 +76,7 @@
 ;;;     (tls-free conn))
 ;;;
 ;;; Since: T3
-(defn tls-wrap-fd [ctx : int fd : int] : int
+(defn tls-wrap-fd [ctx : TlsCtx fd : int] : TlsConn
   ```c
   /* __tur_include__: #include <stdlib.h> */
   /* __tur_include__: #include "mbedtls/ssl.h" */
@@ -112,7 +132,7 @@
 ;;;   reset, cert mismatch, version mismatch, ...).
 ;;;
 ;;; Since: T3
-(defn tls-handshake [conn : int] : int
+(defn tls-handshake [conn : TlsConn] : int
   ```c
   typedef struct {
     mbedtls_ssl_context ssl;
@@ -144,7 +164,7 @@
 ;;;   may return fewer bytes than requested.
 ;;;
 ;;; Since: T3
-(defn tls-read [conn : int buf : int len : int] : int
+(defn tls-read [conn : TlsConn buf : int len : int] : int
   ```c
   typedef struct {
     mbedtls_ssl_context ssl;
@@ -175,7 +195,7 @@
 ;;;   failure. May return fewer bytes than requested.
 ;;;
 ;;; Since: T3
-(defn tls-write [conn : int buf : int len : int] : int
+(defn tls-write [conn : TlsConn buf : int len : int] : int
   ```c
   typedef struct {
     mbedtls_ssl_context ssl;
@@ -203,7 +223,7 @@
 ;;;   conn -- handle from tls-wrap-fd. 0 is a safe no-op.
 ;;;
 ;;; Since: T3
-(defn tls-shutdown [conn : int] : void
+(defn tls-shutdown [conn : TlsConn] : void
   ```c
   typedef struct {
     mbedtls_ssl_context ssl;
@@ -229,7 +249,7 @@
 ;;;   conn -- handle from tls-wrap-fd. 0 is a safe no-op.
 ;;;
 ;;; Since: T3
-(defn tls-free [conn : int] : void
+(defn tls-free [conn : TlsConn] : void
   ```c
   /* __tur_include__: #include <stdlib.h> */
   typedef struct {

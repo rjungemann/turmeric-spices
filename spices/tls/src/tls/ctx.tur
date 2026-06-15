@@ -15,8 +15,25 @@
 ;; generated translation unit's top.
 
 (defmodule tls/ctx
-  (export tls-ctx-new tls-ctx-free
+  (export TlsCtx tls-ctx-null?
+          tls-ctx-new tls-ctx-free
           tls-ctx-load-cert-pem tls-ctx-load-key-pem)
+
+;;; TlsCtx -- server-side TLS context handle.
+;;; Wraps a heap-allocated `tls_ctx_t*` (mbedTLS ssl_config + cert chain
+;;; + private key + RNG). Construct with tls-ctx-new; free with tls-ctx-free.
+;;; tls-ctx-new returns a null handle on allocation or RNG-seed failure;
+;;; test with tls-ctx-null? before passing the handle on.
+;;; Since: 0.2.0
+(defopaque TlsCtx :int)
+
+;;; tls-ctx-null? -- true if `ctx` is the failure-sentinel returned by tls-ctx-new.
+;;; Replaces the `(= ctx 0)` literal-int test now that TlsCtx is nominal.
+;;; Since: 0.2.0
+(defn tls-ctx-null? [ctx : TlsCtx] : bool
+  ```c
+  return ctx == 0;
+  ```)
 
 ;; The C-side struct that backs each TLS context handle. The typedef is
 ;; duplicated in every defn's inline-C body because each Turmeric defn
@@ -42,7 +59,7 @@
 ;;;     (tls-ctx-free ctx))
 ;;;
 ;;; Since: T2
-(defn tls-ctx-new [] : int
+(defn tls-ctx-new [] : TlsCtx
   ```c
   /* __tur_include__: #include <stdlib.h> */
   /* __tur_include__: #include <string.h> */
@@ -100,7 +117,7 @@ fail:
 ;;;   ctx -- handle returned by tls-ctx-new. 0 is a safe no-op.
 ;;;
 ;;; Since: T2
-(defn tls-ctx-free [ctx : int] : void
+(defn tls-ctx-free [ctx : TlsCtx] : void
   ```c
   typedef struct {
     mbedtls_ssl_config       conf;
@@ -132,7 +149,7 @@ fail:
 ;;;   not a PEM, malformed, etc.).
 ;;;
 ;;; Since: T2
-(defn tls-ctx-load-cert-pem [ctx : int path : cstr] : int
+(defn tls-ctx-load-cert-pem [ctx : TlsCtx path : cstr] : int
   ```c
   typedef struct {
     mbedtls_ssl_config       conf;
@@ -162,7 +179,7 @@ fail:
 ;;;   conf-bind failure.
 ;;;
 ;;; Since: T2
-(defn tls-ctx-load-key-pem [ctx : int path : cstr] : int
+(defn tls-ctx-load-key-pem [ctx : TlsCtx path : cstr] : int
   ```c
   typedef struct {
     mbedtls_ssl_config       conf;

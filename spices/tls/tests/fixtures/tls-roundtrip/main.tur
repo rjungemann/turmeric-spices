@@ -26,9 +26,10 @@
 ;; inline-C in run-roundtrip when calling pthread_create.
 
 (defmodule roundtrip
-  (import tls/ctx      :refer [tls-ctx-new tls-ctx-free
+  (import tls/ctx      :refer [tls-ctx-new tls-ctx-free tls-ctx-null?
                                 tls-ctx-load-cert-pem tls-ctx-load-key-pem])
-  (import tls/conn     :refer [tls-wrap-fd tls-handshake
+  (import tls/conn     :refer [TlsConn tls-conn-null?
+                                tls-wrap-fd tls-handshake
                                 tls-read tls-write
                                 tls-shutdown tls-free])
   (import tls/autolink :refer [tls-autolink-hint])
@@ -37,7 +38,7 @@
   ;; bytes back. Returns 0 on a clean exchange, non-zero on any failure.
   ;; Buffer is malloc'd via inline-C since tls-read/write take :int
   ;; pointers; we don't expose a Turmeric-side buffer type for v0.1.0.
-  (defn echo-once [conn : int] : int
+  (defn echo-once [conn : TlsConn] : int
     ```c
     /* __tur_include__: #include <stdlib.h> */
     unsigned char *buf = (unsigned char *)malloc(64);
@@ -57,7 +58,7 @@
   ;; tls/ctx and tls/conn entry point through the public API.
   (defn server-side [fd : int cert-path : cstr key-path : cstr] : int
     (let [ctx (tls-ctx-new)]
-      (if (= ctx 0)
+      (if (tls-ctx-null? ctx)
         1
         (let [crc (tls-ctx-load-cert-pem ctx cert-path)]
           (if (not (= crc 0))
@@ -66,7 +67,7 @@
               (if (not (= krc 0))
                 (do (tls-ctx-free ctx) 3)
                 (let [conn (tls-wrap-fd ctx fd)]
-                  (if (= conn 0)
+                  (if (tls-conn-null? conn)
                     (do (tls-ctx-free ctx) 4)
                     (let [hrc (tls-handshake conn)]
                       (if (not (= hrc 0))

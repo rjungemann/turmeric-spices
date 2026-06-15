@@ -12,7 +12,7 @@
 ;; checked; the program exits 0 only when every step succeeds.
 
 (defmodule tls-ctx-lifecycle-smoke
-  (import tls/ctx      :refer [tls-ctx-new tls-ctx-free
+  (import tls/ctx      :refer [tls-ctx-new tls-ctx-free tls-ctx-null?
                                 tls-ctx-load-cert-pem tls-ctx-load-key-pem])
   (import tls/autolink :refer [tls-autolink-hint])
 
@@ -22,7 +22,7 @@
     (tls-autolink-hint)
 
     (let [ctx (tls-ctx-new)]
-      (if (= ctx 0)
+      (if (tls-ctx-null? ctx)
         (do (println "FAIL: tls-ctx-new returned 0") 1)
         (let [cert-rc (tls-ctx-load-cert-pem ctx "/tmp/tls-smoke-test/test-cert.pem")]
           (if (not (= cert-rc 0))
