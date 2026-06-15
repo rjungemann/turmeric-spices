@@ -1,12 +1,14 @@
 ;; png/writer.tur -- PNG image writing via libpng.
 ;;
-;; png-write accepts an opaque :int image handle (struct __img*) from png/reader.
+;; png-write accepts an Img handle (struct __img*) from png/reader.
 ;; png-write-raw accepts raw pixel data directly without an image handle.
 ;; Results are compatible with stdlib/result.tur:
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule png/writer
   (export png-write png-write-raw)
+
+  (import png/info :refer [Img])
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -46,7 +48,7 @@
 ;;;     (if (ok? r) (println "written") (println "write failed")))
 ;;;
 ;;; Since: PN0
-(defn png-write [path : cstr img : int] : ptr<void>
+(defn png-write [path : cstr img : Img] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>

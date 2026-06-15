@@ -1,13 +1,15 @@
 ;; png/reader.tur -- PNG image reading via libpng.
 ;;
 ;; Images are stored in a heap-allocated __img struct with interleaved RGBA pixels.
-;; Handles returned by png-read are opaque :int (cast from struct __img* via intptr_t).
+;; Handles returned by png-read are the nominal Img opaque (lowered from struct __img*).
 ;; Results are compatible with stdlib/result.tur:
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 ;; All images are normalized to 8-bit RGBA on read (4 channels).
 
 (defmodule png/reader
   (export png-read img-free)
+
+  (import png/info :refer [Img])
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -139,7 +141,7 @@
 ;;;   (img-free img)
 ;;;
 ;;; Since: PN0
-(defn img-free [img : int] : void
+(defn img-free [img : Img] : void
   ```c
   #include <stdlib.h>
   struct __img {

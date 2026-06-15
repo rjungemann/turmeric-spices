@@ -1,12 +1,14 @@
 ;; wav/reader.tur -- WAV/PCM audio reading and seeking.
 ;;
-;; Handles are opaque :int (cast from struct __wav* via intptr_t).
+;; Handles are the nominal Wav opaque (lowered from struct __wav*).
 ;; Open handles with wav-open-read from wav/info; close with wav-close.
 ;; Results are compatible with stdlib/result.tur:
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule wav/reader
   (export wav-open-read wav-close wav-read-float wav-seek)
+
+  (import wav/info :refer [Wav])
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -79,7 +81,7 @@
 ;;;   (wav-close w)
 ;;;
 ;;; Since: WV0
-(defn wav-close [w : int] : void
+(defn wav-close [w : Wav] : void
   ```c
   #include <stdlib.h>
   #include <sndfile.h>
@@ -103,7 +105,7 @@
 ;;;     (println n))
 ;;;
 ;;; Since: WV0
-(defn wav-read-float [w : int buf : cstr frames : int] : int
+(defn wav-read-float [w : Wav buf : cstr frames : int] : int
   ```c
   #include <sndfile.h>
   struct __wav { SNDFILE *sf; SF_INFO info; };
@@ -126,7 +128,7 @@
 ;;;     (if (ok? r) (println "seeked") (println "seek failed")))
 ;;;
 ;;; Since: WV0
-(defn wav-seek [w : int frame-offset : int whence : cstr] : ptr<void>
+(defn wav-seek [w : Wav frame-offset : int whence : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>

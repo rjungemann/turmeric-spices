@@ -1,10 +1,12 @@
 ;; wav/writer.tur -- WAV/PCM audio writing.
 ;;
-;; Handles are opaque :int (cast from struct __wav* via intptr_t).
+;; Handles are the nominal Wav opaque (lowered from struct __wav*).
 ;; Open handles with wav-open-write from wav/info; close with wav-close.
 
 (defmodule wav/writer
   (export wav-open-write wav-write-float)
+
+  (import wav/info :refer [Wav])
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -95,7 +97,7 @@
 ;;;     (println n))
 ;;;
 ;;; Since: WV0
-(defn wav-write-float [w : int buf : cstr frames : int] : int
+(defn wav-write-float [w : Wav buf : cstr frames : int] : int
   ```c
   #include <sndfile.h>
   struct __wav { SNDFILE *sf; SF_INFO info; };

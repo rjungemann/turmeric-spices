@@ -1,12 +1,19 @@
 ;; png/info.tur -- image metadata accessors and pixel read/write operations.
 ;;
-;; Handles are opaque :int (cast from struct __img* via intptr_t).
+;; Handles are the nominal opaque Img (lowers to int64; wraps struct __img*).
 ;; Obtain handles from png-read in png/reader.
 ;; Pixel layout is row-major interleaved RGBA, 8 bits per channel.
 
 (defmodule png/info
-  (export img-width img-height img-channels img-bit-depth
+  (export Img
+          img-width img-height img-channels img-bit-depth
           img-pixels pixel-r pixel-g pixel-b pixel-a pixel-set!)
+
+;;; Img -- RGBA image handle.
+;;; Wraps a heap-allocated `struct __img { width, height, channels, bit_depth, pixels }`.
+;;; Construct with png-read; free with img-free.
+;;; Since: 0.2.0
+(defopaque Img :int)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -24,7 +31,7 @@
 ;;;   (println (img-width img))
 ;;;
 ;;; Since: PN0
-(defn img-width [img : int] : int
+(defn img-width [img : Img] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   return (int64_t)((struct __img *)(intptr_t)img)->width;
@@ -42,7 +49,7 @@
 ;;;   (println (img-height img))
 ;;;
 ;;; Since: PN0
-(defn img-height [img : int] : int
+(defn img-height [img : Img] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   return (int64_t)((struct __img *)(intptr_t)img)->height;
@@ -60,7 +67,7 @@
 ;;;   (println (img-channels img))
 ;;;
 ;;; Since: PN0
-(defn img-channels [img : int] : int
+(defn img-channels [img : Img] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   return (int64_t)((struct __img *)(intptr_t)img)->channels;
@@ -78,7 +85,7 @@
 ;;;   (println (img-bit-depth img))
 ;;;
 ;;; Since: PN0
-(defn img-bit-depth [img : int] : int
+(defn img-bit-depth [img : Img] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   return (int64_t)((struct __img *)(intptr_t)img)->bit_depth;
@@ -96,7 +103,7 @@
 ;;;   (let [buf (img-pixels img)] ...)
 ;;;
 ;;; Since: PN0
-(defn img-pixels [img : int] : cstr
+(defn img-pixels [img : Img] : cstr
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   return (char *)((struct __img *)(intptr_t)img)->pixels;
@@ -116,7 +123,7 @@
 ;;;   (println (pixel-r img 0 0))
 ;;;
 ;;; Since: PN0
-(defn pixel-r [img : int x : int y : int] : int
+(defn pixel-r [img : Img x : int y : int] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   struct __img *i = (struct __img *)(intptr_t)img;
@@ -137,7 +144,7 @@
 ;;;   (println (pixel-g img 0 0))
 ;;;
 ;;; Since: PN0
-(defn pixel-g [img : int x : int y : int] : int
+(defn pixel-g [img : Img x : int y : int] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   struct __img *i = (struct __img *)(intptr_t)img;
@@ -158,7 +165,7 @@
 ;;;   (println (pixel-b img 0 0))
 ;;;
 ;;; Since: PN0
-(defn pixel-b [img : int x : int y : int] : int
+(defn pixel-b [img : Img x : int y : int] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   struct __img *i = (struct __img *)(intptr_t)img;
@@ -179,7 +186,7 @@
 ;;;   (println (pixel-a img 0 0))
 ;;;
 ;;; Since: PN0
-(defn pixel-a [img : int x : int y : int] : int
+(defn pixel-a [img : Img x : int y : int] : int
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   struct __img *i = (struct __img *)(intptr_t)img;
@@ -205,7 +212,7 @@
 ;;;   (pixel-set! img 0 0 255 0 0 255)
 ;;;
 ;;; Since: PN0
-(defn pixel-set! [img : int x : int y : int r : int g : int b : int a : int] : void
+(defn pixel-set! [img : Img x : int y : int r : int g : int b : int a : int] : void
   ```c
   struct __img { unsigned int width; unsigned int height; int channels; int bit_depth; unsigned char *pixels; };
   struct __img *i = (struct __img *)(intptr_t)img;

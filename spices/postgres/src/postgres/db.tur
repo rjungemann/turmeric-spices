@@ -7,8 +7,14 @@
 ;; Use rows-count / row-get / rows-free from postgres/row to work with results.
 
 (defmodule postgres/db
-  (export db-connect db-close db-exec db-query
+  (export Conn
+          db-connect db-close db-exec db-query
           db-query-params db-begin db-commit db-rollback)
+
+;;; Conn -- PostgreSQL connection handle.
+;;; Wraps a `PGconn*`. Construct with db-connect; free with db-close.
+;;; Since: 0.2.0
+(defopaque Conn :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -108,14 +114,14 @@
   ```)
 
 ;;; __pq-finish-raw -- close a PGconn*.
-(defn __pq-finish-raw [conn : int] : void
+(defn __pq-finish-raw [conn : Conn] : void
   ```c
   #include <libpq-fe.h>
   PQfinish((PGconn *)(intptr_t)conn);
   ```)
 
 ;;; __pq-exec-raw -- execute SQL; returns 1 on success, 0 on failure.
-(defn __pq-exec-raw [conn : int sql : cstr] : int
+(defn __pq-exec-raw [conn : Conn sql : cstr] : int
   ```c
   #include <libpq-fe.h>
   PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
@@ -126,7 +132,7 @@
   ```)
 
 ;;; __pq-query-raw -- execute SELECT; returns PGresult* as :int (0 on failure).
-(defn __pq-query-raw [conn : int sql : cstr] : int
+(defn __pq-query-raw [conn : Conn sql : cstr] : int
   ```c
   #include <libpq-fe.h>
   PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
@@ -136,7 +142,7 @@
   ```)
 
 ;;; __pq-query-params-raw -- PQexecParams; returns PGresult* as :int (0 on failure).
-(defn __pq-query-params-raw [conn : int sql : cstr paramValues : int nparams : int] : int
+(defn __pq-query-params-raw [conn : Conn sql : cstr paramValues : int nparams : int] : int
   ```c
   #include <libpq-fe.h>
   const char **vals = (const char **)(intptr_t)paramValues;
@@ -183,7 +189,7 @@
 ;;;   (db-close conn)
 ;;;
 ;;; Since: PG0
-(defn db-close [conn : int] : ptr<void>
+(defn db-close [conn : Conn] : ptr<void>
   (do (__pq-finish-raw conn) (__ok 0)))
 
 ;;; db-exec -- execute a SQL statement that returns no rows.
@@ -199,7 +205,7 @@
 ;;;   (db-exec conn "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT)")
 ;;;
 ;;; Since: PG0
-(defn db-exec [conn : int sql : cstr] : ptr<void>
+(defn db-exec [conn : Conn sql : cstr] : ptr<void>
   (let [rc (__pq-exec-raw conn sql)]
     (if (not= rc 0) (__ok 0) (__err 0))))
 
@@ -222,7 +228,7 @@
 ;;;       (println "query failed")))
 ;;;
 ;;; Since: PG0
-(defn db-query [conn : int sql : cstr] : ptr<void>
+(defn db-query [conn : Conn sql : cstr] : ptr<void>
   (let [raw (__pq-query-raw conn sql)]
     (if (not= raw 0) (__ok raw) (__err 0))))
 
@@ -243,7 +249,7 @@
 ;;;     (if (ok? r) (let [rows (ok-val r)] ...) (println "query failed")))
 ;;;
 ;;; Since: PG1
-(defn db-query-params [conn : int sql : cstr params : int] : ptr<void>
+(defn db-query-params [conn : Conn sql : cstr params : int] : ptr<void>
   (let [n    (__params-count params)
         vals (__params-values params n)
         raw  (__pq-query-params-raw conn sql vals n)]
@@ -261,7 +267,7 @@
 ;;;   (db-begin conn)
 ;;;
 ;;; Since: PG1
-(defn db-begin [conn : int] : ptr<void>
+(defn db-begin [conn : Conn] : ptr<void>
   (db-exec conn "BEGIN"))
 
 ;;; db-commit -- commit the current transaction.
@@ -276,7 +282,7 @@
 ;;;   (db-commit conn)
 ;;;
 ;;; Since: PG1
-(defn db-commit [conn : int] : ptr<void>
+(defn db-commit [conn : Conn] : ptr<void>
   (db-exec conn "COMMIT"))
 
 ;;; db-rollback -- roll back the current transaction.
@@ -291,7 +297,7 @@
 ;;;   (db-rollback conn)
 ;;;
 ;;; Since: PG1
-(defn db-rollback [conn : int] : ptr<void>
+(defn db-rollback [conn : Conn] : ptr<void>
   (db-exec conn "ROLLBACK"))
 
 ) ;; end defmodule postgres/db
