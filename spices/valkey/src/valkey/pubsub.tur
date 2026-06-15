@@ -10,10 +10,34 @@
 
 (defmodule valkey/pubsub
   (import valkey/client :refer [Client])
-  (export pubsub-subscribe pubsub-unsubscribe pubsub-publish
+  (export Message message-of
+          pubsub-subscribe pubsub-unsubscribe pubsub-publish
           pubsub-recv message-channel message-payload)
 
 (import valkey/client :refer [Client])
+
+;;; Message -- opaque handle to a received pub/sub message.
+;;; Wraps a heap-allocated `struct __msg { char *channel; char *payload; }`.
+;;; Construct via pubsub-recv (extract with message-of from the ok result);
+;;; inspect with message-channel / message-payload.
+;;; Since: 0.3.0
+(defopaque Message :int)
+
+;;; message-of -- extract a typed Message handle from an ok result returned by pubsub-recv.
+;;;
+;;; Parameters:
+;;;   r -- ptr<void> result (from pubsub-recv)
+;;;
+;;; Returns:
+;;;   The Message handle stored in the result's ok-val slot. Zero indicates
+;;;   the push was non-message (e.g. a subscribe confirmation).
+;;;
+;;; Since: 0.3.0
+(defn message-of [r : ptr<void>] : Message
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result helpers (layout matches stdlib/result.tur)
@@ -200,7 +224,7 @@
 ;;;   (message-channel m)  ; => "events"
 ;;;
 ;;; Since: VK0
-(defn message-channel [m : int] : cstr
+(defn message-channel [m : Message] : cstr
   ```c
   struct __msg { char *channel; char *payload; };
   return ((struct __msg *)(intptr_t)m)->channel;
@@ -218,7 +242,7 @@
 ;;;   (message-payload m)  ; => "hello"
 ;;;
 ;;; Since: VK0
-(defn message-payload [m : int] : cstr
+(defn message-payload [m : Message] : cstr
   ```c
   struct __msg { char *channel; char *payload; };
   return ((struct __msg *)(intptr_t)m)->payload;

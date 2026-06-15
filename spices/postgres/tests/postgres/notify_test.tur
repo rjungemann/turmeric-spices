@@ -1,6 +1,7 @@
 ;; tests/postgres/notify_test.tur -- tests for postgres/notify.
 (defmodule postgres/tests/notify
-  (import postgres/notify :refer [notify-listen notify-unlisten notify-poll
+  (import postgres/notify :refer [Notification
+                                   notify-listen notify-unlisten notify-poll
                                    notification-channel notification-payload])
   (import test/suite      :refer [describe it])
   (import test/assert     :refer [assert-eq assert-true])
@@ -25,10 +26,10 @@
       (assert-eq 1 1))
 
     (it "notification-channel on null returns empty string"
-      (assert-true (__cstr= (notification-channel 0) "")))
+      (assert-true (__cstr= (notification-channel (:: 0 :Notification)) "")))
 
     (it "notification-payload on null returns empty string"
-      (assert-true (__cstr= (notification-payload 0) "")))
+      (assert-true (__cstr= (notification-payload (:: 0 :Notification)) "")))
 
     (it "notify-listen is exported"
       (assert-eq 1 1))

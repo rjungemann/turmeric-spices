@@ -15,10 +15,47 @@
 
 (defmodule postgres/notify
   (import postgres/db :refer [Conn])
-  (export notify-listen notify-unlisten notify-poll
+  (export Notification notification-of
+          notify-listen notify-unlisten notify-poll
           notification-channel notification-payload)
 
   (import postgres/db :refer [Conn])
+
+;; -------------------------------------------------------------------------
+;; Opaque handle type
+;; -------------------------------------------------------------------------
+
+;;; Notification -- opaque handle to a libpq PGnotify notification.
+;;; Storage is int64_t (PGnotify* cast). Extract from a notify-poll ok-result
+;;; with notification-of; the caller is responsible for freeing the pointer
+;;; via PQfreemem after reading its fields.
+(defopaque Notification :int)
+
+;;; notification-of -- extract a typed Notification handle from a notify-poll ok result.
+;;;
+;;; Parameters:
+;;;   r -- ptr<void> result (from notify-poll)
+;;;
+;;; Returns:
+;;;   The Notification handle stored in the result's ok-val slot.
+;;;   May be a null handle when notify-poll succeeded but no notification
+;;;   was pending; check with (= (:: n :int) 0) before reading fields.
+;;;
+;;; Example:
+;;;   (let [r (notify-poll conn)]
+;;;     (if (ok? r)
+;;;       (let [n (notification-of r)]
+;;;         (if (not= (:: n :int) 0)
+;;;           (println (notification-channel n))
+;;;           nil))
+;;;       nil))
+;;;
+;;; Since: PG3
+(defn notification-of [r : ptr<void>] : Notification
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -158,8 +195,8 @@
 ;;; Example:
 ;;;   (let [r (notify-poll conn)]
 ;;;     (if (ok? r)
-;;;       (let [n (ok-val r)]
-;;;         (if (!= n 0)
+;;;       (let [n (notification-of r)]
+;;;         (if (not= (:: n :int) 0)
 ;;;           (println (notification-channel n))
 ;;;           nil))
 ;;;       (println "poll error")))
@@ -183,7 +220,7 @@
 ;;;   (notification-channel notif)  ; => "my_channel"
 ;;;
 ;;; Since: PG3
-(defn notification-channel [n : int] : cstr
+(defn notification-channel [n : Notification] : cstr
   ```c
   #include <libpq-fe.h>
   PGnotify *notif = (PGnotify *)(intptr_t)n;
@@ -202,7 +239,7 @@
 ;;;   (notification-payload notif)  ; => "hello"
 ;;;
 ;;; Since: PG3
-(defn notification-payload [n : int] : cstr
+(defn notification-payload [n : Notification] : cstr
   ```c
   #include <libpq-fe.h>
   PGnotify *notif = (PGnotify *)(intptr_t)n;
