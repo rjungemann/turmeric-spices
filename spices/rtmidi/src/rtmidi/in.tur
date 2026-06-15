@@ -111,7 +111,7 @@
 ;;;   callback -- captureless C-ABI callback of shape
 ;;;               `void (*)(double timeStamp, const unsigned char *msg,
 ;;;                         size_t nbytes, void *user)` -- spelled
-;;;               `(c-fn [float (ptr<u8>) int (ptr<void>)] void)`
+;;;               `(c-fn [float ptr<const-u8> usize ptr<void>] void)`
 ;;;
 ;;; Returns:
 ;;;   void
@@ -121,17 +121,10 @@
 ;;;
 ;;; Since: RM0
 (defn midi-in-set-callback
-  [mi : int callback : (c-fn [float ptr<u8> int ptr<void>] void)] : void
+  [mi : int callback : (c-fn [float ptr<const-u8> usize ptr<void>] void)] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
-  /* c-fn-precision-gap (see docs/reported/ in main turmeric): the typed
-     (c-fn [float ptr<u8> int ptr<void>] void) lowers to
-     `void (*)(double, void *, long long, void *)`, but RtMidiCCallback is
-     `void (*)(double, const unsigned char *, unsigned long, void *)`.
-     The runtime layout matches (all int64-wide), so cast through at the
-     boundary until precise ptr<u8>/size_t lowering lands. */
-  rtmidi_in_set_callback((RtMidiInPtr)(intptr_t)mi,
-                         (RtMidiCCallback)callback, NULL);
+  rtmidi_in_set_callback((RtMidiInPtr)(intptr_t)mi, callback, NULL);
   ```)
 
 ;;; midi-in-cancel-callback -- remove the previously registered MIDI input callback.

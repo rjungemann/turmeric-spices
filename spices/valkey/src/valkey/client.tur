@@ -5,7 +5,14 @@
 ;; to inspect return values.
 
 (defmodule valkey/client
-  (export client-connect client-connect-unix client-close client-ping)
+  (export Client
+          client-connect client-connect-unix client-close client-ping)
+
+;;; Client -- Valkey/Redis connection handle.
+;;; Wraps a `redisContext*`. Construct with client-connect (or
+;;; client-connect-unix); free with client-close.
+;;; Since: 0.2.0
+(defopaque Client :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -98,7 +105,7 @@
 ;;;   (client-close c)
 ;;;
 ;;; Since: VK0
-(defn client-close [c : int] : void
+(defn client-close [c : Client] : void
   ```c
   #include <hiredis/hiredis.h>
   redisFree((redisContext *)(intptr_t)c);
@@ -117,7 +124,7 @@
 ;;;     (if (ok? r) (println "pong") (println "ping failed")))
 ;;;
 ;;; Since: VK0
-(defn client-ping [c : int] : ptr<void>
+(defn client-ping [c : Client] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>

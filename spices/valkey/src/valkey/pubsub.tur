@@ -12,6 +12,8 @@
   (export pubsub-subscribe pubsub-unsubscribe pubsub-publish
           pubsub-recv message-channel message-payload)
 
+(import valkey/client :refer [Client])
+
 ;; -------------------------------------------------------------------------
 ;; Private: result helpers (layout matches stdlib/result.tur)
 ;; -------------------------------------------------------------------------
@@ -57,7 +59,7 @@
 ;;;     (if (ok? r) (println "subscribed") (println "subscribe failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-subscribe [c : int channel : cstr] : ptr<void>
+(defn pubsub-subscribe [c : Client channel : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -84,7 +86,7 @@
 ;;;     (if (ok? r) (println "unsubscribed") (println "unsubscribe failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-unsubscribe [c : int channel : cstr] : ptr<void>
+(defn pubsub-unsubscribe [c : Client channel : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -113,7 +115,7 @@
 ;;;     (if (ok? r) (println (ok-val r)) (println "publish failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-publish [c : int channel : cstr message : cstr] : ptr<void>
+(defn pubsub-publish [c : Client channel : cstr message : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -154,7 +156,7 @@
 ;;;       (println "recv error")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-recv [c : int] : ptr<void>
+(defn pubsub-recv [c : Client] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
