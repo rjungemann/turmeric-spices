@@ -161,12 +161,17 @@
 ;;; instance (a `defstruct` or a `(defopaque Marker :int)` plus
 ;;; `(defcomponent Marker)`), where E0 allowed bare-int markers.
 ;;;
-;;; Still a per-arity cascade (0..5 components): `defstruct` requires a
-;;; *literal* field vector, so the field list cannot be spliced from a
-;;; computed/variadic form even though the type-position unquote
-;;; (`~(first comps)`) the projection needs is now accepted. Collapsing
-;;; the cascade to a single variadic body waits on a `defstruct`-field
-;;; splice surface -- tracked separately; it does not block E2d.
+;;; Still a per-arity cascade (0..5 components). `~@` splice into a
+;;; `defstruct` field vector now works, and the type-position unquote
+;;; (`~(first comps)`) the projection needs is accepted -- but collapsing
+;;; the cascade to a single variadic body needs to *compute* the flat
+;;; field list from `comps` at macro-expansion time (a `map`/`fold` over
+;;; the component vector). Compile-time function calls inside a splice are
+;;; still unimplemented (turmeric
+;;; `docs/reported/ct-macro-evaluator-no-function-call-in-splice.md`), and
+;;; a recursive helper macro that nests `~@` does not flatten into valid
+;;; `name : type` pairs. So the cascade stays until that lands; it does
+;;; not block E2d.
 ;;;
 ;;; Since: E0 (1..4 components); E1 (5 components); E2d-P5 ((Storage T) fields)
 (defmacro defworld [name comps]

@@ -17,9 +17,13 @@
 ;;; associated-type `(Storage T)` projection on the `Component` class has a
 ;;; distinct type to point at. The carrier is still `:int`, so the inline-C
 ;;; bodies are unchanged -- they cast the handle through `(intptr_t)` exactly
-;;; as before. Struct-A flows through the direct inline-C body (verified
-;;; against the defopaque+struct payload report) rather than the
-;;; `(unsafe (__raw))` closure lift, which mis-typed the env slot.
+;;; as before. Each public op keeps a direct inline-C body (rather than the
+;;; `(unsafe (__raw))` private-helper split that `ecs/sized-storage` uses):
+;;; it is simpler, and struct-A returns through it cleanly. (The unsafe-lift
+;;; path's struct-return miscompile was since fixed upstream --
+;;; turmeric `docs/archive/.../defopaque-struct-payload-fails-through-unsafe-helper.md`
+;;; -- so the split would now work too; the direct body is just the smaller
+;;; surface.)
 ;;;
 ;;; Since: E0; struct support added in E1' after the ABI fix landed
 ;;; (see docs/archive/history/generic-inline-c-struct-arg-monomorphises-to-int64.md);

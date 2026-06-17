@@ -178,24 +178,15 @@
 ;;; world's tag storage. Pulls the tag field via `.<TagName>` -- the tag
 ;;; field on the world struct must hold a `tag-new` handle (`Tag`).
 ;;; (world-tagged? world Player e)
-;;;
-;;; The `(:: (.<TagName> world) :Tag)` ascription re-pins the field read to
-;;; `Tag`: `Tag` is a *nullary* defopaque, and a struct field of a nullary
-;;; opaque currently reads back as its bare `:int` carrier rather than the
-;;; opaque type. The carrier is `:int` so the ascription is free; it just
-;;; lets the read satisfy `tag-has?`'s `Tag` parameter. (Parameterised
-;;; opaques like `(Dense A)` keep their type on field read and need no
-;;; re-pin.) The consuming module must have `Tag` in scope
-;;; (`(import ecs/tag :refer [Tag ...])`).
-;;; Since: E1'; field re-pin added in E2d-P1
+;;; Since: E1'
 (defmacro world-tagged? [world Tag e]
-  `(tag-has? (:: (~(dot-sym Tag) ~world) :Tag) ~e))
+  `(tag-has? (~(dot-sym Tag) ~world) ~e))
 
 ;;; world-untagged? -- inverse of world-tagged?. Sugar for "the entity
 ;;; does NOT carry this tag".
 ;;; Since: E1'
 (defmacro world-untagged? [world Tag e]
-  `(not (tag-has? (:: (~(dot-sym Tag) ~world) :Tag) ~e)))
+  `(not (tag-has? (~(dot-sym Tag) ~world) ~e)))
 
 ;;; Query -- row-typed query handle, parameterised by *rows* of input and
 ;;; output component types. The rows are phantom: the variadic-HKT-rows
