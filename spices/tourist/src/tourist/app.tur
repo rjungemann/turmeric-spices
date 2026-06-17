@@ -31,7 +31,7 @@
   (import httpd/server      :refer [server-start])
   (import httpd/request     :refer [req-method req-path])
   (import httpd/types       :refer [Request])
-  (import tourist/types     :refer [Captures Item ItemList])
+  (import tourist/types     :refer [Captures Item ItemList Pattern])
   (export tourist)
 
 ;; -- Cons list helpers ------------------------------------------------------
@@ -249,7 +249,7 @@
       (if (static-item? route)
         ;; Static file route: GET only; fall through on any miss.
         (if (__tourist-method-match? "GET" rqm)
-          (let [caps (router-match (route-pattern (:: route :int)) path)]
+          (let [caps (router-match (:: (route-pattern (:: route :int)) :Pattern) path)]
             (if (not= (:: caps :int) 0)
               (let [rel  (__tourist-caps-wildcard caps)
                     resp (if (not= rel 0)
@@ -264,7 +264,7 @@
         ;; Regular route: method match, swap caps into ctx, call handler.
         (let [method (route-method (:: route :int))]
           (if (__tourist-method-match? method rqm)
-            (let [caps (router-match (route-pattern (:: route :int)) path)]
+            (let [caps (router-match (:: (route-pattern (:: route :int)) :Pattern) path)]
               (if (not= (:: caps :int) 0)
                 (let [prev (__tourist-ctx-swap-caps ctx caps)
                       resp (route-call-handler (:: route :int) ctx)]

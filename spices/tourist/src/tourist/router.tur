@@ -25,7 +25,7 @@
 ;;   struct __tourist_caps    { char **keys; char **vals; int count; int cap; };
 
 (defmodule tourist/router
-  (import tourist/types :refer [Captures])
+  (import tourist/types :refer [Captures Pattern])
   (export router-compile router-free
           router-match
           captures-get captures-count captures-free)
@@ -36,14 +36,14 @@
 ;;;   pattern -- route pattern string, e.g. "/user/:id" or "/files/*"
 ;;;
 ;;; Returns:
-;;;   :int -- compiled pattern handle; free with router-free
+;;;   Pattern -- compiled pattern handle; free with router-free
 ;;;
 ;;; Example:
 ;;;   (let [p (router-compile "/hello/:name")]
 ;;;     (router-free p))
 ;;;
-;;; Since: v0.1.0
-(defn router-compile [pattern : cstr] : int
+;;; Since: v0.1.0 (typed as Pattern in v0.2.5)
+(defn router-compile [pattern : cstr] : Pattern
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -101,7 +101,7 @@
 ;;; router-free -- release a compiled pattern handle.
 ;;;
 ;;; Parameters:
-;;;   pat -- :int handle from router-compile, or 0 (no-op)
+;;;   pat -- Pattern handle from router-compile, or null ((:: 0 :Pattern))
 ;;;
 ;;; Returns:
 ;;;   :void
@@ -109,8 +109,8 @@
 ;;; Example:
 ;;;   (router-free p)
 ;;;
-;;; Since: v0.1.0
-(defn router-free [pat : int] : void
+;;; Since: v0.1.0 (typed as Pattern in v0.2.5)
+(defn router-free [pat : Pattern] : void
   ```c
   #include <stdlib.h>
   struct __tourist_seg     { int type; char *text; };
@@ -129,7 +129,7 @@
 ;;; segments. Free with captures-free.
 ;;;
 ;;; Parameters:
-;;;   pat  -- :int compiled pattern from router-compile
+;;;   pat  -- Pattern compiled pattern from router-compile
 ;;;   path -- request path string, e.g. "/user/42"
 ;;;
 ;;; Returns:
@@ -141,8 +141,8 @@
 ;;;     (when (not= (:: caps :int) 0)
 ;;;       (captures-get caps "id")))
 ;;;
-;;; Since: v0.1.0 (typed as Captures in v0.2.1)
-(defn router-match [pat : int path : cstr] : Captures
+;;; Since: v0.1.0 (Captures return typed v0.2.1; pat typed Pattern v0.2.5)
+(defn router-match [pat : Pattern path : cstr] : Captures
   ```c
   #include <stdlib.h>
   #include <string.h>

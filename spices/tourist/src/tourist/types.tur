@@ -14,7 +14,8 @@
 ;;; Since: v0.2.0
 
 (defmodule tourist/types
-  (export Ctx Item ItemList Mount MountList AppList StatusList Captures)
+  (export Ctx Item ItemList Mount MountList AppList StatusList Captures
+          Pattern)
 
 ;;; Ctx -- opaque handle to a tourist request context.
 ;;;
@@ -69,6 +70,20 @@
 ;;;
 ;;; Since: v0.2.1
 (defopaque Captures :int)
+
+;;; Pattern -- opaque handle to a __tourist_pattern struct from router-compile.
+;;;
+;;; Carries the segment list (literal / ":name" capture / "*" wildcard) a
+;;; route pattern string compiles to. router-match tests one Pattern against
+;;; a request path; router-free releases it. A null handle ((:: 0 :Pattern))
+;;; is the "no pattern" sentinel used by middleware/sub-app items, which carry
+;;; a non-pattern payload in the same struct slot -- those bridge through
+;;; (:: x :int) at the route-new / route-pattern boundary rather than pretend
+;;; to be a Pattern. Lifetime is owned by the enclosing Route (route-free
+;;; frees it via router-free).
+;;;
+;;; Since: v0.2.5
+(defopaque Pattern :int)
 
 ;;; Mount -- opaque handle to a (prefix, sub-app) pair built by mount!.
 ;;;

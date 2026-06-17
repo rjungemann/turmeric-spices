@@ -20,7 +20,7 @@
 
 (defmodule tourist/dsl
   (import tourist/router :refer [router-compile router-free])
-  (import tourist/types  :refer [Ctx])
+  (import tourist/types  :refer [Ctx Pattern])
   (import httpd/types    :refer [Response])
   (export get! post! put! delete! any!
           route-new
@@ -67,7 +67,11 @@
 ;;; Parameters:
 ;;;   method  -- HTTP method string: "GET", "POST", "PUT", "DELETE", or ""
 ;;;              for any-method matching
-;;;   pat     -- compiled pattern handle from router-compile
+;;;   pat     -- the route struct's generic payload slot as a raw :int: a
+;;;              compiled Pattern bridged via (:: p :int) for real routes, 0
+;;;              for middleware, or a sub-app handle for url-map!/cascade!
+;;;              items (see tourist/routing). Kept :int precisely because the
+;;;              slot is polymorphic across item kinds.
 ;;;   handler -- Turmeric function value (fn [req :int] :int)
 ;;;
 ;;; Returns:
@@ -97,13 +101,19 @@
   return ((struct __tourist_route *)(intptr_t)r)->method;
   ```)
 
-;;; route-pattern -- compiled pattern handle of a Route.
+;;; route-pattern -- generic payload slot of a Route.
+;;;
+;;; For real routes this is a compiled pattern; bridge it back to a Pattern
+;;; with (:: (route-pattern r) :Pattern) before handing it to router-match /
+;;; router-free. For middleware it is 0 and for sub-app items it is a sub-app
+;;; handle, so the accessor itself stays :int.
 ;;;
 ;;; Parameters:
 ;;;   r -- :int Route handle
 ;;;
 ;;; Returns:
-;;;   :int -- compiled pattern handle (from router-compile)
+;;;   :int -- raw payload slot (a Pattern for real routes, 0 / sub-app handle
+;;;           otherwise)
 ;;;
 ;;; Since: v0.1.0
 (defn route-pattern [r : int] : int
@@ -165,7 +175,7 @@
 (defn route-free [r : int] : void
   (when (not= r 0)
     (do
-      (router-free (route-pattern r))
+      (router-free (:: (route-pattern r) :Pattern))
       (__route-free-struct r))))
 
 ;; -- Internal: convert a typed c-fn handler to an int64_t for storage -----
@@ -194,7 +204,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn get! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
-  (route-new "GET" (router-compile pattern) (__handler->int handler)))
+  (route-new "GET" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; post! -- declare a POST route.
 ;;;
@@ -207,7 +217,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn post! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
-  (route-new "POST" (router-compile pattern) (__handler->int handler)))
+  (route-new "POST" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; put! -- declare a PUT route.
 ;;;
@@ -220,7 +230,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn put! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
-  (route-new "PUT" (router-compile pattern) (__handler->int handler)))
+  (route-new "PUT" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; delete! -- declare a DELETE route.
 ;;;
@@ -233,7 +243,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn delete! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
-  (route-new "DELETE" (router-compile pattern) (__handler->int handler)))
+  (route-new "DELETE" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; any! -- declare a route matching any HTTP method.
 ;;;
@@ -249,6 +259,6 @@
 ;;;
 ;;; Since: v0.1.0
 (defn any! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
-  (route-new "" (router-compile pattern) (__handler->int handler)))
+  (route-new "" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ) ;; end defmodule tourist/dsl
