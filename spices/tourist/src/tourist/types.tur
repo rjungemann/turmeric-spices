@@ -14,7 +14,7 @@
 ;;; Since: v0.2.0
 
 (defmodule tourist/types
-  (export Ctx Item Mount Captures)
+  (export Ctx Item ItemList Mount Captures)
 
 ;;; Ctx -- opaque handle to a tourist request context.
 ;;;
@@ -45,6 +45,20 @@
 ;;; the Item newtype on the public API. Internally each shape is tagged
 ;;; via a sentinel method string in the underlying route struct.
 (defopaque Item :int)
+
+;;; ItemList -- opaque handle to a cons list of Items.
+;;;
+;;; tourist/app partitions the collected variadic into three ItemLists
+;;; (mws, after-mws, routes) stored in its dispatch-state singleton.
+;;; Internal cons-walker helpers (__tourist-cons / __mw-cons-head /
+;;; __mw-cons-tail / __tourist-list-rev / mw-chain-run / ...) thread
+;;; ItemList instead of bare :int so the type checker rejects e.g.
+;;; passing a Captures handle where the dispatch list is expected.
+;;;
+;;; A null ItemList ((:: 0 :ItemList)) is the empty-list sentinel.
+;;;
+;;; Since: v0.2.2
+(defopaque ItemList :int)
 
 ;;; Captures -- opaque handle to a __tourist_caps struct produced by router-match.
 ;;;

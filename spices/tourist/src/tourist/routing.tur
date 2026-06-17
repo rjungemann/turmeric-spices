@@ -44,7 +44,7 @@
                                   route-handler route-call-handler])
   (import tourist/router  :refer [router-match captures-free])
   (import tourist/param   :refer [tourist-ctx-strip-path])
-  (import tourist/types   :refer [Captures])
+  (import tourist/types   :refer [Captures Item])
   (export url-map! cascade! cascade-with! mount! passes!
           subapp-item? subapp-call)
 
@@ -162,7 +162,7 @@
 ;;;   :bool
 ;;;
 ;;; Since: v0.2.0
-(defn subapp-item? [item : int] : bool
+(defn subapp-item? [item : Item] : bool
   ```c
   #include <string.h>
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
@@ -255,7 +255,7 @@
 ;;; Returns the response handle on a hit, or 0 if the item did not match
 ;;; (so the caller can try the next item or fall through to 404).
 (defn __dispatch-item [item : int ctx : int] : int
-  (if (subapp-item? item)
+  (if (subapp-item? (:: item :Item))
     (subapp-call item ctx)
     ;; Ordinary Route: method check then pattern match.
     (if (__method-match? (route-method item) (__ctx-method ctx))

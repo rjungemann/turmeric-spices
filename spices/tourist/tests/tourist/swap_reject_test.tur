@@ -8,10 +8,11 @@
 ;; ctx:Ctx retype has regressed.
 
 (defmodule tourist/tests/swap-reject
-  (import tourist/types  :refer [Ctx Captures])
-  (import tourist/router :refer [router-match captures-get
-                                 captures-count captures-free])
-  (import tourist/param  :refer [tourist-ctx-caps param capture])
+  (import tourist/types      :refer [Ctx Captures Item ItemList])
+  (import tourist/router     :refer [router-match captures-get
+                                     captures-count captures-free])
+  (import tourist/param      :refer [tourist-ctx-caps param capture])
+  (import tourist/middleware :refer [mw-item? mw-chain-run])
 
   ;; int (e.g. a raw pattern handle) is not a Captures handle.
   (defn bad-int-as-captures [pat : int] : int
@@ -42,5 +43,23 @@
   (defn bad-captures-as-ctx-for-param [caps : Captures key : cstr]
       : (Result cstr cstr)
     (param caps key))               ; expects Ctx, got Captures
+
+  ;; mw-item? now requires an Item, not a bare int (v0.2.2 S4 cons-walker
+  ;; hygiene).
+  (defn bad-int-as-item [n : int] : bool
+    (mw-item? n))                   ; expects Item, got int
+
+  ;; mw-item? rejects a Captures handle (defopaque collision check).
+  (defn bad-captures-as-item [caps : Captures] : bool
+    (mw-item? caps))                ; expects Item, got Captures
+
+  ;; mw-chain-run requires an ItemList head, not a raw int (cons-walker
+  ;; hygiene).
+  (defn bad-int-as-itemlist [n : int ctx : int] : int
+    (mw-chain-run n ctx))           ; expects ItemList, got int
+
+  ;; mw-chain-run rejects an Item (single cell) where the cons head is wanted.
+  (defn bad-item-as-itemlist [item : Item ctx : int] : int
+    (mw-chain-run item ctx))        ; expects ItemList, got Item
 
   (defn main [] : int 0))
