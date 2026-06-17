@@ -32,10 +32,11 @@ session, which unblocked the E1 surface. See
 - `ecs/tag` -- bitset storage for zero-payload markers (`Dead`,
   `Frozen`, `Player`). `tag-new/cap/count/set!/clear!/has?/free`. O(1)
   set/test, popcount via `__builtin_popcountll`.
-- `ecs/world` -- `defworld Name [Comp1 ... CompN]` macro (arity-capped
-  at 5 in E1; mixed dense/sparse/tag fields all hold an `:int` handle
-  and the same `(.Comp w)` syntax works regardless of backend).
-  `world-alloc-entity!`, `world-despawn!`.
+- `ecs/world` -- `defworld Name [Comp1 ... CompN]` macro (variadic since
+  E2d-P5b -- no arity cap; a recursive `world-fields` helper computes the
+  flat field list at expansion time. Mixed dense/sparse/tag fields all
+  hold an `:int` handle and the same `(.Comp w)` syntax works regardless
+  of backend). `world-alloc-entity!`, `world-despawn!`.
 - `ecs/query` -- single user-facing **`for-each`** macro, truly
   variadic (no arity cap; recursive helper macros walk the component
   list at expansion time):

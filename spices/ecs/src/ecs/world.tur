@@ -34,10 +34,10 @@
 ;;; `(defopaque Marker :int)` for a payload-less marker); the pre-E2d
 ;;; bare-`int` marker shorthand no longer type-checks.
 ;;;
-;;; Arity is capped at five components (the per-arity cascade in
-;;; `defworld`); wider worlds are hand-rolled as a `defstruct` with
-;;; `(Storage C)` fields until the `defstruct`-field splice surface that
-;;; would allow a variadic emit lands.
+;;; Since E2d-P5b, `defworld` is variadic over its component vector and
+;;; arity is no longer capped: the field list is computed at
+;;; macro-expansion time and spliced into the `defstruct` body, so a
+;;; world may carry any number of components.
 ;;;
 ;;; Since: E0 (defstruct emission); E2 (accessor emission via
 ;;; defcomponent-accessors -- depends on gaps A + E + G)
@@ -143,10 +143,37 @@
        (defn ~haser [^borrow w : ~world-name e : int] : bool
          (dense-has? (~field w) e)))))
 
+;;; world-fields -- expand a component vector into the flat
+;;; `Comp : (Storage Comp)` field triples a `defstruct` body wants.
+;;;
+;;; Recurses over `comps`, emitting three tokens per component
+;;; (`name`, `:`, `(Storage name)`) and splicing the tail in via `~@`.
+;;; Because each recursion contributes a *flat* run of tokens rather than
+;;; a nested `[name : type]` group, the whole sequence splices straight
+;;; into `defworld`'s field vector as valid `name : type` pairs.
+;;;
+;;; This is the macro-eval-time computation that collapses the former
+;;; `defworld--0..5` per-arity cascade: it requires both `~@`-splice into
+;;; a vector literal (turmeric
+;;; `docs/archive/quasiquote-splice-into-vector-unsupported.md`) and a
+;;; nested user-macro call inside a splice expression (turmeric
+;;; `docs/archive/ct-macro-evaluator-no-function-call-in-splice.md`),
+;;; both of which landed 2026-06-17. It is intentionally not exported:
+;;; macros resolve in their defining module's scope at expansion time, so
+;;; consumers that `(import ecs/world :refer [defworld])` get the helper
+;;; transitively without naming it.
+;;;
+;;; Since: E2d-P5b (cascade collapse)
+(defmacro world-fields [comps]
+  (if (empty? comps)
+    `()
+    `(~(first comps) : (Storage ~(first comps))
+      ~@(world-fields (rest comps)))))
+
 ;;; defworld -- declare a closed world type carrying typed storages.
 ;;;
 ;;; Syntax:
-;;;   (defworld Name [Comp1 Comp2 ...])     ;; up to five components
+;;;   (defworld Name [Comp1 Comp2 ...])     ;; any number of components
 ;;;
 ;;; Lowers to a defstruct only. Per-component accessors are emitted
 ;;; separately via `defcomponent-accessors`; see this module's top
@@ -161,51 +188,19 @@
 ;;; instance (a `defstruct` or a `(defopaque Marker :int)` plus
 ;;; `(defcomponent Marker)`), where E0 allowed bare-int markers.
 ;;;
-;;; Still a per-arity cascade (0..5 components). `~@` splice into a
-;;; `defstruct` field vector now works, and the type-position unquote
-;;; (`~(first comps)`) the projection needs is accepted -- but collapsing
-;;; the cascade to a single variadic body needs to *compute* the flat
-;;; field list from `comps` at macro-expansion time (a `map`/`fold` over
-;;; the component vector). Compile-time function calls inside a splice are
-;;; still unimplemented (turmeric
-;;; `docs/reported/ct-macro-evaluator-no-function-call-in-splice.md`), and
-;;; a recursive helper macro that nests `~@` does not flatten into valid
-;;; `name : type` pairs. So the cascade stays until that lands; it does
-;;; not block E2d.
+;;; E2d-P5b: the former `defworld--0..5` per-arity cascade is collapsed
+;;; into one variadic body that computes its field list with the
+;;; `world-fields` helper macro and splices it into the `defstruct` field
+;;; vector. Arity is no longer capped at five -- a world may carry any
+;;; number of components (see `tests/spawn1k-wide.tur`, which builds an
+;;; eight-component world). The collapse depends on two turmeric fixes
+;;; that landed 2026-06-17: `~@`-splice into a vector literal and a nested
+;;; user-macro call from inside a splice expression.
 ;;;
-;;; Since: E0 (1..4 components); E1 (5 components); E2d-P5 ((Storage T) fields)
+;;; Since: E0 (1..4 components); E1 (5 components); E2d-P5 ((Storage T)
+;;; fields); E2d-P5b (variadic, uncapped arity)
 (defmacro defworld [name comps]
-  (if (empty? comps)
-    `(defstruct ~name [gens : int])
-    (if (empty? (rest comps))
-      `(defstruct ~name
-         [gens : int
-          ~(first comps) : (Storage ~(first comps))])
-      (if (empty? (rest (rest comps)))
-        `(defstruct ~name
-           [gens : int
-            ~(first comps) : (Storage ~(first comps))
-            ~(second comps) : (Storage ~(second comps))])
-        (if (empty? (rest (rest (rest comps))))
-          `(defstruct ~name
-             [gens : int
-              ~(first comps) : (Storage ~(first comps))
-              ~(second comps) : (Storage ~(second comps))
-              ~(first (rest (rest comps))) : (Storage ~(first (rest (rest comps))))])
-          (if (empty? (rest (rest (rest (rest comps)))))
-            `(defstruct ~name
-               [gens : int
-                ~(first comps) : (Storage ~(first comps))
-                ~(second comps) : (Storage ~(second comps))
-                ~(first (rest (rest comps))) : (Storage ~(first (rest (rest comps))))
-                ~(second (rest (rest comps))) : (Storage ~(second (rest (rest comps))))])
-            `(defstruct ~name
-               [gens : int
-                ~(first comps) : (Storage ~(first comps))
-                ~(second comps) : (Storage ~(second comps))
-                ~(first (rest (rest comps))) : (Storage ~(first (rest (rest comps))))
-                ~(second (rest (rest comps))) : (Storage ~(second (rest (rest comps))))
-                ~(first (rest (rest (rest (rest comps))))) : (Storage ~(first (rest (rest (rest (rest comps))))))])))))))
+  `(defstruct ~name [gens : int ~@(world-fields comps)]))
 
 ;;; defcomponent-class -- declare a `Has<Comp>` typeclass with one
 ;;; method `<Comp>-storage-of` that returns the component's dense
