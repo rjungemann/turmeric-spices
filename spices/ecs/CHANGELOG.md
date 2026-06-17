@@ -6,6 +6,30 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 10 -- monomorphic `sized-defworld-mono` +
+  `sized-defcomponent-accessors-mono`.** The sized-world plan's
+  "ergonomic-default for application code with a fixed budget"
+  surface: capacity baked in at declaration, no `[n]` ascription
+  required at call sites. `(sized-defworld-mono GameWorld (Static
+  64) [Pos Vel])` lowers to a non-parameterised `defstruct` whose
+  fields are `(SizedDense (Static 64) Comp)` plus a `make-GameWorld`
+  constructor; `(sized-defcomponent-accessors-mono GameWorld Pos)`
+  emits the cap-gated `get-Pos` / `set-Pos!` / `has-Pos?` family
+  with `w : GameWorld` (no type-arg vector). The polymorphic
+  `sized-defworld` / `sized-defcomponent-accessors` remain for
+  libraries that ship reusable world shapes.
+
+  The monomorphic body uses new-style `[field : type]` field
+  syntax, which (unlike the old-style `(field type)` groups the
+  polymorphic `sized-defworld` is forced into by its `[n]` type-
+  param vector) accepts the fully-applied `(SizedDense (Static k)
+  Comp)` slot directly -- so the original "defstruct field-type
+  slot does not accept an unquote-spliced list" rationale from
+  `sized-defworld`'s docstring for deferring the monomorphic form
+  no longer applies. New regression test
+  `tests/sized-defworld-mono.tur` exercises both the macro lowering
+  and the mono accessor cap surface.
+
 - **E2c slice 9 -- mixed-shape `sized-for-each`: sparse component
   lookup.** Two new macros in `ecs/sized-query`,
   `sized-world-sparse-has?` and `sized-world-sparse-get`, complete

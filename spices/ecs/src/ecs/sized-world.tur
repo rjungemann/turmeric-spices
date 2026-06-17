@@ -29,8 +29,8 @@
 ;;; Since: E2c slice 3 -- see docs/upcoming/ecs-sized-world-plan.md.
 
 (defmodule ecs/sized-world
-  (export sized-defworld
-          sized-defcomponent-accessors
+  (export sized-defworld sized-defworld-mono
+          sized-defcomponent-accessors sized-defcomponent-accessors-mono
           sized-defsystem
           sized-state-new sized-state-free
           sized-live sized-cap
@@ -356,6 +356,120 @@
     `()
     `((:: (sized-dense-new k) (SizedDense n ~(first comps)))
       ~@(sized-ctor-args (rest comps)))))
+
+;;; sized-mono-world-fields -- like `sized-world-fields` but emits
+;;; new-style `[field : type]` field triples with the capacity index
+;;; fixed at a caller-supplied `cap-expr` (typically `(Static k)`).
+;;;
+;;; The polymorphic `sized-world-fields` emits old-style `(field type)`
+;;; groups because a parameterised `defstruct ~name [n] ...` requires
+;;; them. The monomorphic body has no type-param vector so it can use
+;;; (and must use, for the inline `(SizedDense (Static k) Comp)` slot
+;;; to parse) the new-style `[name : type ...]` field surface.
+;;;
+;;; Since: E2c slice 10
+(defmacro sized-mono-world-fields [cap-expr comps]
+  (if (empty? comps)
+    `()
+    `(~(first comps) : (SizedDense ~cap-expr ~(first comps))
+      ~@(sized-mono-world-fields ~cap-expr ~(rest comps)))))
+
+;;; sized-mono-ctor-args -- the monomorphic counterpart of
+;;; `sized-ctor-args`. Emits the per-component `(:: (sized-dense-new
+;;; k) (SizedDense cap-expr Comp))` constructor arguments with the
+;;; capacity index fixed at `cap-expr`.
+;;;
+;;; Since: E2c slice 10
+(defmacro sized-mono-ctor-args [cap-expr comps]
+  (if (empty? comps)
+    `()
+    `((:: (sized-dense-new k) (SizedDense ~cap-expr ~(first comps)))
+      ~@(sized-mono-ctor-args ~cap-expr ~(rest comps)))))
+
+;;; sized-defworld-mono -- declare a bounded-capacity world type with
+;;; the capacity baked in at the declaration. Monomorphic counterpart
+;;; of `sized-defworld`, satisfying the sized-world plan's
+;;; "ergonomic-default for application code with a fixed budget"
+;;; surface point.
+;;;
+;;; Syntax:
+;;;   (sized-defworld-mono GameWorld (Static 64) [Pos Vel])
+;;;
+;;; Lowers to a non-parameterised `defstruct` whose fields are
+;;; `(SizedDense (Static 64) Comp)`, plus a `make-GameWorld`
+;;; constructor that takes the runtime `k` slot count -- which the
+;;; caller is expected to match against the declared `cap-expr`:
+;;;
+;;;   (defstruct GameWorld
+;;;     [Pos   : (SizedDense (Static 64) Pos)
+;;;      Vel   : (SizedDense (Static 64) Vel)
+;;;      state : int])
+;;;   (defn make-GameWorld [k : int] : GameWorld ...)
+;;;
+;;; The polymorphic `sized-defworld` previously documented the
+;;; monomorphic form as "trivially expressed via `(deftype GW64
+;;; (GameWorld (Static 64)))`" -- which works, but loses the
+;;; ergonomic `(make-GameWorld 64)` call and forces every accessor /
+;;; defsystem invocation to re-ascribe the type. This macro is the
+;;; first-class form so application code reads `GameWorld` everywhere
+;;; without the alias-vs-original split.
+;;;
+;;; The cap-expr ↔ k matching is a runtime convention, not a static
+;;; constraint: a caller that writes `(sized-defworld-mono W (Static
+;;; 64) [Pos])` and then constructs via `(make-W 32)` gets a
+;;; world whose runtime storage is 32 slots wide even though the
+;;; type-level cap is `(Static 64)`. The accessors' runtime bounds
+;;; checks (sized-world plan Q4) catch the resulting OOB at the
+;;; access site; no static check today.
+;;;
+;;; Since: E2c slice 10
+(defmacro sized-defworld-mono [name cap-expr comps]
+  (let [ctor-name (str->sym (str-append "make-" (symbol-name name)))]
+    `(do
+       (defstruct ~name
+         [~@(sized-mono-world-fields ~cap-expr ~comps)
+          state : int])
+       (defn ~ctor-name [k : int] : ~name
+         (make-struct ~name
+                      ~@(sized-mono-ctor-args ~cap-expr ~comps)
+                      (sized-state-new k))))))
+
+;;; sized-defcomponent-accessors-mono -- emit cap-gated
+;;; `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` for one (mono sized
+;;; world, component) pair, matching the surface of
+;;; `sized-defcomponent-accessors` but against a *non-parameterised*
+;;; world type (the shape `sized-defworld-mono` emits).
+;;;
+;;; The polymorphic variant emits `[n]` as a type-param vector and
+;;; types `w` as `(~world-name n)`. The monomorphic world has no `n`
+;;; -- the capacity is baked into the storage field types -- so the
+;;; accessor's signature is `[w : ~world-name]` with no type-param
+;;; vector, otherwise identical (same cap surface, same backend
+;;; calls). Splitting into a separate macro is the lightest landing:
+;;; trying to overload on world shape would require the macro to
+;;; inspect the world-name's binding at macro-expand time, which the
+;;; current macro system does not support.
+;;;
+;;; Since: E2c slice 10
+(defmacro sized-defcomponent-accessors-mono [world-name comp-name]
+  (let [getter (str->sym (str-append "get-"  (symbol-name comp-name)))
+        setter (str->sym (str-append "set-"  (symbol-name comp-name) "!"))
+        haser  (str->sym (str-append "has-"  (symbol-name comp-name) "?"))
+        field  (dot-sym comp-name)]
+    `(do
+       (defn ~getter [^borrow cap : (ReadCap  ~comp-name)
+                      ^borrow w   : ~world-name
+                      e           : int]
+                    : ~comp-name
+         (let [p : ~comp-name (sized-dense-get (~field w) e)] p))
+       (defn ~setter [^borrow cap : (WriteCap ~comp-name)
+                      ^borrow w   : ~world-name
+                      e           : int
+                      v           : ~comp-name]
+                    : nil
+         (sized-dense-set! (~field w) e v))
+       (defn ~haser [^borrow w : ~world-name e : int] : bool
+         (sized-dense-has? (~field w) e)))))
 
 ;;; sized-defworld -- declare a bounded-capacity world type `(Name n)`.
 ;;;
