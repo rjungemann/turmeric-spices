@@ -5,6 +5,7 @@
   (import tourist/dsl        :refer [get!])
   (import tourist/helpers    :refer [text])
   (import tourist/middleware :refer [use!])
+  (import tourist/types      :refer [Ctx Response])
   (import httpd/request      :refer [req-path])
   (import httpd/response     :refer [response])
   (import httpd/server       :refer [server-stop])
@@ -34,22 +35,27 @@
     ```)
 
   ;; __some-resp -- wrap a Response in a some(Response) option.
-  ;; Middleware returns option<Response>: none (0) to continue, some(resp) to short-circuit.
-  (defn __some-resp [resp : int] : int
+  ;; Middleware returns (Option Response): (none) to continue, (some resp) to short-circuit.
+  (defn __some-resp [resp : Response] : (Option Response)
     ```c
     #include <stdlib.h>
     struct __opt { bool is_some; int64_t value; };
     struct __opt *o = (struct __opt *)malloc(sizeof(*o));
     o->is_some = true;
     o->value   = (int64_t)resp;
-    return (int64_t)(intptr_t)o;
+    return (struct tur__option__Option *)(intptr_t)o;
+    ```)
+
+  (defn __none-resp [] : (Option Response)
+    ```c
+    return (struct tur__option__Option *)0;
     ```)
 
   ;; blocker -- short-circuit with 403 when path is /block; pass otherwise.
-  (defn blocker [req : int] : int
-    (if (cstr-eq? "/block" (req-path req))
-      (__some-resp (response 403 "text/plain" "blocked"))
-      0))
+  (defn blocker [ctx : Ctx] : (Option Response)
+    (if (cstr-eq? "/block" (req-path (:: ctx :int)))
+      (__some-resp (:: (response 403 "text/plain" "blocked") :Response))
+      (__none-resp)))
 
   (defn main [] : int
     (let [srv (tourist 18103

@@ -7,6 +7,7 @@
   (import tourist/helpers    :refer [text])
   (import tourist/middleware :refer [use!])
   (import tourist/routing    :refer [url-map! cascade! mount!])
+  (import tourist/types      :refer [Ctx Response])
   (import httpd/request      :refer [req-path])
   (import httpd/server       :refer [server-stop])
   (import http/client        :refer [http-get])
@@ -41,15 +42,17 @@
     ```)
 
   ;; Outer middleware tags every response by short-circuiting nothing
-  ;; (returns the (none) option, 0); it just observes the request.
-  (defn tag-mw [req : int] : int
-    ;; (none) is the integer 0 -- continue dispatch.
-    0)
+  ;; (returns the (none) option, NULL); it just observes the request.
+  (defn tag-mw [ctx : Ctx] : (Option Response)
+    ```c
+    (void)ctx;
+    return (struct tur__option__Option *)0;
+    ```)
 
   ;; Two leaf handlers
-  (defn users-handler [ctx : int] : int (text (req-path ctx)))
-  (defn items-handler [ctx : int] : int (text (req-path ctx)))
-  (defn legacy-handler [ctx : int] : int (text "legacy-v1"))
+  (defn users-handler [ctx : Ctx] : Response (text (req-path (:: ctx :int))))
+  (defn items-handler [ctx : Ctx] : Response (text (req-path (:: ctx :int))))
+  (defn legacy-handler [ctx : Ctx] : Response (text "legacy-v1"))
 
   ;; v2 sub-app: url-map! with two prefixes
   (defn v2-app [] : int

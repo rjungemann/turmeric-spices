@@ -15,7 +15,8 @@
 ;;
 
 (defmodule tourist/middleware
-  (import tourist/dsl :refer [route-new route-call-handler])
+  (import tourist/dsl   :refer [route-new route-call-handler])
+  (import tourist/types :refer [Ctx Response])
   (export use!
           mw-item? mw-call mw-chain-run)
 
@@ -40,25 +41,27 @@
 ;;; use! -- register a middleware function.
 ;;;
 ;;; Returns a handle that tourist collects alongside route handles. Middleware
-;;; runs in declaration order before any route handler is invoked.
+;;; runs in declaration order before any route handler is invoked, against
+;;; the per-request Ctx the framework builds at request entry (so middleware
+;;; and route handlers share the same context).
 ;;;
 ;;; Parameters:
-;;;   fn -- (fn [req :int] :int) returning option<Response>:
+;;;   fn -- (c-fn [Ctx] (Option Response)):
 ;;;           (none) to continue, (some resp) to short-circuit
 ;;;
 ;;; Returns:
 ;;;   :int -- middleware handle; consumed by tourist
 ;;;
 ;;; Example:
-;;;   (use! (fn [req]
-;;;           (println (req-path req))
+;;;   (use! (fn [ctx]
+;;;           (println (req-path ctx))
 ;;;           (none)))
 ;;;
-;;; Since: v0.1.0
-(defn use! [fn : (c-fn [int] int)] : int
+;;; Since: v0.2.0 (Ctx-based signature; req-based shape was v0.1.0)
+(defn use! [fn : (c-fn [Ctx] (Option Response))] : int
   (route-new "__mw" 0 (__mw-fn->int fn)))
 
-(defn __mw-fn->int [h : (c-fn [int] int)] : int
+(defn __mw-fn->int [h : (c-fn [Ctx] (Option Response))] : int
   ```c
   return (int64_t)(intptr_t)h;
   ```)
