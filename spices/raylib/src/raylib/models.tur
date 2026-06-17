@@ -11,6 +11,7 @@
 ;; Use load-default-material / identity-transform helpers in this module.
 
 (defmodule raylib/models
+  (import raylib/types :refer [Model Mesh Material Matrix])
   (export load-model unload-model draw-model draw-model-ex load-mesh draw-mesh)
 
 ;;; load-model -- load a 3D model from a file (OBJ, GLTF, IQM, ...).
@@ -25,7 +26,7 @@
 ;;;   (let [m (load-model "robot.obj")] ...)
 ;;;
 ;;; Since: P3
-(defn load-model [path : cstr] : int
+(defn load-model [path : cstr] : Model
   ```c
   #include <raylib.h>
   Model *m = malloc(sizeof(Model));
@@ -42,7 +43,7 @@
 ;;;   (unload-model m)
 ;;;
 ;;; Since: P3
-(defn unload-model [model : int] : void
+(defn unload-model [model : Model] : void
   ```c
   #include <raylib.h>
   Model *m = (Model *)(intptr_t)model;
@@ -62,7 +63,7 @@
 ;;;   (draw-model robot 0.0 0.0 0.0 1.0 (white))
 ;;;
 ;;; Since: P3
-(defn draw-model [model : int px : float py : float pz : float scale : float tint : int] : void
+(defn draw-model [model : Model px : float py : float pz : float scale : float tint : int] : void
   ```c
   #include <raylib.h>
   Model *m = (Model *)(intptr_t)model;
@@ -84,7 +85,7 @@
 ;;;   (draw-model-ex robot 0.0 0.0 0.0  0.0 1.0 0.0  45.0  1.0 1.0 1.0  (white))
 ;;;
 ;;; Since: P3
-(defn draw-model-ex [model : int
+(defn draw-model-ex [model : Model
                      px : float py : float pz : float
                      ax : float ay : float az : float angle : float
                      sx : float sy : float sz : float
@@ -114,7 +115,7 @@
 ;;;   (let [mesh (load-mesh 1.0 1.0 1.0)] ...)
 ;;;
 ;;; Since: P3
-(defn load-mesh [w : float h : float d : float] : int
+(defn load-mesh [w : float h : float d : float] : Mesh
   ```c
   #include <raylib.h>
   Mesh *mesh = malloc(sizeof(Mesh));
@@ -134,7 +135,7 @@
 ;;;   (draw-mesh mesh mat xform)
 ;;;
 ;;; Since: P3
-(defn draw-mesh [mesh : int material : int transform : int] : void
+(defn draw-mesh [mesh : Mesh material : Material transform : Matrix] : void
   ```c
   #include <raylib.h>
   Mesh     *me = (Mesh     *)(intptr_t)mesh;

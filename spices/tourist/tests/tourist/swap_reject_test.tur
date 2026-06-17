@@ -1,0 +1,32 @@
+;; tests/tourist/swap_reject_test.tur -- compile-time swap-rejection probes
+;; for the Captures opaque handle.
+;;
+;; NEGATIVE fixture: every defn below is wrong on purpose. Running
+;; `tur check tests/tourist/swap_reject_test.tur` MUST produce TUR-E0001
+;; mismatches at the marked sites. If any of these typecheck cleanly,
+;; the S2 audit's "missing Captures defopaque" has regressed.
+
+(defmodule tourist/tests/swap-reject
+  (import tourist/types  :refer [Ctx Captures])
+  (import tourist/router :refer [router-match captures-get
+                                 captures-count captures-free])
+  (import tourist/param  :refer [tourist-ctx-caps])
+
+  ;; int (e.g. a raw pattern handle) is not a Captures handle.
+  (defn bad-int-as-captures [pat : int] : int
+    (captures-count pat))           ; expects Captures, got int
+
+  ;; Ctx is not a Captures (even though both are :int under the hood).
+  (defn bad-ctx-as-captures [ctx : Ctx] : void
+    (captures-free ctx))            ; expects Captures, got Ctx
+
+  ;; Captures is not an int -- router-compile/router-match arg 1 wants int.
+  (defn bad-captures-as-pattern [caps : Captures path : cstr] : Captures
+    (router-match caps path))       ; arg 1 expects int, got Captures
+
+  ;; Swapped args on captures-get: (Captures, cstr) is the right order.
+  (defn bad-swap-captures-get [caps : Captures key : cstr]
+      : (Result cstr cstr)
+    (captures-get (:: key :Captures) caps))  ; both args swapped + bad cast
+
+  (defn main [] : int 0))

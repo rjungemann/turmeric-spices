@@ -1,9 +1,10 @@
 ;; raylib/core.tur -- window lifecycle, frame management, and 3D mode entry.
 ;;
-;; Camera handles passed to begin-mode-3d are opaque :int from camera-3d in
-;; raylib/camera.  Color handles are opaque :int from raylib/color.
+;; Camera handles passed to begin-mode-3d are opaque Camera3D from camera-3d
+;; in raylib/camera. Color handles are opaque Color from raylib/color.
 
 (defmodule raylib/core
+  (import raylib/types :refer [Camera3D])
   (export init-window close-window begin-drawing end-drawing
           begin-mode-3d end-mode-3d clear-background
           set-target-fps get-frame-time window-should-close)
@@ -85,7 +86,7 @@
 ;;;   (begin-mode-3d cam)
 ;;;
 ;;; Since: P3
-(defn begin-mode-3d [camera : int] : void
+(defn begin-mode-3d [camera : Camera3D] : void
   ```c
   #include <raylib.h>
   Camera3D *cam = (Camera3D *)(intptr_t)camera;
