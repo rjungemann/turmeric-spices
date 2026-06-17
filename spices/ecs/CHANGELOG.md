@@ -6,6 +6,33 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 5 -- `sized-for-each` payoff macro.** New module
+  `ecs/sized-query` exporting `sized-for-each`, the bounded-capacity
+  counterpart of `ecs/query`'s `for-each`. Shape mirrors the unsized
+  macro one-for-one (`(sized-for-each w [Comp...] [e v...] body)`),
+  but every storage access goes through the typed `(SizedDense n
+  Comp)` surface (`sized-dense-has?` / `sized-dense-get`) and the
+  loop bound is the first storage's static `sized-dense-cap` --
+  not a per-storage runtime min. Rectangularity is structural:
+  `(sized-defworld GameWorld [Pos Vel])` lowers every field to
+  `(SizedDense n Comp)`, so every `(.Comp w)` access on a
+  `w : (GameWorld n)` carries the same type-level `n` and the SZ8
+  cross-parameter unifier proves the storages line up at the world's
+  defstruct -- the runtime `__fe-min-cap` probe the unsized `for-each`
+  computes is gone. Per-component `sized-dense-has?` checks stay
+  because slot population is data, not type. New regression test
+  `tests/sized-for-each.tur` exercises an 8-slot world with four
+  populated slots in mixed intersection/single-component
+  configurations; only the two slots that have both components are
+  visited. The `ecs-sized-world-plan.md`'s "for-each -- the payoff"
+  surface is now wired.
+
+  Also fills in `ecs/sized-world`'s missing build.tur exports
+  (`sized-spawn!`, `sized-despawn`, `sized-alive?`, etc.) so the
+  spawn / despawn / alive surface from slices 4 / 4b / 4c is
+  reachable from consumers via the normal `:exports` path instead of
+  only via module-internal references.
+
 - **E2c slice 4c -- generational `Entity` handles on sized worlds.**
   The slice-4b free-list lets `sized-spawn!` recycle the slot a
   despawn just freed; without per-slot generations a stale handle
