@@ -1,0 +1,81 @@
+;; E2c slice 4b -- free-list-based slot reuse over a (GameWorld n).
+;;
+;; Fill a cap=3 world, despawn a middle slot, and verify the next
+;; spawn hands it back (instead of advancing past `cap`). Then
+;; alternate despawn / spawn many more times than `cap` to confirm
+;; the world recycles slots indefinitely within its capacity --
+;; which is the load-bearing payoff of the slice-4b free-list
+;; (slice 4 advanced `next` monotonically, so this pattern aborted).
+;;
+;; Expected output:
+;;   0
+;;   1
+;;   2
+;;   3
+;;   true
+;;   2
+;;   1
+;;   3
+;;   1
+;;   3
+;;   ok
+;;   ok-recycle
+
+(defmodule sized_world_reuse_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense])
+(import ecs/sized-world   :refer [sized-defworld
+                                   sized-spawn! sized-despawn
+                                   sized-live sized-cap])
+
+(defopaque Pos :int)
+
+(sized-defworld GameWorld [Pos])
+
+(defn recycle-loop [s : int rounds : int] : int
+  (if (<= rounds 0)
+    (sized-live s)
+    (do
+      ;; Despawn slot 0 (always live at the start of a cycle by the
+      ;; loop invariant), then spawn -- which pops slot 0 back off
+      ;; the free-list. `next` never advances, so this loop runs
+      ;; indefinitely against a slice-4b world but would abort
+      ;; against a slice-4 world after the first cycle.
+      (sized-despawn s 0)
+      (sized-spawn! s)
+      (recycle-loop s (- rounds 1)))))
+
+(defn main [] : int
+  (let [w : (GameWorld (Static 3)) (make-GameWorld 3)]
+    (do
+      (println (sized-spawn! (.state w)))            ;; 0
+      (println (sized-spawn! (.state w)))            ;; 1
+      (println (sized-spawn! (.state w)))            ;; 2
+      (println (sized-live (.state w)))              ;; 3
+      (println (sized-despawn (.state w) 1))         ;; true
+      (println (sized-live (.state w)))              ;; 2
+      (println (sized-spawn! (.state w)))            ;; 1 (reused)
+      (println (sized-live (.state w)))              ;; 3
+      ;; Despawn 0 and 2 to make a two-slot free-list, then drain.
+      (sized-despawn (.state w) 0)
+      (sized-despawn (.state w) 2)
+      (println (sized-live (.state w)))              ;; 1
+      ;; Pop both: spawns return 2 (LIFO) then 0.
+      (sized-spawn! (.state w))
+      (sized-spawn! (.state w))
+      (println (sized-live (.state w)))              ;; 3
+      (if (= (sized-live (.state w)) 3)
+        (do (println "ok") 0)
+        (do (println "FAIL") 1))
+      ;; Hammer many despawn/spawn cycles to prove the high-water
+      ;; mark does not climb past `cap`. With cap=3 and live=3 at
+      ;; the start of each cycle the loop runs entirely off the
+      ;; free-list; if the free-list were absent (slice-4 behaviour)
+      ;; the second cycle would abort.
+      (recycle-loop (.state w) 100)
+      (if (= (sized-live (.state w)) 3)
+        (do (println "ok-recycle") 0)
+        (do (println "FAIL-recycle") 1)))))
+
+) ;; end defmodule sized_world_reuse_test

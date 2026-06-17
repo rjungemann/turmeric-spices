@@ -44,60 +44,100 @@
 ;; repo. Callers that need fallibility today should guard with
 ;; `(< (sized-live s) (sized-cap s))` before calling `sized-spawn!`.
 
-;; ===== Slice 4 -- spawn / despawn over a state cell =====
+;; ===== Slice 4 / 4b -- spawn / despawn over a state cell =====
 ;;
 ;; The world struct holds a `state : int` field carrying a malloc'd
-;; control block { int64_t live; int64_t cap; }. `live` is the
-;; next-free-slot counter (monotonic in slice 4; slot reuse via a
-;; free-list ships in slice 4b). `cap` is the runtime image of the
-;; type-level `n`.
+;; control block:
 ;;
-;; Slice 4 does NOT implement slot reuse: despawn is a no-op on the
-;; spawn counter. Repeated spawn/despawn cycles still exhaust the
-;; world's capacity. The fallible-spawn type story is the load-
-;; bearing payoff of this slice; reuse follows once the free-list
-;; design lands.
+;;   typedef struct {
+;;     int64_t next;          // high-water mark of fresh slot ids handed out
+;;     int64_t live;          // current live entity count
+;;     int64_t cap;           // runtime image of the type-level `n`
+;;     int64_t *fl_data;      // free-list buffer (slots ready for reuse)
+;;     int64_t  fl_len;       // count of slots currently on the free-list
+;;     int64_t  fl_cap;       // capacity of fl_data
+;;   } __ecs_state;
+;;
+;; Slice 4b adds free-list-based slot reuse: `sized-despawn` takes the
+;; slot id and pushes it onto the free-list; `sized-spawn!` pops from
+;; the free-list before reaching for a fresh slot. `next` is the
+;; monotonic high-water mark of fresh ids -- once `next == cap` all
+;; further spawns must come through the free-list, so a world that
+;; recycles slots can run indefinitely within its capacity. The
+;; free-list grows on push and is freed alongside the state cell;
+;; total memory stays O(cap).
+;;
+;; The fallible-spawn type story (`(Result int WorldFull)`) is still
+;; deferred behind the M3 struct-carrier path (turmeric
+;; docs/upcoming/end-to-end-monomorphization-plan.md). Callers that
+;; need fallibility guard with `(< (sized-live s) (sized-cap s))`.
 
 (defn __sized-state-new-raw [k : int] #{Unsafe} : int
   ```c
   #include <stdlib.h>
-  typedef struct { int64_t next; int64_t live; int64_t cap; } __ecs_state;
+  typedef struct {
+    int64_t next; int64_t live; int64_t cap;
+    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
+  } __ecs_state;
   __ecs_state *s = (__ecs_state *)calloc(1, sizeof(*s));
   s->next = 0;
   s->live = 0;
   s->cap  = (int64_t)k;
+  s->fl_data = NULL;
+  s->fl_len  = 0;
+  s->fl_cap  = 0;
   return (int64_t)(intptr_t)s;
   ```)
 
 (defn __sized-state-free-raw [s : int] #{Unsafe} : nil
   ```c
   #include <stdlib.h>
-  typedef struct { int64_t next; int64_t live; int64_t cap; } __ecs_state;
+  typedef struct {
+    int64_t next; int64_t live; int64_t cap;
+    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
+  } __ecs_state;
   __ecs_state *st = (__ecs_state *)(intptr_t)s;
-  if (st) free(st);
+  if (st) {
+    if (st->fl_data) free(st->fl_data);
+    free(st);
+  }
   ```)
 
 (defn __sized-state-live-raw [s : int] #{Unsafe} : int
   ```c
-  typedef struct { int64_t next; int64_t live; int64_t cap; } __ecs_state;
+  typedef struct {
+    int64_t next; int64_t live; int64_t cap;
+    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
+  } __ecs_state;
   __ecs_state *st = (__ecs_state *)(intptr_t)s;
   return st->live;
   ```)
 
 (defn __sized-state-cap-raw [s : int] #{Unsafe} : int
   ```c
-  typedef struct { int64_t next; int64_t live; int64_t cap; } __ecs_state;
+  typedef struct {
+    int64_t next; int64_t live; int64_t cap;
+    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
+  } __ecs_state;
   __ecs_state *st = (__ecs_state *)(intptr_t)s;
   return st->cap;
   ```)
 
-;; Try to allocate the next slot: returns the new slot index on
-;; success, or -1 if the world is full. The :int return is wrapped
-;; into a (Result int WorldFull) by sized-spawn below.
+;; Try to allocate the next slot: returns the slot index on success,
+;; or -1 if the world is full. Pops from the free-list when one is
+;; available; otherwise advances the `next` high-water mark.
 (defn __sized-state-try-spawn-raw [s : int] #{Unsafe} : int
   ```c
-  typedef struct { int64_t next; int64_t live; int64_t cap; } __ecs_state;
+  typedef struct {
+    int64_t next; int64_t live; int64_t cap;
+    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
+  } __ecs_state;
   __ecs_state *st = (__ecs_state *)(intptr_t)s;
+  if (st->fl_len > 0) {
+    int64_t slot = st->fl_data[--st->fl_len];
+    st->live = st->live + 1;
+    return slot;
+  }
   if (st->next >= st->cap) return -1;
   int64_t slot = st->next;
   st->next = st->next + 1;
@@ -141,25 +181,44 @@
   return 0;  /* unreachable */
   ```)
 
-;;; sized-despawn -- decrement the live counter. Slice 4 has no
-;;; free-list: despawn does NOT make the freed slot available for
-;;; reuse by spawn. (See slice 4b for free-list-based slot reuse.)
-;;; The live counter is decremented so sized-live reflects the
-;;; current population, but the spawn counter remains at its highest
-;;; point.
+;;; sized-despawn -- free `slot` for reuse and decrement the live
+;;; counter. Pushes the slot onto the world's free-list so the next
+;;; `sized-spawn!` hands it back; the `next` high-water mark only
+;;; advances when the free-list is empty, so a world that recycles
+;;; slots can run indefinitely within its capacity.
 ;;;
-;;; Returns false if the world's live count is already 0.
-(defn sized-despawn [s : int] : bool
-  (unsafe (__sized-despawn-raw s)))
+;;; Returns false (and is a no-op) if `slot` is outside the range
+;;; `[0, next)` of slots the world has ever handed out, or if `live`
+;;; is already zero. Callers are responsible for not despawning the
+;;; same slot twice -- a double-despawn would push a duplicate onto
+;;; the free-list, which the next two spawns would hand out as
+;;; aliasing slot ids. (Generational entity ids guard the
+;;; application surface against use-after-despawn even when the
+;;; underlying slot is reused.)
+;;;
+;;; Since: E2c slice 4 (signature-only); slice 4b (free-list reuse,
+;;; this body)
+(defn sized-despawn [s : int slot : int] : bool
+  (unsafe (__sized-despawn-raw s slot)))
 
-(defn __sized-despawn-raw [s : int] #{Unsafe} : bool
+(defn __sized-despawn-raw [s : int slot : int] #{Unsafe} : bool
   ```c
-  typedef struct { int64_t next; int64_t live; int64_t cap; } __ecs_state;
+  #include <stdlib.h>
+  typedef struct {
+    int64_t next; int64_t live; int64_t cap;
+    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
+  } __ecs_state;
   __ecs_state *st = (__ecs_state *)(intptr_t)s;
   if (st->live <= 0) return false;
-  /* Population goes down, but `next` (the spawn high-water mark)
-     does not -- slot reuse needs a free-list, deferred to slice 4b.
-     Repeated spawn/despawn cycles still exhaust the world's cap. */
+  if (slot < 0 || slot >= st->next) return false;
+  if (st->fl_len >= st->fl_cap) {
+    int64_t nc = st->fl_cap ? st->fl_cap * 2 : 4;
+    int64_t *nd = (int64_t *)realloc(st->fl_data, (size_t)nc * sizeof(int64_t));
+    if (!nd) return false;
+    st->fl_data = nd;
+    st->fl_cap  = nc;
+  }
+  st->fl_data[st->fl_len++] = slot;
   st->live = st->live - 1;
   return true;
   ```)

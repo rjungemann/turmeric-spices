@@ -6,6 +6,33 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 4b -- free-list-based slot reuse in sized worlds.** The
+  slice-4 `sized-despawn` decremented `live` but left the freed slot
+  stranded -- `next` advanced monotonically, so a world that repeatedly
+  spawned and despawned still exhausted its capacity. Slice 4b grows the
+  `__ecs_state` control block with a `int64_t *fl_data` free-list (plus
+  `fl_len` / `fl_cap`): `sized-despawn` now pushes the freed slot onto
+  the list, and `sized-spawn!` pops from it before reaching for a fresh
+  slot. A cap-`n` world that recycles slots can run indefinitely within
+  its capacity. The free-list is freed alongside the state cell, so
+  total memory stays O(cap). New regression test
+  `tests/sized-world-reuse.tur` exercises spawn-after-despawn slot
+  reuse and a tight despawn/spawn loop that runs 100 cycles against a
+  cap-3 world.
+
+### Changed -- BREAKING
+
+- **`sized-despawn` now takes the slot id.** The slice-4 signature
+  `(sized-despawn state) : bool` was a no-op on the spawn high-water
+  mark and so did not need to know which slot was being freed.
+  Slice 4b's free-list reuse requires the slot, so the signature is
+  now `(sized-despawn state slot) : bool`. Callers update by passing
+  the slot id returned from the corresponding `sized-spawn!`.
+  Generational entity ids still guard the application surface
+  against use-after-despawn even when the underlying slot is reused
+  -- a stale handle's generation mismatches the slot's current
+  generation and reads return `(none)`.
+
 - **E2d-P6 (stretch) -- polymorphic storage ops via a single-param class.**
   New module `ecs/storage-ops` defines `(defclass StorageOps [S] (type Elem
   : Type) (storage-insert! ...) (storage-get ...) (storage-has? ...))` -- a
