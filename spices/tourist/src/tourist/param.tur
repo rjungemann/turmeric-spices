@@ -378,7 +378,7 @@
 ;;; independently.
 ;;;
 ;;; Parameters:
-;;;   ctx -- :int tourist ctx handle (from tourist-ctx-new or passed by app)
+;;;   ctx -- :Ctx tourist context (from tourist-ctx-new or passed by app)
 ;;;   key -- query parameter name, e.g. "q" for ?q=hello
 ;;;
 ;;; Returns:
@@ -388,8 +388,8 @@
 ;;;   (let [r (param req "q")]
 ;;;     (when (ok? r) (ok-val r)))
 ;;;
-;;; Since: v0.1.0 (typed as Result in 0.2.0)
-(defn param [ctx : int key : cstr] : (Result cstr cstr)
+;;; Since: v0.1.0 (typed as Result in 0.2.0; ctx retyped to Ctx in 0.2.2)
+(defn param [ctx : Ctx key : cstr] : (Result cstr cstr)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -416,7 +416,7 @@
 ;;; ok_val string is owned by the ctx; do not free it independently.
 ;;;
 ;;; Parameters:
-;;;   ctx  -- :int tourist ctx handle
+;;;   ctx  -- :Ctx tourist context
 ;;;   name -- capture name, e.g. "id" for ":id", or "*" for wildcard
 ;;;
 ;;; Returns:
@@ -426,9 +426,9 @@
 ;;;   (let [r (capture req "name")]
 ;;;     (when (ok? r) (ok-val r)))
 ;;;
-;;; Since: v0.1.0 (typed as Result in 0.2.0)
-(defn capture [ctx : int name : cstr] : (Result cstr cstr)
-  (captures-get (tourist-ctx-caps ctx) name))
+;;; Since: v0.1.0 (typed as Result in 0.2.0; ctx retyped to Ctx in 0.2.2)
+(defn capture [ctx : Ctx name : cstr] : (Result cstr cstr)
+  (captures-get (tourist-ctx-caps (:: ctx :int)) name))
 
 ;; -- v0.2.0: per-request attrs and deferred response headers ---------------
 
