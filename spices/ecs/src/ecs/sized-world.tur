@@ -31,6 +31,7 @@
 (defmodule ecs/sized-world
   (export sized-defworld
           sized-defcomponent-accessors
+          sized-defsystem
           sized-state-new sized-state-free
           sized-live sized-cap
           sized-spawn! sized-despawn
@@ -39,7 +40,11 @@
 (import ecs/sized-storage :refer [SizedDense sized-dense-new
                                    sized-dense-get sized-dense-set!
                                    sized-dense-has?])
-(import ecs/cap           :refer [WriteCap ReadCap])
+(import ecs/cap           :refer [WriteCap ReadCap
+                                   make-write-cap make-read-cap use-cap!])
+(import ecs/system        :refer [defsystem--with-read-caps
+                                   defsystem--with-write-caps
+                                   defsystem--consume-write-caps])
 (import ecs/entity        :refer [Entity entity-new entity-index entity-generation])
 
 ;; Slice 4 ships the panicking `sized-spawn!` only. The design
@@ -433,5 +438,70 @@
        (defn ~haser [n]
                     [^borrow w : (~world-name n) e : int] : bool
          (sized-dense-has? (~field w) e)))))
+
+;;; sized-defsystem -- declare a typed sized-world system body with
+;;; `:reads` / `:writes` caps bound in scope.
+;;;
+;;; Syntax:
+;;;   (sized-defsystem name WorldName [reads-comp ...] [writes-comp ...] body)
+;;;
+;;; `WorldName` is the unparameterized world type (e.g. `GameWorld`,
+;;; not `(GameWorld (Static 64))`). The macro emits one polymorphic
+;;; `defn`:
+;;;
+;;;   (defn name [n] [^borrow w : (WorldName n)] : nil
+;;;     (defsystem--with-read-caps
+;;;       (defsystem--with-write-caps
+;;;         (do body (defsystem--consume-write-caps writes))
+;;;         writes)
+;;;       reads))
+;;;
+;;; ...so a single `name` defn elaborates against every concrete
+;;; `(WorldName (Static k))` capacity without duplication, mirroring
+;;; `sized-defcomponent-accessors`'s `n`-polymorphic shape.
+;;;
+;;; The cap-binding lowering reuses the unsized `ecs/system` helpers
+;;; (`defsystem--with-read-caps`, `defsystem--with-write-caps`,
+;;; `defsystem--consume-write-caps`), so the binding rules and
+;;; auto-consume semantics are identical to `defsystem`: read caps
+;;; are non-linear and bound as `<Comp>-read-cap`; write caps are
+;;; linear, bound as `<Comp>-write-cap`, and auto-consumed once at
+;;; body end. A `<Comp>-cid` binding must be in scope at the macro
+;;; call site for each declared comp.
+;;;
+;;; **No `System` value is emitted (yet).** The `ecs/system` scheduler's
+;;; `System` value packs `(reads-mask, writes-mask, run-fn :
+;;; ptr<void>)` whose run-fn signature is `[w : int] : nil` -- the
+;;; world is type-erased through a void* cast. A `(WorldName n)` is
+;;; a struct, not an int handle, so it cannot ride the existing
+;;; scheduler pointer. Wiring sized worlds into the parallel
+;;; scheduler is queued as a separate slice once `System` is
+;;; generalized over the world type (a follow-up that touches
+;;; `ecs/system` and `ecs/stage`, both world-agnostic today). Until
+;;; then, callers invoke the typed impl directly:
+;;;
+;;;   (sized-defsystem physics GameWorld [Pos Vel] [Pos]
+;;;     (set-Pos! Pos-write-cap w 0 (:: 1 :Pos)))
+;;;   (physics game-world)
+;;;
+;;; This still buys the load-bearing static guarantee: a body that
+;;; writes a component it did not declare has no `<Comp>-write-cap`
+;;; in scope, so the call fails to elaborate. The Stage-parallel
+;;; story is purely an integration follow-up; the cap-gating is
+;;; complete.
+;;;
+;;; Required imports at the call site:
+;;;   (import ecs/cap :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
+;;;
+;;; Since: E2c slice 8
+(defmacro sized-defsystem [name world-name reads-vec writes-vec body]
+  `(defn ~name [n] [^borrow w : (~world-name n)] : nil
+     (defsystem--with-read-caps
+       (defsystem--with-write-caps
+         (do
+           ~body
+           (defsystem--consume-write-caps ~writes-vec))
+         ~writes-vec)
+       ~reads-vec)))
 
 ) ;; end defmodule ecs/sized-world

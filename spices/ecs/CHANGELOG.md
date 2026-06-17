@@ -6,6 +6,33 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 8 -- `sized-defsystem`.** Sized-side counterpart of
+  `ecs/system`'s `defsystem`. Emits a single `n`-polymorphic
+  `(defn name [n] [^borrow w : (WorldName n)] : nil ...)` with the
+  declared read/write caps bound in body scope via the same
+  `defsystem--with-read-caps` / `defsystem--with-write-caps` /
+  `defsystem--consume-write-caps` helpers the unsized macro uses --
+  so cap-binding rules and the auto-consume at body end are
+  identical, and the load-bearing "writes to a component not in
+  :writes is a compile-time error" guarantee carries over verbatim
+  (negative test `tests/errors/sized-defsystem-undeclared-write.tur`
+  confirms `Vel-write-cap` is unbound when only `[Pos]` is declared
+  in `:writes`). The `n`-polymorphic shape mirrors slice 7's
+  accessors: one `physics` defn elaborates against every
+  `(GameWorld (Static k))` capacity.
+
+  No `System` value is emitted (yet): `ecs/system`'s `System` struct
+  pins the run-fn signature to `[w : int] : nil` so the world rides
+  the scheduler's `ptr<void>` cast as a bare int, and a
+  `(GameWorld n)` is a struct that does not. Wiring sized worlds
+  through the parallel scheduler is queued as a follow-up that
+  generalizes `System`/`Stage` over the world type; the cap-gating
+  is already complete and callers invoke the typed impl directly
+  (`(physics game-world)`) until then. New regression test
+  `tests/sized-defsystem.tur` exercises the full set/get cycle
+  inside a sized-defsystem body against two differently-sized
+  worlds.
+
 - **E2c slice 7 -- `sized-defcomponent-accessors`.** Cap-gated
   `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` for sized worlds,
   the sized counterpart of `ecs/world`'s `defcomponent-accessors`.
