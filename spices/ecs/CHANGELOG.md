@@ -6,6 +6,15 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2d-P5b -- variadic `defworld` (uncapped arity).** The former
+  `defworld--0..5` per-arity cascade is collapsed into one variadic body:
+  a recursive `world-fields` helper macro computes the flat
+  `Comp : (Storage Comp)` field list at macro-expansion time and splices
+  it into the `defstruct` body. A world may now carry any number of
+  components (see `tests/spawn1k-wide.tur`, an eight-component world). The
+  collapse depends on two turmeric fixes that landed 2026-06-17:
+  `~@`-splice into a vector literal and a nested user-macro call from
+  inside a `~@` splice expression.
 - **E2d -- associated-type storage projection.** A new `Component`
   typeclass in `ecs/world` carries an associated type member
   `(type Storage : Type)`. `(defcomponent T)` now lowers to a
