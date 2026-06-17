@@ -6,6 +6,39 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 12 -- fallible `sized-spawn` returning `(Result int
+  WorldFull)`.** The sized-world plan's Q3 result-returning spawn, the
+  typed counterpart of the panicking `sized-spawn!`. On success it
+  returns `(ok entity)` (the same packed `int` handle `sized-spawn!`
+  hands back); on capacity exhaustion it returns `(err world-full)`
+  instead of aborting, where `WorldFull` is a new payload-less marker
+  type exported from `ecs/sized-world`. The slot-allocation path is
+  shared verbatim with `sized-spawn!` (free-list pop, else `next`
+  high-water advance, generation read off the slot), so a world that
+  despawns to make room succeeds on the next `sized-spawn` and the
+  returned entity is generation-correct. Q3 wanted both variants:
+  `sized-spawn` where capacity exhaustion is recoverable, `sized-spawn!`
+  on benchmark / demo paths where the Result unwrap is pure overhead.
+
+  This was previously deferred behind the M3 struct-carrier path; Track
+  A's audit refresh (turmeric `docs/parallel-tracks.md`, "Not a
+  blocker") establishes that a spice surface returning `(Result T E)`
+  over primitive int-carried payloads -- which both the ok-arm entity
+  `int` and the `WorldFull` marker are -- monomorphizes by-value and is
+  not M3-gated. One spice-side wrinkle remains: the carrier->Result
+  bridge fires at a direct tail-return of `(ok ...)` / `(err ...)` but
+  not when the constructor call sits in an `if` branch (the branch
+  result is materialized into a struct temp before the return, skipping
+  the bridge). `sized-spawn` routes each arm through a one-line helper
+  (`__sized-spawn-ok` / `__sized-spawn-err`) whose body is a bare tail
+  `(ok ...)` / `(err ...)`, so the bridge fires inside the helper and
+  the `if` dispatches between two struct-returning calls -- the
+  spice-side idiom for this carrier-bridge tail-position limitation
+  until the if-branched form bridges directly. New regression test
+  `tests/sized-world-spawn-result.tur` exercises a cap-2 world: two
+  successful spawns, an `err` on the full world, then a successful
+  re-spawn after a despawn frees a slot.
+
 - **E2c slice 11 -- `sized-defworld-copy-into` for slot-preserving
   world resize.** The sized-world plan's "grow the world" surface:
   open the existential, allocate a fresh `(World n')` with `n' >=
