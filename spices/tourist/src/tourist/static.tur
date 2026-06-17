@@ -21,7 +21,7 @@
 
 (defmodule tourist/static
   (import tourist/router :refer [router-compile])
-  (import tourist/types  :refer [Item])
+  (import tourist/types  :refer [Item Pattern])
   (export serve-static!
           static-item?
           static-route-fs-root
@@ -47,7 +47,9 @@
 ;; -- Internal: allocate the extended static-route struct --------------------
 
 ;;; __static-route-alloc -- allocate a __tourist_static_route struct.
-(defn __static-route-alloc [prefix : cstr fs-root : cstr pat : int] : int
+;;; pat is a compiled Pattern (the "<prefix>/*" matcher); it stores into the
+;;; same generic slot route-pattern reads, so app dispatch can router-match it.
+(defn __static-route-alloc [prefix : cstr fs-root : cstr pat : Pattern] : int
   ```c
   #include <stdlib.h>
   #include <string.h>

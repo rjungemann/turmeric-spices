@@ -1,16 +1,18 @@
 ;; tests/tourist/swap_reject_test.tur -- compile-time swap-rejection probes
-;; for the Captures and Ctx opaque handles.
+;; for the Captures, Ctx, and Pattern opaque handles.
 ;;
 ;; NEGATIVE fixture: every defn below is wrong on purpose. Running
 ;; `tur check tests/tourist/swap_reject_test.tur` MUST produce TUR-E0001
 ;; mismatches at the marked sites. If any of these typecheck cleanly,
 ;; the S2 audit's "missing Captures defopaque" or the v0.2.2 param/capture
-;; ctx:Ctx retype has regressed.
+;; ctx:Ctx retype or the v0.2.5 router Pattern retype has regressed.
 
 (defmodule tourist/tests/swap-reject
   (import tourist/types      :refer [Ctx Captures Item ItemList
-                                     Mount MountList AppList StatusList])
-  (import tourist/router     :refer [router-match captures-get
+                                     Mount MountList AppList StatusList
+                                     Pattern])
+  (import tourist/router     :refer [router-compile router-free router-match
+                                     captures-get
                                      captures-count captures-free])
   (import tourist/param      :refer [tourist-ctx-caps param capture])
   (import tourist/middleware :refer [mw-item? mw-chain-run])
@@ -24,9 +26,19 @@
   (defn bad-ctx-as-captures [ctx : Ctx] : void
     (captures-free ctx))            ; expects Captures, got Ctx
 
-  ;; Captures is not an int -- router-compile/router-match arg 1 wants int.
+  ;; Captures is not a Pattern -- router-match arg 1 wants the Pattern handle
+  ;; from router-compile (typed Pattern in v0.2.5), not the Captures it returns.
   (defn bad-captures-as-pattern [caps : Captures path : cstr] : Captures
-    (router-match caps path))       ; arg 1 expects int, got Captures
+    (router-match caps path))       ; arg 1 expects Pattern, got Captures
+
+  ;; A bare int is not a Pattern (v0.2.5 router-compile/router-match retype):
+  ;; callers must thread the typed handle, not a raw int.
+  (defn bad-int-as-pattern [pat : int path : cstr] : Captures
+    (router-match pat path))        ; arg 1 expects Pattern, got int
+
+  ;; Ctx is not a Pattern even though both wrap :int.
+  (defn bad-ctx-as-pattern-free [ctx : Ctx] : void
+    (router-free ctx))              ; expects Pattern, got Ctx
 
   ;; Swapped args on captures-get: (Captures, cstr) is the right order.
   (defn bad-swap-captures-get [caps : Captures key : cstr]

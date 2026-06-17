@@ -44,7 +44,8 @@
                                   route-handler route-call-handler])
   (import tourist/router  :refer [router-match captures-free])
   (import tourist/param   :refer [tourist-ctx-strip-path])
-  (import tourist/types   :refer [Captures Item Mount MountList AppList StatusList])
+  (import tourist/types   :refer [Captures Item Mount MountList AppList StatusList
+                                  Pattern])
   (export url-map! cascade! cascade-with! mount! passes!
           subapp-item? subapp-call)
 
@@ -259,7 +260,7 @@
     (subapp-call item ctx)
     ;; Ordinary Route: method check then pattern match.
     (if (__method-match? (route-method item) (__ctx-method ctx))
-      (let [caps (router-match (route-pattern item) (__ctx-path ctx))]
+      (let [caps (router-match (:: (route-pattern item) :Pattern) (__ctx-path ctx))]
         (if (not= (:: caps :int) 0)
           (let [prev-caps (__ctx-set-caps ctx caps)
                 resp      (route-call-handler item ctx)]
