@@ -13,12 +13,19 @@
 ;;; Since: E1'
 
 (defmodule ecs/tag
-  (export tag-new tag-cap tag-count tag-set! tag-clear!
+  (export Tag
+          tag-new tag-cap tag-count tag-set! tag-clear!
           tag-has? tag-free)
 
-;;; tag-new -- allocate an empty tag bitset. Returns an :int handle.
-;;; Since: E1'
-(defn tag-new [] : int
+;; Tag is a defopaque whose carrier is :int (the raw C bitset handle). Tags
+;; are payloadless, so -- unlike (Dense A) / (Sparse A) -- there is no
+;; phantom element type; `Tag` is a nullary opaque. Lifted from a bare :int
+;; handle in E2d-P1.
+(defopaque Tag :int)
+
+;;; tag-new -- allocate an empty tag bitset. Returns a `Tag`.
+;;; Since: E1' (returned :int); E2d-P1 (returns Tag)
+(defn tag-new [] : Tag
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -30,7 +37,7 @@
 
 ;;; tag-cap -- highest representable bit index (capacity in bits).
 ;;; Since: E1'
-(defn tag-cap [t : int] : int
+(defn tag-cap [t : Tag] : int
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -38,7 +45,7 @@
   ```)
 
 ;;; __tag-grow -- internal: ensure bitset can hold at least bit `idx`.
-(defn __tag-grow [t : int idx : int] : nil
+(defn __tag-grow [t : Tag idx : int] : nil
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -56,7 +63,7 @@
 
 ;;; tag-set! -- mark entity slot idx as tagged.
 ;;; Since: E1'
-(defn tag-set! [t : int idx : int] : nil
+(defn tag-set! [t : Tag idx : int] : nil
   (__tag-grow t idx)
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
@@ -66,7 +73,7 @@
 
 ;;; tag-clear! -- mark entity slot idx as untagged.
 ;;; Since: E1'
-(defn tag-clear! [t : int idx : int] : nil
+(defn tag-clear! [t : Tag idx : int] : nil
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -76,7 +83,7 @@
 
 ;;; tag-has? -- is entity slot idx tagged?
 ;;; Since: E1'
-(defn tag-has? [t : int idx : int] : bool
+(defn tag-has? [t : Tag idx : int] : bool
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -86,7 +93,7 @@
 
 ;;; tag-count -- popcount: number of set bits across the bitset.
 ;;; Since: E1'
-(defn tag-count [t : int] : int
+(defn tag-count [t : Tag] : int
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -99,7 +106,7 @@
 
 ;;; tag-free -- release the bitset's word buffer.
 ;;; Since: E1'
-(defn tag-free [t : int] : nil
+(defn tag-free [t : Tag] : nil
   ```c
   #include <stdlib.h>
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;

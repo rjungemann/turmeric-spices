@@ -24,13 +24,20 @@
 ;;;
 ;;; The accessors are thin wrappers over `dense-set!` / `dense-get` /
 ;;; `dense-has?`. They are deliberately *not* emitted by `defworld`
-;;; itself so that tests/programs that use bare-int components without
-;;; an underlying defstruct continue to type-check; only call
-;;; `defcomponent-accessors` when the component name names a real
-;;; defstruct.
+;;; itself -- some worlds mix dense components with `Tag` bitset fields
+;;; that have no `dense-*` accessors -- so call `defcomponent-accessors`
+;;; only for the dense components you want typed get/set/has helpers for.
 ;;;
-;;; Arity is capped at four components for now -- variadic emit lands
-;;; with E1 / variadic-HKT rows.
+;;; Since E2d-P5, `defworld` projects component fields through
+;;; `(Storage T)`, so every component must be a real type with a
+;;; `(defcomponent T)` registration (a `defstruct`, or a
+;;; `(defopaque Marker :int)` for a payload-less marker); the pre-E2d
+;;; bare-`int` marker shorthand no longer type-checks.
+;;;
+;;; Arity is capped at five components (the per-arity cascade in
+;;; `defworld`); wider worlds are hand-rolled as a `defstruct` with
+;;; `(Storage C)` fields until the `defstruct`-field splice surface that
+;;; would allow a variadic emit lands.
 ;;;
 ;;; Since: E0 (defstruct emission); E2 (accessor emission via
 ;;; defcomponent-accessors -- depends on gaps A + E + G)
@@ -40,16 +47,51 @@
           defcomponent-class defcomponent-class-instance
           world-alloc-entity! world-despawn!)
 
-;;; defcomponent -- mark a type as a component (E0 documentation marker).
+;;; Component -- the associated-type storage class (E2d-P2).
 ;;;
-;;; For E0 this emits nothing beyond `nil`; the underlying type stays
-;;; untouched. The macro is provided so existing call sites continue to
-;;; elaborate when E2d wires associated-type storage selection in. The
-;;; arity allows trailing keyword pairs (e.g. `:storage :dense`) so the
-;;; eventual surface lands without churn.
+;;; `(Component T)` has a single associated type member `Storage`, which
+;;; names the concrete storage handle a component lives in. A component
+;;; declares its storage by giving an instance:
 ;;;
-;;; Since: E0
-(defmacro defcomponent [T] nil)
+;;;   (definstance Component [Pos] (type Storage = (Dense Pos)))
+;;;
+;;; `defworld` then projects each component's field type through `(Storage
+;;; T)` instead of consulting a macro-time storage registry, so the choice
+;;; of backend (dense today; sparse/tag once `StorageOps` lands in E2d-P6)
+;;; is a property of the component, visible on the world's type to every
+;;; consumer.
+;;;
+;;; The class is intentionally **not** in the module's `(export ...)` list:
+;;; typeclasses register globally and become visible to any module that
+;;; imports `ecs/world` (export-list entries are only recognised for
+;;; `defn`/`defmacro`/value-level names). `(Storage T)` and `Component`
+;;; resolve in consumer modules through this transitive visibility.
+;;;
+;;; Since: E2d-P2
+(defclass Component [T]
+  (type Storage : Type))
+
+;;; defcomponent -- register a type as a component (E2d-P4).
+;;;
+;;; `(defcomponent Pos)` lowers to the `Component`/`Storage` instance that
+;;; binds the component to its storage backend; `(defcomponent Pos :storage
+;;; :dense)` is the explicit spelling of the dense default. Dense is the
+;;; only fully-wired backend today -- the `for-each` / accessor surface
+;;; reaches storages through `dense-*`; sparse/tag components carry their
+;;; own hand-rolled worlds until the polymorphic `StorageOps` class lands
+;;; (E2d-P6).
+;;;
+;;; The component type itself must already be a type when `defcomponent`
+;;; runs: a `defstruct` for a payload-carrying component
+;;; (`(defstruct Pos [x : int y : int])`), or a `defopaque` carrier for a
+;;; bare marker component (`(defopaque Health :int)`). `defcomponent` only
+;;; emits the instance; it never (re)defines the type, so it composes with
+;;; either declaration.
+;;;
+;;; Since: E0 (documentation marker); E2d-P4 (emits the Component instance)
+(defmacro defcomponent [T]
+  `(definstance Component [~T]
+     (type Storage = (Dense ~T))))
 
 ;;; defcomponent-accessors -- emit `get-<Comp>` / `set-<Comp>!` /
 ;;; `has-<Comp>?` for one (world, component) pair. Used internally by
@@ -108,42 +150,57 @@
 ;;;
 ;;; Lowers to a defstruct only. Per-component accessors are emitted
 ;;; separately via `defcomponent-accessors`; see this module's top
-;;; docstring for the rationale (component names can name bare-int
-;;; "marker" components without an underlying defstruct).
+;;; docstring for the rationale.
 ;;;
-;;; Since: E0 (1..4 components); E1 (5 components)
+;;; E2d-P5: each component field is typed `(Storage ~Comp)` -- the
+;;; associated-type projection on the `Component` class -- rather than the
+;;; old hard-coded `: int`. With a `(defcomponent Comp)` instance in scope,
+;;; `(Storage Comp)` reduces to `(Dense Comp)`, so the world struct now
+;;; records each component's storage backend on its type. A component used
+;;; in a `defworld` must therefore be a real type with a `Component`
+;;; instance (a `defstruct` or a `(defopaque Marker :int)` plus
+;;; `(defcomponent Marker)`), where E0 allowed bare-int markers.
+;;;
+;;; Still a per-arity cascade (0..5 components): `defstruct` requires a
+;;; *literal* field vector, so the field list cannot be spliced from a
+;;; computed/variadic form even though the type-position unquote
+;;; (`~(first comps)`) the projection needs is now accepted. Collapsing
+;;; the cascade to a single variadic body waits on a `defstruct`-field
+;;; splice surface -- tracked separately; it does not block E2d.
+;;;
+;;; Since: E0 (1..4 components); E1 (5 components); E2d-P5 ((Storage T) fields)
 (defmacro defworld [name comps]
   (if (empty? comps)
     `(defstruct ~name [gens : int])
     (if (empty? (rest comps))
       `(defstruct ~name
          [gens : int
-          ~(first comps) : int])
+          ~(first comps) : (Storage ~(first comps))])
       (if (empty? (rest (rest comps)))
         `(defstruct ~name
            [gens : int
-            ~(first comps) : int
-            ~(second comps) : int])
+            ~(first comps) : (Storage ~(first comps))
+            ~(second comps) : (Storage ~(second comps))])
         (if (empty? (rest (rest (rest comps))))
           `(defstruct ~name
              [gens : int
-              ~(first comps) : int
-              ~(second comps) : int
-              ~(first (rest (rest comps))) : int])
+              ~(first comps) : (Storage ~(first comps))
+              ~(second comps) : (Storage ~(second comps))
+              ~(first (rest (rest comps))) : (Storage ~(first (rest (rest comps))))])
           (if (empty? (rest (rest (rest (rest comps)))))
             `(defstruct ~name
                [gens : int
-                ~(first comps) : int
-                ~(second comps) : int
-                ~(first (rest (rest comps))) : int
-                ~(second (rest (rest comps))) : int])
+                ~(first comps) : (Storage ~(first comps))
+                ~(second comps) : (Storage ~(second comps))
+                ~(first (rest (rest comps))) : (Storage ~(first (rest (rest comps))))
+                ~(second (rest (rest comps))) : (Storage ~(second (rest (rest comps))))])
             `(defstruct ~name
                [gens : int
-                ~(first comps) : int
-                ~(second comps) : int
-                ~(first (rest (rest comps))) : int
-                ~(second (rest (rest comps))) : int
-                ~(first (rest (rest (rest (rest comps))))) : int])))))))
+                ~(first comps) : (Storage ~(first comps))
+                ~(second comps) : (Storage ~(second comps))
+                ~(first (rest (rest comps))) : (Storage ~(first (rest (rest comps))))
+                ~(second (rest (rest comps))) : (Storage ~(second (rest (rest comps))))
+                ~(first (rest (rest (rest (rest comps))))) : (Storage ~(first (rest (rest (rest (rest comps))))))])))))))
 
 ;;; defcomponent-class -- declare a `Has<Comp>` typeclass with one
 ;;; method `<Comp>-storage-of` that returns the component's dense

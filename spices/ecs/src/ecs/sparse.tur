@@ -32,12 +32,19 @@
 ;;; Since: E1' (initial linear-probe version); rewritten to Robin Hood E1' patch 1.
 
 (defmodule ecs/sparse
-  (export sparse-new sparse-len sparse-set! sparse-get
+  (export Sparse
+          sparse-new sparse-len sparse-set! sparse-get
           sparse-has? sparse-del! sparse-free)
 
-;;; sparse-new -- allocate an empty sparse storage. Returns an :int handle.
-;;; Since: E1'
-(defn sparse-new [] : int
+;; (Sparse A) is a defopaque whose carrier is :int (the raw C handle). Like
+;; (Dense A), the phantom A makes per-component sparse storages distinct at
+;; the type level; it erases to the int carrier at codegen.
+;; Lifted from a bare :int handle in E2d-P1.
+(defopaque Sparse [A] :int)
+
+;;; sparse-new -- allocate an empty sparse storage. Returns a `(Sparse A)`.
+;;; Since: E1' (returned :int); E2d-P1 (returns (Sparse A))
+(defn sparse-new [A] [] : (Sparse A)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -56,7 +63,7 @@
 
 ;;; sparse-len -- live entry count.
 ;;; Since: E1'
-(defn sparse-len [s : int] : int
+(defn sparse-len [A] [s : (Sparse A)] : int
   ```c
   typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
   __ecs_sparse *st = (__ecs_sparse *)(intptr_t)s;
@@ -68,7 +75,7 @@
 ;;; exceeds the resident's, the resident would have been swapped past on
 ;;; insertion -- so the key isn't in the table.
 ;;; Since: E1'
-(defn sparse-has? [s : int idx : int] : bool
+(defn sparse-has? [A] [s : (Sparse A) idx : int] : bool
   ```c
   #include <stdint.h>
   typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
@@ -97,7 +104,7 @@
 ;;; in practice unreachable for tables that fit in addressable memory
 ;;; (load 0.75 has expected longest probe ~2 * ln(cap)).
 ;;; Since: E1'
-(defn sparse-set! [A] [s : int idx : int val : A] : nil
+(defn sparse-set! [A] [s : (Sparse A) idx : int val : A] : nil
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -189,7 +196,7 @@
 ;;; sparse-get -- int-carrier read (raw ints / opaques / pointers).
 ;;; Returns unspecified bits if the slot is empty; has?-check first.
 ;;; Since: E1'
-(defn sparse-get [A] [s : int idx : int] : A
+(defn sparse-get [A] [s : (Sparse A) idx : int] : A
   ```c
   #include <stdint.h>
   typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
@@ -208,7 +215,7 @@
 ;;; No rehash arithmetic in the loop, no wrap-around math beyond the
 ;;; one-line `(cur + 1) & mask`.
 ;;; Since: E1'
-(defn sparse-del! [s : int idx : int] : bool
+(defn sparse-del! [A] [s : (Sparse A) idx : int] : bool
   ```c
   #include <string.h>
   #include <stdint.h>
@@ -248,7 +255,7 @@ found: {
 
 ;;; sparse-free -- release backing arrays.
 ;;; Since: E1'
-(defn sparse-free [s : int] : nil
+(defn sparse-free [A] [s : (Sparse A)] : nil
   ```c
   #include <stdlib.h>
   typedef struct { uint64_t *keys; void *vals; uint8_t *probe_dist; size_t cap; size_t count; size_t elem_sz; } __ecs_sparse;
