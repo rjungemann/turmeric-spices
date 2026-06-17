@@ -1,0 +1,72 @@
+;; E2c slice 10 -- sized-defworld-mono round-trip.
+;;
+;; Monomorphic counterpart of tests/sized-world-rt.tur. The world's
+;; capacity index is baked in at declaration ((Static 4)), so the
+;; emitted GameWorld type is unparameterised: every accessor + every
+;; defsystem call references `GameWorld` directly, no
+;; `(GameWorld (Static 4))` ascription needed at call sites.
+;;
+;; This is the ergonomic-default surface the sized-world plan calls
+;; out for application code with a fixed capacity budget. The
+;; polymorphic form remains available via `sized-defworld` for
+;; libraries that ship reusable world shapes.
+;;
+;; Expected output:
+;;   42
+;;   7
+;;   true
+;;   true
+;;   99      ;; via the mono cap-gated accessor
+
+(defmodule sized_defworld_mono_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense sized-dense-set!
+                                   sized-dense-get sized-dense-has?])
+(import ecs/sized-world   :refer [sized-defworld-mono
+                                   sized-defcomponent-accessors-mono
+                                   sized-cap])
+(import ecs/cap           :refer [WriteCap ReadCap
+                                   make-write-cap make-read-cap use-cap!])
+
+(defopaque Pos :int)
+(defopaque Vel :int)
+
+;; Monomorphic declaration: capacity baked in here, no [n] parameter
+;; vector. Lowers to (defstruct GameWorld [Pos : (SizedDense (Static 4)
+;; Pos) Vel : (SizedDense (Static 4) Vel) state : int]) plus a
+;; `make-GameWorld` constructor.
+(sized-defworld-mono GameWorld (Static 4) [Pos Vel])
+
+;; Mono cap-gated accessors against the unparameterised GameWorld.
+;; The accessor signatures are `(set-Vel! cap w e v)` /
+;; `(get-Vel cap w e)` / `(has-Vel? w e)` with `w : GameWorld` --
+;; no type-arg vector at the call site, the ergonomic-default
+;; counterpart of slice 7's polymorphic accessors.
+(sized-defcomponent-accessors-mono GameWorld Vel)
+
+(def Vel-cid 1)
+
+(defn main [] : int
+  (let [w : GameWorld (make-GameWorld 4)]
+    (do
+      (sized-dense-set! (.Pos w) 0 (:: 42 :Pos))
+      (sized-dense-set! (.Pos w) 1 (:: 7  :Pos))
+      (let [p0 : Pos (sized-dense-get (.Pos w) 0)
+            p1 : Pos (sized-dense-get (.Pos w) 1)]
+        (do
+          (println (:: p0 :int))                         ;; 42
+          (println (:: p1 :int))                         ;; 7
+          (println (sized-dense-has? (.Pos w) 0))        ;; true
+          (println (= (sized-cap (.state w)) 4))))       ;; true
+      (let [wc (:: (make-write-cap Vel-cid) (WriteCap Vel))
+            rc (:: (make-read-cap  Vel-cid) (ReadCap  Vel))]
+        (do
+          (set-Vel! wc w 2 (:: 99 :Vel))
+          (let [v (get-Vel rc w 2)]
+            (do
+              (println (:: v :int))                      ;; 99
+              (use-cap! wc)
+              0)))))))
+
+) ;; end defmodule sized_defworld_mono_test

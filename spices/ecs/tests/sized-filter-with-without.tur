@@ -1,0 +1,69 @@
+;; E2c slice 6 -- sized-world-tagged? / sized-world-untagged? filter
+;; macros composed with sized-for-each.
+;;
+;; Sized-side analogue of tests/filter-with-without.tur. Because
+;; sized-defworld currently emits every component field as
+;; (SizedDense n Comp), mixing SizedTag fields into a sized world
+;; means hand-rolling the world's defstruct -- the same constraint
+;; the unsized defworld has today.
+;;
+;; Setup: cap=100 world. Pos = i for every i in [0, 100). Player tag
+;; set on i % 3 == 0; Dead tag set on i % 5 == 0. Iterate Pos AND
+;; tagged Player AND NOT Dead, sum.
+;;
+;; Sum of those i in [0, 100) with (i%3==0 AND i%5!=0):
+;;   (0+3+6+...+99) - (0+15+30+45+60+75+90) = 1683 - 315 = 1368
+;;
+;; Expected output:
+;;   1368
+
+(defmodule sized_filter_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense sized-dense-new
+                                   sized-dense-set!])
+(import ecs/sized-tag     :refer [SizedTag sized-tag-new sized-tag-set!])
+(import ecs/sized-query   :refer [sized-for-each
+                                   sized-world-tagged?
+                                   sized-world-untagged?])
+
+;; Pos is an int-carried defopaque marker so the (SizedDense n Pos)
+;; field type names a real component without dragging struct-by-value
+;; into the picture.
+(defopaque Pos :int)
+
+;; Hand-rolled sized world: a SizedDense Pos field plus two SizedTag
+;; fields, all sharing the same n. The SZ8 cross-parameter unifier
+;; proves rectangularity across the dense + tag fields the same way
+;; it does inside sized-defworld's all-dense output.
+(defstruct GameWorld [n]
+  (Pos    (SizedDense n Pos))
+  (Player (SizedTag n))
+  (Dead   (SizedTag n)))
+
+(defn make-game-world [n] [k : int] : (GameWorld n)
+  (make-struct GameWorld
+               (:: (sized-dense-new k) (SizedDense n Pos))
+               (:: (sized-tag-new   k) (SizedTag   n))
+               (:: (sized-tag-new   k) (SizedTag   n))))
+
+(defn main [] : int
+  (let [w : (GameWorld (Static 100)) (make-game-world 100)]
+    (do
+      (let [^mut i 0]
+        (while (< i 100)
+          (do
+            (sized-dense-set! (.Pos w) i (:: i :Pos))
+            (when (= 0 (mod i 3)) (sized-tag-set! (.Player w) i))
+            (when (= 0 (mod i 5)) (sized-tag-set! (.Dead w)   i))
+            (set! i (+ i 1)))))
+      (let [^mut sum 0]
+        (do
+          (sized-for-each w [Pos] [e p]
+            (when (and (sized-world-tagged?   w Player e)
+                       (sized-world-untagged? w Dead   e))
+              (set! sum (+ sum (:: p :int)))))
+          (println sum)
+          (if (= sum 1368) 0 1))))))
+
+) ;; end defmodule sized_filter_test

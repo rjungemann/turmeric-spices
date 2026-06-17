@@ -6,6 +6,178 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 11 -- `sized-defworld-copy-into` for slot-preserving
+  world resize.** The sized-world plan's "grow the world" surface:
+  open the existential, allocate a fresh `(World n')` with `n' >=
+  n`, copy components, close. This slice ships the copy step --
+  per-world via `sized-defworld-copy-into`, which emits a
+  `copy-into-<Name>` function polymorphic in both source and
+  destination capacity:
+
+      (sized-defworld GameWorld [Pos Vel])
+      (sized-defworld-copy-into GameWorld [Pos Vel])
+      ;; => (defn copy-into-GameWorld [n n']
+      ;;       [^borrow src : (GameWorld n)
+      ;;        ^borrow dst : (GameWorld n')] : nil ...)
+
+  The body walks `[0, src.cap)`, copies each populated dense slot
+  into `dst`'s same-indexed slot, then threads the full state cell
+  (gens array, live count, next high-water mark) from src to dst
+  via the new `sized-state-copy-into`. The gens copy is what makes
+  the resize **Entity-handle preserving**: an `Entity` packed
+  against `src` continues to satisfy `(sized-alive? dst e)` after
+  the copy, and a despawned entity stays dead in dst because the
+  bumped gen flows through. Growing resizes (n' > n) work
+  directly; shrinking (n' < n) aborts in `sized-state-copy-into`
+  before any partial state is observable. `(GameWorld n)` and
+  `(GameWorld n')` are kept type-distinct -- the SZ8 unifier does
+  not collapse the two caps, which is what makes the resize
+  signature even expressible.
+
+  The component vector must be repeated (the storage handles are
+  defopaque ints at the C ABI, so the macro can't recover the
+  component list from the world type alone). Out of scope for this
+  slice: the plan's `world-resize` wrapper that lifts a copy into
+  the `pack-sized` / `open-sized` existential; that is a thin
+  client layer over `copy-into-<W>` and adds the
+  `(exists [n'] ...)` packaging the plan calls out. New regression
+  test `tests/sized-world-copy-into.tur` exercises a cap-4 -> cap-8
+  grow with a despawned-mid-population entity, asserting
+  Pos round-trip, generational liveness on three surviving
+  entities, generational mismatch on the despawned one, and a
+  preserved live count.
+
+- **E2c slice 10 -- monomorphic `sized-defworld-mono` +
+  `sized-defcomponent-accessors-mono`.** The sized-world plan's
+  "ergonomic-default for application code with a fixed budget"
+  surface: capacity baked in at declaration, no `[n]` ascription
+  required at call sites. `(sized-defworld-mono GameWorld (Static
+  64) [Pos Vel])` lowers to a non-parameterised `defstruct` whose
+  fields are `(SizedDense (Static 64) Comp)` plus a `make-GameWorld`
+  constructor; `(sized-defcomponent-accessors-mono GameWorld Pos)`
+  emits the cap-gated `get-Pos` / `set-Pos!` / `has-Pos?` family
+  with `w : GameWorld` (no type-arg vector). The polymorphic
+  `sized-defworld` / `sized-defcomponent-accessors` remain for
+  libraries that ship reusable world shapes.
+
+  The monomorphic body uses new-style `[field : type]` field
+  syntax, which (unlike the old-style `(field type)` groups the
+  polymorphic `sized-defworld` is forced into by its `[n]` type-
+  param vector) accepts the fully-applied `(SizedDense (Static k)
+  Comp)` slot directly -- so the original "defstruct field-type
+  slot does not accept an unquote-spliced list" rationale from
+  `sized-defworld`'s docstring for deferring the monomorphic form
+  no longer applies. New regression test
+  `tests/sized-defworld-mono.tur` exercises both the macro lowering
+  and the mono accessor cap surface.
+
+- **E2c slice 9 -- mixed-shape `sized-for-each`: sparse component
+  lookup.** Two new macros in `ecs/sized-query`,
+  `sized-world-sparse-has?` and `sized-world-sparse-get`, complete
+  the sized-side filter surface by mirroring the slice-6 tag pair
+  against `SizedSparse` storages. Use case: walk a dense backbone
+  via `sized-for-each` and branch on whether the entity also has a
+  sparser component (`Hp`, `Score`, ...); read the sparse value via
+  the get macro once presence is confirmed. The element type is
+  inferred from the world's typed `.<Comp>` field, so a hand-rolled
+  `(GameWorld n)` with `(Hp (SizedSparse n Hp))` lets
+  `(sized-world-sparse-get w Hp e)` return an `Hp` without a witness
+  arg. Same hand-rolled-world caveat as slice 6: `sized-defworld`
+  emits dense fields only, so mixed-shape worlds spell out their
+  `defstruct` by hand. New regression test
+  `tests/sized-sparse-lookup.tur` -- a (GameWorld n) with dense Pos
+  + sparse Hp + sparse Score, iterated as "Pos AND Hp, optionally
+  + Score", asserting a weighted sum of 240.
+
+- **E2c slice 8 -- `sized-defsystem`.** Sized-side counterpart of
+  `ecs/system`'s `defsystem`. Emits a single `n`-polymorphic
+  `(defn name [n] [^borrow w : (WorldName n)] : nil ...)` with the
+  declared read/write caps bound in body scope via the same
+  `defsystem--with-read-caps` / `defsystem--with-write-caps` /
+  `defsystem--consume-write-caps` helpers the unsized macro uses --
+  so cap-binding rules and the auto-consume at body end are
+  identical, and the load-bearing "writes to a component not in
+  :writes is a compile-time error" guarantee carries over verbatim
+  (negative test `tests/errors/sized-defsystem-undeclared-write.tur`
+  confirms `Vel-write-cap` is unbound when only `[Pos]` is declared
+  in `:writes`). The `n`-polymorphic shape mirrors slice 7's
+  accessors: one `physics` defn elaborates against every
+  `(GameWorld (Static k))` capacity.
+
+  No `System` value is emitted (yet): `ecs/system`'s `System` struct
+  pins the run-fn signature to `[w : int] : nil` so the world rides
+  the scheduler's `ptr<void>` cast as a bare int, and a
+  `(GameWorld n)` is a struct that does not. Wiring sized worlds
+  through the parallel scheduler is queued as a follow-up that
+  generalizes `System`/`Stage` over the world type; the cap-gating
+  is already complete and callers invoke the typed impl directly
+  (`(physics game-world)`) until then. New regression test
+  `tests/sized-defsystem.tur` exercises the full set/get cycle
+  inside a sized-defsystem body against two differently-sized
+  worlds.
+
+- **E2c slice 7 -- `sized-defcomponent-accessors`.** Cap-gated
+  `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` for sized worlds,
+  the sized counterpart of `ecs/world`'s `defcomponent-accessors`.
+  The accessor's world parameter is `^borrow w : (~world-name n)`,
+  so `n` is polymorphic at the accessor's signature and unified at
+  the call site -- one accessor family elaborates against every
+  `(GameWorld (Static k))` shape without duplication (the regression
+  test reuses one `set-Pos!` / `get-Pos` / `has-Pos?` family against
+  both a `(GameWorld (Static 16))` and a `(GameWorld (Static 4))`).
+  Cap surface is unchanged from the unsized accessors: caps pair
+  with a component type, not a world shape, so `WriteCap<Pos>` /
+  `ReadCap<Pos>` work identically. Bounds checks stay runtime per
+  the sized-world plan Q4 -- the static-index `(Fin n)` path is
+  refinement-types-gated and out of scope. New regression test
+  `tests/sized-defcomponent-accessors.tur`.
+
+- **E2c slice 6 -- `sized-world-tagged?` / `sized-world-untagged?`
+  filter macros for sized worlds.** Sized-side analogues of
+  `ecs/query`'s `world-tagged?` / `world-untagged?` -- macro-only
+  surface that expands to a direct `sized-tag-has?` against the
+  named `.<Tag>` field on the world. Composes with `sized-for-each`
+  inside the body via `when`/`unless`, exactly the unsized pair's
+  ergonomic shape. The world's `.<Tag>` field must hold a
+  `(SizedTag n)`; because `sized-defworld` currently emits every
+  component field as `(SizedDense n Comp)`, callers mixing tag
+  bitsets into a sized world hand-roll the world's `defstruct`
+  -- the same constraint the unsized `defworld` has today (see
+  `tests/filter-with-without.tur`). New regression test
+  `tests/sized-filter-with-without.tur` is the sized counterpart:
+  a hand-rolled `(GameWorld n)` with a SizedDense Pos plus two
+  SizedTag bitsets (Player / Dead), iterated as "Pos AND Player AND
+  NOT Dead". The sum matches the unsized fixture's expected total
+  (1368), confirming the macro pair composes with `sized-for-each`
+  the same way the unsized pair composes with `for-each`.
+
+- **E2c slice 5 -- `sized-for-each` payoff macro.** New module
+  `ecs/sized-query` exporting `sized-for-each`, the bounded-capacity
+  counterpart of `ecs/query`'s `for-each`. Shape mirrors the unsized
+  macro one-for-one (`(sized-for-each w [Comp...] [e v...] body)`),
+  but every storage access goes through the typed `(SizedDense n
+  Comp)` surface (`sized-dense-has?` / `sized-dense-get`) and the
+  loop bound is the first storage's static `sized-dense-cap` --
+  not a per-storage runtime min. Rectangularity is structural:
+  `(sized-defworld GameWorld [Pos Vel])` lowers every field to
+  `(SizedDense n Comp)`, so every `(.Comp w)` access on a
+  `w : (GameWorld n)` carries the same type-level `n` and the SZ8
+  cross-parameter unifier proves the storages line up at the world's
+  defstruct -- the runtime `__fe-min-cap` probe the unsized `for-each`
+  computes is gone. Per-component `sized-dense-has?` checks stay
+  because slot population is data, not type. New regression test
+  `tests/sized-for-each.tur` exercises an 8-slot world with four
+  populated slots in mixed intersection/single-component
+  configurations; only the two slots that have both components are
+  visited. The `ecs-sized-world-plan.md`'s "for-each -- the payoff"
+  surface is now wired.
+
+  Also fills in `ecs/sized-world`'s missing build.tur exports
+  (`sized-spawn!`, `sized-despawn`, `sized-alive?`, etc.) so the
+  spawn / despawn / alive surface from slices 4 / 4b / 4c is
+  reachable from consumers via the normal `:exports` path instead of
+  only via module-internal references.
+
 - **E2c slice 4c -- generational `Entity` handles on sized worlds.**
   The slice-4b free-list lets `sized-spawn!` recycle the slot a
   despawn just freed; without per-slot generations a stale handle
