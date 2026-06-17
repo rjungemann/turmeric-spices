@@ -8,6 +8,13 @@ real-time games. Long-form plan and rationale:
 
 **E1 -- variadic-looking queries + row-typed `Query` value.** Shipped 2026-06-11.
 
+Since then (unreleased): **E2** systems + parallel scheduler with
+substructural write-cap enforcement; **E2d** associated-type storage
+projection (the world's field types project through `(Storage Comp)`)
+plus the `StorageOps` backend class; and **E2c** bounded-capacity
+("sized") worlds -- see the dedicated section below. See `CHANGELOG.md`
+for the per-slice log.
+
 The D1 prerequisite (variadic HKT rows) and all four L6 follow-ups
 (strict row elements, `^&` on defgadt/ADT/deftype, row-polymorphic
 defn/fn, permutation-aware row equality) landed in the main repo this
@@ -78,6 +85,43 @@ session, which unblocked the E1 surface. See
   `#row{...}` literal syntax. The spice module itself does not use
   `#row{...}`, so it builds under the default reader.
 
+### Bounded-capacity (sized) worlds -- E2c
+
+A parallel surface where the world commits to a capacity `n` at
+construction and threads it through every storage as a type-level
+index, so iteration is *statically rectangular* -- the
+`sized-for-each` loop bound comes from the world's type, not a runtime
+min-capacity probe. Design plan:
+[../../../turmeric/docs/upcoming/ecs-sized-world-plan.md](../../../turmeric/docs/upcoming/ecs-sized-world-plan.md).
+
+- `ecs/sized-storage` / `ecs/sized-sparse` / `ecs/sized-tag` -- the
+  sized counterparts of the three backends, each a phantom-indexed
+  opaque (`(SizedDense n A)`, `(SizedSparse n A)`, `(SizedTag n)`) so
+  the same `n` unifies across a mixed-representation world.
+- `ecs/sized-world` -- `(sized-defworld GameWorld [Comp ...])` lowers
+  to a polymorphic `(GameWorld n)` struct (one `(SizedDense n Comp)`
+  field per component plus a state cell) and a `make-GameWorld`
+  constructor; `(sized-defworld-mono GameWorld (Static 64) [...])`
+  bakes the capacity in at declaration for application code with a
+  fixed budget. `sized-defcomponent-accessors` emits the cap-gated
+  `get-/set-!/has-?` family; `sized-defsystem` is the sized
+  counterpart of `defsystem` (same `:reads`/`:writes` cap-gating).
+- **spawn / despawn.** Two spawn variants per the design plan's Q3:
+  `sized-spawn! : ... -> int` aborts on a full world (benchmark / demo
+  paths), while `sized-spawn : ... -> (Result int WorldFull)` reports
+  capacity exhaustion as a typed `(err world-full)` rather than
+  aborting. Both share the slot-allocation path (free-list reuse, then
+  `next` high-water advance) and return a generationally-packed entity.
+  `sized-despawn` frees a slot and bumps its generation; `sized-alive?`
+  answers the use-after-despawn question (a stale handle whose
+  generation no longer matches the slot's reads as dead).
+- `sized-defworld-copy-into` emits a `copy-into-<World>` that
+  slot-copies a world into a larger one, preserving entity handles
+  across the resize (the generation array is carried over). The plan's
+  `world-resize` existential wrapper over this remains blocked on
+  compiler support for packing a multi-field world struct through the
+  existential carrier.
+
 ### What's not in (yet)
 
 - Sparse/tag participation in `for-each` iteration order. Today the
@@ -104,6 +148,9 @@ tur run tests/for-each-arity-8.tur        # E1  arity-8 (15660)
 tur run tests/for-each-arity-12.tur       # E1  arity-12 no-cap demo (3510)
 tur run tests/defquery-integrate.tur      # E1  defquery + run-query! (125750)
 tur run -Xdata-literals tests/query-typed.tur   # E1  row-typed Query value (prints 42)
+tur run tests/sized-world-spawn.tur       # E2c sized-spawn! / despawn / live / cap
+tur run tests/sized-world-spawn-result.tur # E2c fallible sized-spawn -> (Result int WorldFull)
+tur run tests/sized-for-each.tur          # E2c statically-rectangular sized-for-each
 ```
 
 Each exits 0 on success.

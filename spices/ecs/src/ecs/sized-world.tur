@@ -35,7 +35,8 @@
           sized-defsystem
           sized-state-new sized-state-free sized-state-copy-into
           sized-live sized-cap
-          sized-spawn! sized-despawn
+          WorldFull
+          sized-spawn! sized-spawn sized-despawn
           sized-alive? sized-slot-generation)
 
 (import ecs/sized-storage :refer [SizedDense sized-dense-new
@@ -48,13 +49,15 @@
                                    defsystem--consume-write-caps])
 (import ecs/entity        :refer [Entity entity-new entity-index entity-generation])
 
-;; Slice 4 ships the panicking `sized-spawn!` only. The design
-;; plan's fallible `sized-spawn : ... -> (Result int WorldFull)` is
-;; deferred until the M3 struct-carrier path stops mis-monomorphizing
-;; generic `ok`/`err` calls; see
-;; docs/upcoming/end-to-end-monomorphization-plan.md in the turmeric
-;; repo. Callers that need fallibility today should guard with
-;; `(< (sized-live s) (sized-cap s))` before calling `sized-spawn!`.
+;; Slice 4 shipped the panicking `sized-spawn!`; slice 12 adds the
+;; design plan's fallible `sized-spawn : ... -> (Result int WorldFull)`
+;; (Q3). The fallible variant was previously deferred behind the M3
+;; struct-carrier path, but Track A's audit refresh (parallel-tracks.md
+;; "Not a blocker") establishes that a spice surface returning
+;; `(Result T E)` over primitive (int-carried) payloads -- which both
+;; the ok-arm `int` entity and the `WorldFull` marker are -- monomorphizes
+;; by-value and is not M3-gated. Callers pick the panicking or the
+;; result-returning variant per call site.
 
 ;; ===== Slice 4 / 4b / 4c -- spawn / despawn over a state cell =====
 ;;
@@ -93,10 +96,11 @@
 ;; `calloc(cap, sizeof(int64_t))`) and freed alongside the state
 ;; cell; memory stays O(cap).
 ;;
-;; The fallible-spawn type story (`(Result Entity WorldFull)`) is
-;; still deferred behind the M3 struct-carrier path (turmeric
-;; docs/upcoming/end-to-end-monomorphization-plan.md). Callers that
-;; need fallibility guard with `(< (sized-live s) (sized-cap s))`.
+;; Slice 12 lifts the fallible-spawn type story to a real
+;; `sized-spawn : ... -> (Result int WorldFull)` (see `sized-spawn`
+;; below). The panicking `sized-spawn!` is retained for benchmark /
+;; demo paths where the ergonomic hit of unwrapping a Result is not
+;; wanted (sized-world plan Q3 ships both variants).
 
 (defn __sized-state-new-raw [k : int] #{Unsafe} : int
   ```c
@@ -331,6 +335,63 @@
   abort();
   return 0;  /* unreachable */
   ```)
+
+;;; WorldFull -- the err-arm marker for `sized-spawn`. A payload-less
+;;; nominal type (defopaque over `:int`, so it rides the int64 carrier
+;;; like every other handle in this module). It exists so the spawn
+;;; failure mode is a *typed* error rather than an `:int` status code or
+;;; a bare `(none)`, matching turmeric's "no `:int` status codes" rule
+;;; and the stdlib `(Result A B)` idiom.
+;;;
+;;; Since: E2c slice 12
+(defopaque WorldFull :int)
+
+;; ok / err arm helpers for `sized-spawn`. Extracted into their own
+;; one-line `defn`s on purpose: the carrier-ABI `ok`/`err` constructors
+;; return the int64 carrier, and the carrier->Result-struct bridge fires
+;; at a *direct* tail-return position but NOT when an `(ok ...)` / `(err
+;; ...)` call sits in an `if` branch (the branch result is materialized
+;; into a struct temp before the function return, so the bridge is
+;; skipped and codegen rejects the int64->struct assignment). Routing
+;; each arm through a helper whose body is a bare `(ok ...)` / `(err ...)`
+;; tail makes the bridge fire inside the helper; `sized-spawn`'s `if`
+;; then dispatches between two struct-returning calls, which assigns
+;; cleanly. (Same class of carrier-bridge tail-position limitation Track
+;; A tracks; the helper split is the spice-side idiom until the
+;; if-branched form bridges directly.)
+(defn __sized-spawn-ok  [e : int] : (Result int WorldFull) (ok e))
+(defn __sized-spawn-err []        : (Result int WorldFull)
+  (err (:: 0 :WorldFull)))
+
+;;; sized-spawn -- fallible counterpart of `sized-spawn!`. Allocates a
+;;; fresh slot and returns its packed (idx, gen) entity wrapped in
+;;; `(ok ...)`; on capacity exhaustion returns `(err world-full)` rather
+;;; than aborting.
+;;;
+;;; The slot-allocation path is identical to `sized-spawn!` -- both call
+;;; `__sized-state-try-spawn-raw`, which pops a reused slot off the
+;;; free-list when one is available and otherwise advances the `next`
+;;; high-water mark, returning -1 only when both the free-list is empty
+;;; and `next == cap`. So a world that despawns to make room succeeds on
+;;; the next `sized-spawn` exactly as `sized-spawn!` would, and the
+;;; returned entity is generation-correct (the slot's `gens[slot]` is
+;;; read at spawn and packed into the handle, slice 4c).
+;;;
+;;; Use `sized-spawn` when capacity exhaustion is a recoverable
+;;; application condition; use `sized-spawn!` on benchmark / demo paths
+;;; where the world is sized to never fill and the Result unwrap is pure
+;;; overhead (sized-world plan Q3 ships both).
+;;;
+;;; The ok arm carries the entity as `int` (the same packed handle
+;;; `sized-spawn!` returns), so `(entity-index (ok-val r))` recovers the
+;;; slot id; the err arm carries a `WorldFull` marker.
+;;;
+;;; Since: E2c slice 12
+(defn sized-spawn [s : int] : (Result int WorldFull)
+  (let [slot (unsafe (__sized-state-try-spawn-raw s))]
+    (if (< slot 0)
+      (__sized-spawn-err)
+      (__sized-spawn-ok (entity-new slot (unsafe (__sized-state-gen-of-raw s slot)))))))
 
 ;;; sized-despawn -- free the slot named by Entity `e` for reuse,
 ;;; bump that slot's generation counter, and decrement `live`.

@@ -1,0 +1,61 @@
+;; E2c slice 12 -- fallible `sized-spawn : (GameWorld n) -> (Result int
+;; WorldFull)`. The design plan's Q3 result-returning spawn, the typed
+;; counterpart of the panicking `sized-spawn!`.
+;;
+;; Setup: a cap-2 world.
+;;   spawn #0 -> ok(entity 0)
+;;   spawn #1 -> ok(entity 1)      ;; world now full
+;;   spawn #2 -> err(world-full)   ;; capacity exhausted, no abort
+;;   despawn entity 0              ;; frees slot 0 (gens[0] bumps to 1)
+;;   spawn #3 -> ok(entity 0)      ;; reuses the freed slot
+;;
+;; This exercises the ok arm, the err arm, and recovery after a
+;; despawn frees room -- the slot-allocation path `sized-spawn` shares
+;; with `sized-spawn!` (free-list pop, else `next` high-water advance).
+;;
+;; Expected output:
+;;   true             ;; spawn #0 ok
+;;   0                ;; its slot id
+;;   true             ;; spawn #1 ok
+;;   1                ;; its slot id
+;;   true             ;; spawn #2 err (world full)
+;;   2                ;; live count at capacity
+;;   true             ;; spawn #3 ok after despawn freed a slot
+;;   0                ;; reused slot id
+;;   2                ;; live count back at capacity
+
+(defmodule sized_world_spawn_result_test
+  (export)
+
+(import ecs/entity        :refer [entity-index])
+(import ecs/sized-storage :refer [SizedDense])
+(import ecs/sized-world   :refer [sized-defworld
+                                   sized-spawn sized-despawn
+                                   sized-live WorldFull])
+
+(defopaque Pos :int)
+
+(sized-defworld GameWorld [Pos])
+
+(defn main [] : int
+  (let [w : (GameWorld (Static 2)) (make-GameWorld 2)]
+    (let [r0 (sized-spawn (.state w))
+          r1 (sized-spawn (.state w))
+          r2 (sized-spawn (.state w))]
+      (do
+        (println (ok? r0))                       ;; true
+        (println (entity-index (ok-val r0)))     ;; 0
+        (println (ok? r1))                       ;; true
+        (println (entity-index (ok-val r1)))     ;; 1
+        (println (err? r2))                      ;; true (world full)
+        (println (sized-live (.state w)))        ;; 2
+        ;; Free slot 0; the next spawn recovers without aborting.
+        (sized-despawn (.state w) (ok-val r0))
+        (let [r3 (sized-spawn (.state w))]
+          (do
+            (println (ok? r3))                   ;; true
+            (println (entity-index (ok-val r3))) ;; 0 (reused slot)
+            (println (sized-live (.state w)))    ;; 2
+            0))))))
+
+) ;; end defmodule sized_world_spawn_result_test
