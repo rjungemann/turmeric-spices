@@ -59,12 +59,18 @@
     return (int64_t)(intptr_t)dir;
     ```)
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   (defn main [] : int
     (let [pub-dir (__setup-test-dir)
           srv     (tourist 18105
                     (serve-static! "/assets" pub-dir))]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
         (describe "tourist static-files"
           (it "GET /assets/hello.txt status is 200"
             (let [r (http-get "http://127.0.0.1:18105/assets/hello.txt")]

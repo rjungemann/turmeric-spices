@@ -53,6 +53,12 @@
     return (struct tur__option__Option *)0;
     ```)
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   ;; blocker -- short-circuit with 403 when path is /block; pass otherwise.
   (defn blocker [ctx : Ctx] : (Option Response)
     (if (cstr-eq? "/block" (req-path (:: ctx :Request)))
@@ -65,7 +71,7 @@
                 (get! "/" (fn [_] (text "ok")))
                 (get! "/block" (fn [_] (text "should not reach"))))]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
         (describe "tourist middleware"
           (it "GET / passes through middleware; status 200"
             (let [r (http-get "http://127.0.0.1:18103/")]

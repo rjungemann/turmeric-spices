@@ -32,12 +32,18 @@
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   (defn main [] : int
     (let [srv (tourist 18104
                 (post! "/echo"
                   (fn [req] (text (req-body (:: req :Request))))))]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
         (describe "tourist post-echo"
           (it "POST /echo status is 200"
             (let [r (http-post "http://127.0.0.1:18104/echo" "hello world")]

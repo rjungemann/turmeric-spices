@@ -60,10 +60,16 @@
   ;; Server-side: 200 OK after a short sleep so the pool actually saturates.
   ;; ---------------------------------------------------------------------
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   (defn slow-handler [req : int] : int
     (do
-      (sleep-ms 40)
-      (resp-ok "text/plain" "ok")))
+      (unsafe (sleep-ms 40))
+      (:: (resp-ok "text/plain" "ok") :int)))
 
   ;; ---------------------------------------------------------------------
   ;; Client-side: issue one GET; on 200 OK, bump the shared counter.
@@ -86,7 +92,7 @@
   (defn main [] : int
     (let [srv (server-start-pool 18084 slow-handler 4)]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
         (__cnt 0)
 
         ;; Spawn 8 client threads -- 2x the pool size, so the listener

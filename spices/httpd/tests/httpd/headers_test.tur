@@ -8,6 +8,7 @@
   (import httpd/server   :refer [server-start server-stop])
   (import httpd/request  :refer [req-header])
   (import httpd/response :refer [resp-ok with-header])
+  (import httpd/types    :refer [Request])
   (import http/client    :refer [http-request])
   (import http/request   :refer [request])
   (import http/response  :refer [response-status response-header])
@@ -77,11 +78,20 @@
   ;; Handler: copy X-Echo from request -> X-Echo-Reply on response.
   ;; ---------------------------------------------------------------------
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   (defn headers-handler [req : int] : int
-    (let [h (req-header req "X-Echo")]
+    (let [r (:: req :Request)
+          h (req-header r "X-Echo")]
       (if (__hdr-ok? h)
-        (with-header (resp-ok "text/plain" "ok") "X-Echo-Reply" (__hdr-val h))
-        (with-header (resp-ok "text/plain" "no-hdr") "X-Echo-Reply" "absent"))))
+        (:: (with-header (resp-ok "text/plain" "ok") "X-Echo-Reply" (__hdr-val h))
+            :int)
+        (:: (with-header (resp-ok "text/plain" "no-hdr") "X-Echo-Reply" "absent")
+            :int))))
 
   ;; ---------------------------------------------------------------------
   ;; Test driver
@@ -90,7 +100,7 @@
   (defn main [] : int
     (let [srv (server-start 18082 headers-handler)]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
 
         (describe "httpd headers -- request/response round-trip"
 

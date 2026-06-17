@@ -44,6 +44,12 @@
     return (int64_t)(intptr_t)out;
     ```)
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   (defn main [] : int
     (let [srv (tourist 18102
                 (get! "/search"
@@ -53,7 +59,7 @@
                         (text (__join-prefix "q:" (ok-val r)))
                         (text "missing"))))))]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
         (describe "tourist query-param"
           (it "GET /search?q=foo status is 200"
             (let [r (http-get "http://127.0.0.1:18102/search?q=foo")]
