@@ -8,11 +8,13 @@
 ;; ctx:Ctx retype has regressed.
 
 (defmodule tourist/tests/swap-reject
-  (import tourist/types      :refer [Ctx Captures Item ItemList])
+  (import tourist/types      :refer [Ctx Captures Item ItemList
+                                     Mount MountList AppList StatusList])
   (import tourist/router     :refer [router-match captures-get
                                      captures-count captures-free])
   (import tourist/param      :refer [tourist-ctx-caps param capture])
   (import tourist/middleware :refer [mw-item? mw-chain-run])
+  (import tourist/routing    :refer [mount! cascade-with! passes!])
 
   ;; int (e.g. a raw pattern handle) is not a Captures handle.
   (defn bad-int-as-captures [pat : int] : int
@@ -61,5 +63,20 @@
   ;; mw-chain-run rejects an Item (single cell) where the cons head is wanted.
   (defn bad-item-as-itemlist [item : Item ctx : int] : int
     (mw-chain-run item ctx))        ; expects ItemList, got Item
+
+  ;; url-map!'s variadic rest is now Mount-typed; a bare int is rejected
+  ;; (v0.2.3 routing cons-walker hygiene). Note that turmeric's variadic
+  ;; call-site checker DOES enforce rest types, but does NOT currently
+  ;; enforce non-variadic positional types when a `& rest` is also present
+  ;; -- so swap-rejection for cascade-with!'s `passes : StatusList` arg is
+  ;; honored only at the internal __cascade-alloc / __cascade-passes
+  ;; boundaries inside routing.tur (which tur-check exercises directly),
+  ;; not at the public call site.
+  (defn bad-int-as-mount-rest [n : int] : int
+    (url-map! n))                   ; rest expects Mount, got int
+
+  ;; Same for AppList: it is not a Mount, even though both wrap :int.
+  (defn bad-applist-as-mount-rest [as : AppList] : int
+    (url-map! as))                  ; rest expects Mount, got AppList
 
   (defn main [] : int 0))

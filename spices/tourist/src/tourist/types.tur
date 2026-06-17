@@ -14,7 +14,7 @@
 ;;; Since: v0.2.0
 
 (defmodule tourist/types
-  (export Ctx Item ItemList Mount Captures)
+  (export Ctx Item ItemList Mount MountList AppList StatusList Captures)
 
 ;;; Ctx -- opaque handle to a tourist request context.
 ;;;
@@ -75,5 +75,25 @@
 ;;; Consumed by url-map!. Has no other public surface; the spice exports
 ;;; it only so url-map!'s variadic signature can name a real type.
 (defopaque Mount :int)
+
+;;; MountList -- cons list of Mount handles (head/tail cons cells).
+;;;
+;;; Used internally by tourist/routing's url-map! pipeline: __build-mounts
+;;; assembles a longest-prefix-first MountList and __url-map-dispatch walks
+;;; it. Null sentinel = (:: 0 :MountList). Since: v0.2.3
+(defopaque MountList :int)
+
+;;; AppList -- cons list of Item handles passed to cascade! / cascade-with!.
+;;;
+;;; Each element is a Route or sub-app the cascade tries in declaration
+;;; order. Null sentinel = (:: 0 :AppList). Since: v0.2.3
+(defopaque AppList :int)
+
+;;; StatusList -- cons list of HTTP status codes (raw :int values).
+;;;
+;;; Built by passes!; consumed by cascade-with! to decide which response
+;;; statuses fall through to the next app. Null sentinel =
+;;; (:: 0 :StatusList). Since: v0.2.3
+(defopaque StatusList :int)
 
 ) ;; end defmodule tourist/types
