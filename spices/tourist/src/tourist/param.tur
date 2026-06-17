@@ -382,14 +382,14 @@
 ;;;   key -- query parameter name, e.g. "q" for ?q=hello
 ;;;
 ;;; Returns:
-;;;   :int -- result<:cstr>: ok(value) if found, err("missing") otherwise
+;;;   (Result cstr cstr) -- ok(value) if found, err("missing") otherwise
 ;;;
 ;;; Example:
 ;;;   (let [r (param req "q")]
 ;;;     (when (ok? r) (ok-val r)))
 ;;;
-;;; Since: v0.1.0
-(defn param [ctx : int key : cstr] : int
+;;; Since: v0.1.0 (typed as Result in 0.2.0)
+(defn param [ctx : int key : cstr] : (Result cstr cstr)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -400,22 +400,14 @@
     char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
     char  *full_path;
   };
-  struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __tourist_ctx *c   = (struct __tourist_ctx *)(intptr_t)ctx;
-  struct __result      *res = malloc(sizeof(*res));
+  struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
   const char *k = (const char *)key;
   for (int i = 0; i < c->qp_count; i++) {
     if (strcmp(c->qp_keys[i], k) == 0) {
-      res->is_ok   = true;
-      res->ok_val  = (int64_t)(intptr_t)c->qp_vals[i];
-      res->err_val = 0;
-      return (int64_t)(intptr_t)res;
+      return tur_ok((int64_t)(intptr_t)c->qp_vals[i]);
     }
   }
-  res->is_ok   = false;
-  res->ok_val  = 0;
-  res->err_val = (int64_t)(intptr_t)"missing";
-  return (int64_t)(intptr_t)res;
+  return tur_err((int64_t)(intptr_t)"missing");
   ```)
 
 ;;; capture -- look up a path-segment capture by name.
@@ -428,14 +420,14 @@
 ;;;   name -- capture name, e.g. "id" for ":id", or "*" for wildcard
 ;;;
 ;;; Returns:
-;;;   :int -- result<:cstr>: ok(value) if found, err("missing") otherwise
+;;;   (Result cstr cstr) -- ok(value) if found, err("missing") otherwise
 ;;;
 ;;; Example:
 ;;;   (let [r (capture req "name")]
 ;;;     (when (ok? r) (ok-val r)))
 ;;;
-;;; Since: v0.1.0
-(defn capture [ctx : int name : cstr] : int
+;;; Since: v0.1.0 (typed as Result in 0.2.0)
+(defn capture [ctx : int name : cstr] : (Result cstr cstr)
   (captures-get (tourist-ctx-caps ctx) name))
 
 ;; -- v0.2.0: per-request attrs and deferred response headers ---------------

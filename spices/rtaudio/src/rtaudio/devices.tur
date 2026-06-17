@@ -8,13 +8,13 @@
 ;; standard stdlib/list head/tail pattern (0 is the empty-list sentinel).
 
 (defmodule rtaudio/devices
-  (import rtaudio/core :refer [Audio])
+  (import rtaudio/core :refer [Audio DeviceInfo])
   (export device-count device-info device-info-name
           device-info-output-chans device-info-input-chans
           device-info-sample-rates device-default-output
           device-default-input device-info-free)
 
-(import rtaudio/core :refer [Audio])
+(import rtaudio/core :refer [Audio DeviceInfo])
 
 ;; -------------------------------------------------------------------------
 ;; Private: cons list helpers (layout matches stdlib/list.tur)
@@ -73,7 +73,7 @@
 ;;;     (device-info-free di))
 ;;;
 ;;; Since: RA0
-(defn device-info [a : Audio id : int] : int
+(defn device-info [a : Audio id : int] : DeviceInfo
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -120,7 +120,7 @@
 ;;;   (println (device-info-name di))
 ;;;
 ;;; Since: RA0
-(defn device-info-name [di : int] : cstr
+(defn device-info-name [di : DeviceInfo] : cstr
   ```c
   struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
   return ((struct __dev_info*)(intptr_t)di)->name;
@@ -138,7 +138,7 @@
 ;;;   (println (device-info-output-chans di))
 ;;;
 ;;; Since: RA0
-(defn device-info-output-chans [di : int] : int
+(defn device-info-output-chans [di : DeviceInfo] : int
   ```c
   struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
   return (int64_t)((struct __dev_info*)(intptr_t)di)->output_chans;
@@ -156,7 +156,7 @@
 ;;;   (println (device-info-input-chans di))
 ;;;
 ;;; Since: RA0
-(defn device-info-input-chans [di : int] : int
+(defn device-info-input-chans [di : DeviceInfo] : int
   ```c
   struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
   return (int64_t)((struct __dev_info*)(intptr_t)di)->input_chans;
@@ -178,7 +178,7 @@
 ;;;       (set! rates (tail rates))))
 ;;;
 ;;; Since: RA0
-(defn device-info-sample-rates [di : int] : int
+(defn device-info-sample-rates [di : DeviceInfo] : int
   ```c
   struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };
   return ((struct __dev_info*)(intptr_t)di)->sample_rates;
@@ -232,7 +232,7 @@
 ;;;   (device-info-free di)
 ;;;
 ;;; Since: RA0
-(defn device-info-free [di : int] : void
+(defn device-info-free [di : DeviceInfo] : void
   ```c
   #include <stdlib.h>
   struct __dev_info { char *name; unsigned int output_chans; unsigned int input_chans; int64_t sample_rates; };

@@ -234,35 +234,27 @@ no_match:
 ;;;   key  -- capture name, e.g. "id" for :id, or "*" for wildcard
 ;;;
 ;;; Returns:
-;;;   :int -- result<:cstr>: ok(value) if found, err("missing") otherwise
+;;;   (Result cstr cstr) -- ok(value) if found, err("missing") otherwise
 ;;;
 ;;; Example:
 ;;;   (let [r (captures-get caps "id")]
 ;;;     (when (ok? r) (ok-val r)))
 ;;;
-;;; Since: v0.1.0
-(defn captures-get [caps : int key : cstr] : int
+;;; Since: v0.1.0 (typed as Result in 0.2.0)
+(defn captures-get [caps : int key : cstr] : (Result cstr cstr)
   ```c
   #include <stdlib.h>
   #include <string.h>
   struct __tourist_caps { char **keys; char **vals; int count; int cap; };
-  struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __tourist_caps *c   = (struct __tourist_caps *)(intptr_t)caps;
-  struct __result       *res = malloc(sizeof(*res));
+  struct __tourist_caps *c = (struct __tourist_caps *)(intptr_t)caps;
   if (c) {
     for (int i = 0; i < c->count; i++) {
       if (strcmp(c->keys[i], (const char *)key) == 0) {
-        res->is_ok   = true;
-        res->ok_val  = (int64_t)(intptr_t)c->vals[i];
-        res->err_val = 0;
-        return (int64_t)(intptr_t)res;
+        return tur_ok((int64_t)(intptr_t)c->vals[i]);
       }
     }
   }
-  res->is_ok   = false;
-  res->ok_val  = 0;
-  res->err_val = (int64_t)(intptr_t)"missing";
-  return (int64_t)(intptr_t)res;
+  return tur_err((int64_t)(intptr_t)"missing");
   ```)
 
 ;;; captures-count -- number of captures in a captures handle.

@@ -9,7 +9,7 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule plutovg/canvas
-  (import plutovg/types :refer [Canvas Surface Path])
+  (import plutovg/types :refer [Canvas Surface Path DashArray])
   (export canvas-create canvas-destroy
           canvas-set-source-color canvas-fill-rect
           ;; PV1: path recording
@@ -37,7 +37,7 @@
           canvas-set-fill-rule canvas-set-operator canvas-set-opacity
           ;; PV6: arc helpers + draw-image
           canvas-arc canvas-arc-to canvas-round-rect canvas-draw-image
-          canvas-of)
+          canvas-of dash-array-of)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -667,7 +667,7 @@
 ;;; "10 pixels on, 5 pixels off" call dash-array-add twice with 10.0 and 5.0.
 ;;;
 ;;; Since: PV4
-(defn dash-array-add [dashes : int length : float] : void
+(defn dash-array-add [dashes : DashArray length : float] : void
   ```c
   char *buf = (char *)(intptr_t)dashes;
   if (!buf) return;
@@ -683,7 +683,7 @@
 ;;; dash-array-count -- return the number of dash lengths added.
 ;;;
 ;;; Since: PV4
-(defn dash-array-count [dashes : int] : int
+(defn dash-array-count [dashes : DashArray] : int
   ```c
   char *buf = (char *)(intptr_t)dashes;
   return buf ? (int64_t)((int *)buf)[1] : 0;
@@ -692,7 +692,7 @@
 ;;; dash-array-destroy -- release a dash-array buffer.
 ;;;
 ;;; Since: PV4
-(defn dash-array-destroy [dashes : int] : void
+(defn dash-array-destroy [dashes : DashArray] : void
   ```c
   #include <stdlib.h>
   if (dashes) free((void *)(intptr_t)dashes);
@@ -716,7 +716,7 @@
 ;;;   dashes -- dash-array handle (from dash-array-create / dash-array-add)
 ;;;
 ;;; Since: PV4
-(defn canvas-set-dash-array [c : Canvas dashes : int] : void
+(defn canvas-set-dash-array [c : Canvas dashes : DashArray] : void
   ```c
   #include <plutovg.h>
   char *buf = (char *)(intptr_t)dashes;
@@ -918,6 +918,13 @@
 
 ;;; canvas-of -- extract a typed Canvas handle from an ok result returned by canvas-create.
 (defn canvas-of [r : ptr<void>] : Canvas
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
+
+;;; dash-array-of -- extract a typed DashArray handle from an ok result returned by dash-array-create.
+(defn dash-array-of [r : ptr<void>] : DashArray
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
   return res->ok_val;
