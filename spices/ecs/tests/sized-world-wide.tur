@@ -1,0 +1,50 @@
+;; E2c slice 3b -- variadic sized-defworld past the old arity-4 cap.
+;;
+;; The slice-3 sized-defworld unrolled per-arity and capped at four
+;; components. Slice 3b collapses that cascade into one variadic macro
+;; (mirroring ecs/world's E2d-P5b defworld collapse), so a sized world
+;; may now carry any number of components. This fixture declares a
+;; FIVE-component world -- one past the old cap -- and exercises a
+;; cross-parameter zip over two of its storages to confirm the
+;; type-level `n` still threads through every field.
+;;
+;; Expected output:
+;;   42
+;;   99
+;;   3
+;;   3
+
+(defmodule sized_world_wide_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense sized-dense-new sized-dense-len
+                                   sized-dense-set! sized-dense-get
+                                   sized-dense-zip-len])
+(import ecs/sized-world   :refer [sized-defworld])
+
+;; Five int-carried component newtypes -- one more than the slice-3 cap.
+(defopaque Pos    :int)
+(defopaque Vel    :int)
+(defopaque Hp     :int)
+(defopaque Sprite :int)
+(defopaque Enemy  :int)
+
+(sized-defworld GameWorld [Pos Vel Hp Sprite Enemy])
+
+(defn main [] : int
+  (let [w : (GameWorld (Static 64)) (make-GameWorld 64)]
+    (do
+      (sized-dense-set! (.Pos   w) 0 (:: 42 :Pos))
+      (sized-dense-set! (.Enemy w) 0 (:: 99 :Enemy))
+      (sized-dense-set! (.Pos   w) 1 (:: 1  :Pos))
+      (sized-dense-set! (.Pos   w) 2 (:: 2  :Pos))
+      (sized-dense-set! (.Enemy w) 1 (:: 1  :Enemy))
+      (sized-dense-set! (.Enemy w) 2 (:: 2  :Enemy))
+      (println (:: (sized-dense-get (.Pos   w) 0) :int))    ;; 42
+      (println (:: (sized-dense-get (.Enemy w) 0) :int))    ;; 99
+      (println (sized-dense-len (.Pos w)))                  ;; 3
+      ;; cross-parameter zip across the first and fifth storage fields
+      (println (sized-dense-zip-len (.Pos w) (.Enemy w)))   ;; 3
+      0)))
+
+) ;; end defmodule sized_world_wide_test

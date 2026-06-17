@@ -6,6 +6,46 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2d-P6 (stretch) -- polymorphic storage ops via a single-param class.**
+  New module `ecs/storage-ops` defines `(defclass StorageOps [S] (type Elem
+  : Type) (storage-insert! ...) (storage-get ...) (storage-has? ...))` -- a
+  single-parameter class threading the carried element type through an
+  associated `Elem` (not a second class parameter, which the unshipped
+  multi-param machinery would need). Instances are provided for the `(Dense
+  A)` and `(Sparse A)` backends, forwarding to the matching `dense-*` /
+  `sparse-*` ops; a body written against the class drives insert/get/has?
+  by the storage handle's type, lifting the "swap the backend with one
+  line" claim into the type system. `Tag` is deliberately *not* an instance
+  (it is payload-less: no element to `get`, no value to `insert!`). See
+  `tests/storage-ops-poly.tur`, which reuses the same call sequence over a
+  `(Dense Hp)` and a `(Sparse Hp)`. Scope per the plan: every handle *and
+  element* rides the int64 carrier, so a by-value struct element is out of
+  scope (it monomorphises `Elem` to the int64 carrier and mismatches the C
+  ABI) -- struct components keep the direct `dense-*` accessor path.
+  `storage-get` needs a use-site witness ascription (`(:: ... Hp)`) because
+  the associated `Elem` is not yet projected in return position, mirroring
+  the pre-E2d-P1 `dense-get` requirement. The `defcomponent-accessors`
+  rewrite-through-`StorageOps` is **deferred**: those accessors carry
+  struct components (out of the class's int-carrier scope) and a large
+  cap-gated passing-test surface, so routing them through the class would
+  regress the suite for no behavioural gain today -- noted as a follow-up
+  once struct-element projection lands. Bounded-polymorphic wrappers
+  (`[S] [(StorageOps S)]`) also remain off the shipped surface: they fail to
+  link against the monomorphised instance symbol, the same gap-H limitation
+  as `defcomponent-class`'s typeclass-bounded wrappers; monomorphic
+  dispatch works end to end.
+
+- **E2c slice 3b -- variadic `sized-defworld` (uncapped arity).** The
+  slice-3 `sized-defworld` unrolled its body per-arity and capped sized
+  worlds at four components. That cascade is now collapsed into one
+  variadic macro mirroring E2d-P5b: a recursive `sized-world-fields`
+  helper builds the `(Comp (SizedDense n Comp))` field groups and a
+  `sized-ctor-args` helper builds the per-component constructor arguments,
+  both spliced at macro-expansion time. A bounded-capacity world may now
+  carry any number of components (see `tests/sized-world-wide.tur`, a
+  five-component world). Relies on the same two turmeric fixes E2d-P5b
+  used (`~@`-splice into a literal and a nested user-macro call from inside
+  a splice expression), which landed 2026-06-17.
 - **E2d-P5b -- variadic `defworld` (uncapped arity).** The former
   `defworld--0..5` per-arity cascade is collapsed into one variadic body:
   a recursive `world-fields` helper macro computes the flat

@@ -1,0 +1,100 @@
+;;; ecs/storage-ops -- the polymorphic storage-operation class (E2d-P6).
+;;;
+;;; `StorageOps` lifts the "swap a component's backend with one line" claim
+;;; from documentation into the type system. Where `ecs/world`'s
+;;; `defcomponent-accessors` hard-codes `dense-set!` / `dense-get` /
+;;; `dense-has?`, a body written against `StorageOps` dispatches the same
+;;; three operations by the *storage handle's* type, so a `(Dense Pos)` and a
+;;; `(Sparse Pos)` are driven by the identical call sequence.
+;;;
+;;; Single parameter, associated element type. The class takes exactly one
+;;; parameter -- the storage handle type `S` (`(Dense A)`, `(Sparse A)`, ...)
+;;; -- because multi-parameter class machinery is not shipped. The element
+;;; type the storage carries rides an associated `type Elem` member instead
+;;; of a second class parameter, the same trick `Component` uses for its
+;;; `Storage` member. The `(Dense A)` instance binds `(type Elem = A)`, so the
+;;; element type is recovered from the handle's own phantom.
+;;;
+;;; Carrier note / element scope. Every storage *handle* (`(Dense A)`,
+;;; `(Sparse A)`, `Tag`) rides the `int64` carrier, so no method *C*
+;;; signature depends on `(Storage T)`. The carried *element* type `Elem`
+;;; must likewise ride the int64 carrier (an int, an int-carried opaque such
+;;; as `(defopaque Hp :int)`, a pointer): the generic instance bodies
+;;; monomorphise `Elem` to the int64 carrier, so a by-value *struct* element
+;;; would mismatch the C ABI at `storage-insert!` / `storage-get`. Struct
+;;; components therefore keep the direct `dense-*` accessor path
+;;; (`defcomponent-accessors`) until the value-level projection caveat the
+;;; plan gates P6 against is closed upstream. Int-carried components dispatch
+;;; through the class cleanly today.
+;;;
+;;; Return-position witness. `storage-get` returns the associated `Elem`. The
+;;; elaborator does not yet project `Elem` to a concrete type in *return*
+;;; position from the receiver's instance, so a `storage-get` call must be
+;;; ascribed at its use site -- `(:: (storage-get s e) Pos)`, or a typed
+;;; let-binding. This mirrors the pre-E2d-P1 `dense-get` witness requirement
+;;; (`A` was pinned by lifting the handle to `(Dense A)`; the class re-opens
+;;; the same hole one level up). `storage-insert!` (Elem in argument
+;;; position) and `storage-has?` (no Elem) need no witness.
+;;;
+;;; Polymorphic-wrapper surface deferred. A function bounded on
+;;; `[S] [(StorageOps S)]` is the natural "generic over any backend" shape,
+;;; but it does not link today: the bounded body emits a call to the
+;;; unspecialised instance symbol while the instance is monomorphised against
+;;; `<struct>`, so `cc` fails with an undefined reference. This is the same
+;;; monomorphisation gap that keeps `defcomponent-class`'s typeclass-bounded
+;;; wrappers off the shipped surface (gap H). *Monomorphic* dispatch -- a
+;;; helper typed against a concrete `(Dense int)` / `(Sparse int)` -- works
+;;; end to end, which is the surface `tests/storage-ops-poly.tur` exercises.
+;;;
+;;; Tag is intentionally not an instance. `Tag` is payload-less: `tag-set!`
+;;; takes no value and there is no element to `get`, so it has no honest
+;;; `(type Elem = ...)` / `storage-insert!` / `storage-get`. Forcing it in
+;;; would mean a phantom element and a `storage-get` that returns garbage;
+;;; tags keep their own `tag-*` surface and the `with` / `without` query
+;;; filters instead.
+;;;
+;;; Since: E2d-P6
+
+(defmodule ecs/storage-ops
+  (export)
+
+(import ecs/storage :refer [Dense  dense-set!  dense-get  dense-has?])
+(import ecs/sparse  :refer [Sparse sparse-set! sparse-get sparse-has?])
+
+;;; StorageOps -- the three index-keyed storage operations, parameterised
+;;; over the storage handle type `S` with the carried element type threaded
+;;; through the associated `Elem`.
+;;;
+;;; Like `Component`, the class is intentionally *not* in the module's
+;;; `(export ...)` list: typeclasses register globally and become visible to
+;;; any module that imports `ecs/storage-ops` (export-list entries are only
+;;; recognised for value-level names). The instances ride along the same way.
+;;;
+;;; Since: E2d-P6
+(defclass StorageOps [S]
+  (type Elem : Type)
+  (storage-insert! [s : S idx : int v : Elem] : nil)
+  (storage-get     [s : S idx : int] : Elem)
+  (storage-has?    [s : S idx : int] : bool))
+
+;;; StorageOps [(Dense A)] -- the dense backend. `Elem` is the handle's own
+;;; phantom `A`; the three methods forward to the matching `dense-*` op.
+;;; Since: E2d-P6
+(definstance StorageOps [(Dense A)]
+  (type Elem = A)
+  (storage-insert! [s idx v] (dense-set! s idx v))
+  (storage-get     [s idx]   (dense-get  s idx))
+  (storage-has?    [s idx]   (dense-has? s idx)))
+
+;;; StorageOps [(Sparse A)] -- the sparse (Robin Hood) backend. Same op
+;;; shape as dense, so it falls out cleanly under the one class. `sparse-del!`
+;;; has no dense counterpart and so is *not* a class method -- the class is
+;;; the common insert/get/has? surface, not the union of every backend's ops.
+;;; Since: E2d-P6
+(definstance StorageOps [(Sparse A)]
+  (type Elem = A)
+  (storage-insert! [s idx v] (sparse-set! s idx v))
+  (storage-get     [s idx]   (sparse-get  s idx))
+  (storage-has?    [s idx]   (sparse-has? s idx)))
+
+) ;; end defmodule ecs/storage-ops
