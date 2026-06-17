@@ -6,6 +6,17 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 3b -- variadic `sized-defworld` (uncapped arity).** The
+  slice-3 `sized-defworld` unrolled its body per-arity and capped sized
+  worlds at four components. That cascade is now collapsed into one
+  variadic macro mirroring E2d-P5b: a recursive `sized-world-fields`
+  helper builds the `(Comp (SizedDense n Comp))` field groups and a
+  `sized-ctor-args` helper builds the per-component constructor arguments,
+  both spliced at macro-expansion time. A bounded-capacity world may now
+  carry any number of components (see `tests/sized-world-wide.tur`, a
+  five-component world). Relies on the same two turmeric fixes E2d-P5b
+  used (`~@`-splice into a literal and a nested user-macro call from inside
+  a splice expression), which landed 2026-06-17.
 - **E2d-P5b -- variadic `defworld` (uncapped arity).** The former
   `defworld--0..5` per-arity cascade is collapsed into one variadic body:
   a recursive `world-fields` helper macro computes the flat
