@@ -45,10 +45,12 @@
 ;;; docs/upcoming/ecs-sized-world-plan.md (turmeric repo).
 
 (defmodule ecs/sized-query
-  (export sized-for-each)
+  (export sized-for-each
+          sized-world-tagged? sized-world-untagged?)
 
 (import ecs/sized-storage :refer [SizedDense sized-dense-cap
                                    sized-dense-get sized-dense-has?])
+(import ecs/sized-tag     :refer [SizedTag sized-tag-has?])
 
 ;;; __sfe-storages -- recursive helper: wrap inner in nested `let`s
 ;;; binding `__ss_<Comp>` to `(.<Comp> w)` for each component.
@@ -131,5 +133,32 @@
                (let [~__e-bind __i]
                  (__sfe-value-binds ~comps ~__v-binds __i ~body)))
              (set! __i (+ __i 1))))))))
+
+;;; sized-world-tagged? -- true if entity slot `e` carries the named
+;;; SizedTag in the world's `.<Tag>` field. The sized counterpart of
+;;; ecs/query's `world-tagged?`; macro-only, expands to a direct
+;;; `sized-tag-has?` call.
+;;;
+;;; The world's `.<Tag>` field must hold a `(SizedTag n)` handle. Since
+;;; `sized-defworld` currently emits every component field as
+;;; `(SizedDense n Comp)`, mixing tag bitsets into a sized world means
+;;; hand-rolling the world's `defstruct` (the same constraint the
+;;; unsized `defworld` has today, see
+;;; `tests/filter-with-without.tur` for the unsized pattern).
+;;; `tests/sized-filter-with-without.tur` is the sized-side analogue.
+;;;
+;;; Composes with `sized-for-each` inside the body via `when`/`unless`
+;;; just like the unsized pair.
+;;;
+;;; Since: E2c slice 6
+(defmacro sized-world-tagged? [world Tag e]
+  `(sized-tag-has? (~(dot-sym Tag) ~world) ~e))
+
+;;; sized-world-untagged? -- inverse of sized-world-tagged?. Sugar for
+;;; "the entity does NOT carry this sized tag". Macro-only.
+;;;
+;;; Since: E2c slice 6
+(defmacro sized-world-untagged? [world Tag e]
+  `(not (sized-tag-has? (~(dot-sym Tag) ~world) ~e)))
 
 ) ;; end defmodule ecs/sized-query

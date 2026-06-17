@@ -30,12 +30,16 @@
 
 (defmodule ecs/sized-world
   (export sized-defworld
+          sized-defcomponent-accessors
           sized-state-new sized-state-free
           sized-live sized-cap
           sized-spawn! sized-despawn
           sized-alive? sized-slot-generation)
 
-(import ecs/sized-storage :refer [SizedDense sized-dense-new])
+(import ecs/sized-storage :refer [SizedDense sized-dense-new
+                                   sized-dense-get sized-dense-set!
+                                   sized-dense-has?])
+(import ecs/cap           :refer [WriteCap ReadCap])
 (import ecs/entity        :refer [Entity entity-new entity-index entity-generation])
 
 ;; Slice 4 ships the panicking `sized-spawn!` only. The design
@@ -369,5 +373,65 @@
          (make-struct ~name
                       ~@(sized-ctor-args comps)
                       (sized-state-new k))))))
+
+;;; sized-defcomponent-accessors -- emit cap-gated
+;;; `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` accessors for one
+;;; (sized world, component) pair. The sized counterpart of
+;;; `ecs/world`'s `defcomponent-accessors`.
+;;;
+;;; Each accessor's world parameter is `^borrow w : (~world-name n)`,
+;;; so the type-level `n` is polymorphic at the accessor's signature
+;;; and unified by the call site against whichever concrete
+;;; `(GameWorld (Static k))` value is passed. The element type
+;;; threads through `(SizedDense n ~comp-name)`, so a hand-written
+;;; `(set-Pos! cap w 0 (:: 42 :Pos))` against a `w : (GameWorld
+;;; (Static 64))` resolves both `n` and the element type without an
+;;; explicit witness.
+;;;
+;;; Cap surface matches the unsized accessors exactly:
+;;;
+;;;   - `get-<Comp>`: `^borrow cap : (ReadCap Comp)` -- non-consuming
+;;;     so a body that reads many slots per iteration does not need
+;;;     to re-mint.
+;;;   - `set-<Comp>!`: `^borrow cap : (WriteCap Comp)` -- same
+;;;     borrow-not-consume rationale as I4. The linear cap is auto-
+;;;     consumed once by `defsystem`'s body-end wrapper (unchanged
+;;;     from the unsized path; sized `defsystem` is a follow-up
+;;;     slice).
+;;;   - `has-<Comp>?`: no cap (presence is observable without
+;;;     declaring a read effect; matches the unsized surface).
+;;;
+;;; The bounds-check story per the sized-world plan Q4: the
+;;; underlying `sized-dense-get` / `sized-dense-set!` keep their
+;;; runtime checks against `cap`. The static-index path
+;;; (`(Fin n)` accessors) is refinement-types-gated and out of
+;;; scope here.
+;;;
+;;; Required imports at the call site:
+;;;   (import ecs/cap :refer [WriteCap ReadCap])
+;;;
+;;; Since: E2c slice 7
+(defmacro sized-defcomponent-accessors [world-name comp-name]
+  (let [getter (str->sym (str-append "get-"  (symbol-name comp-name)))
+        setter (str->sym (str-append "set-"  (symbol-name comp-name) "!"))
+        haser  (str->sym (str-append "has-"  (symbol-name comp-name) "?"))
+        field  (dot-sym comp-name)]
+    `(do
+       (defn ~getter [n]
+                     [^borrow cap : (ReadCap  ~comp-name)
+                      ^borrow w   : (~world-name n)
+                      e           : int]
+                    : ~comp-name
+         (let [p : ~comp-name (sized-dense-get (~field w) e)] p))
+       (defn ~setter [n]
+                     [^borrow cap : (WriteCap ~comp-name)
+                      ^borrow w   : (~world-name n)
+                      e           : int
+                      v           : ~comp-name]
+                    : nil
+         (sized-dense-set! (~field w) e v))
+       (defn ~haser [n]
+                    [^borrow w : (~world-name n) e : int] : bool
+         (sized-dense-has? (~field w) e)))))
 
 ) ;; end defmodule ecs/sized-world

@@ -6,6 +6,41 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 7 -- `sized-defcomponent-accessors`.** Cap-gated
+  `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` for sized worlds,
+  the sized counterpart of `ecs/world`'s `defcomponent-accessors`.
+  The accessor's world parameter is `^borrow w : (~world-name n)`,
+  so `n` is polymorphic at the accessor's signature and unified at
+  the call site -- one accessor family elaborates against every
+  `(GameWorld (Static k))` shape without duplication (the regression
+  test reuses one `set-Pos!` / `get-Pos` / `has-Pos?` family against
+  both a `(GameWorld (Static 16))` and a `(GameWorld (Static 4))`).
+  Cap surface is unchanged from the unsized accessors: caps pair
+  with a component type, not a world shape, so `WriteCap<Pos>` /
+  `ReadCap<Pos>` work identically. Bounds checks stay runtime per
+  the sized-world plan Q4 -- the static-index `(Fin n)` path is
+  refinement-types-gated and out of scope. New regression test
+  `tests/sized-defcomponent-accessors.tur`.
+
+- **E2c slice 6 -- `sized-world-tagged?` / `sized-world-untagged?`
+  filter macros for sized worlds.** Sized-side analogues of
+  `ecs/query`'s `world-tagged?` / `world-untagged?` -- macro-only
+  surface that expands to a direct `sized-tag-has?` against the
+  named `.<Tag>` field on the world. Composes with `sized-for-each`
+  inside the body via `when`/`unless`, exactly the unsized pair's
+  ergonomic shape. The world's `.<Tag>` field must hold a
+  `(SizedTag n)`; because `sized-defworld` currently emits every
+  component field as `(SizedDense n Comp)`, callers mixing tag
+  bitsets into a sized world hand-roll the world's `defstruct`
+  -- the same constraint the unsized `defworld` has today (see
+  `tests/filter-with-without.tur`). New regression test
+  `tests/sized-filter-with-without.tur` is the sized counterpart:
+  a hand-rolled `(GameWorld n)` with a SizedDense Pos plus two
+  SizedTag bitsets (Player / Dead), iterated as "Pos AND Player AND
+  NOT Dead". The sum matches the unsized fixture's expected total
+  (1368), confirming the macro pair composes with `sized-for-each`
+  the same way the unsized pair composes with `for-each`.
+
 - **E2c slice 5 -- `sized-for-each` payoff macro.** New module
   `ecs/sized-query` exporting `sized-for-each`, the bounded-capacity
   counterpart of `ecs/query`'s `for-each`. Shape mirrors the unsized

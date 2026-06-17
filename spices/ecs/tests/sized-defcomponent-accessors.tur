@@ -1,0 +1,76 @@
+;; E2c slice 7 -- sized-defcomponent-accessors round-trip.
+;;
+;; Sized-side counterpart of tests/defcomponent-accessors.tur. The
+;; sized accessor family wraps the typed (SizedDense n Comp) backend
+;; behind a polymorphic-in-`n` defn signature, so a single accessor
+;; works against any concrete (GameWorld (Static k)) value.
+;;
+;; Cap surface (ReadCap / WriteCap) is unchanged from the unsized
+;; world: caps are world-shape-agnostic, they pair with a component
+;; type. The hand-rolled `set-Pos! wc w idx v` / `get-Pos rc w idx`
+;; spelling matches the unsized accessor exactly.
+;;
+;; Note: this test uses an int-carried defopaque Pos rather than the
+;; struct-by-value Pos the unsized accessor test uses. The reason is
+;; the same one that drives the rest of the sized-world tests --
+;; struct-by-value through the sized-dense-get / set! generics hits
+;; the M3 long-tail monomorphization gap (see
+;; tests/sized-world-rt.tur's preamble); the sized accessors keep
+;; the int-carrier convention until that lifts.
+;;
+;; Expected output:
+;;   42
+;;   true
+;;   ok
+;;   100      ;; reuse same accessor against a differently-sized world
+;;   true
+
+(defmodule sized_defcomponent_accessors_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense])
+(import ecs/sized-world   :refer [sized-defworld
+                                   sized-defcomponent-accessors])
+(import ecs/cap           :refer [WriteCap ReadCap
+                                   make-write-cap make-read-cap use-cap!])
+
+(defopaque Pos :int)
+
+(sized-defworld GameWorld [Pos])
+(sized-defcomponent-accessors GameWorld Pos)
+
+(def Pos-cid 0)
+
+(defn main [] : int
+  (let [w   : (GameWorld (Static 16)) (make-GameWorld 16)
+        wc  (:: (make-write-cap Pos-cid) (WriteCap Pos))
+        rc  (:: (make-read-cap  Pos-cid) (ReadCap  Pos))]
+    (do
+      (set-Pos! wc w 3 (:: 42 :Pos))
+      (let [p       (get-Pos rc w 3)
+            present (has-Pos? w 3)]
+        (do
+          (println (:: p :int))           ;; 42
+          (println present)               ;; true
+          (use-cap! wc)
+          (if (and (= (:: p :int) 42) present)
+            (println "ok")                ;; ok
+            (println "FAIL"))))
+      ;; Reuse the same accessor family against a differently-sized
+      ;; world: the accessor's `n` parameter is polymorphic, so the
+      ;; same `set-Pos!` / `get-Pos` defns elaborate against (GameWorld
+      ;; (Static 16)) and (GameWorld (Static 4)) without duplication.
+      (let [w2  : (GameWorld (Static 4)) (make-GameWorld 4)
+            wc2 (:: (make-write-cap Pos-cid) (WriteCap Pos))
+            rc2 (:: (make-read-cap  Pos-cid) (ReadCap  Pos))]
+        (do
+          (set-Pos! wc2 w2 1 (:: 100 :Pos))
+          (let [p2      (get-Pos rc2 w2 1)
+                present (has-Pos? w2 1)]
+            (do
+              (println (:: p2 :int))      ;; 100
+              (println present)           ;; true
+              (use-cap! wc2)
+              0)))))))
+
+) ;; end defmodule sized_defcomponent_accessors_test
