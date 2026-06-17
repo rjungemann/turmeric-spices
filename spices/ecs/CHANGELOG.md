@@ -6,6 +6,65 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 4c -- generational `Entity` handles on sized worlds.**
+  The slice-4b free-list lets `sized-spawn!` recycle the slot a
+  despawn just freed; without per-slot generations a stale handle
+  that named the slot before the despawn was indistinguishable from
+  the freshly-spawned handle at the same slot -- a use-after-despawn
+  hazard the unsized `ecs/world` has guarded against since E0 via
+  generational `Entity` packing. Slice 4c brings the sized world up
+  to the same surface: the `__ecs_state` control block now carries a
+  `int64_t *gens` array sized to `cap`; `sized-spawn!` returns a
+  packed `Entity` via `entity-new(slot, gens[slot])`; `sized-despawn`
+  takes an `Entity`, verifies its generation against the slot's
+  current `gens[slot]`, bumps the slot's generation, and pushes the
+  slot onto the free-list. New helpers `sized-alive?` (true iff the
+  Entity's (idx, gen) still matches `gens[idx]`) and
+  `sized-slot-generation` round out the surface. The generation
+  check also makes `sized-despawn` double-despawn-safe -- a second
+  call against the stale handle no-ops instead of corrupting the
+  free-list with a duplicate slot. Memory stays O(cap) -- the
+  `gens` array is `calloc`'d at construction and released alongside
+  the state cell. New regression test
+  `tests/sized-world-generation.tur` exercises the alive / dead /
+  respawn / double-despawn matrix end-to-end.
+
+- **E2c slice 4b -- free-list-based slot reuse in sized worlds.** The
+  slice-4 `sized-despawn` decremented `live` but left the freed slot
+  stranded -- `next` advanced monotonically, so a world that repeatedly
+  spawned and despawned still exhausted its capacity. Slice 4b grows the
+  `__ecs_state` control block with a `int64_t *fl_data` free-list (plus
+  `fl_len` / `fl_cap`): `sized-despawn` now pushes the freed slot onto
+  the list, and `sized-spawn!` pops from it before reaching for a fresh
+  slot. A cap-`n` world that recycles slots can run indefinitely within
+  its capacity. The free-list is freed alongside the state cell, so
+  total memory stays O(cap). New regression test
+  `tests/sized-world-reuse.tur` exercises spawn-after-despawn slot
+  reuse and a tight despawn/spawn loop that runs 100 cycles against a
+  cap-3 world.
+
+### Changed -- BREAKING
+
+- **`sized-spawn!` returns `Entity`; `sized-despawn` takes `Entity`.**
+  Slice 4b's intermediate signature handed back / consumed a bare
+  slot `int`. Slice 4c lifts both to the packed generational `Entity`
+  that the unsized `ecs/world` has used since E0. For a fresh world
+  every slot starts at generation 0, so callers that only inspect
+  `(entity-index ...)` see the same slot ids as before; the
+  generation-bearing high bits only diverge once a slot is despawned
+  and reused. Callers update by:
+  ```turmeric
+  ;; before:
+  (let [s (sized-spawn! state)]
+    (sized-despawn state s))
+  ;; after:
+  (let [e (sized-spawn! state)]
+    (sized-despawn state e))    ;; no change at call sites that
+                                ;; never named the bare slot id
+  ;; callers that want the slot id explicitly:
+  (entity-index e)
+  ```
+
 - **E2d-P6 (stretch) -- polymorphic storage ops via a single-param class.**
   New module `ecs/storage-ops` defines `(defclass StorageOps [S] (type Elem
   : Type) (storage-insert! ...) (storage-get ...) (storage-has? ...))` -- a

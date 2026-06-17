@@ -1,12 +1,12 @@
 ;; E2c slice 4 -- sized-spawn! / sized-despawn over a (GameWorld n).
 ;;
 ;; A bounded-capacity world of n=4 (cap=4) is filled with 4 spawn!
-;; calls; each returns the slot id. sized-despawn decrements the
-;; live count but does NOT free the slot for reuse (free-list is
-;; slice 4b), so after 4 spawns + 1 despawn:
-;;   sized-live = 3
-;;   sized-cap  = 4
-;;   sized-spawn! on this state would abort -- not exercised here.
+;; calls; each returns the slot id. sized-despawn (slice 4b)
+;; decrements the live count and pushes the freed slot onto the
+;; free-list; the freed slot is then handed back by the next spawn.
+;; The slice-4b slot-reuse story is exercised by tests/sized-world-
+;; reuse.tur; this test stays focused on the spawn / despawn /
+;; sized-live / sized-cap surface.
 ;;
 ;; The fallible variant `sized-spawn : ... -> (Result int WorldFull)`
 ;; the design plan calls out is deferred until the M3 struct-carrier
@@ -27,6 +27,7 @@
 (defmodule sized_world_spawn_test
   (export)
 
+(import ecs/entity        :refer [entity-index])
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld
                                    sized-spawn! sized-despawn
@@ -40,17 +41,25 @@
   (let [w : (GameWorld (Static 4)) (make-GameWorld 4)]
     (do
       (println (sized-cap (.state w)))                ;; 4
-      (println (sized-spawn! (.state w)))             ;; 0
-      (println (sized-spawn! (.state w)))             ;; 1
-      (println (sized-spawn! (.state w)))             ;; 2
-      (println (sized-spawn! (.state w)))             ;; 3
-      (println (sized-live (.state w)))               ;; 4
-      ;; The pre-check pattern callers should use today:
-      (println (= (sized-live (.state w))
-                  (sized-cap  (.state w))))           ;; true (world full)
-      (sized-despawn (.state w))
-      (println (sized-live (.state w)))               ;; 3
-      (println (sized-cap  (.state w)))               ;; 4
-      0)))
+      ;; Slice 4c: spawn returns a packed Entity. For a fresh world
+      ;; every slot starts at generation 0, so unpacking with
+      ;; `entity-index` reproduces the slice-4 / 4b output shape.
+      (let [e0 (sized-spawn! (.state w))
+            e1 (sized-spawn! (.state w))
+            e2 (sized-spawn! (.state w))
+            e3 (sized-spawn! (.state w))]
+        (do
+          (println (entity-index e0))                  ;; 0
+          (println (entity-index e1))                  ;; 1
+          (println (entity-index e2))                  ;; 2
+          (println (entity-index e3))                  ;; 3
+          (println (sized-live (.state w)))            ;; 4
+          ;; The pre-check pattern callers should use today:
+          (println (= (sized-live (.state w))
+                      (sized-cap  (.state w))))        ;; true (world full)
+          (sized-despawn (.state w) e0)
+          (println (sized-live (.state w)))            ;; 3
+          (println (sized-cap  (.state w)))            ;; 4
+          0)))))
 
 ) ;; end defmodule sized_world_spawn_test
