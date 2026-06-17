@@ -30,9 +30,10 @@
 
 (defmodule ecs/sized-world
   (export sized-defworld sized-defworld-mono
+          sized-defworld-copy-into
           sized-defcomponent-accessors sized-defcomponent-accessors-mono
           sized-defsystem
-          sized-state-new sized-state-free
+          sized-state-new sized-state-free sized-state-copy-into
           sized-live sized-cap
           sized-spawn! sized-despawn
           sized-alive? sized-slot-generation)
@@ -196,6 +197,37 @@
   return st->gens[slot];
   ```)
 
+;;; Copy the gens / next / live counters from `src` into `dst` and
+;;; clear `dst`'s free-list. Used by the per-world `copy-into-<W>`
+;;; emission (slice 11) to preserve generational Entity handles
+;;; across a slot-by-slot world resize. The caller has already
+;;; checked `dst->cap >= src->cap`; on mismatch this raw helper
+;;; truncates silently -- the Turmeric wrapper `sized-state-copy-into`
+;;; below does the cap check first.
+(defn __sized-state-copy-into-raw [src : int dst : int] #{Unsafe} : nil
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  typedef struct {
+    int64_t next; int64_t live; int64_t cap;
+    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
+    int64_t *gens;
+  } __ecs_state;
+  __ecs_state *s = (__ecs_state *)(intptr_t)src;
+  __ecs_state *d = (__ecs_state *)(intptr_t)dst;
+  if (!s || !d) return;
+  int64_t n = (s->cap < d->cap) ? s->cap : d->cap;
+  if (s->gens && d->gens && n > 0) {
+    memcpy(d->gens, s->gens, (size_t)n * sizeof(int64_t));
+  }
+  d->next = (s->next < d->cap) ? s->next : d->cap;
+  d->live = s->live;
+  /* Free-list resets to empty: any slots `dst` had on its own
+     free-list belong to the pre-copy state and are no longer
+     consistent with the copied gens. Future despawns repopulate. */
+  d->fl_len = 0;
+  ```)
+
 ;;; sized-state-new -- allocate a state cell with capacity k.
 ;;; Used internally by the constructor that sized-defworld emits;
 ;;; exposed for callers that want to construct a world by hand.
@@ -215,6 +247,30 @@
 ;;; This is the runtime image of the world's type-level `n`.
 (defn sized-cap [s : int] : int
   (unsafe (__sized-state-cap-raw s)))
+
+(defn __sized-state-copy-abort-raw [] #{Unsafe} : nil
+  ```c
+  fprintf(stderr, "sized-state-copy-into: dst cap smaller than src cap\n");
+  abort();
+  ```)
+
+;;; sized-state-copy-into -- copy `src`'s generation array + counters
+;;; into `dst`. Required for slot-preserving world resizes so an
+;;; Entity packed against `src` keeps matching `dst.gens[idx]` after
+;;; the copy. Aborts if `dst.cap < src.cap` -- shrinking is not safe
+;;; (the truncated slots' gens would silently disappear and any live
+;;; Entity referencing them would suddenly mismatch).
+;;;
+;;; Free-list is reset to empty in `dst` (its previous contents
+;;; referenced the pre-copy gens that are now overwritten).
+;;;
+;;; Since: E2c slice 11
+(defn sized-state-copy-into [src : int dst : int] : nil
+  (let [src-cap (unsafe (__sized-state-cap-raw src))
+        dst-cap (unsafe (__sized-state-cap-raw dst))]
+    (if (< dst-cap src-cap)
+      (unsafe (__sized-state-copy-abort-raw))
+      (unsafe (__sized-state-copy-into-raw src dst)))))
 
 ;;; sized-spawn! -- allocate a fresh `Entity` and return its packed
 ;;; (idx, gen) handle. Aborts if the world is at capacity; callers
@@ -492,6 +548,80 @@
          (make-struct ~name
                       ~@(sized-ctor-args comps)
                       (sized-state-new k))))))
+
+;;; sized-copy-component-body -- recursive helper for
+;;; sized-defworld-copy-into. Expands to a chain of per-component
+;;; copy steps inside the iteration body: for each component,
+;;;
+;;;   (when (sized-dense-has? (.~Comp src) i)
+;;;     (sized-dense-set! (.~Comp dst) i
+;;;                       (sized-dense-get (.~Comp src) i)))
+;;;
+;;; The trailing component's expansion is the final form of the body
+;;; (no `do`-tail needed because each step is in a top-level position
+;;; in the body sequence).
+;;;
+;;; Since: E2c slice 11
+(defmacro sized-copy-component-body [src dst i comps]
+  (if (empty? comps)
+    `nil
+    (let [__c (first comps)
+          __field (dot-sym __c)]
+      `(do
+         (when (sized-dense-has? (~__field ~src) ~i)
+           (sized-dense-set! (~__field ~dst) ~i
+                             (sized-dense-get (~__field ~src) ~i)))
+         (sized-copy-component-body ~src ~dst ~i ~(rest comps))))))
+
+;;; sized-defworld-copy-into -- emit a per-world slot-preserving copy
+;;; function `copy-into-<Name>`.
+;;;
+;;; Syntax:
+;;;   (sized-defworld GameWorld [Pos Vel])
+;;;   (sized-defworld-copy-into GameWorld [Pos Vel])
+;;;
+;;; The component vector must match `sized-defworld`'s -- we can't
+;;; recover it from the world type alone (the storage handles are
+;;; defopaque ints at the C ABI), so the caller spells it out a
+;;; second time. The lowering is polymorphic in both src and dst
+;;; capacity:
+;;;
+;;;   (defn copy-into-GameWorld [n n'] [src : (GameWorld n)
+;;;                                     dst : (GameWorld n')] : nil
+;;;     ;; per-slot, per-component, has?-guarded copy
+;;;     ...
+;;;     (sized-state-copy-into (.state src) (.state dst)))
+;;;
+;;; Cross-parameter unification: `(GameWorld n)` and `(GameWorld n')`
+;;; carry independent caps -- the SZ8 unifier does NOT collapse them,
+;;; which is exactly what we want for a resize (the whole point is
+;;; that `n` and `n'` can differ). The state-copy aborts at runtime
+;;; if `dst.cap < src.cap`; the slot-by-slot dense copy is bounded
+;;; by `src`'s cap and writes into `dst`'s same-indexed slots, so
+;;; growing copies (n' > n) work directly and shrinking is rejected
+;;; by the state-copy guard before any partial copy is observable.
+;;;
+;;; Entity-handle preservation: generations are carried in the state
+;;; cell (slice 4c), and `sized-state-copy-into` copies the full
+;;; gens array, so an `Entity` packed against `src` continues to
+;;; satisfy `(sized-alive? dst e)` after the copy. The dst's
+;;; free-list is reset to empty (its pre-copy contents referenced
+;;; gens that have just been overwritten); future despawns repopulate
+;;; it consistently with the new generation state.
+;;;
+;;; Since: E2c slice 11
+(defmacro sized-defworld-copy-into [name comps]
+  (let [fn-name (str->sym (str-append "copy-into-" (symbol-name name)))]
+    `(defn ~fn-name [n n']
+                    [^borrow src : (~name n) ^borrow dst : (~name n')] : nil
+       (let [^mut i 0
+             src-cap (sized-cap (.state src))]
+         (do
+           (while (< i src-cap)
+             (do
+               (sized-copy-component-body src dst i ~comps)
+               (set! i (+ i 1))))
+           (sized-state-copy-into (.state src) (.state dst)))))))
 
 ;;; sized-defcomponent-accessors -- emit cap-gated
 ;;; `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` accessors for one

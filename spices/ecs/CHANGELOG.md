@@ -6,6 +6,47 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 11 -- `sized-defworld-copy-into` for slot-preserving
+  world resize.** The sized-world plan's "grow the world" surface:
+  open the existential, allocate a fresh `(World n')` with `n' >=
+  n`, copy components, close. This slice ships the copy step --
+  per-world via `sized-defworld-copy-into`, which emits a
+  `copy-into-<Name>` function polymorphic in both source and
+  destination capacity:
+
+      (sized-defworld GameWorld [Pos Vel])
+      (sized-defworld-copy-into GameWorld [Pos Vel])
+      ;; => (defn copy-into-GameWorld [n n']
+      ;;       [^borrow src : (GameWorld n)
+      ;;        ^borrow dst : (GameWorld n')] : nil ...)
+
+  The body walks `[0, src.cap)`, copies each populated dense slot
+  into `dst`'s same-indexed slot, then threads the full state cell
+  (gens array, live count, next high-water mark) from src to dst
+  via the new `sized-state-copy-into`. The gens copy is what makes
+  the resize **Entity-handle preserving**: an `Entity` packed
+  against `src` continues to satisfy `(sized-alive? dst e)` after
+  the copy, and a despawned entity stays dead in dst because the
+  bumped gen flows through. Growing resizes (n' > n) work
+  directly; shrinking (n' < n) aborts in `sized-state-copy-into`
+  before any partial state is observable. `(GameWorld n)` and
+  `(GameWorld n')` are kept type-distinct -- the SZ8 unifier does
+  not collapse the two caps, which is what makes the resize
+  signature even expressible.
+
+  The component vector must be repeated (the storage handles are
+  defopaque ints at the C ABI, so the macro can't recover the
+  component list from the world type alone). Out of scope for this
+  slice: the plan's `world-resize` wrapper that lifts a copy into
+  the `pack-sized` / `open-sized` existential; that is a thin
+  client layer over `copy-into-<W>` and adds the
+  `(exists [n'] ...)` packaging the plan calls out. New regression
+  test `tests/sized-world-copy-into.tur` exercises a cap-4 -> cap-8
+  grow with a despawned-mid-population entity, asserting
+  Pos round-trip, generational liveness on three surviving
+  entities, generational mismatch on the despawned one, and a
+  preserved live count.
+
 - **E2c slice 10 -- monomorphic `sized-defworld-mono` +
   `sized-defcomponent-accessors-mono`.** The sized-world plan's
   "ergonomic-default for application code with a fixed budget"
