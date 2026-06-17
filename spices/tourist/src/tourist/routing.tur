@@ -44,6 +44,7 @@
                                   route-handler route-call-handler])
   (import tourist/router  :refer [router-match captures-free])
   (import tourist/param   :refer [tourist-ctx-strip-path])
+  (import tourist/types   :refer [Captures])
   (export url-map! cascade! cascade-with! mount! passes!
           subapp-item? subapp-call)
 
@@ -234,7 +235,7 @@
   ```)
 
 ;;; __ctx-set-caps -- replace ctx->caps with caps, returning the previous.
-(defn __ctx-set-caps [ctx : int caps : int] : int
+(defn __ctx-set-caps [ctx : int caps : Captures] : Captures
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -259,7 +260,7 @@
     ;; Ordinary Route: method check then pattern match.
     (if (__method-match? (route-method item) (__ctx-method ctx))
       (let [caps (router-match (route-pattern item) (__ctx-path ctx))]
-        (if (not= caps 0)
+        (if (not= (:: caps :int) 0)
           (let [prev-caps (__ctx-set-caps ctx caps)
                 resp      (route-call-handler item ctx)]
             ;; restore caps and free the temporary captures

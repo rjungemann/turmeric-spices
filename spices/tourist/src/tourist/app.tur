@@ -31,6 +31,7 @@
   (import httpd/server      :refer [server-start])
   (import httpd/request     :refer [req-method req-path])
   (import httpd/types       :refer [Request])
+  (import tourist/types     :refer [Captures])
   (export tourist)
 
 ;; -- Cons list helpers ------------------------------------------------------
@@ -182,7 +183,7 @@
 ;;;
 ;;; Returns the char* of the wildcard capture value as int64_t (0 = not found).
 ;;; Caller must read the value before calling captures-free.
-(defn __tourist-caps-wildcard [caps : int] : int
+(defn __tourist-caps-wildcard [caps : Captures] : int
   ```c
   struct __tourist_caps { char **keys; char **vals; int count; int cap; };
   if (caps == 0) return 0;
@@ -245,7 +246,7 @@
         ;; Static file route: GET only; fall through on any miss.
         (if (__tourist-method-match? "GET" rqm)
           (let [caps (router-match (route-pattern route) path)]
-            (if (not= caps 0)
+            (if (not= (:: caps :int) 0)
               (let [rel  (__tourist-caps-wildcard caps)
                     resp (if (not= rel 0)
                            (static-serve (static-route-fs-root route) rel)
@@ -260,7 +261,7 @@
         (let [method (route-method route)]
           (if (__tourist-method-match? method rqm)
             (let [caps (router-match (route-pattern route) path)]
-              (if (not= caps 0)
+              (if (not= (:: caps :int) 0)
                 (let [prev (__tourist-ctx-swap-caps ctx caps)
                       resp (route-call-handler route ctx)]
                   (__tourist-ctx-swap-caps ctx prev)
@@ -274,7 +275,7 @@
 ;;; Mirrors routing.tur's __ctx-set-caps but kept private to app.tur to
 ;;; avoid leaking a routing-internal helper into the app/middleware import
 ;;; graph.
-(defn __tourist-ctx-swap-caps [ctx : int caps : int] : int
+(defn __tourist-ctx-swap-caps [ctx : int caps : Captures] : Captures
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;

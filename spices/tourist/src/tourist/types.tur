@@ -14,7 +14,7 @@
 ;;; Since: v0.2.0
 
 (defmodule tourist/types
-  (export Ctx Item Mount)
+  (export Ctx Item Mount Captures)
 
 ;;; Ctx -- opaque handle to a tourist request context.
 ;;;
@@ -45,6 +45,16 @@
 ;;; the Item newtype on the public API. Internally each shape is tagged
 ;;; via a sentinel method string in the underlying route struct.
 (defopaque Item :int)
+
+;;; Captures -- opaque handle to a __tourist_caps struct produced by router-match.
+;;;
+;;; Carries the (name, value) pairs captured by ":id" / "*" pattern segments.
+;;; A null handle (cast from 0) means "no match"; see router-match. Lifetime
+;;; is owned by the caller of router-match; free with captures-free, or hand
+;;; ownership to a Ctx via __ctx-set-caps and let tourist-ctx-free do it.
+;;;
+;;; Since: v0.2.1
+(defopaque Captures :int)
 
 ;;; Mount -- opaque handle to a (prefix, sub-app) pair built by mount!.
 ;;;
