@@ -42,11 +42,12 @@ This is **E3** in the ECS spice plan
 (import ecs/storage  :refer [dense-new dense-set! dense-get])
 (import ecs/world    :refer [defcomponent defworld world-alloc-entity!])
 (import ecs/query    :refer [for-each])
-(import ecs-raylib/components :refer [Pos2 Vel2 Radius Color
+(import ecs-raylib/components :refer [Pos2 Vel2 Radius
                                        pos2-make vel2-make radius-make])
 (import ecs-raylib/systems    :refer [integrate-2d])
 (import ecs-raylib/render     :refer [render-circles])
 (import ecs-raylib/loop       :refer [with-game-loop])
+(import raylib/types          :refer [Color])
 (import raylib/color          :refer [red])
 
 (defcomponent Pos2)
