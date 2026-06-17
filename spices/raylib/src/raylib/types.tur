@@ -1,0 +1,67 @@
+;; raylib/types.tur -- opaque handle types for the raylib spice.
+;;
+;; All raylib handles are heap-allocated C structs (raylib's Color, Vector2,
+;; Camera3D, Camera2D, Texture2D, Model, Mesh, Font, Material, Matrix, ...)
+;; whose pointers we cast through intptr_t to fit in int64_t. Wrapping each
+;; kind in its own `defopaque` makes the type checker reject e.g. passing
+;; a Color where a Vector2 is expected, without changing the C ABI.
+;;
+;; Sound and Music are owned by raylib/audio (they were already defopaque
+;; in earlier versions); the rest are centralised here so every other
+;; module can import them without duplicating definitions.
+;;
+;; Since: v0.2.0
+
+(defmodule raylib/types
+  (export Vector2 Rectangle
+          Camera3D Camera2D
+          Texture2D Font
+          Model Mesh Material Matrix)
+
+;; Note: a `Color` defopaque is intentionally omitted from this module.
+;; ecs-raylib's `Color` component (in spices/ecs-raylib/src/ecs-raylib/components.tur)
+;; already defines a global defopaque of the same name; introducing a sibling
+;; Color here would collide whenever both spices are loaded in one program
+;; (e.g. the ecs-raylib demos). Color parameters on raylib drawing functions
+;; remain `:int` for now -- the swap-protection win on Color is sacrificed to
+;; preserve the ecs-raylib world-struct shape; closing the duplicate is
+;; tracked as a follow-up under the "spices-type-features-uplift-plan"
+;; U1 phase.
+
+;;; Vector2 -- opaque handle to a heap-allocated Raylib Vector2 (x,y floats).
+(defopaque Vector2 :int)
+
+;;; Rectangle -- opaque handle to a heap-allocated Raylib Rectangle
+;;; (x, y, width, height as floats).
+(defopaque Rectangle :int)
+
+;;; Camera3D -- opaque handle to a heap-allocated Raylib Camera3D.
+(defopaque Camera3D :int)
+
+;;; Camera2D -- opaque handle to a heap-allocated Raylib Camera2D.
+(defopaque Camera2D :int)
+
+;;; Texture2D -- opaque handle to a heap-allocated Raylib Texture2D (GPU id +
+;;; metadata).
+(defopaque Texture2D :int)
+
+;;; Font -- opaque handle to a heap-allocated Raylib Font (atlas + glyph table).
+(defopaque Font :int)
+
+;;; Model -- opaque handle to a heap-allocated Raylib Model.
+(defopaque Model :int)
+
+;;; Mesh -- opaque handle to a heap-allocated Raylib Mesh.
+(defopaque Mesh :int)
+
+;;; Material -- opaque handle to a heap-allocated Raylib Material.
+;;; (Not yet constructed by this spice; declared so draw-mesh can name the
+;;; parameter even before a load-default-material helper exists.)
+(defopaque Material :int)
+
+;;; Matrix -- opaque handle to a heap-allocated Raylib Matrix (4x4 transform).
+;;; (Not yet constructed by this spice; declared so draw-mesh can name the
+;;; transform parameter.)
+(defopaque Matrix :int)
+
+) ;; end defmodule raylib/types

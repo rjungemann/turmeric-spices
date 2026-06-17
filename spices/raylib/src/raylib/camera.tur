@@ -1,7 +1,8 @@
 ;; raylib/camera.tur -- Camera3D and Camera2D types, and camera update.
 ;;
 ;; Cameras are heap-allocated Raylib Camera3D / Camera2D structs returned as
-;; opaque :int handles.  Pass handles to begin-mode-3d in raylib/core.
+;; opaque Camera3D / Camera2D handles. Pass handles to begin-mode-3d in
+;; raylib/core.
 ;;
 ;; Camera projection modes (pass as :int to camera-3d):
 ;;   0 = CAMERA_PERSPECTIVE  1 = CAMERA_ORTHOGRAPHIC
@@ -11,6 +12,7 @@
 ;;   3 = CAMERA_FIRST_PERSON  4 = CAMERA_THIRD_PERSON
 
 (defmodule raylib/camera
+  (import raylib/types :refer [Camera3D Camera2D])
   (export camera-3d camera-2d update-camera)
 
 ;;; camera-3d -- construct a 3D perspective or orthographic camera.
@@ -23,7 +25,7 @@
 ;;;   proj      -- projection mode (0=PERSPECTIVE 1=ORTHOGRAPHIC)
 ;;;
 ;;; Returns:
-;;;   Opaque :int handle to a heap-allocated Camera3D struct.
+;;;   Opaque Camera3D handle to a heap-allocated Camera3D struct.
 ;;;
 ;;; Example:
 ;;;   (let [cam (camera-3d 0.0 10.0 10.0
@@ -36,7 +38,7 @@
 (defn camera-3d [px : float py : float pz : float
                  tx : float ty : float tz : float
                  ux : float uy : float uz : float
-                 fovy : float proj : int] : int
+                 fovy : float proj : int] : Camera3D
   ```c
   #include <raylib.h>
   Camera3D *cam = malloc(sizeof(Camera3D));
@@ -57,7 +59,7 @@
 ;;;   zoom      -- zoom factor (1.0 = no zoom)
 ;;;
 ;;; Returns:
-;;;   Opaque :int handle to a heap-allocated Camera2D struct.
+;;;   Opaque Camera2D handle to a heap-allocated Camera2D struct.
 ;;;
 ;;; Example:
 ;;;   (let [cam (camera-2d 400.0 300.0 0.0 0.0 0.0 1.0)] ...)
@@ -65,7 +67,7 @@
 ;;; Since: P3
 (defn camera-2d [ox : float oy : float
                  tx : float ty : float
-                 rotation : float zoom : float] : int
+                 rotation : float zoom : float] : Camera2D
   ```c
   #include <raylib.h>
   Camera2D *cam = malloc(sizeof(Camera2D));
@@ -86,7 +88,7 @@
 ;;;   (update-camera cam 1)  ; 1 = CAMERA_FREE
 ;;;
 ;;; Since: P3
-(defn update-camera [camera : int mode : int] : void
+(defn update-camera [camera : Camera3D mode : int] : void
   ```c
   #include <raylib.h>
   Camera3D *cam = (Camera3D *)(intptr_t)camera;
