@@ -20,13 +20,15 @@
 (defmodule tourist/app
   (import tourist/dsl       :refer [route-method route-pattern route-call-handler])
   (import tourist/middleware :refer [mw-item? mw-chain-run])
-  (import tourist/param     :refer [tourist-ctx-new tourist-ctx-free])
+  (import tourist/param     :refer [tourist-ctx-new tourist-ctx-free
+                                     tourist-ctx-resp-headers
+                                     tourist-ctx-clear-resp-headers])
   (import tourist/router    :refer [router-match captures-free])
+  (import httpd/response    :refer [not-found with-header])
   (import tourist/static    :refer [static-item? static-route-fs-root static-serve])
   (import tourist/routing   :refer [subapp-item? subapp-call])
   (import httpd/server      :refer [server-start])
   (import httpd/request     :refer [req-method req-path])
-  (import httpd/response    :refer [not-found])
   (export tourist)
 
 ;; -- Cons list helpers ------------------------------------------------------
@@ -242,19 +244,61 @@
   return prev;
   ```)
 
+;;; __hdr-name / __hdr-value / __hdr-next -- resp-headers cons cell accessors.
+;;;
+;;; The underlying layout is `{char *name; char *value; struct *next;}`; see
+;;; tourist/param's ctx-add-header!. These accessors let __apply-resp-headers
+;;; walk the list in Turmeric instead of from inline-C, which keeps the
+;;; with-header call (which the framework wants to type-check) on the
+;;; Turmeric side.
+(defn __hdr-name [cell : int] : cstr
+  ```c
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  return (const char *)((struct __tourist_hdr *)(intptr_t)cell)->name;
+  ```)
+
+(defn __hdr-value [cell : int] : cstr
+  ```c
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  return (const char *)((struct __tourist_hdr *)(intptr_t)cell)->value;
+  ```)
+
+(defn __hdr-next [cell : int] : int
+  ```c
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  return (int64_t)(intptr_t)((struct __tourist_hdr *)(intptr_t)cell)->next;
+  ```)
+
+;;; __apply-resp-headers -- walk ctx->resp_headers and append each to resp.
+;;;
+;;; Returns the final response handle. The cons list is consumed
+;;; afterwards by tourist-ctx-clear-resp-headers in __tourist-handler so the
+;;; same buffers aren't applied twice in the (currently unreachable) case
+;;; that a ctx is reused.
+(defn __apply-resp-headers [hdrs : int resp : int] : int
+  (if (= hdrs 0)
+    resp
+    (__apply-resp-headers
+      (__hdr-next hdrs)
+      (with-header resp (__hdr-name hdrs) (__hdr-value hdrs)))))
+
 ;;; __tourist-handler -- top-level request handler passed to server-start.
 ;;;
 ;;; Builds the per-request ctx once with empty captures, runs the middleware
 ;;; chain on it, and -- if no middleware short-circuited -- dispatches to
-;;; the route table. The ctx is freed before returning, taking ownership
-;;; of any captures left in the caps slot (route dispatch always swaps the
-;;; original 0-caps value back into place via __tourist-ctx-swap-caps).
+;;; the route table. Before returning, applies any headers queued via
+;;; ctx-add-header! to the response. The ctx is freed last, taking
+;;; ownership of any captures left in the caps slot (route dispatch always
+;;; swaps the original 0-caps value back into place via
+;;; __tourist-ctx-swap-caps) and freeing the attrs / resp_headers lists.
 (defn __tourist-handler [req : int] : int
   (let [ctx (tourist-ctx-new req 0)
         opt (mw-chain-run (__tourist-state-mws) ctx)
-        resp (if (not= opt 0)
-               (__tourist-opt-extract opt)
-               (__tourist-route-dispatch (__tourist-state-routes) ctx))]
+        raw (if (not= opt 0)
+              (__tourist-opt-extract opt)
+              (__tourist-route-dispatch (__tourist-state-routes) ctx))
+        resp (__apply-resp-headers (tourist-ctx-resp-headers ctx) raw)]
+    (tourist-ctx-clear-resp-headers ctx)
     (tourist-ctx-free ctx)
     resp))
 

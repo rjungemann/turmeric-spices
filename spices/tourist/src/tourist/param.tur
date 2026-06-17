@@ -33,14 +33,23 @@
 ;;     int     qp_count;
 ;;     int     qp_cap;
 ;;     char   *full_path; // original unstripped path (borrowed from httpd req)
+;;     // v0.2.0 additions
+;;     int64_t attrs;        // head of cons list of __tourist_attr (owned)
+;;     int64_t resp_headers; // head of cons list of __tourist_hdr  (owned)
 ;;   };
+;;
+;;   struct __tourist_attr { char *key;  int64_t val;  struct __tourist_attr *next; };
+;;   struct __tourist_hdr  { char *name; char  *value; struct __tourist_hdr  *next; };
 
 (defmodule tourist/param
   (import tourist/router :refer [captures-get captures-free])
+  (import tourist/types  :refer [Ctx])
   (export param capture
           tourist-ctx-new tourist-ctx-free
           tourist-ctx-caps
-          tourist-ctx-strip-path req-full-path)
+          tourist-ctx-strip-path req-full-path
+          ctx-attr-get ctx-attr-set! ctx-add-header!
+          tourist-ctx-resp-headers tourist-ctx-clear-resp-headers)
 
 ;; -- Internal: query-string parser ----------------------------------------
 
@@ -229,25 +238,29 @@
     int64_t caps;
     char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
     char  *full_path;
+    int64_t attrs;
+    int64_t resp_headers;
   };
 
   struct __httpd_req  *r = (struct __httpd_req  *)(intptr_t)req;
   struct __tourist_ctx *c = malloc(sizeof(*c));
 
-  c->method    = r->method;
-  c->path      = r->path;
-  c->query     = r->query;
-  c->body      = r->body;
-  c->hdr_keys  = r->hdr_keys;
-  c->hdr_vals  = r->hdr_vals;
-  c->hdr_count = r->hdr_count;
-  c->body_len  = r->body_len;
-  c->caps      = (int64_t)caps;
-  c->qp_cap    = 8;
-  c->qp_count  = 0;
-  c->qp_keys   = malloc(sizeof(char *) * (size_t)c->qp_cap);
-  c->qp_vals   = malloc(sizeof(char *) * (size_t)c->qp_cap);
-  c->full_path = r->path;
+  c->method       = r->method;
+  c->path         = r->path;
+  c->query        = r->query;
+  c->body         = r->body;
+  c->hdr_keys     = r->hdr_keys;
+  c->hdr_vals     = r->hdr_vals;
+  c->hdr_count    = r->hdr_count;
+  c->body_len     = r->body_len;
+  c->caps         = (int64_t)caps;
+  c->qp_cap       = 8;
+  c->qp_count     = 0;
+  c->qp_keys      = malloc(sizeof(char *) * (size_t)c->qp_cap);
+  c->qp_vals      = malloc(sizeof(char *) * (size_t)c->qp_cap);
+  c->full_path    = r->path;
+  c->attrs        = 0;
+  c->resp_headers = 0;
 
   return (int64_t)(intptr_t)c;
   ```)
@@ -273,7 +286,62 @@
     (do
       (captures-free (tourist-ctx-caps ctx))
       (__ctx-free-qp ctx)
+      (__ctx-free-attrs ctx)
+      (__ctx-free-resp-headers ctx)
       (__ctx-free-struct ctx))))
+
+;;; __ctx-free-attrs -- release the attrs cons list (keys are owned cstr copies).
+(defn __ctx-free-attrs [ctx : int] : void
+  ```c
+  #include <stdlib.h>
+  struct __tourist_attr { char *key; int64_t val; struct __tourist_attr *next; };
+  struct __tourist_ctx_h {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+    int64_t attrs;
+    int64_t resp_headers;
+  };
+  if (ctx == 0) return;
+  struct __tourist_ctx_h *c = (struct __tourist_ctx_h *)(intptr_t)ctx;
+  struct __tourist_attr *p = (struct __tourist_attr *)(intptr_t)c->attrs;
+  while (p) {
+    struct __tourist_attr *nx = p->next;
+    free(p->key);
+    free(p);
+    p = nx;
+  }
+  c->attrs = 0;
+  ```)
+
+;;; __ctx-free-resp-headers -- release the resp_headers cons list (owned cstrs).
+(defn __ctx-free-resp-headers [ctx : int] : void
+  ```c
+  #include <stdlib.h>
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  struct __tourist_ctx_h {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+    int64_t attrs;
+    int64_t resp_headers;
+  };
+  if (ctx == 0) return;
+  struct __tourist_ctx_h *c = (struct __tourist_ctx_h *)(intptr_t)ctx;
+  struct __tourist_hdr *p = (struct __tourist_hdr *)(intptr_t)c->resp_headers;
+  while (p) {
+    struct __tourist_hdr *nx = p->next;
+    free(p->name);
+    free(p->value);
+    free(p);
+    p = nx;
+  }
+  c->resp_headers = 0;
+  ```)
 
 (defn __ctx-free-qp [ctx : int] : void
   ```c
@@ -369,5 +437,196 @@
 ;;; Since: v0.1.0
 (defn capture [ctx : int name : cstr] : int
   (captures-get (tourist-ctx-caps ctx) name))
+
+;; -- v0.2.0: per-request attrs and deferred response headers ---------------
+
+;;; ctx-attr-get -- look up a per-request attribute by key.
+;;;
+;;; Attributes are middleware-attached pieces of state (a session ID, a
+;;; request ID, a parsed auth principal) that route handlers can read
+;;; back. Values are int64-sized; callers cast pointers in/out as needed.
+;;;
+;;; Parameters:
+;;;   ctx -- :Ctx tourist context
+;;;   key -- attribute name (key compared by strcmp)
+;;;
+;;; Returns:
+;;;   (Option int) -- (some value) if set, (none) otherwise
+;;;
+;;; Example:
+;;;   (let [o (ctx-attr-get ctx "request-id")]
+;;;     (when (some? o) (println-int (unwrap o))))
+;;;
+;;; Since: v0.2.0
+(defn ctx-attr-get [ctx : Ctx key : cstr] : (Option int)
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __tourist_attr { char *key; int64_t val; struct __tourist_attr *next; };
+  struct __tourist_ctx_h {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+    int64_t attrs;
+    int64_t resp_headers;
+  };
+  struct __opt_int { bool is_some; int64_t value; };
+  struct __tourist_ctx_h *c = (struct __tourist_ctx_h *)(intptr_t)ctx;
+  const char *k = (const char *)key;
+  for (struct __tourist_attr *p = (struct __tourist_attr *)(intptr_t)c->attrs;
+       p; p = p->next) {
+    if (strcmp(p->key, k) == 0) {
+      struct __opt_int *o = malloc(sizeof(*o));
+      o->is_some = true;
+      o->value   = p->val;
+      return (struct tur__option__Option *)(intptr_t)o;
+    }
+  }
+  return (struct tur__option__Option *)0;
+  ```)
+
+;;; ctx-attr-set! -- set or replace a per-request attribute.
+;;;
+;;; If key already exists, its value is overwritten in place (the original
+;;; key cstr is kept and the cell is reused). Otherwise a new (key, value)
+;;; entry is prepended to the list. The key string is copied; the caller
+;;; retains ownership of the original buffer.
+;;;
+;;; Parameters:
+;;;   ctx -- :Ctx tourist context
+;;;   key -- attribute name (will be strdup'd)
+;;;   val -- :int payload (any int64-sized value, including cast pointers)
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (ctx-attr-set! ctx "request-id" 0x1234)
+;;;
+;;; Since: v0.2.0
+(defn ctx-attr-set! [ctx : Ctx key : cstr val : int] : void
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __tourist_attr { char *key; int64_t val; struct __tourist_attr *next; };
+  struct __tourist_ctx_h {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+    int64_t attrs;
+    int64_t resp_headers;
+  };
+  struct __tourist_ctx_h *c = (struct __tourist_ctx_h *)(intptr_t)ctx;
+  const char *k = (const char *)key;
+  for (struct __tourist_attr *p = (struct __tourist_attr *)(intptr_t)c->attrs;
+       p; p = p->next) {
+    if (strcmp(p->key, k) == 0) {
+      p->val = (int64_t)val;
+      return;
+    }
+  }
+  struct __tourist_attr *n = malloc(sizeof(*n));
+  size_t kl = strlen(k);
+  n->key = malloc(kl + 1);
+  memcpy(n->key, k, kl + 1);
+  n->val  = (int64_t)val;
+  n->next = (struct __tourist_attr *)(intptr_t)c->attrs;
+  c->attrs = (int64_t)(intptr_t)n;
+  ```)
+
+;;; ctx-add-header! -- queue a response header to be applied after dispatch.
+;;;
+;;; Use from middleware (or any handler) to append a header to the response
+;;; without having to thread the response object through the call stack.
+;;; Tourist applies the queued headers to the final response after the route
+;;; (and any after-middleware) returns; headers are written in insertion
+;;; order. Both `name` and `value` are copied; caller retains ownership.
+;;;
+;;; Parameters:
+;;;   ctx   -- :Ctx tourist context
+;;;   name  -- HTTP header name (e.g. "X-Request-Id")
+;;;   value -- header value
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Example:
+;;;   (ctx-add-header! ctx "X-Request-Id" "abc-123")
+;;;
+;;; Since: v0.2.0
+(defn ctx-add-header! [ctx : Ctx name : cstr value : cstr] : void
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  struct __tourist_ctx_h {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+    int64_t attrs;
+    int64_t resp_headers;
+  };
+  struct __tourist_ctx_h *c = (struct __tourist_ctx_h *)(intptr_t)ctx;
+  const char *nm = (const char *)name;
+  const char *vl = (const char *)value;
+  size_t nlen = strlen(nm), vlen = strlen(vl);
+  struct __tourist_hdr *h = malloc(sizeof(*h));
+  h->name  = malloc(nlen + 1); memcpy(h->name,  nm, nlen + 1);
+  h->value = malloc(vlen + 1); memcpy(h->value, vl, vlen + 1);
+  /* append in declaration order; walk to tail */
+  h->next = NULL;
+  struct __tourist_hdr **tail =
+    (struct __tourist_hdr **)(void *)&c->resp_headers;
+  while (*tail) tail = &(*tail)->next;
+  *tail = h;
+  ```)
+
+;;; tourist-ctx-resp-headers -- raw head pointer of the resp_headers cons list.
+;;;
+;;; Exposed for tourist/app to walk the queued headers after dispatch and
+;;; apply them to the response. Not part of the user-facing API.
+;;;
+;;; Parameters:
+;;;   ctx -- :int tourist context handle
+;;;
+;;; Returns:
+;;;   :int -- head cell pointer, or 0 if no headers were queued
+;;;
+;;; Since: v0.2.0
+(defn tourist-ctx-resp-headers [ctx : int] : int
+  ```c
+  struct __tourist_ctx_h {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+    int64_t attrs;
+    int64_t resp_headers;
+  };
+  return ((struct __tourist_ctx_h *)(intptr_t)ctx)->resp_headers;
+  ```)
+
+;;; tourist-ctx-clear-resp-headers -- free the resp_headers list and reset to 0.
+;;;
+;;; Used by tourist/app after the queued headers have been applied to the
+;;; response so the same ctx (in pathological reentrant flows) does not
+;;; double-apply them. Safe to call on an empty list.
+;;;
+;;; Parameters:
+;;;   ctx -- :int tourist context handle
+;;;
+;;; Returns:
+;;;   :void
+;;;
+;;; Since: v0.2.0
+(defn tourist-ctx-clear-resp-headers [ctx : int] : void
+  (__ctx-free-resp-headers ctx))
 
 ) ;; end defmodule tourist/param
