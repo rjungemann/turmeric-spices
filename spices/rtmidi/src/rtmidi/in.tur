@@ -5,6 +5,7 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule rtmidi/in
+  (import rtmidi/core :refer [MidiIn])
   (export midi-in-open midi-in-open-virtual midi-in-close
           midi-in-set-callback midi-in-cancel-callback
           midi-in-ignore-types)
@@ -48,7 +49,7 @@
 ;;;     (if (ok? r) ... (println "open failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-in-open [mi : int i : int name : cstr] : ptr<void>
+(defn midi-in-open [mi : MidiIn i : int name : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
@@ -74,7 +75,7 @@
 ;;;     (if (ok? r) ... (println "virtual open failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-in-open-virtual [mi : int name : cstr] : ptr<void>
+(defn midi-in-open-virtual [mi : MidiIn name : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
@@ -98,7 +99,7 @@
 ;;;   (midi-in-close mi)
 ;;;
 ;;; Since: RM0
-(defn midi-in-close [mi : int] : void
+(defn midi-in-close [mi : MidiIn] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_close_port((RtMidiPtr)(intptr_t)mi);
@@ -121,7 +122,7 @@
 ;;;
 ;;; Since: RM0
 (defn midi-in-set-callback
-  [mi : int callback : (c-fn [float ptr<const-u8> usize ptr<void>] void)] : void
+  [mi : MidiIn callback : (c-fn [float ptr<const-u8> usize ptr<void>] void)] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_in_set_callback((RtMidiInPtr)(intptr_t)mi, callback, NULL);
@@ -139,7 +140,7 @@
 ;;;   (midi-in-cancel-callback mi)
 ;;;
 ;;; Since: RM0
-(defn midi-in-cancel-callback [mi : int] : void
+(defn midi-in-cancel-callback [mi : MidiIn] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_in_cancel_callback((RtMidiInPtr)(intptr_t)mi);
@@ -160,7 +161,7 @@
 ;;;   (midi-in-ignore-types mi true true true)
 ;;;
 ;;; Since: RM0
-(defn midi-in-ignore-types [mi : int sysex : bool timing : bool active-sense : bool] : void
+(defn midi-in-ignore-types [mi : MidiIn sysex : bool timing : bool active-sense : bool] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_in_ignore_types((RtMidiInPtr)(intptr_t)mi,
