@@ -8,8 +8,18 @@
 ;; since c-fn parameters lower to the bare C-ABI function pointer.
 
 (defmodule osc/server
-  (export server-new server-new-tcp server-free
+  (export Server server-of
+          server-new server-new-tcp server-free
           server-add-method server-recv server-recv-noblock)
+
+;;; Server -- opaque handle to a liblo lo_server_thread.
+;;;
+;;; Stored as int64_t (cast through intptr_t). server-new / server-new-tcp
+;;; return an ok result wrapping a Server; extract with server-of after
+;;; checking ok?. Release with server-free.
+;;;
+;;; Since: OSC1
+(defopaque Server :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result helpers (layout matches stdlib/result.tur)
@@ -107,7 +117,7 @@
 ;;;   (server-free s)
 ;;;
 ;;; Since: OSC0
-(defn server-free [s : int] : void
+(defn server-free [s : Server] : void
   ```c
   #include <lo/lo.h>
   lo_server_thread st = (lo_server_thread)(intptr_t)s;
@@ -138,7 +148,7 @@
 ;;;
 ;;; Since: OSC0
 (defn server-add-method
-  [s : int path : cstr typespec : cstr
+  [s : Server path : cstr typespec : cstr
    handler : (c-fn [cstr cstr ptr<void> int ptr<void> ptr<void>] int)] : void
   ```c
   #include <lo/lo.h>
@@ -162,7 +172,7 @@
 ;;;   (server-recv s 100)  ; => 1
 ;;;
 ;;; Since: OSC0
-(defn server-recv [s : int timeout-ms : int] : int
+(defn server-recv [s : Server timeout-ms : Server] : int
   ```c
   #include <lo/lo.h>
   lo_server_thread st = (lo_server_thread)(intptr_t)s;
@@ -182,12 +192,27 @@
 ;;;   (server-recv-noblock s)  ; => 0
 ;;;
 ;;; Since: OSC0
-(defn server-recv-noblock [s : int] : int
+(defn server-recv-noblock [s : Server] : int
   ```c
   #include <lo/lo.h>
   lo_server_thread st = (lo_server_thread)(intptr_t)s;
   lo_server srv = lo_server_thread_get_server(st);
   return (int64_t)lo_server_recv_noblock(srv, 0);
+  ```)
+
+;;; server-of -- extract a typed Server from an ok result.
+;;;
+;;; Parameters:
+;;;   r -- :ptr<void> ok result from server-new or server-new-tcp
+;;;
+;;; Returns:
+;;;   :Server -- opaque handle to the lo_server_thread
+;;;
+;;; Since: OSC1
+(defn server-of [r : ptr<void>] : Server
+  ```c
+  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
+  return (int64_t)((struct __r *)r)->ok_val;
   ```)
 
 ) ;; end defmodule osc/server

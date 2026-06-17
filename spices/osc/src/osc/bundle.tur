@@ -6,7 +6,17 @@
 ;; bundle -- liblo takes ownership and frees them with the bundle.
 
 (defmodule osc/bundle
-  (export bundle-new bundle-add-msg bundle-free)
+  (import osc/msg :refer [Msg])
+  (export Bundle bundle-new bundle-add-msg bundle-free)
+
+;;; Bundle -- opaque handle to a liblo lo_bundle.
+;;;
+;;; Stored as int64_t (cast through intptr_t). Construct via bundle-new;
+;;; release with bundle-free. bundle-free also frees any Msg handles that
+;;; were added with bundle-add-msg; do NOT msg-free those separately.
+;;;
+;;; Since: OSC1
+(defopaque Bundle :int)
 
 ;;; bundle-new -- create a new OSC bundle with the given timetag.
 ;;;
@@ -21,7 +31,7 @@
 ;;;     ...)
 ;;;
 ;;; Since: OSC0
-(defn bundle-new [timetag : float] : int
+(defn bundle-new [timetag : float] : Bundle
   ```c
   #include <lo/lo.h>
   lo_timetag tt;
@@ -49,7 +59,7 @@
 ;;;   (bundle-add-msg b m)
 ;;;
 ;;; Since: OSC0
-(defn bundle-add-msg [b : int m : int] : void
+(defn bundle-add-msg [b : Bundle m : Msg] : void
   ```c
   #include <lo/lo.h>
   struct __msg_wrapper { char *path; lo_message msg; };
@@ -69,7 +79,7 @@
 ;;;   (bundle-free b)
 ;;;
 ;;; Since: OSC0
-(defn bundle-free [b : int] : void
+(defn bundle-free [b : Bundle] : void
   ```c
   #include <lo/lo.h>
   lo_bundle_free_messages((lo_bundle)(intptr_t)b);

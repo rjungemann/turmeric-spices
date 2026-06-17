@@ -5,7 +5,18 @@
 ;; Bundles are created with osc/bundle and sent via client-send-bundle.
 
 (defmodule osc/client
-  (export client-new client-free client-send client-send-bundle)
+  (import osc/msg    :refer [Msg])
+  (import osc/bundle :refer [Bundle])
+  (export Address address-of
+          client-new client-free client-send client-send-bundle)
+
+;;; Address -- opaque handle to a liblo lo_address (client target).
+;;;
+;;; Stored as int64_t. client-new returns an ok result wrapping an
+;;; Address; extract with address-of. Release with client-free.
+;;;
+;;; Since: OSC1
+(defopaque Address :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result helpers (layout matches stdlib/result.tur)
@@ -74,7 +85,7 @@
 ;;;   (client-free c)
 ;;;
 ;;; Since: OSC0
-(defn client-free [c : int] : void
+(defn client-free [c : Address] : void
   ```c
   #include <lo/lo.h>
   lo_address_free((lo_address)(intptr_t)c);
@@ -96,7 +107,7 @@
 ;;;       (if (ok? r) (println "sent") (println "send failed"))))
 ;;;
 ;;; Since: OSC0
-(defn client-send [c : int m : int] : ptr<void>
+(defn client-send [c : Address m : Msg] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <lo/lo.h>
@@ -129,7 +140,7 @@
 ;;;       (if (ok? r) (println "sent") (println "send-bundle failed"))))
 ;;;
 ;;; Since: OSC0
-(defn client-send-bundle [c : int bundle : int] : ptr<void>
+(defn client-send-bundle [c : Address bundle : Bundle] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <lo/lo.h>
@@ -142,6 +153,21 @@
     r->is_ok = true; r->ok_val = 0; r->err_val = 0;
   }
   return r;
+  ```)
+
+;;; address-of -- extract a typed Address from an ok result.
+;;;
+;;; Parameters:
+;;;   r -- :ptr<void> ok result from client-new
+;;;
+;;; Returns:
+;;;   :Address -- opaque handle to the lo_address
+;;;
+;;; Since: OSC1
+(defn address-of [r : ptr<void>] : Address
+  ```c
+  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
+  return (int64_t)((struct __r *)r)->ok_val;
   ```)
 
 ) ;; end defmodule osc/client
