@@ -62,6 +62,7 @@
   (import httpd/response :refer [free-response])
   (import httpd/write    :refer [serialize-response wbuf-bytes wbuf-len free-wbuf])
   (import httpd/pool     :refer [pool-new pool-enqueue pool-stop])
+  (import httpd/types    :refer [Request Response Wbuf])
   (export server-start server-start-pool server-start-spawn server-stop)
 
 ;; file-scope-c-block: system headers like <pthread.h> and <sys/socket.h>
@@ -293,12 +294,12 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
           (if (= req 0)
             (do (srv-raw-free raw)
                 (srv-close-fd client-fd))
-            (let [resp (srv-call-handler handler req)
+            (let [resp (:: (srv-call-handler handler req) :Response)
                   wbuf (serialize-response resp)]
               (srv-write-all client-fd (wbuf-bytes wbuf) (wbuf-len wbuf))
               (free-wbuf wbuf)
               (free-response resp)
-              (free-request req)
+              (free-request (:: req :Request))
               (srv-raw-free raw)
               (srv-close-fd client-fd)))))))
   (srv-null-ptr))

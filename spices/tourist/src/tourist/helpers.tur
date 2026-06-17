@@ -11,7 +11,7 @@
 
 (defmodule tourist/helpers
   (import httpd/response :refer [response with-header with-status])
-  (import tourist/types  :refer [Response])
+  (import httpd/types    :refer [Response])
   (export text html json-body redirect status)
 
 ;;; text -- build a 200 text/plain response.
@@ -27,7 +27,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn text [body : cstr] : Response
-  (:: (response 200 "text/plain" body) :Response))
+  (response 200 "text/plain" body))
 
 ;;; html -- build a 200 text/html response.
 ;;;
@@ -42,7 +42,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn html [body : cstr] : Response
-  (:: (response 200 "text/html" body) :Response))
+  (response 200 "text/html" body))
 
 ;;; json-body -- build a 200 application/json response.
 ;;;
@@ -57,7 +57,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn json-body [body : cstr] : Response
-  (:: (response 200 "application/json" body) :Response))
+  (response 200 "application/json" body))
 
 ;;; redirect -- build a 302 redirect response.
 ;;;
@@ -76,7 +76,7 @@
 ;;;
 ;;; Since: v0.1.0
 (defn redirect [path : cstr] : Response
-  (:: (with-header (response 302 "text/plain" "") "Location" path) :Response))
+  (with-header (response 302 "text/plain" "") "Location" path))
 
 ;;; status -- override the HTTP status code of an existing response.
 ;;;
@@ -94,6 +94,6 @@
 ;;;
 ;;; Since: v0.1.0
 (defn status [code : int resp : Response] : Response
-  (:: (with-status (:: resp :int) code) :Response))
+  (with-status resp code))
 
 ) ;; end defmodule tourist/helpers

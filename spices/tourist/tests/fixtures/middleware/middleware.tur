@@ -5,8 +5,10 @@
   (import tourist/dsl        :refer [get!])
   (import tourist/helpers    :refer [text])
   (import tourist/middleware :refer [use!])
-  (import tourist/types      :refer [Ctx Response])
+  (import tourist/types      :refer [Ctx])
+  (import httpd/types        :refer [Response])
   (import httpd/request      :refer [req-path])
+  (import httpd/types        :refer [Request])
   (import httpd/response     :refer [response])
   (import httpd/server       :refer [server-stop])
   (import http/client        :refer [http-get])
@@ -53,7 +55,7 @@
 
   ;; blocker -- short-circuit with 403 when path is /block; pass otherwise.
   (defn blocker [ctx : Ctx] : (Option Response)
-    (if (cstr-eq? "/block" (req-path (:: ctx :int)))
+    (if (cstr-eq? "/block" (req-path (:: ctx :Request)))
       (__some-resp (:: (response 403 "text/plain" "blocked") :Response))
       (__none-resp)))
 

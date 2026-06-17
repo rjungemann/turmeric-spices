@@ -35,6 +35,7 @@
 ;; there is no copy-on-write semantics.
 
 (defmodule httpd/response
+  (import httpd/types :refer [Response])
   (export response resp-ok not-found bad-request
           with-header with-body with-status
           free-response)
@@ -53,7 +54,7 @@ struct __httpd_resp {
 
 ;; -- Internal: allocate an empty Response with a given status -----------
 
-(defn __resp-new [status : int body : cstr] : int
+(defn __resp-new [status : int body : cstr] : Response
   ```c
   struct __httpd_resp *r = malloc(sizeof(*r));
   r->status   = (int)status;
@@ -86,7 +87,7 @@ struct __httpd_resp {
 ;;;       (with-header "X-Hello" "world"))
 ;;;
 ;;; Since: H4
-(defn with-header [resp : int key : cstr val : cstr] : int
+(defn with-header [resp : Response key : cstr val : cstr] : Response
   ```c
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
   if (r->hdr_count >= r->hdr_cap) {
@@ -119,7 +120,7 @@ struct __httpd_resp {
 ;;;   (-> (ok "text/plain" "") (with-body "later"))
 ;;;
 ;;; Since: H4
-(defn with-body [resp : int body : cstr] : int
+(defn with-body [resp : Response body : cstr] : Response
   ```c
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
   free(r->body);
@@ -145,7 +146,7 @@ struct __httpd_resp {
 ;;;   (-> (ok "text/plain" "no") (with-status 503))
 ;;;
 ;;; Since: H4
-(defn with-status [resp : int status : int] : int
+(defn with-status [resp : Response status : int] : Response
   ```c
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
   r->status = (int)status;
@@ -164,7 +165,7 @@ struct __httpd_resp {
 ;;;   (free-response r)
 ;;;
 ;;; Since: H4
-(defn free-response [resp : int] : void
+(defn free-response [resp : Response] : void
   ```c
   if (resp == 0) return;
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
@@ -195,7 +196,7 @@ struct __httpd_resp {
 ;;;   (response 201 "application/json" "{\"id\":1}")
 ;;;
 ;;; Since: H4
-(defn response [status : int content-type : cstr body : cstr] : int
+(defn response [status : int content-type : cstr body : cstr] : Response
   (with-header (__resp-new status body) "Content-Type" content-type))
 
 ;;; resp-ok -- build a 200 OK response.
@@ -214,7 +215,7 @@ struct __httpd_resp {
 ;;;   (resp-ok "text/plain" "Hello, world!")
 ;;;
 ;;; Since: H4
-(defn resp-ok [content-type : cstr body : cstr] : int
+(defn resp-ok [content-type : cstr body : cstr] : Response
   (response 200 content-type body))
 
 ;;; not-found -- build a 404 Not Found response with a text/plain body.
@@ -229,7 +230,7 @@ struct __httpd_resp {
 ;;;   (not-found "no such resource")
 ;;;
 ;;; Since: H4
-(defn not-found [body : cstr] : int
+(defn not-found [body : cstr] : Response
   (response 404 "text/plain" body))
 
 ;;; bad-request -- build a 400 Bad Request response with a text/plain body.
@@ -244,7 +245,7 @@ struct __httpd_resp {
 ;;;   (bad-request "missing id parameter")
 ;;;
 ;;; Since: H4
-(defn bad-request [body : cstr] : int
+(defn bad-request [body : cstr] : Response
   (response 400 "text/plain" body))
 
 ) ;; end defmodule httpd/response

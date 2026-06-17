@@ -1,0 +1,35 @@
+;;; httpd/types -- opaque handle types for the httpd spice.
+;;;
+;;; Centralises the defopaque newtypes so request/response/write/server can
+;;; all import them without duplicating definitions. Each handle is stored
+;;; as int64_t under the hood; coerce to/from :int with (:: x :int) and
+;;; (:: x :Request) etc. inside inline-C blocks where the C-ABI int64_t
+;;; shape matters.
+;;;
+;;; Since: H8
+
+(defmodule httpd/types
+  (export Request Response Wbuf)
+
+;;; Request -- opaque handle to a parsed HTTP request.
+;;;
+;;; Produced by httpd/parse; freed by the framework after the handler
+;;; returns. Underlying layout is `struct __httpd_req`; handlers borrow
+;;; the pointer and must not free it.
+(defopaque Request :int)
+
+;;; Response -- opaque handle to an HTTP response.
+;;;
+;;; Built by httpd/response constructors (`response` / `resp-ok` /
+;;; `not-found` / `bad-request`). Mutated in place by `with-header` /
+;;; `with-body` / `with-status`. Ownership transfers to the framework
+;;; when returned from a handler; otherwise call `free-response`.
+(defopaque Response :int)
+
+;;; Wbuf -- opaque handle to a serialized response byte buffer.
+;;;
+;;; Returned by `serialize-response`. Read raw bytes via `wbuf-bytes` /
+;;; `wbuf-len`, release with `free-wbuf`.
+(defopaque Wbuf :int)
+
+) ;; end defmodule httpd/types

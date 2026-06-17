@@ -14,7 +14,7 @@
 ;;; Since: v0.2.0
 
 (defmodule tourist/types
-  (export Ctx Request Response Item Mount)
+  (export Ctx Item Mount)
 
 ;;; Ctx -- opaque handle to a tourist request context.
 ;;;
@@ -25,20 +25,15 @@
 ;;; middleware borrow the handle and must not free it.
 (defopaque Ctx :int)
 
-;;; Request -- opaque handle to a raw httpd request.
-;;;
-;;; This is the underlying httpd request handle the framework receives
-;;; from server-start. Tourist normally wraps it in a Ctx before calling
-;;; user code; Request appears in signatures only where the raw httpd
-;;; handle is intentionally exposed.
-(defopaque Request :int)
-
-;;; Response -- opaque handle to a tourist/httpd response.
-;;;
-;;; Produced by helpers (text, html, json-body, redirect) or by the
-;;; lower-level (response code ctype body) constructor. Ownership transfers
-;;; to whatever returns it to the framework dispatcher.
-(defopaque Response :int)
+;; Request / Response are owned by httpd/types (from `tur-httpd` v0.2.0)
+;; so a handler that returns a Response in tourist is the same defopaque
+;; the httpd worker frees -- no cross-spice cast at the boundary. Tourist
+;; downstream modules import them directly:
+;;
+;;   (import httpd/types :refer [Request Response])
+;;
+;; v0.2.0 of tourist shipped local Request/Response opaques; that was a
+;; short-lived split closed by tourist v0.2.1.
 
 ;;; Item -- opaque handle to any value collected by the tourist top-level
 ;;; variadic.

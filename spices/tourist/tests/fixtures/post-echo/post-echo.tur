@@ -5,6 +5,7 @@
   (import tourist/dsl     :refer [post!])
   (import tourist/helpers :refer [text])
   (import httpd/request   :refer [req-body])
+  (import httpd/types     :refer [Request])
   (import httpd/server    :refer [server-stop])
   (import http/client     :refer [http-post])
   (import http/response   :refer [response-status response-body response-header])
@@ -34,7 +35,7 @@
   (defn main [] : int
     (let [srv (tourist 18104
                 (post! "/echo"
-                  (fn [req] (text (req-body req)))))]
+                  (fn [req] (text (req-body (:: req :Request))))))]
       (do
         (sleep-ms 50)
         (describe "tourist post-echo"

@@ -6,8 +6,10 @@
   (import tourist/helpers :refer [text])
   (import tourist/routing :refer [url-map! mount!])
   (import tourist/param   :refer [req-full-path])
-  (import tourist/types   :refer [Ctx Response])
+  (import tourist/types   :refer [Ctx])
+  (import httpd/types     :refer [Response])
   (import httpd/request   :refer [req-path])
+  (import httpd/types     :refer [Request])
   (import httpd/server    :refer [server-stop])
   (import http/client     :refer [http-get])
   (import http/response   :refer [response-status response-body])
@@ -59,7 +61,7 @@
   ;; A handler that echoes "stripped=<req-path> full=<req-full-path>"
   ;; so we can verify path stripping behaviour from the response body.
   (defn echo-paths [ctx : Ctx] : Response
-    (text (__join4 "stripped=" (req-path (:: ctx :int)) " full=" (req-full-path (:: ctx :int)))))
+    (text (__join4 "stripped=" (req-path (:: ctx :Request)) " full=" (req-full-path (:: ctx :Request)))))
 
   (defn api-app [] : int
     (url-map! (mount! "/users" (get! "/" echo-paths))
