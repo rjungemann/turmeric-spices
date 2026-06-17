@@ -1,23 +1,32 @@
-;;; tourist/middleware -- Middleware type and middleware chain runner.
+;;; tourist/middleware -- Pre/post middleware types and chain runners.
 ;;;
-;;; Middleware is a function Request -> option<Response>.
-;;; Return (none) to continue; return (some resp) to short-circuit.
-;;; use! registers a middleware to run before routes, in declaration order.
+;;; Two flavours of middleware:
+;;;
+;;;   use!       -- (c-fn [Ctx] (Option Response)) runs BEFORE the route
+;;;                 handler in declaration order. Return (none) to continue
+;;;                 dispatch; (some resp) short-circuits with that response.
+;;;   use-after! -- (c-fn [Ctx Response] Response) runs AFTER the route
+;;;                 handler in REVERSE declaration order. Each can return
+;;;                 the same resp or a replacement.
 ;;;
 ;;; Middleware handles are Route-shaped structs with method sentinel "__mw"
-;;; and pattern 0, so tourist/app can collect routes and middlewares in a
-;;; single cons list and separate them via mw-item?.
+;;; or "__mwafter" so tourist/app can collect them alongside routes via the
+;;; mw-item? / mwafter-item? predicates.
 ;;;
-;;; Internal exports (mw-item?, mw-call, mw-chain-run) are used by
-;;; tourist/app and are not part of the public spice API.
+;;; Internal exports (mw-item?, mw-call, mw-chain-run, mwafter-item?,
+;;; mwafter-call, mwafter-chain-run) are used by tourist/app and are not
+;;; part of the public spice API.
 ;;;
-;;; Since: v0.1.0
+;;; Since: v0.1.0 (use!); v0.2.0 (use-after!)
 ;;
 
 (defmodule tourist/middleware
-  (import tourist/dsl :refer [route-new route-call-handler])
-  (export use!
-          mw-item? mw-call mw-chain-run)
+  (import tourist/dsl   :refer [route-new route-call-handler])
+  (import tourist/types :refer [Ctx])
+  (import httpd/types   :refer [Response])
+  (export use! use-after!
+          mw-item?      mw-call      mw-chain-run
+          mwafter-item? mwafter-call mwafter-chain-run)
 
 ;; -- Internal: cons list accessors -----------------------------------------
 
@@ -40,25 +49,27 @@
 ;;; use! -- register a middleware function.
 ;;;
 ;;; Returns a handle that tourist collects alongside route handles. Middleware
-;;; runs in declaration order before any route handler is invoked.
+;;; runs in declaration order before any route handler is invoked, against
+;;; the per-request Ctx the framework builds at request entry (so middleware
+;;; and route handlers share the same context).
 ;;;
 ;;; Parameters:
-;;;   fn -- (fn [req :int] :int) returning option<Response>:
+;;;   fn -- (c-fn [Ctx] (Option Response)):
 ;;;           (none) to continue, (some resp) to short-circuit
 ;;;
 ;;; Returns:
 ;;;   :int -- middleware handle; consumed by tourist
 ;;;
 ;;; Example:
-;;;   (use! (fn [req]
-;;;           (println (req-path req))
+;;;   (use! (fn [ctx]
+;;;           (println (req-path ctx))
 ;;;           (none)))
 ;;;
-;;; Since: v0.1.0
-(defn use! [fn : (c-fn [int] int)] : int
+;;; Since: v0.2.0 (Ctx-based signature; req-based shape was v0.1.0)
+(defn use! [fn : (c-fn [Ctx] (Option Response))] : int
   (route-new "__mw" 0 (__mw-fn->int fn)))
 
-(defn __mw-fn->int [h : (c-fn [int] int)] : int
+(defn __mw-fn->int [h : (c-fn [Ctx] (Option Response))] : int
   ```c
   return (int64_t)(intptr_t)h;
   ```)
@@ -123,5 +134,97 @@
       (if (not= result 0)
         result
         (mw-chain-run (__mw-cons-tail mws) req)))))
+
+;; -- After-middleware (post-response hook) ---------------------------------
+
+;;; use-after! -- register a response-decoration middleware.
+;;;
+;;; Returns a handle that tourist collects alongside route handles. After
+;;; the route handler (or short-circuiting pre-middleware) produces a
+;;; response, every registered after-mw is called in REVERSE declaration
+;;; order with the per-request Ctx and the current response, and its return
+;;; value becomes the next response. Use this for response decoration
+;;; (compression, observability hooks, header injection that has to see
+;;; the final status) and for finishing work attached to the ctx via
+;;; ctx-attr-set! during the request lifecycle.
+;;;
+;;; Headers queued via ctx-add-header! are applied AFTER the after-mw
+;;; chain completes, so an after-mw may itself call ctx-add-header! and
+;;; have those headers land on the final response.
+;;;
+;;; Parameters:
+;;;   fn -- (c-fn [Ctx Response] Response): receives ctx + current
+;;;         response; returns the same handle or a replacement
+;;;
+;;; Returns:
+;;;   :int -- after-middleware handle; consumed by tourist
+;;;
+;;; Example:
+;;;   (use-after! (fn [ctx resp]
+;;;                 (ctx-add-header! ctx "X-Request-Id" "abc-123")
+;;;                 resp))
+;;;
+;;; Since: v0.2.0
+(defn use-after! [fn : (c-fn [Ctx Response] Response)] : int
+  (route-new "__mwafter" 0 (__mwafter-fn->int fn)))
+
+(defn __mwafter-fn->int [h : (c-fn [Ctx Response] Response)] : int
+  ```c
+  return (int64_t)(intptr_t)h;
+  ```)
+
+;;; mwafter-item? -- true if an item handle is an after-middleware.
+;;;
+;;; Checks for the "__mwafter" sentinel method stored by use-after!.
+;;; Used by tourist/app to partition the mixed item list.
+;;;
+;;; Since: v0.2.0
+(defn mwafter-item? [item : int] : bool
+  ```c
+  #include <string.h>
+  struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
+  if (item == 0) return false;
+  return strcmp(((struct __tourist_route *)(intptr_t)item)->method,
+                "__mwafter") == 0;
+  ```)
+
+;;; mwafter-call -- invoke a single after-middleware on (ctx, resp).
+;;;
+;;; Calls the stored Turmeric function value as int64_t(*)(int64_t, int64_t).
+;;; Mirrors route-call-handler's calling convention but with an extra
+;;; response argument.
+;;;
+;;; Since: v0.2.0
+(defn mwafter-call [mw : int ctx : int resp : int] : int
+  ```c
+  struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
+  struct __tourist_route *rt = (struct __tourist_route *)(intptr_t)mw;
+  return ((int64_t(*)(int64_t, int64_t))(intptr_t)rt->handler)
+           ((int64_t)ctx, (int64_t)resp);
+  ```)
+
+;;; mwafter-chain-run -- thread resp through the after-mw cons list.
+;;;
+;;; The list is consumed head-first; tourist/app supplies it already in
+;;; reverse declaration order (the collection step does not re-reverse the
+;;; partitioned list), so head-first iteration yields the documented
+;;; "reverse declaration order" execution semantics.
+;;;
+;;; Parameters:
+;;;   mws  -- :int cons list of after-middleware handles (0 = empty)
+;;;   ctx  -- :int tourist ctx
+;;;   resp -- :int current response handle
+;;;
+;;; Returns:
+;;;   :int -- the final response handle after every after-mw has run.
+;;;
+;;; Since: v0.2.0
+(defn mwafter-chain-run [mws : int ctx : int resp : int] : int
+  (if (= mws 0)
+    resp
+    (mwafter-chain-run
+      (__mw-cons-tail mws)
+      ctx
+      (mwafter-call (__mw-cons-head mws) ctx resp))))
 
 ) ;; end defmodule tourist/middleware

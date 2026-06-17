@@ -49,7 +49,11 @@
 ;;;   format      -- sample format keyword: ":int16", ":int32", ":float32", ":float64"
 ;;;   sample-rate -- desired sample rate in Hz (e.g. 44100, 48000)
 ;;;   buf-frames  -- buffer size in frames (e.g. 256, 512)
-;;;   callback    -- audio callback function pointer as :int (cast to rtaudio_cb_t)
+;;;   callback    -- captureless C-ABI audio callback of shape
+;;;                  `int (*)(void *out, void *in, unsigned int nFrames,
+;;;                           double stream_time, rtaudio_stream_status_t status,
+;;;                           void *userdata)`, spelled
+;;;                  `(c-fn [ptr<void> ptr<void> int float int ptr<void>] int)`
 ;;;
 ;;; Returns:
 ;;;   (ok 0) on success; (err 0) on failure.
@@ -62,7 +66,7 @@
 (defn stream-open [a : Audio out-device : int out-chans : int
                    in-device : int in-chans : int
                    format : cstr sample-rate : int buf-frames : int
-                   callback : int] : ptr<void>
+                   callback : (c-fn [ptr<void> ptr<void> int float int ptr<void>] int)] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -93,7 +97,7 @@
                                out_ptr, in_ptr,
                                fmt, (unsigned int)sample_rate,
                                &frames,
-                               (rtaudio_cb_t)(intptr_t)callback,
+                               (rtaudio_cb_t)callback,
                                NULL, NULL, NULL);
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (rc == 0) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }

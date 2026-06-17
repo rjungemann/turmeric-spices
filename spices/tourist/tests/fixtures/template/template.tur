@@ -58,6 +58,12 @@
     return (int64_t)(intptr_t)path;
     ```)
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   (defn main [] : int
     (let [tpl-path (__setup-template-dir)
           srv      (tourist 18106
@@ -70,7 +76,7 @@
                              (env-set e "name" nm)
                              (html (render-template tpl-path e)))))))]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
         (describe "tourist template"
           (it "GET /greet/alice status is 200"
             (let [r (http-get "http://127.0.0.1:18106/greet/alice")]

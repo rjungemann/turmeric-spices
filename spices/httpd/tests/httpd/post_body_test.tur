@@ -10,6 +10,7 @@
   (import httpd/server   :refer [server-start server-stop])
   (import httpd/request  :refer [req-method req-body])
   (import httpd/response :refer [resp-ok])
+  (import httpd/types    :refer [Request])
   (import http/client    :refer [http-post http-get])
   (import http/response  :refer [response-status response-body])
   (import test/suite     :refer [describe it])
@@ -51,8 +52,15 @@
     return p;
     ```)
 
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
   (defn body-echo-handler [req : int] : int
-    (resp-ok "text/plain" (empty-or (req-body req) "<empty>")))
+    (:: (resp-ok "text/plain" (empty-or (req-body (:: req :Request)) "<empty>"))
+        :int))
 
   ;; ---------------------------------------------------------------------
   ;; Test driver
@@ -61,7 +69,7 @@
   (defn main [] : int
     (let [srv (server-start 18083 body-echo-handler)]
       (do
-        (sleep-ms 50)
+        (unsafe (sleep-ms 50))
 
         (describe "httpd post-body -- request body round-trip"
 

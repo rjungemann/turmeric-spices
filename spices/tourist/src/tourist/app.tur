@@ -19,14 +19,18 @@
 
 (defmodule tourist/app
   (import tourist/dsl       :refer [route-method route-pattern route-call-handler])
-  (import tourist/middleware :refer [mw-item? mw-chain-run])
-  (import tourist/param     :refer [tourist-ctx-new tourist-ctx-free])
+  (import tourist/middleware :refer [mw-item? mw-chain-run
+                                      mwafter-item? mwafter-chain-run])
+  (import tourist/param     :refer [tourist-ctx-new tourist-ctx-free
+                                     tourist-ctx-resp-headers
+                                     tourist-ctx-clear-resp-headers])
   (import tourist/router    :refer [router-match captures-free])
+  (import httpd/response    :refer [not-found with-header])
   (import tourist/static    :refer [static-item? static-route-fs-root static-serve])
   (import tourist/routing   :refer [subapp-item? subapp-call])
   (import httpd/server      :refer [server-start])
   (import httpd/request     :refer [req-method req-path])
-  (import httpd/response    :refer [not-found])
+  (import httpd/types       :refer [Request])
   (export tourist)
 
 ;; -- Cons list helpers ------------------------------------------------------
@@ -67,47 +71,72 @@
 
 ;;; tourist-state-ptr -- return a pointer to the persistent dispatch state.
 ;;;
-;;; Stores mws and routes as a static local; lives for the process lifetime.
-;;; Other functions in this module reference it via its mangled C name.
+;;; Stores mws, after_mws, and routes as a static local; lives for the
+;;; process lifetime. Other functions in this module reference it via
+;;; its mangled C name.
 (defn tourist-state-ptr [] : int
   ```c
-  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
-  static __tourist_app_state s = { 0, 0 };
+  typedef struct {
+    int64_t mws;
+    int64_t after_mws;
+    int64_t routes;
+  } __tourist_app_state;
+  static __tourist_app_state s = { 0, 0, 0 };
   return (int64_t)(intptr_t)&s;
   ```)
 
-;;; __tourist-state-set -- write mws and routes into the dispatch state.
-(defn __tourist-state-set [mws : int routes : int] : void
+;;; __tourist-state-set -- write mws, after_mws, and routes into dispatch state.
+(defn __tourist-state-set [mws : int after-mws : int routes : int] : void
   ```c
   extern int64_t tourist__app__tourist_hystate_hyptr(void);
-  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+  typedef struct {
+    int64_t mws;
+    int64_t after_mws;
+    int64_t routes;
+  } __tourist_app_state;
   __tourist_app_state *s =
     (__tourist_app_state *)(intptr_t)tourist__app__tourist_hystate_hyptr();
-  s->mws    = mws;
-  s->routes = routes;
+  s->mws       = mws;
+  s->after_mws = after_mws;
+  s->routes    = routes;
   ```)
 
 ;;; __tourist-state-mws -- read the mws cons list from the dispatch state.
 (defn __tourist-state-mws [] : int
   ```c
   extern int64_t tourist__app__tourist_hystate_hyptr(void);
-  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+  typedef struct {
+    int64_t mws; int64_t after_mws; int64_t routes;
+  } __tourist_app_state;
   return ((__tourist_app_state *)
     (intptr_t)tourist__app__tourist_hystate_hyptr())->mws;
+  ```)
+
+;;; __tourist-state-after-mws -- read the after-mws cons list (reverse decl order).
+(defn __tourist-state-after-mws [] : int
+  ```c
+  extern int64_t tourist__app__tourist_hystate_hyptr(void);
+  typedef struct {
+    int64_t mws; int64_t after_mws; int64_t routes;
+  } __tourist_app_state;
+  return ((__tourist_app_state *)
+    (intptr_t)tourist__app__tourist_hystate_hyptr())->after_mws;
   ```)
 
 ;;; __tourist-state-routes -- read the routes cons list from the dispatch state.
 (defn __tourist-state-routes [] : int
   ```c
   extern int64_t tourist__app__tourist_hystate_hyptr(void);
-  typedef struct { int64_t mws; int64_t routes; } __tourist_app_state;
+  typedef struct {
+    int64_t mws; int64_t after_mws; int64_t routes;
+  } __tourist_app_state;
   return ((__tourist_app_state *)
     (intptr_t)tourist__app__tourist_hystate_hyptr())->routes;
   ```)
 
 ;; -- Item partition --------------------------------------------------------
 
-;;; __tourist-collect-mws -- accumulate middleware handles from items (reversed).
+;;; __tourist-collect-mws -- accumulate pre-middleware handles from items (reversed).
 ;;;
 ;;; Caller reverses with __tourist-list-rev to restore declaration order.
 (defn __tourist-collect-mws [items : int acc : int] : int
@@ -119,13 +148,31 @@
         (__tourist-collect-mws rest (__tourist-cons item acc))
         (__tourist-collect-mws rest acc)))))
 
+;;; __tourist-collect-after-mws -- accumulate after-middleware handles (reversed).
+;;;
+;;; The collection accumulator naturally reverses input order; the caller
+;;; does NOT re-reverse this list because we want execution in reverse
+;;; declaration order, which matches the head-first traversal of the
+;;; collected (reversed) list.
+(defn __tourist-collect-after-mws [items : int acc : int] : int
+  (if (= items 0)
+    acc
+    (let [item (__tourist-cons-head items)
+          rest (__tourist-cons-tail items)]
+      (if (mwafter-item? item)
+        (__tourist-collect-after-mws rest (__tourist-cons item acc))
+        (__tourist-collect-after-mws rest acc)))))
+
 ;;; __tourist-collect-routes -- accumulate route handles from items (reversed).
+;;;
+;;; Skips both pre- and after-middleware items so the routes list contains
+;;; only Routes, sub-apps, and static-route items.
 (defn __tourist-collect-routes [items : int acc : int] : int
   (if (= items 0)
     acc
     (let [item (__tourist-cons-head items)
           rest (__tourist-cons-tail items)]
-      (if (mw-item? item)
+      (if (or (mw-item? item) (mwafter-item? item))
         (__tourist-collect-routes rest acc)
         (__tourist-collect-routes rest (__tourist-cons item acc))))))
 
@@ -172,27 +219,28 @@
 
 ;;; __tourist-route-dispatch -- find the first matching route and dispatch.
 ;;;
-;;; Walks the route cons list in order. Static routes (serve-static!) are
-;;; detected via static-item? and handled by static-serve, which returns 0
-;;; on a miss (file not found / traversal) to fall through to the next route.
-;;; Regular routes are dispatched through a tourist ctx and route-call-handler.
-;;; Returns a 404 Not Found response if no route matches.
-(defn __tourist-route-dispatch [routes : int req : int] : int
+;;; Walks the route cons list in order. The ctx is built once at request
+;;; entry (in __tourist-handler) and reused across middleware + every route
+;;; attempt; route-specific captures are swapped into the ctx via
+;;; tourist/routing's caps slot just before the handler runs and restored
+;;; afterwards. Static routes (serve-static!) are detected via static-item?
+;;; and handled by static-serve; a 0 return means "no match" -- fall
+;;; through to the next item. Returns a 404 Not Found response if no route
+;;; matches.
+(defn __tourist-route-dispatch [routes : int ctx : int] : int
   (if (= routes 0)
-    (not-found "404 Not Found")
+    (:: (not-found "404 Not Found") :int)
     (let [route (__tourist-cons-head routes)
-          path  (req-path req)
-          rqm   (req-method req)]
+          path  (req-path (:: ctx :Request))
+          rqm   (req-method (:: ctx :Request))]
       (if (subapp-item? route)
-        ;; Sub-app (url-map!/cascade!): build a ctx with empty captures and
-        ;; delegate. A return of 0 means "no inner route matched" -- fall
-        ;; through to the next item, exactly like a static-route miss.
-        (let [ctx  (tourist-ctx-new req 0)
-              resp (subapp-call route ctx)]
-          (tourist-ctx-free ctx)
+        ;; Sub-app (url-map!/cascade!): delegate on the shared ctx. A return
+        ;; of 0 means "no inner route matched" -- fall through to the next
+        ;; item, exactly like a static-route miss.
+        (let [resp (subapp-call route ctx)]
           (if (not= resp 0)
             resp
-            (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
+            (__tourist-route-dispatch (__tourist-cons-tail routes) ctx)))
       (if (static-item? route)
         ;; Static file route: GET only; fall through on any miss.
         (if (__tourist-method-match? "GET" rqm)
@@ -205,31 +253,102 @@
                 (captures-free caps)
                 (if (not= resp 0)
                   resp
-                  (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
-              (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
-          (__tourist-route-dispatch (__tourist-cons-tail routes) req))
-        ;; Regular route: method match, build ctx, call handler.
+                  (__tourist-route-dispatch (__tourist-cons-tail routes) ctx)))
+              (__tourist-route-dispatch (__tourist-cons-tail routes) ctx)))
+          (__tourist-route-dispatch (__tourist-cons-tail routes) ctx))
+        ;; Regular route: method match, swap caps into ctx, call handler.
         (let [method (route-method route)]
           (if (__tourist-method-match? method rqm)
             (let [caps (router-match (route-pattern route) path)]
               (if (not= caps 0)
-                (let [ctx  (tourist-ctx-new req caps)
+                (let [prev (__tourist-ctx-swap-caps ctx caps)
                       resp (route-call-handler route ctx)]
-                  (tourist-ctx-free ctx)
+                  (__tourist-ctx-swap-caps ctx prev)
+                  (captures-free caps)
                   resp)
-                (__tourist-route-dispatch (__tourist-cons-tail routes) req)))
-            (__tourist-route-dispatch (__tourist-cons-tail routes) req))))))))
+                (__tourist-route-dispatch (__tourist-cons-tail routes) ctx)))
+            (__tourist-route-dispatch (__tourist-cons-tail routes) ctx))))))))
+
+;;; __tourist-ctx-swap-caps -- replace ctx->caps; return previous handle.
+;;;
+;;; Mirrors routing.tur's __ctx-set-caps but kept private to app.tur to
+;;; avoid leaking a routing-internal helper into the app/middleware import
+;;; graph.
+(defn __tourist-ctx-swap-caps [ctx : int caps : int] : int
+  ```c
+  struct __tourist_ctx {
+    char  *method; char *path; char *query; char *body;
+    char **hdr_keys; char **hdr_vals; int hdr_count; int body_len;
+    int64_t caps;
+    char  **qp_keys; char **qp_vals; int qp_count; int qp_cap;
+    char  *full_path;
+  };
+  struct __tourist_ctx *c = (struct __tourist_ctx *)(intptr_t)ctx;
+  int64_t prev = c->caps;
+  c->caps = (int64_t)caps;
+  return prev;
+  ```)
+
+;;; __hdr-name / __hdr-value / __hdr-next -- resp-headers cons cell accessors.
+;;;
+;;; The underlying layout is `{char *name; char *value; struct *next;}`; see
+;;; tourist/param's ctx-add-header!. These accessors let __apply-resp-headers
+;;; walk the list in Turmeric instead of from inline-C, which keeps the
+;;; with-header call (which the framework wants to type-check) on the
+;;; Turmeric side.
+(defn __hdr-name [cell : int] : cstr
+  ```c
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  return (const char *)((struct __tourist_hdr *)(intptr_t)cell)->name;
+  ```)
+
+(defn __hdr-value [cell : int] : cstr
+  ```c
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  return (const char *)((struct __tourist_hdr *)(intptr_t)cell)->value;
+  ```)
+
+(defn __hdr-next [cell : int] : int
+  ```c
+  struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
+  return (int64_t)(intptr_t)((struct __tourist_hdr *)(intptr_t)cell)->next;
+  ```)
+
+;;; __apply-resp-headers -- walk ctx->resp_headers and append each to resp.
+;;;
+;;; Returns the final response handle. The cons list is consumed
+;;; afterwards by tourist-ctx-clear-resp-headers in __tourist-handler so the
+;;; same buffers aren't applied twice in the (currently unreachable) case
+;;; that a ctx is reused.
+(defn __apply-resp-headers [hdrs : int resp : int] : int
+  (if (= hdrs 0)
+    resp
+    (__apply-resp-headers
+      (__hdr-next hdrs)
+      (:: (with-header (:: resp :Response)
+                       (__hdr-name hdrs) (__hdr-value hdrs))
+          :int))))
 
 ;;; __tourist-handler -- top-level request handler passed to server-start.
 ;;;
-;;; Runs the middleware chain first. If any middleware returns some(resp),
-;;; that response is returned immediately. Otherwise, dispatches to the
-;;; route table.
+;;; Builds the per-request ctx once with empty captures, runs the middleware
+;;; chain on it, and -- if no middleware short-circuited -- dispatches to
+;;; the route table. Before returning, applies any headers queued via
+;;; ctx-add-header! to the response. The ctx is freed last, taking
+;;; ownership of any captures left in the caps slot (route dispatch always
+;;; swaps the original 0-caps value back into place via
+;;; __tourist-ctx-swap-caps) and freeing the attrs / resp_headers lists.
 (defn __tourist-handler [req : int] : int
-  (let [opt (mw-chain-run (__tourist-state-mws) req)]
-    (if (not= opt 0)
-      (__tourist-opt-extract opt)
-      (__tourist-route-dispatch (__tourist-state-routes) req))))
+  (let [ctx       (tourist-ctx-new req 0)
+        opt       (mw-chain-run (__tourist-state-mws) ctx)
+        raw       (if (not= opt 0)
+                    (__tourist-opt-extract opt)
+                    (__tourist-route-dispatch (__tourist-state-routes) ctx))
+        decorated (mwafter-chain-run (__tourist-state-after-mws) ctx raw)
+        resp      (__apply-resp-headers (tourist-ctx-resp-headers ctx) decorated)]
+    (tourist-ctx-clear-resp-headers ctx)
+    (tourist-ctx-free ctx)
+    resp))
 
 ;;; __tourist-handler-ptr -- return __tourist-handler as a typed (c-fn [int] int).
 ;;;
@@ -273,9 +392,13 @@
 ;;;
 ;;; Since: v0.1.0
 (defn tourist [port : int & items : int] : ptr<void>
-  (let [mws    (__tourist-list-rev (__tourist-collect-mws    items 0) 0)
-        routes (__tourist-list-rev (__tourist-collect-routes items 0) 0)]
-    (__tourist-state-set mws routes)
+  (let [mws       (__tourist-list-rev (__tourist-collect-mws       items 0) 0)
+        ;; After-mws are intentionally NOT reversed: head-first walk
+        ;; matches the reverse-declaration-order semantics use-after!
+        ;; documents.
+        after-mws (__tourist-collect-after-mws items 0)
+        routes    (__tourist-list-rev (__tourist-collect-routes    items 0) 0)]
+    (__tourist-state-set mws after-mws routes)
     (server-start port (__tourist-handler-ptr))))
 
 ) ;; end defmodule tourist/app

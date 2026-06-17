@@ -1,0 +1,127 @@
+;; Fixture: ctx-attrs-after -- per-request attrs (ctx-attr-set! / ctx-attr-get)
+;; plus use-after! header injection. Demonstrates the v0.2.0 redesign's
+;; three new capabilities working end-to-end through one request:
+;;
+;;   1. A pre-middleware (use!) stashes a "request-id" in ctx via
+;;      ctx-attr-set!.
+;;   2. The route handler reads it back via ctx-attr-get and embeds it
+;;      in the response body.
+;;   3. An after-middleware (use-after!) calls ctx-add-header! to inject
+;;      X-Request-Id on the outgoing response.
+
+(defmodule tourist/tests/ctx-attrs-after
+  (import tourist/app        :refer [tourist])
+  (import tourist/dsl        :refer [get!])
+  (import tourist/helpers    :refer [text])
+  (import tourist/middleware :refer [use! use-after!])
+  (import tourist/param      :refer [ctx-attr-get ctx-attr-set! ctx-add-header!])
+  (import tourist/types      :refer [Ctx])
+  (import httpd/types        :refer [Response])
+  (import httpd/server       :refer [server-stop])
+  (import http/client        :refer [http-get])
+  (import http/response      :refer [response-status response-body response-header])
+  (import test/suite         :refer [describe it])
+  (import test/assert        :refer [assert-eq assert-true])
+  (import test/runner        :refer [run-all])
+
+  (defn __cr-ok? [r : ptr<void>] : bool
+    ```c
+    if (!r) return false;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r : ptr<void>] : int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  (defn cstr-eq? [a : cstr b : cstr] : bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn __none-resp [] : (Option Response)
+    ```c
+    return (struct tur__option__Option *)0;
+    ```)
+
+  ;; Render "id=<int>" body so the assertions can pin a known numeric id.
+  (defn __body-of-id [id : int] : cstr
+    ```c
+    #include <stdio.h>
+    #include <stdlib.h>
+    char buf[64];
+    int n = snprintf(buf, sizeof buf, "id=%lld", (long long)id);
+    char *out = malloc((size_t)n + 1);
+    for (int i = 0; i <= n; i++) out[i] = buf[i];
+    return (const char *)out;
+    ```)
+
+  ;; Same scheme, but parses the int back so the route handler can format it
+  ;; uniformly with the some-payload from ctx-attr-get.
+  (defn __opt-unwrap-or [o : (Option int) fallback : int] : int
+    ```c
+    struct __opt_int { bool is_some; int64_t value; };
+    if (!o) return (int64_t)fallback;
+    struct __opt_int *p = (struct __opt_int *)o;
+    return p->is_some ? p->value : (int64_t)fallback;
+    ```)
+
+  ;; -- Pre middleware: stamp request-id=4242 in ctx attrs. ----------------
+  (defn stamp-id [ctx : Ctx] : (Option Response)
+    (do
+      (ctx-attr-set! ctx "request-id" 4242)
+      (__none-resp)))
+
+  ;; -- Route handler: reads request-id back and renders "id=<value>". -----
+  (defn route-root [ctx : Ctx] : Response
+    (let [id (__opt-unwrap-or (ctx-attr-get ctx "request-id") 0)]
+      (text (__body-of-id id))))
+
+  ;; -- After middleware: read the id again and inject as a response header.
+  ;; Demonstrates that an after-mw observing ctx queued via ctx-add-header!
+  ;; lands on the outgoing response.
+  (defn inject-header [ctx : Ctx resp : Response] : Response
+    (do
+      (ctx-add-header! ctx "X-Request-Id"
+                       (__body-of-id (__opt-unwrap-or
+                                       (ctx-attr-get ctx "request-id") 0)))
+      resp))
+
+  (defn main [] : int
+    (let [srv (tourist 18130
+                (use!       stamp-id)
+                (use-after! inject-header)
+                (get! "/" route-root))]
+      (do
+        (unsafe (sleep-ms 50))
+        (describe "tourist ctx attrs + use-after!"
+          (it "GET / round-trips request-id through ctx-attr-set!/get"
+            (let [r (http-get "http://127.0.0.1:18130/")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "id=4242" (response-body (__cr-val r))))
+                (assert-true false))))
+          (it "GET / status is 200"
+            (let [r (http-get "http://127.0.0.1:18130/")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+          (it "after-middleware ctx-add-header! lands on the response"
+            (let [r (http-get "http://127.0.0.1:18130/")]
+              (if (__cr-ok? r)
+                (assert-true
+                  (cstr-eq? "id=4242"
+                            (response-header (__cr-val r) "X-Request-Id")))
+                (assert-true false)))))
+        (server-stop srv)
+        (run-all)))
+    0))

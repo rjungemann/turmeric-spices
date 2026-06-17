@@ -11,7 +11,7 @@
 ;;   ":latin1" ":utf8" ":utf16" ":utf32"  (default if unrecognized: ":utf8")
 
 (defmodule plutovg/font
-  (import plutovg/types :refer [Canvas FontFace])
+  (import plutovg/types :refer [Canvas FontFace FontCache])
   (export ;; Face lifecycle
           font-face-load-from-file font-face-load-from-data
           font-face-destroy
@@ -25,7 +25,7 @@
           ;; Canvas bridges
           canvas-set-font-face canvas-set-font-size canvas-set-font
           canvas-fill-text canvas-stroke-text canvas-text-extents
-          font-face-of)
+          font-face-of font-cache-of)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result-type helpers (matches stdlib/result.tur layout)
@@ -234,7 +234,7 @@
 ;;; font-cache-destroy -- release a font-face cache and all faces it owns.
 ;;;
 ;;; Since: PV5
-(defn font-cache-destroy [fc : int] : void
+(defn font-cache-destroy [fc : FontCache] : void
   ```c
   #include <plutovg.h>
   if (fc) plutovg_font_face_cache_destroy((plutovg_font_face_cache_t *)(intptr_t)fc);
@@ -255,7 +255,7 @@
 ;;;   (font-cache-add-file fc "/System/Library/Fonts/Helvetica.ttc")
 ;;;
 ;;; Since: PV5
-(defn font-cache-add-file [fc : int path : cstr] : ptr<void>
+(defn font-cache-add-file [fc : FontCache path : cstr] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -276,7 +276,7 @@
 ;;;   system fonts were found.
 ;;;
 ;;; Since: PV5
-(defn font-cache-load-system [fc : int] : ptr<void>
+(defn font-cache-load-system [fc : FontCache] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -307,7 +307,7 @@
 ;;;   (font-cache-get fc "Helvetica" ":bold" 24.0)
 ;;;
 ;;; Since: PV5
-(defn font-cache-get [fc : int family : cstr style : cstr size : float] : ptr<void>
+(defn font-cache-get [fc : FontCache family : cstr style : cstr size : float] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -457,6 +457,13 @@
 
 ;;; font-face-of -- extract a typed FontFace handle from an ok result.
 (defn font-face-of [r : ptr<void>] : FontFace
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
+
+;;; font-cache-of -- extract a typed FontCache handle from an ok result returned by font-cache-create.
+(defn font-cache-of [r : ptr<void>] : FontCache
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
   return res->ok_val;

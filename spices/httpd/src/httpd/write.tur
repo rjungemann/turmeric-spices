@@ -31,6 +31,7 @@
 ;; The Response struct layout is duplicated verbatim from httpd/response.tur.
 
 (defmodule httpd/write
+  (import httpd/types :refer [Response Wbuf])
   (export serialize-response wbuf-bytes wbuf-len free-wbuf)
 
 ;; file-scope-c-block: system headers contain static inline function
@@ -67,7 +68,7 @@ struct __httpd_wbuf { char *bytes; int len; };
 ;;;     (free-response r))
 ;;;
 ;;; Since: H5
-(defn serialize-response [resp : int] : int
+(defn serialize-response [resp : Response] : Wbuf
   ```c
   struct __httpd_resp *r = (struct __httpd_resp *)(intptr_t)resp;
 
@@ -213,7 +214,7 @@ struct __httpd_wbuf { char *bytes; int len; };
 ;;;   (wbuf-bytes w)  ; => "HTTP/1.1 200 OK\r\n..."
 ;;;
 ;;; Since: H5
-(defn wbuf-bytes [buf : int] : cstr
+(defn wbuf-bytes [buf : Wbuf] : cstr
   ```c
   return ((struct __httpd_wbuf *)(intptr_t)buf)->bytes;
   ```)
@@ -230,7 +231,7 @@ struct __httpd_wbuf { char *bytes; int len; };
 ;;;   (wbuf-len w)  ; => 64
 ;;;
 ;;; Since: H5
-(defn wbuf-len [buf : int] : int
+(defn wbuf-len [buf : Wbuf] : int
   ```c
   return ((struct __httpd_wbuf *)(intptr_t)buf)->len;
   ```)
@@ -247,7 +248,7 @@ struct __httpd_wbuf { char *bytes; int len; };
 ;;;   (free-wbuf w)
 ;;;
 ;;; Since: H5
-(defn free-wbuf [buf : int] : void
+(defn free-wbuf [buf : Wbuf] : void
   ```c
   if (buf == 0) return;
   struct __httpd_wbuf *w = (struct __httpd_wbuf *)(intptr_t)buf;

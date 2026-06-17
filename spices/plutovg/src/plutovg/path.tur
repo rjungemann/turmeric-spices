@@ -10,7 +10,7 @@
 ;;   ok? / ok-val / err-val are auto-loaded stdlib globals.
 
 (defmodule plutovg/path
-  (import plutovg/types :refer [Path])
+  (import plutovg/types :refer [Path DashArray Rect])
   (export path-create path-destroy path-of
           ;; Construction
           path-move-to path-line-to path-quad-to path-cubic-to
@@ -25,7 +25,7 @@
           ;; SVG path-data parsing
           path-parse
           ;; Rect accessors (also used by font/canvas extents)
-          rect-destroy rect-x rect-y rect-w rect-h)
+          rect-destroy rect-x rect-y rect-w rect-h rect-of)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result-type helpers (layout matches stdlib/result.tur)
@@ -319,7 +319,7 @@
 ;;;     (dash-array-destroy da))
 ;;;
 ;;; Since: PV6
-(defn path-clone-dashed [p : Path offset : float dashes : int] : ptr<void>
+(defn path-clone-dashed [p : Path offset : float dashes : DashArray] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <plutovg.h>
@@ -418,7 +418,7 @@
 ;;; rect-destroy -- release a rect allocated by path-extents / text-extents.
 ;;;
 ;;; Since: PV2
-(defn rect-destroy [box : int] : void
+(defn rect-destroy [box : Rect] : void
   ```c
   #include <stdlib.h>
   if (box) free((void *)(intptr_t)box);
@@ -426,34 +426,42 @@
 
 ;;; rect-x -- read the x component of a rect.
 ;;; Since: PV2
-(defn rect-x [box : int] : float
+(defn rect-x [box : Rect] : float
   ```c
   return (double)((float *)(intptr_t)box)[0];
   ```)
 
 ;;; rect-y -- read the y component of a rect.
 ;;; Since: PV2
-(defn rect-y [box : int] : float
+(defn rect-y [box : Rect] : float
   ```c
   return (double)((float *)(intptr_t)box)[1];
   ```)
 
 ;;; rect-w -- read the width of a rect.
 ;;; Since: PV2
-(defn rect-w [box : int] : float
+(defn rect-w [box : Rect] : float
   ```c
   return (double)((float *)(intptr_t)box)[2];
   ```)
 
 ;;; rect-h -- read the height of a rect.
 ;;; Since: PV2
-(defn rect-h [box : int] : float
+(defn rect-h [box : Rect] : float
   ```c
   return (double)((float *)(intptr_t)box)[3];
   ```)
 
 ;;; path-of -- extract a typed Path handle from an ok result returned by path-create.
 (defn path-of [r : ptr<void>] : Path
+  ```c
+  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
+  return res->ok_val;
+  ```)
+
+;;; rect-of -- extract a typed Rect handle from an ok result returned by
+;;; path-extents / font-face-text-extents / canvas-text-extents.
+(defn rect-of [r : ptr<void>] : Rect
   ```c
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
   return res->ok_val;

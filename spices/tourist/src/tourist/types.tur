@@ -1,0 +1,55 @@
+;;; tourist/types -- opaque handle types for the tourist HTTP framework.
+;;;
+;;; Centralises the defopaque newtypes so every other module can import them
+;;; without duplicating definitions. Each handle is stored as int64_t under
+;;; the hood (the C ABI for inline-C blocks); the defopaque newtype gives the
+;;; type checker a real name to reason about so e.g. handing a Response to
+;;; route-call-handler is a compile error rather than a silent miscast.
+;;;
+;;; Construct handles via the spice's normal constructors (get!, post!, use!,
+;;; mount!, response, etc.). Bridge to/from :int with (:: x :int) and
+;;; (:: x :Ctx) only inside inline-C blocks where the C-ABI int64_t shape
+;;; matters.
+;;;
+;;; Since: v0.2.0
+
+(defmodule tourist/types
+  (export Ctx Item Mount)
+
+;;; Ctx -- opaque handle to a tourist request context.
+;;;
+;;; Built once per request at the framework entry point (before middleware
+;;; runs). Carries the request method/path/query/body, parsed query params,
+;;; route captures, and a per-request attrs map (see ctx-attr-get /
+;;; ctx-attr-set!). Lifetime is owned by the framework; handlers and
+;;; middleware borrow the handle and must not free it.
+(defopaque Ctx :int)
+
+;; Request / Response are owned by httpd/types (from `tur-httpd` v0.2.0)
+;; so a handler that returns a Response in tourist is the same defopaque
+;; the httpd worker frees -- no cross-spice cast at the boundary. Tourist
+;; downstream modules import them directly:
+;;
+;;   (import httpd/types :refer [Request Response])
+;;
+;; v0.2.0 of tourist shipped local Request/Response opaques; that was a
+;; short-lived split closed by tourist v0.2.1.
+
+;;; Item -- opaque handle to any value collected by the tourist top-level
+;;; variadic.
+;;;
+;;; The framework accepts a mix of Routes (get!/post!/...), middleware
+;;; registrations (use!/use-after!), static-file routes (serve-static!),
+;;; and sub-app handles (url-map!/cascade!/cascade-with!). Turmeric's
+;;; variadic rest requires a single element type, so all of these share
+;;; the Item newtype on the public API. Internally each shape is tagged
+;;; via a sentinel method string in the underlying route struct.
+(defopaque Item :int)
+
+;;; Mount -- opaque handle to a (prefix, sub-app) pair built by mount!.
+;;;
+;;; Consumed by url-map!. Has no other public surface; the spice exports
+;;; it only so url-map!'s variadic signature can name a real type.
+(defopaque Mount :int)
+
+) ;; end defmodule tourist/types

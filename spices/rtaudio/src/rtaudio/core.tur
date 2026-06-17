@@ -5,10 +5,15 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule rtaudio/core
-  (export Audio audio-new audio-free audio-api audio-of)
+  (export Audio DeviceInfo audio-new audio-free audio-api audio-of)
 
 ;;; Audio -- opaque handle to an RtAudio instance (rtaudio_t).
 (defopaque Audio :int)
+
+;;; DeviceInfo -- opaque handle to a heap __dev_info struct produced by
+;;; device-info (rtaudio/devices). Owns its name string and sample-rates list;
+;;; free with device-info-free.
+(defopaque DeviceInfo :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)

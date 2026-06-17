@@ -1,14 +1,30 @@
 ;; rtmidi/core.tur -- RtMidi handle lifecycle and port enumeration.
 ;;
-;; Handles returned by midi-in-new / midi-out-new are opaque :int values
-;; (cast from RtMidiInPtr / RtMidiOutPtr via intptr_t).
+;; Handles returned by midi-in-new / midi-out-new are opaque MidiIn / MidiOut
+;; values (defopaque newtype over int64 storage; the underlying value is a
+;; RtMidiInPtr / RtMidiOutPtr cast through intptr_t).  Use midi-in-of /
+;; midi-out-of to extract a typed handle from the ok-val of the new-result.
 ;; Results are compatible with stdlib/result.tur:
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule rtmidi/core
-  (export midi-in-new midi-out-new midi-in-free midi-out-free
+  (export MidiIn MidiOut midi-in-of midi-out-of
+          midi-in-new midi-out-new midi-in-free midi-out-free
           midi-in-port-count midi-out-port-count
           midi-in-port-name midi-out-port-name)
+
+;; -------------------------------------------------------------------------
+;; Opaque handle types
+;; -------------------------------------------------------------------------
+
+;;; MidiIn -- opaque handle to an RtMidi input port (RtMidiInPtr).
+;;; Storage is int64_t. Construct via midi-in-new (then midi-in-of on the
+;;; ok-val) or coerce in inline-C with (:: x :int) / (:: x :MidiIn).
+(defopaque MidiIn :int)
+
+;;; MidiOut -- opaque handle to an RtMidi output port (RtMidiOutPtr).
+;;; Storage is int64_t.
+(defopaque MidiOut :int)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -63,12 +79,12 @@
 ;;;
 ;;; Returns:
 ;;;   (ok handle) on success; (err 0) on failure.
-;;;   Pass handle as :int to rtmidi/in and rtmidi/core functions.
-;;;   Free with midi-in-free when done.
+;;;   Extract the typed MidiIn handle with midi-in-of and pass it to
+;;;   rtmidi/in / rtmidi/core functions. Free with midi-in-free when done.
 ;;;
 ;;; Example:
 ;;;   (let [r (midi-in-new ":core-midi")]
-;;;     (if (ok? r) (let [mi (ok-val r)] ...) (println "midi-in init failed")))
+;;;     (if (ok? r) (let [mi (midi-in-of r)] ...) (println "midi-in init failed")))
 ;;;
 ;;; Since: RM0
 (defn midi-in-new [api : cstr] : ptr<void>
@@ -95,12 +111,12 @@
 ;;;
 ;;; Returns:
 ;;;   (ok handle) on success; (err 0) on failure.
-;;;   Pass handle as :int to rtmidi/out and rtmidi/core functions.
-;;;   Free with midi-out-free when done.
+;;;   Extract the typed MidiOut handle with midi-out-of and pass it to
+;;;   rtmidi/out / rtmidi/core functions. Free with midi-out-free when done.
 ;;;
 ;;; Example:
 ;;;   (let [r (midi-out-new ":core-midi")]
-;;;     (if (ok? r) (let [mo (ok-val r)] ...) (println "midi-out init failed")))
+;;;     (if (ok? r) (let [mo (midi-out-of r)] ...) (println "midi-out init failed")))
 ;;;
 ;;; Since: RM0
 (defn midi-out-new [api : cstr] : ptr<void>
@@ -131,7 +147,7 @@
 ;;;   (midi-in-free mi)
 ;;;
 ;;; Since: RM0
-(defn midi-in-free [mi : int] : void
+(defn midi-in-free [mi : MidiIn] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_in_free((RtMidiInPtr)(intptr_t)mi);
@@ -149,7 +165,7 @@
 ;;;   (midi-out-free mo)
 ;;;
 ;;; Since: RM0
-(defn midi-out-free [mo : int] : void
+(defn midi-out-free [mo : MidiOut] : void
   ```c
   #include <rtmidi/rtmidi_c.h>
   rtmidi_out_free((RtMidiOutPtr)(intptr_t)mo);
@@ -167,7 +183,7 @@
 ;;;   (println (midi-in-port-count mi))
 ;;;
 ;;; Since: RM0
-(defn midi-in-port-count [mi : int] : int
+(defn midi-in-port-count [mi : MidiIn] : int
   ```c
   #include <rtmidi/rtmidi_c.h>
   return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mi);
@@ -185,7 +201,7 @@
 ;;;   (println (midi-out-port-count mo))
 ;;;
 ;;; Since: RM0
-(defn midi-out-port-count [mo : int] : int
+(defn midi-out-port-count [mo : MidiOut] : int
   ```c
   #include <rtmidi/rtmidi_c.h>
   return (int64_t)rtmidi_get_port_count((RtMidiPtr)(intptr_t)mo);
@@ -204,7 +220,7 @@
 ;;;   (println (midi-in-port-name mi 0))
 ;;;
 ;;; Since: RM0
-(defn midi-in-port-name [mi : int i : int] : cstr
+(defn midi-in-port-name [mi : MidiIn i : int] : cstr
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
@@ -240,7 +256,7 @@
 ;;;   (println (midi-out-port-name mo 0))
 ;;;
 ;;; Since: RM0
-(defn midi-out-port-name [mo : int i : int] : cstr
+(defn midi-out-port-name [mo : MidiOut i : int] : cstr
   ```c
   #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
@@ -258,6 +274,44 @@
     return (char *)"";
   }
   return buf;
+  ```)
+
+;; -------------------------------------------------------------------------
+;; Result extractors
+;; -------------------------------------------------------------------------
+
+;;; midi-in-of -- extract a typed MidiIn from an ok result returned by midi-in-new.
+;;;
+;;; Parameters:
+;;;   r -- :ptr<void> ok result from midi-in-new (caller checks ok? first)
+;;;
+;;; Returns:
+;;;   :MidiIn -- opaque MIDI input handle
+;;;
+;;; Example:
+;;;   (let [r (midi-in-new ":core-midi")]
+;;;     (if (ok? r) (let [mi (midi-in-of r)] ...) (println "init failed")))
+;;;
+;;; Since: RM1
+(defn midi-in-of [r : ptr<void>] : MidiIn
+  ```c
+  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
+  return (int64_t)((struct __r *)r)->ok_val;
+  ```)
+
+;;; midi-out-of -- extract a typed MidiOut from an ok result returned by midi-out-new.
+;;;
+;;; Parameters:
+;;;   r -- :ptr<void> ok result from midi-out-new
+;;;
+;;; Returns:
+;;;   :MidiOut -- opaque MIDI output handle
+;;;
+;;; Since: RM1
+(defn midi-out-of [r : ptr<void>] : MidiOut
+  ```c
+  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
+  return (int64_t)((struct __r *)r)->ok_val;
   ```)
 
 ) ;; end defmodule rtmidi/core

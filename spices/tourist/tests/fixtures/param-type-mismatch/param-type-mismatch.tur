@@ -1,0 +1,24 @@
+;; Fixture: param-type-mismatch -- compile-error guard for the result<cstr>
+;; migration of (param ctx key), (capture ctx name), (captures-get caps key),
+;; and (req-header req name). Each now returns (Result cstr cstr); treating
+;; the value as a bare :cstr (handing it directly to text/println/etc.) is
+;; a type error.
+;;
+;; expected-compile-error: cannot pass (Result cstr cstr) where cstr is required
+;;
+;; To exercise: `tur check param-type-mismatch.tur` should fail. To check the
+;; positive shape, swap `(param ctx "q")` for `(ok-val (param ctx "q"))` --
+;; the file then type-checks (modulo the ctx handle wiring).
+
+(defmodule tourist/tests/param-type-mismatch
+  (import tourist/param   :refer [param])
+  (import tourist/helpers :refer [text])
+  (import httpd/types     :refer [Response])
+
+  ;; This handler is wrong on purpose: `param` returns (Result cstr cstr),
+  ;; not cstr, so passing it straight to `text` (which wants :cstr) must
+  ;; be a TUR-E0001-class type error.
+  (defn bad-handler [ctx : int] : Response
+    (text (param ctx "q")))
+
+  (defn main [] : int 0))

@@ -17,6 +17,7 @@
 ;; inline-C block here, matching the http/ spice convention).
 
 (defmodule httpd/request
+  (import httpd/types :refer [Request])
   (export req-method req-path req-query req-body req-header)
 
 ;; file-scope-c-block: system headers contain static inline function
@@ -46,7 +47,7 @@ struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
 ;;;   (req-method req)  ; => "POST"
 ;;;
 ;;; Since: H3
-(defn req-method [req : int] : cstr
+(defn req-method [req : Request] : cstr
   ```c
   return ((struct __httpd_req *)(intptr_t)req)->method;
   ```)
@@ -63,7 +64,7 @@ struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
 ;;;   (req-path req)  ; => "/hello"
 ;;;
 ;;; Since: H3
-(defn req-path [req : int] : cstr
+(defn req-path [req : Request] : cstr
   ```c
   return ((struct __httpd_req *)(intptr_t)req)->path;
   ```)
@@ -80,7 +81,7 @@ struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
 ;;;   (req-query req)  ; => "name=world"
 ;;;
 ;;; Since: H3
-(defn req-query [req : int] : cstr
+(defn req-query [req : Request] : cstr
   ```c
   return ((struct __httpd_req *)(intptr_t)req)->query;
   ```)
@@ -97,7 +98,7 @@ struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
 ;;;   (req-body req)  ; => "hello world"
 ;;;
 ;;; Since: H3
-(defn req-body [req : int] : cstr
+(defn req-body [req : Request] : cstr
   ```c
   return ((struct __httpd_req *)(intptr_t)req)->body;
   ```)
@@ -105,34 +106,27 @@ struct __result { bool is_ok; int64_t ok_val; int64_t err_val; };
 ;;; req-header -- look up a request header by name (case-insensitive).
 ;;;
 ;;; Parameters:
-;;;   req  -- :int Request handle
+;;;   req  -- Request handle
 ;;;   name -- header name, e.g. "Content-Type"
 ;;;
 ;;; Returns:
-;;;   :int -- result<:cstr>: ok(value) if the header is present,
-;;;           err("not found") otherwise.  Unwrap with ok-val / err-val.
+;;;   (Result cstr cstr) -- ok(value) if the header is present,
+;;;                         err("not found") otherwise.  Unwrap with ok-val / err-val.
 ;;;
 ;;; Example:
 ;;;   (let [h (req-header req "Content-Type")]
 ;;;     (when (ok? h) (println (ok-val h))))
 ;;;
-;;; Since: H3
-(defn req-header [req : int name : cstr] : int
+;;; Since: H3 (typed as Result in 0.2.0)
+(defn req-header [req : Request name : cstr] : (Result cstr cstr)
   ```c
   struct __httpd_req *r = (struct __httpd_req *)(intptr_t)req;
-  struct __result *res = malloc(sizeof(*res));
   for (int i = 0; i < r->hdr_count; i++) {
     if (strcasecmp(r->hdr_keys[i], (const char *)name) == 0) {
-      res->is_ok = true;
-      res->ok_val = (int64_t)(intptr_t)r->hdr_vals[i];
-      res->err_val = 0;
-      return (int64_t)(intptr_t)res;
+      return tur_ok((int64_t)(intptr_t)r->hdr_vals[i]);
     }
   }
-  res->is_ok = false;
-  res->ok_val = 0;
-  res->err_val = (int64_t)(intptr_t)"not found";
-  return (int64_t)(intptr_t)res;
+  return tur_err((int64_t)(intptr_t)"not found");
   ```)
 
 ) ;; end defmodule httpd/request
