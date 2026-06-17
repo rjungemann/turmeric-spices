@@ -11,28 +11,30 @@
 (import ecs/world   :refer [defcomponent defworld world-alloc-entity!])
 (import ecs/query   :refer [for-each])
 
+(defopaque Pos :int)
 (defcomponent Pos)
+(defopaque Vel :int)
 (defcomponent Vel)
 
 (defworld GameWorld [Pos Vel])
 
 (defn main [] : int
-  (let [w (make-struct GameWorld (vec-new) (dense-new) (dense-new))]
+  (let [w (make-struct GameWorld (vec-new) (:: (dense-new) (Storage Pos)) (:: (dense-new) (Storage Vel)))]
     (do
       (let [^mut i 0]
         (while (< i 500)
           (let [e (world-alloc-entity! (.gens w))]
-            (dense-set! (.Pos w) (entity-index e) i)
-            (dense-set! (.Vel w) (entity-index e) 2))
+            (dense-set! (.Pos w) (entity-index e) (:: i :Pos))
+            (dense-set! (.Vel w) (entity-index e) (:: 2 :Vel)))
           (set! i (+ i 1))))
       (for-each w [Pos Vel] [e p v]
-        (dense-set! (.Pos w) e (+ p v)))
+        (dense-set! (.Pos w) e (:: (+ (:: p :int) (:: v :int)) :Pos)))
       (let [^mut sum 0
             ^mut j   0
             n        (dense-len (.Pos w))]
         (while (< j n)
           (when (dense-has? (.Pos w) j)
-            (set! sum (+ sum (dense-get (.Pos w) j))))
+            (let [pv : Pos (dense-get (.Pos w) j)] (set! sum (+ sum (:: pv :int)))))
           (set! j (+ j 1)))
         (println sum)
         (if (= sum 125750) 0 1)))))

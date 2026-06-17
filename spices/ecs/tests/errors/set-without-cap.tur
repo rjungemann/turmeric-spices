@@ -10,16 +10,18 @@
 
 (import ecs/entity  :refer [entity-index])
 (import ecs/storage :refer [dense-new dense-set! dense-get dense-has?])
-(import ecs/world   :refer [defworld defcomponent-accessors world-alloc-entity!])
+(import ecs/world   :refer [defcomponent defworld defcomponent-accessors world-alloc-entity!])
 (import ecs/cap     :refer [WriteCap ReadCap])
 
 (defstruct Pos [x : int y : int])
+
+(defcomponent Pos)
 
 (defworld GameWorld [Pos])
 (defcomponent-accessors GameWorld Pos)
 
 (defn main [] : int
-  (let [w (make-struct GameWorld (vec-new) (dense-new))
+  (let [w (make-struct GameWorld (vec-new) (:: (dense-new) (Storage Pos)))
         e (world-alloc-entity! (.gens w))]
     (set-Pos! w (entity-index e) (make-struct Pos 7 8))   ;; ERROR: missing cap arg
     0))

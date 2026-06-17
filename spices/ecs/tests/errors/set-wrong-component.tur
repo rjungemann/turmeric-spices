@@ -11,11 +11,14 @@
 
 (import ecs/entity  :refer [entity-index])
 (import ecs/storage :refer [dense-new dense-set! dense-get dense-has?])
-(import ecs/world   :refer [defworld defcomponent-accessors world-alloc-entity!])
+(import ecs/world   :refer [defcomponent defworld defcomponent-accessors world-alloc-entity!])
 (import ecs/cap     :refer [WriteCap ReadCap make-write-cap use-cap!])
 
 (defstruct Pos [x : int y : int])
 (defstruct Vel [x : int y : int])
+
+(defcomponent Pos)
+(defcomponent Vel)
 
 (defworld GameWorld [Pos Vel])
 (defcomponent-accessors GameWorld Pos)
@@ -25,7 +28,7 @@
 (def Vel-cid 1)
 
 (defn main [] : int
-  (let [w   (make-struct GameWorld (vec-new) (dense-new) (dense-new))
+  (let [w   (make-struct GameWorld (vec-new) (:: (dense-new) (Storage Pos)) (:: (dense-new) (Storage Vel)))
         e   (world-alloc-entity! (.gens w))
         ;; Only mint a Vel write-cap.
         vc  (:: (make-write-cap Vel-cid) (WriteCap Vel))]

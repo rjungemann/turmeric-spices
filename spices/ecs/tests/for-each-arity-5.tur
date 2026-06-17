@@ -9,30 +9,38 @@
 (import ecs/world   :refer [defcomponent defworld world-alloc-entity!])
 (import ecs/query   :refer [for-each])
 
+(defopaque A :int)
 (defcomponent A)
+(defopaque B :int)
 (defcomponent B)
+(defopaque C :int)
 (defcomponent C)
+(defopaque D :int)
 (defcomponent D)
+(defopaque E :int)
 (defcomponent E)
 
 (defworld FiveWorld [A B C D E])
 
 (defn main [] : int
-  (let [w (make-struct FiveWorld (vec-new) (dense-new) (dense-new) (dense-new) (dense-new) (dense-new))]
+  (let [w (make-struct FiveWorld (vec-new)
+            (:: (dense-new) (Storage A)) (:: (dense-new) (Storage B))
+            (:: (dense-new) (Storage C)) (:: (dense-new) (Storage D))
+            (:: (dense-new) (Storage E)))]
     (do
       (let [^mut i 0]
         (while (< i 50)
           (let [ent (world-alloc-entity! (.gens w))
                 idx (entity-index ent)]
-            (dense-set! (.A w) idx i)
-            (dense-set! (.B w) idx (* 2 i))
-            (dense-set! (.C w) idx (* 3 i))
-            (dense-set! (.D w) idx (* 4 i))
-            (dense-set! (.E w) idx (* 5 i)))
+            (dense-set! (.A w) idx (:: i :A))
+            (dense-set! (.B w) idx (:: (* 2 i) :B))
+            (dense-set! (.C w) idx (:: (* 3 i) :C))
+            (dense-set! (.D w) idx (:: (* 4 i) :D))
+            (dense-set! (.E w) idx (:: (* 5 i) :E)))
           (set! i (+ i 1))))
       (let [^mut total 0]
         (for-each w [A B C D E] [ent a b c d ee]
-          (set! total (+ total (+ a (+ b (+ c (+ d ee)))))))
+          (set! total (+ total (+ (:: a :int) (+ (:: b :int) (+ (:: c :int) (+ (:: d :int) (:: ee :int))))))))
         (println total)
         (if (= total 18375) 0 1)))))
 

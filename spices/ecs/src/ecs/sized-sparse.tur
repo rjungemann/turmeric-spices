@@ -34,39 +34,39 @@
 ;;;
 ;;; Since: E2c
 (defn sized-sparse-new [n A] : (SizedSparse n A)
-  (:: (sparse-new) :SizedSparse))
+  (:: (:: (sparse-new) (Sparse A)) (SizedSparse n A)))
 
 ;;; sized-sparse-len -- live entry count.
 ;;; Since: E2c
 (defn sized-sparse-len [n A] [s : (SizedSparse n A)] : int
-  (sparse-len (:: s :int)))
+  (sparse-len (:: s (Sparse A))))
 
 ;;; sized-sparse-set! -- write a value at entity index idx.
 ;;; Caller is responsible for `idx < n`; that bound is not statically
 ;;; checked here (refinement-types-gated, like dense -- see Q4).
 ;;; Since: E2c
 (defn sized-sparse-set! [n A] [s : (SizedSparse n A) idx : int val : A] : nil
-  (sparse-set! (:: s :int) idx val))
+  (sparse-set! (:: s (Sparse A)) idx val))
 
 ;;; sized-sparse-get -- read the value at idx; caller must has?-check first.
 ;;; Since: E2c
 (defn sized-sparse-get [n A] [s : (SizedSparse n A) idx : int] : A
-  (sparse-get (:: s :int) idx))
+  (sparse-get (:: s (Sparse A)) idx))
 
 ;;; sized-sparse-has? -- is there an entry at idx?
 ;;; Since: E2c
 (defn sized-sparse-has? [n A] [s : (SizedSparse n A) idx : int] : bool
-  (sparse-has? (:: s :int) idx))
+  (sparse-has? (:: s (Sparse A)) idx))
 
 ;;; sized-sparse-del! -- remove the entry at idx; returns false if absent.
 ;;; Since: E2c
 (defn sized-sparse-del! [n A] [s : (SizedSparse n A) idx : int] : bool
-  (sparse-del! (:: s :int) idx))
+  (sparse-del! (:: s (Sparse A)) idx))
 
 ;;; sized-sparse-free -- release backing arrays.
 ;;; Since: E2c
 (defn sized-sparse-free [n A] [s : (SizedSparse n A)] : nil
-  (sparse-free (:: s :int)))
+  (sparse-free (:: s (Sparse A))))
 
 ;;; sized-sparse-zip-domain -- cross-parameter unification probe.
 ;;;

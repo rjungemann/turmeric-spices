@@ -11,6 +11,12 @@
 (import ecs/world   :refer [defcomponent defworld world-alloc-entity!])
 (import ecs/query   :refer [for-each])
 
+;; E2d-P4/P5: marker components are int-carried opaques so they satisfy the
+;; (Storage T) field projection; int values cross the boundary with a `::`.
+(defopaque A :int)
+(defopaque B :int)
+(defopaque C :int)
+(defopaque D :int)
 (defcomponent A)
 (defcomponent B)
 (defcomponent C)
@@ -19,20 +25,22 @@
 (defworld FourWorld [A B C D])
 
 (defn main [] : int
-  (let [w (make-struct FourWorld (vec-new) (dense-new) (dense-new) (dense-new) (dense-new))]
+  (let [w (make-struct FourWorld (vec-new)
+            (:: (dense-new) (Storage A)) (:: (dense-new) (Storage B))
+            (:: (dense-new) (Storage C)) (:: (dense-new) (Storage D)))]
     (do
       (let [^mut i 0]
         (while (< i 100)
           (let [e (world-alloc-entity! (.gens w))
                 idx (entity-index e)]
-            (dense-set! (.A w) idx i)
-            (dense-set! (.B w) idx (* 2 i))
-            (dense-set! (.C w) idx (* 3 i))
-            (dense-set! (.D w) idx (* 4 i)))
+            (dense-set! (.A w) idx (:: i :A))
+            (dense-set! (.B w) idx (:: (* 2 i) :B))
+            (dense-set! (.C w) idx (:: (* 3 i) :C))
+            (dense-set! (.D w) idx (:: (* 4 i) :D)))
           (set! i (+ i 1))))
       (let [^mut total 0]
         (for-each w [A B C D] [e a b c d]
-          (set! total (+ total (+ a (+ b (+ c d))))))
+          (set! total (+ total (+ (:: a :int) (+ (:: b :int) (+ (:: c :int) (:: d :int)))))))
         (println total)
         (if (= total 49500) 0 1)))))
 
