@@ -1,0 +1,70 @@
+;; E2c slice 4c -- generational `Entity` safety on a sized world.
+;;
+;; The slice-4b free-list lets `sized-spawn!` recycle the slot a
+;; despawn just freed. Without per-slot generations a stale handle
+;; that named (idx=0, gen=0) before the despawn would be
+;; indistinguishable from the freshly-spawned handle at the same
+;; slot. Slice 4c gives every slot a generation counter that
+;; `sized-despawn` bumps; `sized-alive?` returns false for any
+;; handle whose (idx, gen) no longer matches `gens[idx]`.
+;;
+;; The test exercises four properties end-to-end:
+;;   1. A just-spawned Entity is alive (gen-0 baseline).
+;;   2. After despawn the same handle is dead.
+;;   3. A respawn returns a *new* Entity at a bumped generation;
+;;      the new handle is alive, the original is still dead.
+;;   4. A second despawn against the stale handle is a no-op
+;;      (returns false; does NOT push a duplicate slot onto the
+;;      free-list). This is the double-despawn safety net the
+;;      slice-4 / 4b world lacked.
+;;
+;; Expected output:
+;;   true     -- 1: fresh entity is alive
+;;   false    -- 2: same handle after despawn is dead
+;;   true     -- 3: respawn at bumped gen is alive
+;;   false    -- 3: original stale handle still dead
+;;   0        -- respawned slot's index (slot 0 reused)
+;;   1        -- respawned generation (was 0, bumped on despawn)
+;;   false    -- 4: double-despawn against stale handle no-ops
+;;   1        -- live count unchanged after the no-op
+;;   ok
+
+(defmodule sized_world_generation_test
+  (export)
+
+(import ecs/entity        :refer [entity-index entity-generation])
+(import ecs/sized-storage :refer [SizedDense])
+(import ecs/sized-world   :refer [sized-defworld
+                                   sized-spawn! sized-despawn
+                                   sized-live sized-alive?])
+
+(defopaque Pos :int)
+
+(sized-defworld GameWorld [Pos])
+
+(defn main [] : int
+  (let [w : (GameWorld (Static 2)) (make-GameWorld 2)]
+    (let [e0 (sized-spawn! (.state w))]
+      ;; 1. Just-spawned -> alive.
+      (println (sized-alive? (.state w) e0))           ;; true
+      (sized-despawn (.state w) e0)
+      ;; 2. Original handle after despawn -> dead.
+      (println (sized-alive? (.state w) e0))           ;; false
+      (let [e0b (sized-spawn! (.state w))]
+        ;; 3. Respawn -> alive; stale handle still dead.
+        (println (sized-alive? (.state w) e0b))        ;; true
+        (println (sized-alive? (.state w) e0))         ;; false
+        (println (entity-index      e0b))              ;; 0 (slot 0 reused)
+        (println (entity-generation e0b))              ;; 1 (was 0, bumped)
+        ;; 4. Double-despawn against the stale handle.
+        (let [r2 (sized-despawn (.state w) e0)]
+          (println r2)                                 ;; false
+          (println (sized-live (.state w)))            ;; 1
+          (if (and (sized-alive? (.state w) e0b)
+              (and (not (sized-alive? (.state w) e0))
+              (and (not r2)
+                   (= (sized-live (.state w)) 1))))
+            (do (println "ok") 0)
+            (do (println "FAIL") 1)))))))
+
+) ;; end defmodule sized_world_generation_test
