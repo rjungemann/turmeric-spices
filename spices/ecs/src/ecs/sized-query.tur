@@ -46,11 +46,14 @@
 
 (defmodule ecs/sized-query
   (export sized-for-each
-          sized-world-tagged? sized-world-untagged?)
+          sized-world-tagged? sized-world-untagged?
+          sized-world-sparse-has? sized-world-sparse-get)
 
 (import ecs/sized-storage :refer [SizedDense sized-dense-cap
                                    sized-dense-get sized-dense-has?])
 (import ecs/sized-tag     :refer [SizedTag sized-tag-has?])
+(import ecs/sized-sparse  :refer [SizedSparse sized-sparse-has?
+                                   sized-sparse-get])
 
 ;;; __sfe-storages -- recursive helper: wrap inner in nested `let`s
 ;;; binding `__ss_<Comp>` to `(.<Comp> w)` for each component.
@@ -160,5 +163,33 @@
 ;;; Since: E2c slice 6
 (defmacro sized-world-untagged? [world Tag e]
   `(not (sized-tag-has? (~(dot-sym Tag) ~world) ~e)))
+
+;;; sized-world-sparse-has? -- presence probe against a SizedSparse
+;;; component field on the world. The sparse counterpart of
+;;; sized-world-tagged?, with the same hand-rolled-world caveat:
+;;; sized-defworld emits dense fields only, so a sparse component is
+;;; declared by hand-rolling the world's defstruct and naming the
+;;; field after the component type. Macro-only.
+;;;
+;;; Composes with sized-for-each via when/unless to express the
+;;; "dense iterate + sparse lookup" pattern that mixed-shape worlds
+;;; need: walk the dense Pos backbone, branch on whether the entity
+;;; also has the sparser Hp component.
+;;;
+;;; Since: E2c slice 9
+(defmacro sized-world-sparse-has? [world Comp e]
+  `(sized-sparse-has? (~(dot-sym Comp) ~world) ~e))
+
+;;; sized-world-sparse-get -- read a SizedSparse component value off
+;;; the world for entity `e`. The element type is inferred from the
+;;; world's typed `.<Comp>` field, so a use-site like
+;;; `(sized-world-sparse-get w Hp e)` against a world whose `.Hp` is
+;;; `(SizedSparse n Hp)` returns an `Hp`. Caller should guard with
+;;; `sized-world-sparse-has?` first -- absent slots return unspecified
+;;; payload bytes (the sized-sparse-get contract).
+;;;
+;;; Since: E2c slice 9
+(defmacro sized-world-sparse-get [world Comp e]
+  `(sized-sparse-get (~(dot-sym Comp) ~world) ~e))
 
 ) ;; end defmodule ecs/sized-query

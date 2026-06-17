@@ -1,0 +1,85 @@
+;; E2c slice 9 -- sized-world-sparse-has? / sized-world-sparse-get for
+;; the mixed-shape dense-iterate + sparse-lookup pattern.
+;;
+;; Hand-rolled (GameWorld n) with a dense Pos backbone, a sparse Hp
+;; (only some entities have hit points), and a sparse Score. The
+;; SZ8 cross-parameter unifier proves rectangularity across the
+;; dense + sparse fields the same way it does for the slice-6
+;; dense + tag mix.
+;;
+;; Iteration: walk Pos via sized-for-each; for entities that also
+;; have Hp via sized-world-sparse-has?, read both Hp and Score
+;; (when present) and accumulate a weighted sum.
+;;
+;; Setup:
+;;   slots 0..4 have Pos = slot * 10
+;;   slot 1: Hp = 50, Score = 7
+;;   slot 3: Hp = 20, Score = 3
+;;   slot 4: Hp = 80 (no Score)
+;;   other slots: no Hp, no Score
+;;
+;; The body fires for entities with both Pos AND Hp -- slots 1, 3, 4.
+;; sum-with-score adds Pos+Hp+Score for slots that also have Score,
+;; and Pos+Hp otherwise. So:
+;;   slot 1: 10 + 50 + 7 = 67
+;;   slot 3: 30 + 20 + 3 = 53
+;;   slot 4: 40 + 80     = 120
+;;   total: 240
+;;
+;; Expected output:
+;;   240
+
+(defmodule sized_sparse_lookup_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense sized-dense-new
+                                   sized-dense-set!])
+(import ecs/sized-sparse  :refer [SizedSparse sized-sparse-new
+                                   sized-sparse-set!])
+(import ecs/sized-query   :refer [sized-for-each
+                                   sized-world-sparse-has?
+                                   sized-world-sparse-get])
+
+(defopaque Pos   :int)
+(defopaque Hp    :int)
+(defopaque Score :int)
+
+(defstruct GameWorld [n]
+  (Pos   (SizedDense  n Pos))
+  (Hp    (SizedSparse n Hp))
+  (Score (SizedSparse n Score)))
+
+(defn make-game-world [n] [k : int] : (GameWorld n)
+  (make-struct GameWorld
+               (:: (sized-dense-new  k) (SizedDense  n Pos))
+               (:: (sized-sparse-new)   (SizedSparse n Hp))
+               (:: (sized-sparse-new)   (SizedSparse n Score))))
+
+(defn main [] : int
+  (let [w : (GameWorld (Static 8)) (make-game-world 8)]
+    (do
+      (sized-dense-set! (.Pos w) 0 (:: 0  :Pos))
+      (sized-dense-set! (.Pos w) 1 (:: 10 :Pos))
+      (sized-dense-set! (.Pos w) 2 (:: 20 :Pos))
+      (sized-dense-set! (.Pos w) 3 (:: 30 :Pos))
+      (sized-dense-set! (.Pos w) 4 (:: 40 :Pos))
+      (sized-sparse-set! (.Hp    w) 1 (:: 50 :Hp))
+      (sized-sparse-set! (.Score w) 1 (:: 7  :Score))
+      (sized-sparse-set! (.Hp    w) 3 (:: 20 :Hp))
+      (sized-sparse-set! (.Score w) 3 (:: 3  :Score))
+      (sized-sparse-set! (.Hp    w) 4 (:: 80 :Hp))
+      (let [^mut total 0]
+        (do
+          (sized-for-each w [Pos] [e p]
+            (when (sized-world-sparse-has? w Hp e)
+              (let [h (sized-world-sparse-get w Hp e)]
+                (if (sized-world-sparse-has? w Score e)
+                  (let [sc (sized-world-sparse-get w Score e)]
+                    (set! total (+ total (+ (:: p :int)
+                                            (+ (:: h :int)
+                                               (:: sc :int))))))
+                  (set! total (+ total (+ (:: p :int) (:: h :int))))))))
+          (println total)
+          (if (= total 240) 0 1))))))
+
+) ;; end defmodule sized_sparse_lookup_test

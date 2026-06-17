@@ -6,6 +6,24 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 9 -- mixed-shape `sized-for-each`: sparse component
+  lookup.** Two new macros in `ecs/sized-query`,
+  `sized-world-sparse-has?` and `sized-world-sparse-get`, complete
+  the sized-side filter surface by mirroring the slice-6 tag pair
+  against `SizedSparse` storages. Use case: walk a dense backbone
+  via `sized-for-each` and branch on whether the entity also has a
+  sparser component (`Hp`, `Score`, ...); read the sparse value via
+  the get macro once presence is confirmed. The element type is
+  inferred from the world's typed `.<Comp>` field, so a hand-rolled
+  `(GameWorld n)` with `(Hp (SizedSparse n Hp))` lets
+  `(sized-world-sparse-get w Hp e)` return an `Hp` without a witness
+  arg. Same hand-rolled-world caveat as slice 6: `sized-defworld`
+  emits dense fields only, so mixed-shape worlds spell out their
+  `defstruct` by hand. New regression test
+  `tests/sized-sparse-lookup.tur` -- a (GameWorld n) with dense Pos
+  + sparse Hp + sparse Score, iterated as "Pos AND Hp, optionally
+  + Score", asserting a weighted sum of 240.
+
 - **E2c slice 8 -- `sized-defsystem`.** Sized-side counterpart of
   `ecs/system`'s `defsystem`. Emits a single `n`-polymorphic
   `(defn name [n] [^borrow w : (WorldName n)] : nil ...)` with the
