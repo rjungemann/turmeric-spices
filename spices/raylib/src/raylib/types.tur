@@ -13,20 +13,20 @@
 ;; Since: v0.2.0
 
 (defmodule raylib/types
-  (export Vector2 Rectangle
+  (export Color
+          Vector2 Rectangle
           Camera3D Camera2D
           Texture2D Font
           Model Mesh Material Matrix)
 
-;; Note: a `Color` defopaque is intentionally omitted from this module.
-;; ecs-raylib's `Color` component (in spices/ecs-raylib/src/ecs-raylib/components.tur)
-;; already defines a global defopaque of the same name; introducing a sibling
-;; Color here would collide whenever both spices are loaded in one program
-;; (e.g. the ecs-raylib demos). Color parameters on raylib drawing functions
-;; remain `:int` for now -- the swap-protection win on Color is sacrificed to
-;; preserve the ecs-raylib world-struct shape; closing the duplicate is
-;; tracked as a follow-up under the "spices-type-features-uplift-plan"
-;; U1 phase.
+;; Color is owned by raylib/types as of v0.2.1. ecs-raylib's
+;; `Color` component (in spices/ecs-raylib/src/ecs-raylib/components.tur)
+;; re-exports this same defopaque -- both spices now agree on the type so
+;; demos that load both can interchange Color handles without casts. The
+;; previous v0.2.0 "Color intentionally omitted" workaround is dropped.
+
+;;; Color -- opaque handle to a heap-allocated Raylib Color (r,g,b,a bytes).
+(defopaque Color :int)
 
 ;;; Vector2 -- opaque handle to a heap-allocated Raylib Vector2 (x,y floats).
 (defopaque Vector2 :int)

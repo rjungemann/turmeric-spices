@@ -14,7 +14,7 @@
 ;;; Since: v0.2.0
 
 (defmodule tourist/types
-  (export Ctx Item Mount Captures)
+  (export Ctx Item ItemList Mount MountList AppList StatusList Captures)
 
 ;;; Ctx -- opaque handle to a tourist request context.
 ;;;
@@ -46,6 +46,20 @@
 ;;; via a sentinel method string in the underlying route struct.
 (defopaque Item :int)
 
+;;; ItemList -- opaque handle to a cons list of Items.
+;;;
+;;; tourist/app partitions the collected variadic into three ItemLists
+;;; (mws, after-mws, routes) stored in its dispatch-state singleton.
+;;; Internal cons-walker helpers (__tourist-cons / __mw-cons-head /
+;;; __mw-cons-tail / __tourist-list-rev / mw-chain-run / ...) thread
+;;; ItemList instead of bare :int so the type checker rejects e.g.
+;;; passing a Captures handle where the dispatch list is expected.
+;;;
+;;; A null ItemList ((:: 0 :ItemList)) is the empty-list sentinel.
+;;;
+;;; Since: v0.2.2
+(defopaque ItemList :int)
+
 ;;; Captures -- opaque handle to a __tourist_caps struct produced by router-match.
 ;;;
 ;;; Carries the (name, value) pairs captured by ":id" / "*" pattern segments.
@@ -61,5 +75,25 @@
 ;;; Consumed by url-map!. Has no other public surface; the spice exports
 ;;; it only so url-map!'s variadic signature can name a real type.
 (defopaque Mount :int)
+
+;;; MountList -- cons list of Mount handles (head/tail cons cells).
+;;;
+;;; Used internally by tourist/routing's url-map! pipeline: __build-mounts
+;;; assembles a longest-prefix-first MountList and __url-map-dispatch walks
+;;; it. Null sentinel = (:: 0 :MountList). Since: v0.2.3
+(defopaque MountList :int)
+
+;;; AppList -- cons list of Item handles passed to cascade! / cascade-with!.
+;;;
+;;; Each element is a Route or sub-app the cascade tries in declaration
+;;; order. Null sentinel = (:: 0 :AppList). Since: v0.2.3
+(defopaque AppList :int)
+
+;;; StatusList -- cons list of HTTP status codes (raw :int values).
+;;;
+;;; Built by passes!; consumed by cascade-with! to decide which response
+;;; statuses fall through to the next app. Null sentinel =
+;;; (:: 0 :StatusList). Since: v0.2.3
+(defopaque StatusList :int)
 
 ) ;; end defmodule tourist/types

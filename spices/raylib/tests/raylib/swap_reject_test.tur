@@ -1,6 +1,6 @@
 ;; tests/raylib/swap_reject_test.tur -- compile-time swap-rejection probes
 ;; for raylib's secondary opaque handle types (Camera3D, Camera2D, Vector2,
-;; Rectangle, Texture2D, Font, Model, Mesh).
+;; Rectangle, Texture2D, Font, Model, Mesh, Color).
 ;;
 ;; NEGATIVE fixture: every defn below is wrong on purpose. Running
 ;; `tur check tests/raylib/swap_reject_test.tur` MUST produce TUR-E0001
@@ -9,14 +9,11 @@
 ;;
 ;; If any of these typecheck cleanly, the S2 audit's "secondary handle
 ;; leaks inside raylib" have regressed.
-;;
-;; Note: `Color` is intentionally not covered here -- see raylib/types.tur
-;; for the rationale (it would collide with ecs-raylib's Color component).
 
 (defmodule raylib/tests/swap-reject
   (import raylib/types    :refer [Camera3D Camera2D Vector2 Rectangle
-                                  Texture2D Font Model Mesh])
-  (import raylib/core     :refer [begin-mode-3d])
+                                  Texture2D Font Model Mesh Color])
+  (import raylib/core     :refer [begin-mode-3d clear-background])
   (import raylib/camera   :refer [update-camera])
   (import raylib/shapes   :refer [draw-circle-v draw-rectangle-rec
                                   draw-line-v])
@@ -34,11 +31,11 @@
     (update-camera c2 0))                 ; expects Camera3D
 
   ;; Vector2 vs Rectangle: draw-rectangle-rec wants a Rectangle.
-  (defn bad-vec-as-rect [v : Vector2 col : int] : void
+  (defn bad-vec-as-rect [v : Vector2 col : Color] : void
     (draw-rectangle-rec v col))           ; expects Rectangle, got Vector2
 
   ;; Rectangle vs Vector2: draw-circle-v wants a Vector2.
-  (defn bad-rect-as-vec [r : Rectangle col : int] : void
+  (defn bad-rect-as-vec [r : Rectangle col : Color] : void
     (draw-circle-v r 5.0 col))            ; expects Vector2, got Rectangle
 
   ;; Texture2D vs Font: unload-font wants a Font.
@@ -55,7 +52,15 @@
 
   ;; draw-line-v: swap Vector2 and int (raylib radius/color params come
   ;; later; this case feeds an int where Vector2 is required).
-  (defn bad-int-as-vec [n : int v : Vector2 col : int] : void
+  (defn bad-int-as-vec [n : int v : Vector2 col : Color] : void
     (draw-line-v n v col))                ; arg 1: expects Vector2
+
+  ;; Color vs Vector2: clear-background wants a Color (v0.2.1 U1 retype).
+  (defn bad-vec-as-color [v : Vector2] : void
+    (clear-background v))                 ; expects Color, got Vector2
+
+  ;; raw int is not a Color (v0.2.1 U1 retype).
+  (defn bad-int-as-color [n : int] : void
+    (clear-background n))                 ; expects Color, got int
 
   (defn main [] : int 0))

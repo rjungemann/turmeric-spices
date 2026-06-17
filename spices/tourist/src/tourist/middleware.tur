@@ -22,7 +22,7 @@
 
 (defmodule tourist/middleware
   (import tourist/dsl   :refer [route-new route-call-handler])
-  (import tourist/types :refer [Ctx])
+  (import tourist/types :refer [Ctx Item ItemList])
   (import httpd/types   :refer [Response])
   (export use! use-after!
           mw-item?      mw-call      mw-chain-run
@@ -30,15 +30,15 @@
 
 ;; -- Internal: cons list accessors -----------------------------------------
 
-;;; __mw-cons-head -- head of a Turmeric cons list cell.
-(defn __mw-cons-head [lst : int] : int
+;;; __mw-cons-head -- head Item of an ItemList cell.
+(defn __mw-cons-head [lst : ItemList] : Item
   ```c
   typedef struct { int64_t head; int64_t tail; } __tur_cons;
   return ((__tur_cons *)(intptr_t)lst)->head;
   ```)
 
-;;; __mw-cons-tail -- tail of a Turmeric cons list cell.
-(defn __mw-cons-tail [lst : int] : int
+;;; __mw-cons-tail -- tail ItemList of an ItemList cell.
+(defn __mw-cons-tail [lst : ItemList] : ItemList
   ```c
   typedef struct { int64_t head; int64_t tail; } __tur_cons;
   return ((__tur_cons *)(intptr_t)lst)->tail;
@@ -88,7 +88,7 @@
 ;;;   :bool
 ;;;
 ;;; Since: v0.1.0
-(defn mw-item? [item : int] : bool
+(defn mw-item? [item : Item] : bool
   ```c
   #include <string.h>
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
@@ -106,8 +106,8 @@
 ;;;   :int -- option<Response>: 0 = none (continue), non-zero = some(resp)
 ;;;
 ;;; Since: v0.1.0
-(defn mw-call [mw : int req : int] : int
-  (route-call-handler mw req))
+(defn mw-call [mw : Item req : int] : int
+  (route-call-handler (:: mw :int) req))
 
 ;;; mw-chain-run -- run a cons list of middleware handles in order.
 ;;;
@@ -127,8 +127,8 @@
 ;;;     (when (not= opt 0) ...))
 ;;;
 ;;; Since: v0.1.0
-(defn mw-chain-run [mws : int req : int] : int
-  (if (= mws 0)
+(defn mw-chain-run [mws : ItemList req : int] : int
+  (if (= (:: mws :int) 0)
     0
     (let [result (mw-call (__mw-cons-head mws) req)]
       (if (not= result 0)
@@ -179,7 +179,7 @@
 ;;; Used by tourist/app to partition the mixed item list.
 ;;;
 ;;; Since: v0.2.0
-(defn mwafter-item? [item : int] : bool
+(defn mwafter-item? [item : Item] : bool
   ```c
   #include <string.h>
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
@@ -195,7 +195,7 @@
 ;;; response argument.
 ;;;
 ;;; Since: v0.2.0
-(defn mwafter-call [mw : int ctx : int resp : int] : int
+(defn mwafter-call [mw : Item ctx : int resp : int] : int
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   struct __tourist_route *rt = (struct __tourist_route *)(intptr_t)mw;
@@ -219,8 +219,8 @@
 ;;;   :int -- the final response handle after every after-mw has run.
 ;;;
 ;;; Since: v0.2.0
-(defn mwafter-chain-run [mws : int ctx : int resp : int] : int
-  (if (= mws 0)
+(defn mwafter-chain-run [mws : ItemList ctx : int resp : int] : int
+  (if (= (:: mws :int) 0)
     resp
     (mwafter-chain-run
       (__mw-cons-tail mws)

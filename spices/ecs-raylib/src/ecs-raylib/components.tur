@@ -16,7 +16,8 @@
 ;;; Since: E3
 
 (defmodule ecs-raylib/components
-  (export Pos2 Vel2 Rot Radius Color
+  (import raylib/types :refer [Color])
+  (export Pos2 Vel2 Rot Radius
           pos2-make pos2-x pos2-y pos2-add!
           vel2-make vel2-x vel2-y
           radius-make radius-value rot-make rot-value
@@ -40,11 +41,14 @@
 ;;; Since: E3
 (defopaque Radius :int)
 
-;;; Color -- raylib RGBA color handle, carried as an int pointer into the
-;;; heap-allocated Color struct. Use raylib/color helpers (`color`, `red`,
-;;; etc.) to construct.
-;;; Since: E3
-(defopaque Color :int)
+;; Color now lives in raylib/types (since tur-raylib v0.2.1) and is imported
+;; above so this module's color-rgba can name it. The previous local
+;; (defopaque Color :int) collided with raylib's once both spices were
+;; loaded; deleting it closes the duplicate so dense-set!/red/etc. flow
+;; the same Color handle. Downstream code that used to do
+;; (import ecs-raylib/components :refer [Color]) must now import it from
+;; raylib/types directly.
+;; Since: E3 (moved to raylib/types in E4)
 
 ;;; pos2-make -- pack (x, y) floats into a Pos2 carrier.
 ;;; Since: E3
