@@ -1,0 +1,47 @@
+;; Exercise the limits the old hand-rolled scanner disclaimed and yyjson now
+;; lifts: nested objects, fractional numbers (Decode [float]), and full
+;; \uXXXX escapes inside strings.
+;;
+;; Expected:
+;;   inner=99
+;;   pi=3.14
+;;   unicode-ok
+
+(defmodule decode_yyjson_features_test (export)
+
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
+(import json/encode)
+
+(defn __show-int [tag : cstr n : int] #{Unsafe} : nil
+  ```c printf("%s=%lld\n", (const char*)tag, (long long)n); ```)
+
+(defn __show-float [tag : cstr d : float] #{Unsafe} : nil
+  ```c printf("%s=%g\n", (const char*)tag, d); ```)
+
+(defn __check-snow [s : cstr] #{Unsafe} : nil
+  ```c
+  /* UTF-8 of "snöw" = 73 6e c3 b6 77, length 5. */
+  if (s && strlen((const char*)s) == 5 && (unsigned char)s[2] == 0xc3 &&
+      (unsigned char)s[3] == 0xb6) {
+    printf("unicode-ok\n");
+  } else {
+    printf("unicode-fail\n");
+  }
+  ```)
+
+(defn main [] : int
+  (let [src   "{\"outer\":{\"inner\":99},\"pi\":3.14,\"u\":\"sn\\u00f6w\"}"
+        doc   (unsafe (json-parse-doc src))
+        root  (unsafe (json-doc-root doc))
+        outer (unsafe (json-obj-get doc root "outer"))
+        inner (unsafe (json-obj-get doc outer "inner"))
+        pi-v  (unsafe (json-obj-get doc root "pi"))
+        u-v   (unsafe (json-obj-get doc root "u"))]
+    (unsafe (__show-int "inner"
+              (ok-val (:: (decode doc inner) (Result int cstr)))))
+    (unsafe (__show-float "pi"
+              (ok-val (:: (decode doc pi-v) (Result float cstr)))))
+    (unsafe (__check-snow
+              (ok-val (:: (decode doc u-v) (Result cstr cstr)))))
+    (unsafe (json-doc-free doc))
+    0)))

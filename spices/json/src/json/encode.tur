@@ -188,104 +188,67 @@
 
 (defclass Decode [a] (decode [doc : int  val : int] : (Result a cstr)))
 
-;;; Decode [int] -- parse the JSON number at `val` as a 64-bit integer.
-;;; JSON literals `true`/`false` decode as `1`/`0`. Rejects fractional
-;;; or exponent forms, and any non-numeric value.
+;;; Decode [int] -- read the value at `val` as a 64-bit integer. Accepts
+;;; integer JSON numbers; rejects floats, strings, booleans, null, and a
+;;; null val handle (missing field).
 (definstance Decode [int] (decode [doc val]
   ```c
-  typedef struct { char *src; size_t len; } __jdoc;
-  __jdoc *d = (__jdoc *)(intptr_t)doc;
-  if (!d || val < 0 || (size_t)val >= d->len) {
-    return tur_err((int64_t)(intptr_t)"decode int: out-of-range val handle");
+  #include <yyjson.h>
+  (void)doc;
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  if (!v) return tur_err((int64_t)(intptr_t)"decode int: missing field");
+  if (!yyjson_is_int(v) && !yyjson_is_uint(v) && !yyjson_is_sint(v)) {
+    return tur_err((int64_t)(intptr_t)"decode int: not an integer");
   }
-  size_t i = (size_t)val;
-  if (i + 4 <= d->len && memcmp(d->src + i, "true",  4) == 0) return tur_ok((int64_t)1);
-  if (i + 5 <= d->len && memcmp(d->src + i, "false", 5) == 0) return tur_ok((int64_t)0);
-  int sign = 1;
-  if (d->src[i] == '-') { sign = -1; i++; }
-  else if (d->src[i] == '+') { i++; }
-  if (i >= d->len || d->src[i] < '0' || d->src[i] > '9') {
-    return tur_err((int64_t)(intptr_t)"decode int: not a number");
-  }
-  int64_t n = 0;
-  while (i < d->len && d->src[i] >= '0' && d->src[i] <= '9') {
-    n = n * 10 + (d->src[i] - '0');
-    i++;
-  }
-  if (i < d->len && (d->src[i] == '.' || d->src[i] == 'e' || d->src[i] == 'E')) {
-    return tur_err((int64_t)(intptr_t)"decode int: fractional/exponent not supported");
-  }
-  return tur_ok((int64_t)(sign * n));
+  return tur_ok((int64_t)yyjson_get_sint(v));
   ```))
 
-;;; Decode [cstr] -- parse the JSON string at `val`, returning a freshly
-;;; malloc'd cstr inside `ok` (caller owns it). Supports the minimal
-;;; escape set; `\uXXXX` is rejected with a static err message.
+;;; Decode [cstr] -- read the value at `val` as a JSON string. Returns a
+;;; freshly malloc'd cstr (caller owns it) so it survives `json-doc-free`.
+;;; Full RFC 8259 escapes + UTF-8 are supported by yyjson's decoder.
 (definstance Decode [cstr] (decode [doc val]
   ```c
-  typedef struct { char *src; size_t len; } __jdoc;
-  __jdoc *d = (__jdoc *)(intptr_t)doc;
-  if (!d || val < 0 || (size_t)val >= d->len || d->src[val] != '"') {
-    return tur_err((int64_t)(intptr_t)"decode cstr: expected `\"`");
-  }
-  size_t i = (size_t)val + 1;
-  size_t out_len = 0;
-  size_t j = i;
-  while (j < d->len) {
-    char x = d->src[j];
-    if (x == '\\') {
-      if (j + 1 >= d->len) return tur_err((int64_t)(intptr_t)"decode cstr: trailing `\\`");
-      char e = d->src[j + 1];
-      if (e == '"' || e == '\\' || e == '/' || e == 'b' || e == 'f' ||
-          e == 'n' || e == 'r' || e == 't') { out_len++; j += 2; continue; }
-      return tur_err((int64_t)(intptr_t)"decode cstr: unsupported escape");
-    }
-    if (x == '"') break;
-    out_len++; j++;
-  }
-  if (j >= d->len) return tur_err((int64_t)(intptr_t)"decode cstr: unterminated string");
-  char *out = (char *)malloc(out_len + 1);
-  size_t w = 0;
-  j = i;
-  while (j < d->len) {
-    char x = d->src[j];
-    if (x == '"') break;
-    if (x == '\\') {
-      char e = d->src[j + 1];
-      char k = '\0';
-      switch (e) {
-        case '"':  k = '"';  break;
-        case '\\': k = '\\'; break;
-        case '/':  k = '/';  break;
-        case 'b':  k = '\b'; break;
-        case 'f':  k = '\f'; break;
-        case 'n':  k = '\n'; break;
-        case 'r':  k = '\r'; break;
-        case 't':  k = '\t'; break;
-        default: break;
-      }
-      out[w++] = k; j += 2; continue;
-    }
-    out[w++] = x; j++;
-  }
-  out[w] = '\0';
+  #include <yyjson.h>
+  (void)doc;
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  if (!v) return tur_err((int64_t)(intptr_t)"decode cstr: missing field");
+  if (!yyjson_is_str(v)) return tur_err((int64_t)(intptr_t)"decode cstr: not a string");
+  const char *s = yyjson_get_str(v);
+  size_t n = yyjson_get_len(v);
+  char *out = (char *)malloc(n + 1);
+  if (!out) return tur_err((int64_t)(intptr_t)"decode cstr: oom");
+  memcpy(out, s, n);
+  out[n] = '\0';
   return tur_ok((int64_t)(intptr_t)out);
   ```))
 
-;;; Decode [bool] -- accept literal `true` / `false` at `val`; reject
-;;; anything else (including numeric `0`/`1`) so the spice keeps strict
-;;; JSON-boolean semantics.
+;;; Decode [bool] -- accept JSON `true` / `false` only. Rejects numbers,
+;;; strings, and a null val handle (missing field).
 (definstance Decode [bool] (decode [doc val]
   ```c
-  typedef struct { char *src; size_t len; } __jdoc;
-  __jdoc *d = (__jdoc *)(intptr_t)doc;
-  if (!d || val < 0 || (size_t)val >= d->len) {
-    return tur_err((int64_t)(intptr_t)"decode bool: out-of-range val handle");
-  }
-  size_t i = (size_t)val;
-  if (i + 4 <= d->len && memcmp(d->src + i, "true",  4) == 0) return tur_ok((int64_t)1);
-  if (i + 5 <= d->len && memcmp(d->src + i, "false", 5) == 0) return tur_ok((int64_t)0);
-  return tur_err((int64_t)(intptr_t)"decode bool: not a boolean");
+  #include <yyjson.h>
+  (void)doc;
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  if (!v) return tur_err((int64_t)(intptr_t)"decode bool: missing field");
+  if (!yyjson_is_bool(v)) return tur_err((int64_t)(intptr_t)"decode bool: not a boolean");
+  return tur_ok((int64_t)(yyjson_get_bool(v) ? 1 : 0));
+  ```))
+
+;;; Decode [float] -- read the value at `val` as an IEEE-754 double. Accepts
+;;; both JSON ints (widened to double) and floats; rejects non-numerics.
+;;; The double is returned via the same int64 carrier slot; the result-type
+;;; ascription `(Result float cstr)` selects this instance.
+(definstance Decode [float] (decode [doc val]
+  ```c
+  #include <yyjson.h>
+  (void)doc;
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  if (!v) return tur_err((int64_t)(intptr_t)"decode float: missing field");
+  if (!yyjson_is_num(v)) return tur_err((int64_t)(intptr_t)"decode float: not a number");
+  double d = yyjson_get_num(v);
+  int64_t bits;
+  memcpy(&bits, &d, sizeof(bits));
+  return tur_ok(bits);
   ```))
 
 ;; Recursive helper for derive-json's Decode side: turn the field list

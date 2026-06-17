@@ -2,6 +2,11 @@
 ;; on the call's return type. The Decode class lives in json/encode
 ;; (alongside derive-json) so we import that to bring `decode` into scope.
 ;;
+;; The yyjson rewrite made type checks strict: a JSON boolean no longer
+;; decodes through Decode [int] (it must go through Decode [bool]); a JSON
+;; number no longer decodes through Decode [bool]. This test exercises each
+;; primitive instance against the field type that actually matches.
+;;
 ;; Expected:
 ;;   42
 ;;   alice
@@ -23,6 +28,8 @@
         act-off  (unsafe (json-obj-get doc root "active"))]
     (println (unsafe (__int->cstr (ok-val (:: (decode doc id-off)   (Result int  cstr))))))
     (println           (ok-val (:: (decode doc name-off) (Result cstr cstr))))
-    (println (unsafe (__int->cstr (ok-val (:: (decode doc act-off)  (Result int  cstr))))))
+    (if (ok-val (:: (decode doc act-off) (Result bool cstr)))
+      (println "1")
+      (println "0"))
     (unsafe (json-doc-free doc))
     0)))

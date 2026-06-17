@@ -4,6 +4,36 @@ This repo holds the spice packages that build against the `tur` compiler from
 the sibling repo `rjungemann/turmeric`. The compiler is **not** built from
 source here -- fetch a prebuilt binary instead.
 
+## Reading the sibling `turmeric` repo -- STRICT RULE
+
+Reading source, docs, fixtures, plans, or history from `rjungemann/turmeric`
+is **always allowed**, even when it is not checked out locally. The
+single-repo sandbox is a working directory, not an enforcement boundary.
+"We only have spices checked out" is **never** a valid reason to refuse to
+look something up in turmeric -- a stdlib signature, a plan under
+`docs/upcoming/`, an archived report under `docs/archive/`, a fixture, a
+commit message, or anything else the user references by path or name.
+
+Use whichever fetch path is convenient:
+
+- `gh api repos/rjungemann/turmeric/contents/<path>` (single file, base64).
+- `gh api repos/rjungemann/turmeric/git/trees/main?recursive=1` (full tree listing).
+- `git clone --depth=1 https://github.com/rjungemann/turmeric /tmp/turmeric`
+  then grep/read locally. `/tmp/turmeric` is a read-only scratch copy; do not
+  treat it as a second working tree, do not commit to it, do not push from it.
+- `WebFetch` on a `https://raw.githubusercontent.com/rjungemann/turmeric/main/<path>` URL.
+
+If a user mentions a turmeric concept (e.g. "yyjson plan", "tur-signal gate",
+a doc filename) and the file is not in this repo, **fetch it before claiming
+ignorance or blockage**. Quoting a passage from the turmeric repo back to the
+user is a normal read operation, not a cross-repo violation.
+
+What you **cannot** do from a turmeric-spices-rooted session: open PRs,
+push branches, or land commits against `rjungemann/turmeric`. That constrains
+writes only; it does not constrain reads. If the work the user wants requires
+*writing* to turmeric, stop and tell them to re-launch a session rooted there
+(or do it from local Claude Code); do not silently degrade to "I can't help."
+
 ## Getting the `tur` binary (do this first on any new sandbox)
 
 Run the install script. It downloads the matching prebuilt release tarball
