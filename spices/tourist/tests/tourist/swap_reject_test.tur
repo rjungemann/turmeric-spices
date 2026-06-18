@@ -14,7 +14,8 @@
   (import tourist/router     :refer [router-compile router-free router-match
                                      captures-get
                                      captures-count captures-free])
-  (import tourist/param      :refer [tourist-ctx-caps param capture])
+  (import tourist/param      :refer [tourist-ctx-caps param capture
+                                     req-full-path tourist-ctx-free])
   (import tourist/middleware :refer [mw-item? mw-chain-run])
   (import tourist/routing    :refer [mount! cascade-with! passes!])
 
@@ -90,5 +91,21 @@
   ;; Same for AppList: it is not a Mount, even though both wrap :int.
   (defn bad-applist-as-mount-rest [as : AppList] : int
     (url-map! as))                  ; rest expects Mount, got AppList
+
+  ;; tourist-ctx-caps now requires a Ctx, not a bare int (v0.2.6 tourist-ctx-*
+  ;; helper retype). The same applies to req-full-path and tourist-ctx-free
+  ;; below.
+  (defn bad-int-as-ctx-for-caps [ctx : int] : Captures
+    (tourist-ctx-caps ctx))         ; expects Ctx, got int
+
+  (defn bad-int-as-ctx-for-full-path [ctx : int] : cstr
+    (req-full-path ctx))            ; expects Ctx, got int
+
+  (defn bad-int-as-ctx-for-free [ctx : int] : void
+    (tourist-ctx-free ctx))         ; expects Ctx, got int
+
+  ;; Captures is not a Ctx, even though both wrap :int.
+  (defn bad-captures-as-ctx-for-full-path [caps : Captures] : cstr
+    (req-full-path caps))           ; expects Ctx, got Captures
 
   (defn main [] : int 0))

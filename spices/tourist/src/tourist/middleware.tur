@@ -106,8 +106,8 @@
 ;;;   :int -- option<Response>: 0 = none (continue), non-zero = some(resp)
 ;;;
 ;;; Since: v0.1.0
-(defn mw-call [mw : Item req : int] : int
-  (route-call-handler (:: mw :int) req))
+(defn mw-call [mw : Item ctx : Ctx] : int
+  (route-call-handler (:: mw :int) (:: ctx :int)))
 
 ;;; mw-chain-run -- run a cons list of middleware handles in order.
 ;;;
@@ -127,13 +127,13 @@
 ;;;     (when (not= opt 0) ...))
 ;;;
 ;;; Since: v0.1.0
-(defn mw-chain-run [mws : ItemList req : int] : int
+(defn mw-chain-run [mws : ItemList ctx : Ctx] : int
   (if (= (:: mws :int) 0)
     0
-    (let [result (mw-call (__mw-cons-head mws) req)]
+    (let [result (mw-call (__mw-cons-head mws) ctx)]
       (if (not= result 0)
         result
-        (mw-chain-run (__mw-cons-tail mws) req)))))
+        (mw-chain-run (__mw-cons-tail mws) ctx)))))
 
 ;; -- After-middleware (post-response hook) ---------------------------------
 
@@ -195,7 +195,7 @@
 ;;; response argument.
 ;;;
 ;;; Since: v0.2.0
-(defn mwafter-call [mw : Item ctx : int resp : int] : int
+(defn mwafter-call [mw : Item ctx : Ctx resp : int] : int
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   struct __tourist_route *rt = (struct __tourist_route *)(intptr_t)mw;
@@ -219,7 +219,7 @@
 ;;;   :int -- the final response handle after every after-mw has run.
 ;;;
 ;;; Since: v0.2.0
-(defn mwafter-chain-run [mws : ItemList ctx : int resp : int] : int
+(defn mwafter-chain-run [mws : ItemList ctx : Ctx resp : int] : int
   (if (= (:: mws :int) 0)
     resp
     (mwafter-chain-run

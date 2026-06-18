@@ -57,7 +57,7 @@
 ;;;
 ;;; Parses "k1=v1&k2=v2" in place; writes malloc'd copies of keys and
 ;;; values into the ctx's qp_keys / qp_vals fields.
-(defn __parse-qp [ctx : int] : void
+(defn __parse-qp [ctx : Ctx] : void
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -116,8 +116,8 @@
 ;;; Returns:
 ;;;   Captures -- captures handle (may be the null handle, i.e. (:: 0 :Captures))
 ;;;
-;;; Since: v0.1.0 (typed as Captures in v0.2.1)
-(defn tourist-ctx-caps [ctx : int] : Captures
+;;; Since: v0.1.0 (typed as Captures in v0.2.1; ctx retyped to Ctx in v0.2.6)
+(defn tourist-ctx-caps [ctx : Ctx] : Captures
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -148,7 +148,7 @@
 ;;;   :cstr -- previous ctx->path value; pass it back in to restore.
 ;;;
 ;;; Since: v0.2.0
-(defn tourist-ctx-strip-path [ctx : int new-path : cstr] : cstr
+(defn tourist-ctx-strip-path [ctx : Ctx new-path : cstr] : cstr
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -181,7 +181,7 @@
 ;;;   (req-full-path ctx)  ;; => "/api/users"
 ;;;
 ;;; Since: v0.2.0
-(defn req-full-path [ctx : int] : cstr
+(defn req-full-path [ctx : Ctx] : cstr
   ```c
   struct __tourist_ctx {
     char  *method; char *path; char *query; char *body;
@@ -211,17 +211,17 @@
 ;;;   caps -- :int captures handle from router-match (ctx takes ownership)
 ;;;
 ;;; Returns:
-;;;   :int -- tourist ctx handle; free with tourist-ctx-free
+;;;   Ctx -- tourist ctx handle; free with tourist-ctx-free
 ;;;
 ;;; Example:
 ;;;   (let [ctx (tourist-ctx-new req caps)]
 ;;;     ...)
 ;;;
-;;; Since: v0.1.0
-(defn tourist-ctx-new [req : int caps : int] : int
+;;; Since: v0.1.0 (return retyped to Ctx in v0.2.6)
+(defn tourist-ctx-new [req : int caps : int] : Ctx
   (let [ctx (__tourist-ctx-alloc req caps)]
-    (__parse-qp ctx)
-    ctx))
+    (__parse-qp (:: ctx :Ctx))
+    (:: ctx :Ctx)))
 
 (defn __tourist-ctx-alloc [req : int caps : int] : int
   ```c
@@ -281,8 +281,8 @@
 ;;;   (tourist-ctx-free ctx)
 ;;;
 ;;; Since: v0.1.0
-(defn tourist-ctx-free [ctx : int] : void
-  (when (not= ctx 0)
+(defn tourist-ctx-free [ctx : Ctx] : void
+  (when (not= (:: ctx :int) 0)
     (do
       (captures-free (tourist-ctx-caps ctx))
       (__ctx-free-qp ctx)
@@ -291,7 +291,7 @@
       (__ctx-free-struct ctx))))
 
 ;;; __ctx-free-attrs -- release the attrs cons list (keys are owned cstr copies).
-(defn __ctx-free-attrs [ctx : int] : void
+(defn __ctx-free-attrs [ctx : Ctx] : void
   ```c
   #include <stdlib.h>
   struct __tourist_attr { char *key; int64_t val; struct __tourist_attr *next; };
@@ -317,7 +317,7 @@
   ```)
 
 ;;; __ctx-free-resp-headers -- release the resp_headers cons list (owned cstrs).
-(defn __ctx-free-resp-headers [ctx : int] : void
+(defn __ctx-free-resp-headers [ctx : Ctx] : void
   ```c
   #include <stdlib.h>
   struct __tourist_hdr { char *name; char *value; struct __tourist_hdr *next; };
@@ -343,7 +343,7 @@
   c->resp_headers = 0;
   ```)
 
-(defn __ctx-free-qp [ctx : int] : void
+(defn __ctx-free-qp [ctx : Ctx] : void
   ```c
   #include <stdlib.h>
   struct __tourist_ctx {
@@ -363,7 +363,7 @@
   free(c->qp_vals);
   ```)
 
-(defn __ctx-free-struct [ctx : int] : void
+(defn __ctx-free-struct [ctx : Ctx] : void
   ```c
   #include <stdlib.h>
   if (ctx != 0) free((void *)(intptr_t)ctx);
@@ -428,7 +428,7 @@
 ;;;
 ;;; Since: v0.1.0 (typed as Result in 0.2.0; ctx retyped to Ctx in 0.2.2)
 (defn capture [ctx : Ctx name : cstr] : (Result cstr cstr)
-  (captures-get (tourist-ctx-caps (:: ctx :int)) name))
+  (captures-get (tourist-ctx-caps ctx) name))
 
 ;; -- v0.2.0: per-request attrs and deferred response headers ---------------
 
@@ -591,7 +591,7 @@
 ;;;   :int -- head cell pointer, or 0 if no headers were queued
 ;;;
 ;;; Since: v0.2.0
-(defn tourist-ctx-resp-headers [ctx : int] : int
+(defn tourist-ctx-resp-headers [ctx : Ctx] : int
   ```c
   struct __tourist_ctx_h {
     char  *method; char *path; char *query; char *body;
@@ -618,7 +618,7 @@
 ;;;   :void
 ;;;
 ;;; Since: v0.2.0
-(defn tourist-ctx-clear-resp-headers [ctx : int] : void
+(defn tourist-ctx-clear-resp-headers [ctx : Ctx] : void
   (__ctx-free-resp-headers ctx))
 
 ) ;; end defmodule tourist/param

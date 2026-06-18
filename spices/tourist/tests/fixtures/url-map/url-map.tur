@@ -61,7 +61,7 @@
   ;; A handler that echoes "stripped=<req-path> full=<req-full-path>"
   ;; so we can verify path stripping behaviour from the response body.
   (defn echo-paths [ctx : Ctx] : Response
-    (text (__join4 "stripped=" (req-path (:: ctx :Request)) " full=" (req-full-path (:: ctx :Request)))))
+    (text (__join4 "stripped=" (req-path (:: ctx :Request)) " full=" (req-full-path ctx))))
 
   (defn api-app [] : int
     (url-map! (mount! "/users" (get! "/" echo-paths))
