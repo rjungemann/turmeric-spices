@@ -1432,40 +1432,98 @@
     RETURN_OK(0);
     ```)
 
+  ;; ---------------------------------------------------------------------------
+  ;; Backend -- the output target a plot renders to (U2 typeclass collapse).
+  ;;
+  ;; The three legacy entrypoints (`plot-into-canvas`, `plot`, `plot-write-png`)
+  ;; differed only in *where* the same renderer Vec lands: an existing canvas, a
+  ;; fresh surface, or a PNG file. They are now one method, `render-to`, with
+  ;; one instance per target, so plot-building code can be written generic over
+  ;; the destination and a new sink (e.g. a notebook-inline backend) becomes a
+  ;; new instance rather than a new top-level function.
+  ;;
+  ;; Named `Backend`, not the uplift plan's "Renderer": this spice already calls
+  ;; every drawable element a "renderer" (the `renderers` Vec), so a `Renderer`
+  ;; typeclass sitting next to a `renderers` parameter would be needlessly
+  ;; confusing. The concept the plan means is the output backend.
+  ;;
+  ;; `render-to` returns the same :ptr<void> result envelope the legacy
+  ;; entrypoints did: ok-val carries the new surface handle for SurfaceBackend,
+  ;; 0 for the canvas/PNG sinks; err-val carries the failure code.
+  ;; ---------------------------------------------------------------------------
+  (defclass Backend [b]
+    (render-to [self : b  renderers : int  opts : int] : ptr<void>))
+
+  ;; CanvasBackend -- draw into an existing canvas at the given viewport.
+  (defstruct CanvasBackend [canvas : int  px : int  py : int  pw : int  ph : int])
+
+  ;; SurfaceBackend -- allocate a fresh surface and return it (caller owns).
+  ;; A width/height of 0 falls back to the opts dimensions (or 600x450).
+  (defstruct SurfaceBackend [width : int  height : int])
+
+  ;; PngBackend -- render to a fresh surface and write it to `path` as PNG.
+  (defstruct PngBackend [path : cstr])
+
+  ;; CanvasBackend delegates straight to the inline-C drawing worker.
+  (definstance Backend [CanvasBackend]
+    (render-to [self renderers opts]
+      (plot-into-canvas (.canvas self) renderers opts
+                        (.px self) (.py self) (.pw self) (.ph self))))
+
+  ;; SurfaceBackend allocates the surface + canvas, then dispatches the draw
+  ;; through CanvasBackend and hands the surface back on success.
+  (definstance Backend [SurfaceBackend]
+    (render-to [self renderers opts]
+      (let [w  (if (> (.width self) 0) (.width self)
+                 (if (> (plot-opts-width opts) 0) (plot-opts-width opts) 600))
+            h  (if (> (.height self) 0) (.height self)
+                 (if (> (plot-opts-height opts) 0) (plot-opts-height opts) 450))
+            sr (__surface-create w h)]
+        (if (__ok? sr)
+          (let [surface (__ok-val sr)
+                cr      (__canvas-create surface)]
+            (if (__ok? cr)
+              (let [canvas (__ok-val cr)
+                    rr (render-to (make-struct CanvasBackend canvas 0 0 w h)
+                                  renderers opts)]
+                (__canvas-destroy canvas)
+                (if (__ok? rr)
+                  (__ok surface)
+                  (do
+                    (__surface-destroy surface)
+                    (__err (__err-val rr)))))
+              (__err (__err-val cr))))
+          (__err (__err-val sr))))))
+
+  ;; PngBackend renders through SurfaceBackend, then writes + frees the surface.
+  (definstance Backend [PngBackend]
+    (render-to [self renderers opts]
+      (let [r (render-to (make-struct SurfaceBackend 0 0) renderers opts)]
+        (if (__ok? r)
+          (let [s  (__ok-val r)
+                wr (__surface-write-png s (.path self))]
+            (__surface-destroy s)
+            wr)
+          (__err (__err-val r))))))
+
   ;;; plot -- render a Vec[Renderer] to a new surface and return it.
   ;;;
   ;;; renderers is a Vec[Renderer] (build with vec-of, or vec-new + vec-push!).
   ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
+  ;;;
+  ;;; Thin wrapper over the `Backend` dispatch (the `SurfaceBackend` instance);
+  ;;; equivalent to `(render-to (make-struct SurfaceBackend 0 0) renderers opts)`.
   (defn plot [renderers : int opts : int] : ptr<void>
-    (let [w (if (> (plot-opts-width opts) 0) (plot-opts-width opts) 600)
-          h (if (> (plot-opts-height opts) 0) (plot-opts-height opts) 450)
-          sr (__surface-create w h)]
-      (if (__ok? sr)
-        (let [surface (__ok-val sr)
-              cr (__canvas-create surface)]
-          (if (__ok? cr)
-            (let [canvas (__ok-val cr)
-                  rr (plot-into-canvas canvas renderers opts 0 0 w h)]
-              (__canvas-destroy canvas)
-              (if (__ok? rr)
-                (__ok surface)
-                (do
-                  (__surface-destroy surface)
-                  (__err (__err-val rr)))))
-            (__err (__err-val cr))))
-        (__err (__err-val sr)))))
+    (render-to (make-struct SurfaceBackend 0 0) renderers opts))
 
   ;;; plot-write-png -- render a Vec[Renderer] and write it to a PNG file.
   ;;;
   ;;; renderers is a Vec[Renderer] (build with vec-of, or vec-new + vec-push!).
   ;;; This used to be a cons list (:int with terminating 0) prior to 0.2.0.
+  ;;;
+  ;;; Thin wrapper over the `Backend` dispatch (the `PngBackend` instance);
+  ;;; equivalent to `(render-to (make-struct PngBackend path) renderers opts)`.
   (defn plot-write-png [renderers : int opts : int path : cstr] : ptr<void>
-    (let [r (plot renderers opts)]
-      (if (__ok? r)
-        (let [s (__ok-val r)
-              wr (__surface-write-png s path)]
-          (__surface-destroy s)
-          wr)
-        (__err (__err-val r)))))
+    (render-to (make-struct PngBackend path) renderers opts))
 
 ) ;; end defmodule plot/core

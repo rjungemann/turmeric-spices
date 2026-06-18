@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Backend` typeclass in `plot/core` (U2 typeclass collapse): the three
+  output sinks now share one `render-to` method with one instance each --
+  `CanvasBackend` (draw into an existing canvas + viewport),
+  `SurfaceBackend` (allocate a fresh surface, optional explicit
+  dimensions), and `PngBackend` (render + write a PNG). Adding a new sink
+  (e.g. notebook-inline) is now a new instance rather than a new
+  top-level function. `plot`, `plot-write-png`, and `plot-into-canvas`
+  remain as thin wrappers that route through `render-to`, so existing
+  call sites are unchanged.
+
+### Fixed
+
+- `__plot-sample-adaptive` is now pinned to the stable C symbol
+  `plot_sample_adaptive` via `export-as`. turmeric's injective identifier
+  mangler encodes the `__`-prefixed, kebab-cased name differently from the
+  legacy fold the inline-C call site hard-coded, which broke linking of
+  the sampled-curve renderers against tip-of-main turmeric.
+
 ## 0.3.0
 
 ### Added
