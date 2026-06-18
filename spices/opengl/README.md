@@ -53,6 +53,22 @@ let [w make-window(800 600 "Hello")]
   destroy-window(w)
 ```
 
+### Linear `Window`; opaque GPU handles (U1)
+
+`Window` is a `:linear` opaque: a window from `make-window` must be
+destroyed exactly once with `destroy-window`, and the per-frame observers
+(`window-should-close?`, `swap-buffers`, `key-pressed?`, `mouse-pos`,
+`mouse-button-pressed?`) take it by `^borrow`. Under `-Xsubstructural`
+this makes use-after-destroy and leaked windows compile-time errors
+(`TUR-E0101` / `TUR-E0100`); the discipline is inert in ordinary builds.
+
+The GPU-object handles (`Vao`, `Vbo`, `Ebo`, `Shader`, `Program`,
+`Texture`) are nominally distinct opaques, so mixing them up -- e.g.
+passing a `Vbo` where a `Vao` is expected -- is a type error. They are not
+`:linear`: the spice exposes no `glDelete*` wrapper for them yet, so there
+is no consuming peer to anchor a linear discipline on. Adding a deleter
+later is the trigger to make the corresponding handle `:linear`.
+
 ## See also
 
 - [API reference](api/)
