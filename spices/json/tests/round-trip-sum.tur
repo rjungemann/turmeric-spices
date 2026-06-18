@@ -1,0 +1,32 @@
+;; Full round-trip for the U2 derive-json-sum support: derive both Encode
+;; and Decode for a defdata sum, decode each tag's JSON into the ADT, then
+;; re-encode it back through the macro-emitted Encode instance. The mixed
+;; carrier types (cstr + int) exercise per-field typeclass dispatch inside
+;; the generated match arms.
+;;
+;; Expected:
+;;   {"Move":{"dir":"north","steps":2}}
+;;   {"Quit":{}}
+
+(defmodule round_trip_sum_test (export)
+
+(import json/encode :refer [derive-json-sum])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+
+(defdata Cmd :copy [] (Move :cstr :int) (Quit))
+(derive-json-sum Cmd
+  (Move (dir cstr) (steps int))
+  (Quit))
+
+(defn round-trip [s : cstr] : cstr
+  (let [doc  (unsafe (json-parse-doc s))
+        root (unsafe (json-doc-root doc))
+        cmd  (ok-val (:: (decode doc root) (Result Cmd cstr)))
+        out  (encode cmd)]
+    (unsafe (json-doc-free doc))
+    out))
+
+(defn main [] : int
+  (println (round-trip "{\"Move\":{\"dir\":\"north\",\"steps\":2}}"))
+  (println (round-trip "{\"Quit\":{}}"))
+  0))
