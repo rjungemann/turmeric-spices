@@ -46,27 +46,42 @@ All notable changes to the `tur-ecs` spice are documented here.
   `sized-defworld-copy-into` call); `sized-defworld-world-resize` takes
   only the world name.
 
-- **E2c sized-scheduler -- wire sized worlds through the parallel
-  `Stage` via the report's "by heap pointer" direction.** The
-  `docs/reported/sized-scheduler-system-stage-world-carrier.md` report
-  (direction 1) recommends running sized `(GameWorld n)` worlds through
-  the existing one-word run-fn carrier by heap-boxing the world and
-  having each system's run-fn cast the pointer back to its concrete
-  world type. The recipe is expressible at the spice layer today
-  without compiler work: the sized world is declared with
-  `sized-defworld-mono`, three per-world inline-C helpers
-  (`box-<W>` / `load-<W>` / `free-<W>-box`) heap-allocate the struct
-  and load it on the receiving side, each `[wp : int]` run-fn loads
-  the world back from the pointer to drive the cap-gated typed
-  accessors, and `make-system` + `stage-add!` + `stage-run!` schedule
-  the systems concurrently. Mutations flow through the int64 storage
-  handles inside the world struct, which remain shared across every
-  loaded copy. New regression test `tests/sized-stage.tur` exercises a
-  two-system wave (disjoint Pos / Hp masks) running in a single wave;
-  the `sized-defsystem` docstring now documents the recipe and points
-  at the test as the canonical example. Generalising `System` /
-  `Stage` over the world type (the report's direction 2 / gap-H) is
-  still gated on the monomorphisation-audit M2-M7 path.
+- **E2c sized-scheduler wiring -- `sized-defsystem-scheduled` macro
+  for one-call System lowering against the parallel `Stage`.** The
+  sized-scheduler report's direction-1 follow-up
+  (`docs/archive/sized-scheduler-system-stage-world-carrier.md`)
+  ships at the macro layer, superseding the earlier hand-rolled
+  recipe: `(sized-defsystem-scheduled name WorldName [reads] [writes]
+  body)` expands to three top-level forms -- a typed
+  `name-impl : [^borrow w : WorldName] : nil` with the same
+  cap-binding / auto-consume body lowering as `sized-defsystem`, an
+  int-carrier wrapper `name-fn : [wp : int] : nil` that loads the
+  boxed world via `load-<WorldName>` and dispatches to the typed
+  impl, and a `name = (make-system READS-MASK WRITES-MASK name-fn)`
+  System value runnable on the parallel `Stage` scheduler. Cap-binding
+  guarantees come back compared to the prior hand-rolled `[wp : int]`
+  run-fns that minted caps inline and bypassed `defsystem--with-
+  write-caps` -- a body that writes a component not declared in
+  `:writes` fails to elaborate with `unbound symbol '<Comp>-write-cap'`.
+
+  The per-world `box-<W>` / `load-<W>` / `free-<W>-box` triple stays
+  user-written: macros cannot splice identifiers into inline-C text
+  (`docs/archive/history/macro-cannot-emit-inline-c-block.md`) and
+  the three helpers reference the C struct name verbatim. They are
+  three short blocks per world; the macro takes them as a naming
+  convention (`load-<WorldName>` is invoked from the wrapper's
+  `let`).
+
+  `tests/sized-stage.tur` is refactored onto the new macro: the
+  two-system disjoint-mask wave still runs in a single wave (the
+  scheduler's conflict-graph non-conflict proof is unaffected by the
+  carrier wiring), and the previously-bypassed cap-binding now
+  guards both `physics` and `combat`. Generalising `System` /
+  `Stage` over the world type so the run-fn carries `^borrow w :
+  (WorldName n)` directly (the report's direction 2 / gap-H) is
+  still gated on the monomorphisation-audit M2-M7 path; the
+  monomorphic-world heap-box landing is the supported surface in
+  the interim.
 
 - **E2c slice 12 -- fallible `sized-spawn` returning `(Result int
   WorldFull)`.** The sized-world plan's Q3 result-returning spawn, the

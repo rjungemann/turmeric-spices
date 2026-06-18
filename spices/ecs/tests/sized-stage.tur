@@ -1,11 +1,22 @@
 ;; E2c sized-scheduler -- wire a sized (GameWorld) through the parallel
 ;; Stage scheduler via the report's recommended "by heap pointer"
-;; direction (docs/reported/sized-scheduler-system-stage-world-carrier.md,
-;; direction 1). The sized world is a multi-int64 struct so it cannot ride
-;; the one-word run-fn carrier by value; instead we heap-box the world,
-;; pass its pointer reinterpreted as :int through the existing System /
-;; Stage run-fn carrier, and have each system's run-fn load the world
-;; struct back from the pointer to drive the cap-gated typed accessors.
+;; direction (now resolved -- see docs/archive/sized-scheduler-system-
+;; stage-world-carrier.md, direction 1). The sized world is a multi-int64
+;; struct so it cannot ride the one-word run-fn carrier by value; instead
+;; we heap-box the world, pass its pointer reinterpreted as :int through
+;; the existing System / Stage run-fn carrier, and have each system's
+;; run-fn load the world struct back from the pointer to drive the
+;; cap-gated typed accessors.
+;;
+;; The `box-GameWorld` / `load-GameWorld` / `free-GameWorld-box` triple is
+;; three short inline-C blocks referencing the C struct name verbatim --
+;; macros cannot splice identifiers into inline-C text (see
+;; docs/archive/history/macro-cannot-emit-inline-c-block.md), so the
+;; triple stays user-written. Everything downstream -- the typed body,
+;; the int-carrier wrapper, the System value packed with the right reads/
+;; writes masks -- is collapsed into one `sized-defsystem-scheduled`
+;; call, and cap-binding / auto-consume come back compared to the prior
+;; hand-rolled `[wp : int]` run-fns that bypassed them.
 ;;
 ;; The Pos and Hp fields are independent storage handles inside the world
 ;; struct; the two systems read/write disjoint masks so the wave scheduler
@@ -15,8 +26,8 @@
 ;;
 ;; Expected output:
 ;;   1               -- single conflict-free wave
-;;   42              -- Pos slot 0 mutated by physics-fn
-;;   7               -- Hp  slot 0 mutated by combat-fn
+;;   42              -- Pos slot 0 mutated by physics
+;;   7               -- Hp  slot 0 mutated by combat
 ;;   ok
 
 (defmodule sized_stage_test
@@ -24,7 +35,8 @@
 
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono
-                                   sized-defcomponent-accessors-mono])
+                                   sized-defcomponent-accessors-mono
+                                   sized-defsystem-scheduled])
 (import ecs/cap           :refer [WriteCap ReadCap
                                    make-write-cap make-read-cap use-cap!])
 (import ecs/system        :refer [System make-system cid-bit])
@@ -44,7 +56,10 @@
 ;; Heap-box / load / free for GameWorld. The struct is { Pos:i64, Hp:i64,
 ;; state:i64 } -- three int64 handles into shared heap storage -- so a
 ;; by-value copy after `load-GameWorld` keeps every accessor pointed at
-;; the same underlying dense arrays and state cell.
+;; the same underlying dense arrays and state cell. These three helpers
+;; are the per-world boilerplate `sized-defsystem-scheduled` cannot
+;; auto-generate (inline-C text is opaque to the reader; the C struct
+;; name `GameWorld` cannot be spliced from a macro).
 (defn box-GameWorld [w : GameWorld] : int
   ```c
   #include <stdlib.h>
@@ -64,29 +79,16 @@
   free((GameWorld *)(intptr_t)wp);
   ```)
 
-;; physics-fn -- writes Pos slot 0. Pulls the world struct back from the
-;; heap-boxed pointer, mints a Pos write-cap inline (the wrapper does not
-;; ride the cap-binding helpers `defsystem` injects, since those expect a
-;; sized-world `^borrow w : (W n)` parameter shape rather than a
-;; `[w : int]` carrier), and writes through the cap-gated `set-Pos!`.
-(defn physics-fn [wp : int] : nil
-  (let [w : GameWorld (load-GameWorld wp)
-        cap          (:: (make-write-cap Pos-cid) (WriteCap Pos))]
-    (do
-      (set-Pos! cap w 0 (:: 42 :Pos))
-      (use-cap! cap))))
+;; physics -- writes Pos slot 0. Cap-bound: Pos-write-cap is in scope
+;; from the macro's `defsystem--with-write-caps` lowering and is
+;; auto-consumed at body end. Disjoint mask from combat so the wave
+;; scheduler places both systems in the same wave.
+(sized-defsystem-scheduled physics GameWorld [Pos] [Pos]
+  (set-Pos! Pos-write-cap w 0 (:: 42 :Pos)))
 
-;; combat-fn -- writes Hp slot 0. Disjoint mask from physics-fn so the
-;; wave scheduler places both in the same wave.
-(defn combat-fn [wp : int] : nil
-  (let [w : GameWorld (load-GameWorld wp)
-        cap          (:: (make-write-cap Hp-cid) (WriteCap Hp))]
-    (do
-      (set-Hp! cap w 0 (:: 7 :Hp))
-      (use-cap! cap))))
-
-(def physics (make-system (cid-bit Pos-cid) (cid-bit Pos-cid) physics-fn))
-(def combat  (make-system (cid-bit Hp-cid)  (cid-bit Hp-cid)  combat-fn))
+;; combat -- writes Hp slot 0.
+(sized-defsystem-scheduled combat GameWorld [Hp] [Hp]
+  (set-Hp! Hp-write-cap w 0 (:: 7 :Hp)))
 
 (defn main [] : int
   (let [w     : GameWorld (make-GameWorld 8)

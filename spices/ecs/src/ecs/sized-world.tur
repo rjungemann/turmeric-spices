@@ -32,7 +32,7 @@
   (export sized-defworld sized-defworld-mono
           sized-defworld-copy-into sized-defworld-world-resize
           sized-defcomponent-accessors sized-defcomponent-accessors-mono
-          sized-defsystem
+          sized-defsystem sized-defsystem-scheduled
           sized-state-new sized-state-free sized-state-copy-into
           sized-live sized-cap
           WorldFull
@@ -44,7 +44,8 @@
                                    sized-dense-has?])
 (import ecs/cap           :refer [WriteCap ReadCap
                                    make-write-cap make-read-cap use-cap!])
-(import ecs/system        :refer [defsystem--with-read-caps
+(import ecs/system        :refer [make-system defsystem--mask
+                                   defsystem--with-read-caps
                                    defsystem--with-write-caps
                                    defsystem--consume-write-caps])
 (import ecs/entity        :refer [Entity entity-new entity-index entity-generation])
@@ -893,5 +894,106 @@
            (defsystem--consume-write-caps ~writes-vec))
          ~writes-vec)
        ~reads-vec)))
+
+;;; sized-defsystem-scheduled -- declare a monomorphic sized-world
+;;; system that ships as a `System` value runnable on the parallel
+;;; `Stage` scheduler. The "by heap pointer" landing for the report's
+;;; direction-1 follow-up
+;;; (`docs/archive/sized-scheduler-system-stage-world-carrier.md`).
+;;;
+;;; Syntax:
+;;;   (sized-defsystem-scheduled name WorldName [reads-comp ...] [writes-comp ...] body)
+;;;
+;;; `WorldName` is the *monomorphic* world type (the shape emitted by
+;;; `sized-defworld-mono`). The polymorphic `(WorldName n)` shape is
+;;; deliberately not supported here -- the `System` carrier passes the
+;;; world as a `ptr<void>` reinterpreted as `:int`, so the world's C
+;;; representation must be a single concrete struct type the wrapper
+;;; can cast back to.
+;;;
+;;; Pre-condition: a `load-<WorldName>` function with signature
+;;; `[wp : int] : <WorldName>` must be in scope at the macro call
+;;; site. The matching `box-<WorldName>` (allocate + copy world onto
+;;; the heap) and `free-<WorldName>-box` (release the boxed world)
+;;; are needed by the *caller* of `stage-add!`/`stage-run!` but are
+;;; not consulted by this macro's expansion. They stay user-written
+;;; -- macros cannot splice identifiers into inline-C text and the
+;;; heap-box / load / free triple is three short inline-C blocks
+;;; referencing the C struct name verbatim (see
+;;; `tests/sized-stage.tur` for the canonical recipe and
+;;; `docs/archive/history/macro-cannot-emit-inline-c-block.md` for
+;;; the underlying limitation).
+;;;
+;;; Expands to three top-level forms:
+;;;
+;;;   (defn name-impl [^borrow w : WorldName] : nil
+;;;     ;; cap-binding lets per :reads / :writes, body, auto-consume
+;;;     ;; -- same lowering as `sized-defsystem`'s emitted impl but
+;;;     ;; monomorphic in the world type.
+;;;     ...)
+;;;
+;;;   (defn name-fn [wp : int] : nil
+;;;     ;; int-carrier wrapper -- load the boxed world, dispatch to
+;;;     ;; the typed impl.
+;;;     (let [w : WorldName (load-WorldName wp)]
+;;;       (name-impl w)))
+;;;
+;;;   (def name (make-system READS-MASK WRITES-MASK name-fn))
+;;;
+;;; Cap-binding rules and auto-consume semantics match `sized-defsystem`
+;;; and `defsystem` exactly: read caps are non-linear and bound as
+;;; `<Comp>-read-cap`; write caps are linear, bound as `<Comp>-write-cap`,
+;;; and auto-consumed once at body end. A `<Comp>-cid` binding must be
+;;; in scope at the macro call site for each declared comp.
+;;;
+;;; A body that writes a component not declared in `:writes` fails to
+;;; elaborate with `unbound symbol '<Comp>-write-cap'` -- the same
+;;; compile-time guarantee the unsized `defsystem` and the typed
+;;; `sized-defsystem` give. The int-carrier wrapper does not weaken
+;;; this: the cap-binding lets sit *inside* the typed impl, above the
+;;; wrapper's `(name-impl w)` call.
+;;;
+;;; The world struct is loaded by-value into the impl. Its fields are
+;;; int64 handles into shared heap storage, so mutations applied
+;;; through cap-gated `set-<Comp>!` flow through to every other loaded
+;;; copy of the same boxed world. Callers re-load the boxed world
+;;; after `stage-run!` to observe the writes (see
+;;; `tests/sized-stage.tur` for the round-trip).
+;;;
+;;; Required imports at the call site:
+;;;   (import ecs/cap    :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
+;;;   (import ecs/system :refer [System make-system cid-bit])
+;;;   (import ecs/stage  :refer [Stage stage-new stage-add! stage-n-waves stage-run! stage-free!])
+;;;
+;;; Example:
+;;;   (sized-defworld-mono GameWorld (Static 8) [Pos Hp])
+;;;   (sized-defcomponent-accessors-mono GameWorld Pos)
+;;;   ;; box-GameWorld / load-GameWorld / free-GameWorld-box defined here ...
+;;;   (def Pos-cid 0)
+;;;   (sized-defsystem-scheduled physics GameWorld [Pos] [Pos]
+;;;     (set-Pos! Pos-write-cap w 0 (:: 42 :Pos)))
+;;;   ;; ... stage-add! stage physics ...
+;;;
+;;; Since: E2c sized-scheduler wiring (direction 1)
+(defmacro sized-defsystem-scheduled [name world-name reads-vec writes-vec body]
+  (let [impl-name (str->sym (str-append (symbol-name name) "-impl"))
+        fn-name   (str->sym (str-append (symbol-name name) "-fn"))
+        load-name (str->sym (str-append "load-" (symbol-name world-name)))]
+    `(do
+       (defn ~impl-name [^borrow w : ~world-name] : nil
+         (defsystem--with-read-caps
+           (defsystem--with-write-caps
+             (do
+               ~body
+               (defsystem--consume-write-caps ~writes-vec))
+             ~writes-vec)
+           ~reads-vec))
+       (defn ~fn-name [wp : int] : nil
+         (let [w : ~world-name (~load-name wp)]
+           (~impl-name w)))
+       (def ~name (make-system
+                    (defsystem--mask ~reads-vec)
+                    (defsystem--mask ~writes-vec)
+                    ~fn-name)))))
 
 ) ;; end defmodule ecs/sized-world
