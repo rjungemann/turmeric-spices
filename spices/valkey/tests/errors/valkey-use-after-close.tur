@@ -1,0 +1,27 @@
+;; U1 negative fixture: using a Client after client-close must be rejected
+;; under -Xsubstructural. Client is a :linear opaque whose single legal
+;; consumption is client-close (redisFree); cmd-* borrow, so a command on a
+;; closed client is a use-after-free.
+;;
+;; Verify (from the valkey spice root):
+;;   tur check -Xsubstructural tests/errors/valkey-use-after-close.tur
+;;   => error [TUR-E0101]: linear value 'c' used after being consumed
+;;
+;; The violation lives in an uncalled defn (no main), so without the flag
+;; the file compiles cleanly and `tur test` treats it as a no-op pass --
+;; it is a compile-fail fixture for -Xsubstructural, not a runnable test.
+;; Automated assertion awaits the P5 negative-fixture harness.
+
+(defmodule valkey_use_after_close_test
+  (export)
+
+(import valkey/client :refer [Client client-connect client-of client-close])
+(import valkey/cmd    :refer [cmd-get])
+
+(defn use-after-close [] : ptr<void>
+  (let [c (client-of (client-connect "127.0.0.1" 6379))]
+    (do
+      (client-close c)         ;; the single legal consumption
+      (cmd-get c "key"))))     ;; ERROR TUR-E0101: borrow after consume
+
+) ;; end defmodule valkey_use_after_close_test
