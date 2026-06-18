@@ -7,6 +7,7 @@
 
 (defmodule ansi/color
   (export fg4 bg4 fg8 bg8 fg24 bg24 color-reset
+          color4 color8 rgb
           color-black color-red color-green color-yellow
           color-blue color-magenta color-cyan color-white
           color-bright-black color-bright-red color-bright-green
@@ -121,5 +122,72 @@
   (defn color-bright-magenta [] #{Unsafe} : int ```c return 13; ```)
   (defn color-bright-cyan    [] #{Unsafe} : int ```c return 14; ```)
   (defn color-bright-white   [] #{Unsafe} : int ```c return 15; ```)
+
+  ;; -------------------------------------------------------------------------
+  ;; Color typeclass -- U2 collapse of the fg4/bg4/fg8/bg8/fg24/bg24 sextet.
+  ;; -------------------------------------------------------------------------
+  ;;
+  ;; The six emitters above differ only in color *depth* (4-bit / 8-bit /
+  ;; 24-bit), which the caller already knows statically.  Per the uplift
+  ;; rubric this is the "≥3 parallel functions that branch on a payload type"
+  ;; case: lifting depth into the *type* of the color value collapses the
+  ;; caller-facing surface to two methods -- `fg` and `bg` -- dispatched
+  ;; coherently on the color value's type.
+  ;;
+  ;; Depth is now a type-level property.  `Color4`, `Color8`, and `Color24`
+  ;; are distinct types, so a helper that is parametric in a single
+  ;; `(Color a)` cannot be handed a deeper color than it was written for --
+  ;; e.g. a routine that only commits to 4-bit output won't silently accept a
+  ;; truecolor value.  The depth-specific emitters (fg4 .. bg24) remain the
+  ;; exported low-level primitives the instances delegate to, for callers
+  ;; that want to pass a bare index without boxing it into a color value.
+
+  ;;; Color4 -- a 4-bit (16-color) palette color.  `idx` is 0-15.
+  (defstruct Color4 [idx : int])
+  ;;; Color8 -- an 8-bit (256-color) palette color.  `idx` is 0-255.
+  (defstruct Color8 [idx : int])
+  ;;; Color24 -- a 24-bit (true-color) RGB color.  Channels are 0-255.
+  (defstruct Color24 [r : int  g : int  b : int])
+
+  ;;; color4 -- box a 4-bit palette index (0-15) as a `Color4` value.
+  (defn color4 [idx : int] : Color4 (make-struct Color4 idx))
+  ;;; color8 -- box an 8-bit palette index (0-255) as a `Color8` value.
+  (defn color8 [idx : int] : Color8 (make-struct Color8 idx))
+  ;;; rgb -- box a 24-bit RGB triple (each 0-255) as a `Color24` value.
+  (defn rgb [r : int g : int b : int] : Color24 (make-struct Color24 r g b))
+
+  ;;; Color -- emit a foreground (`fg`) or background (`bg`) SGR escape for a
+  ;;; color value, dispatched on the value's depth-carrying type.  The bytes
+  ;;; emitted are identical to the matching depth-specific primitive.
+  ;;;
+  ;;; Methods:
+  ;;;   fg : a -> void     ;; emit foreground SGR
+  ;;;   bg : a -> void     ;; emit background SGR
+  ;;;
+  ;;; Example:
+  ;;;   (fg (color4 (color-red)))   ;; same bytes as (fg4 (color-red))
+  ;;;   (fg (color8 208))           ;; same bytes as (fg8 208)
+  ;;;   (bg (rgb 255 128 0))        ;; same bytes as (bg24 255 128 0)
+  ;;;
+  ;;; Since: U2 (typeclass collapse)
+  (defclass Color [a] (fg [c] : void) (bg [c] : void))
+
+  ;; Each instance method delegates to the matching depth-specific emitter,
+  ;; which is `#{Unsafe}` (raw printf/fflush), so the call is wrapped in
+  ;; `(unsafe ...)`.  That wrapper draws a spurious TUR-W0033 ("unreachable
+  ;; handler") because the compiler models the `#{Unsafe}` *attribute*
+  ;; separately from the `unsafe` *effect handler*; the warning is benign and
+  ;; matches the json P2a slice's macro-emitted instances (json/encode.tur).
+  (definstance Color [Color4]
+    (fg [c] (unsafe (fg4 (.idx c))))
+    (bg [c] (unsafe (bg4 (.idx c)))))
+
+  (definstance Color [Color8]
+    (fg [c] (unsafe (fg8 (.idx c))))
+    (bg [c] (unsafe (bg8 (.idx c)))))
+
+  (definstance Color [Color24]
+    (fg [c] (unsafe (fg24 (.r c) (.g c) (.b c))))
+    (bg [c] (unsafe (bg24 (.r c) (.g c) (.b c)))))
 
 ) ;; end defmodule ansi/color

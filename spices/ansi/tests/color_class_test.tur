@@ -1,0 +1,103 @@
+;; tests/color_class_test.tur -- U2 typeclass-collapse coverage for ansi/color.
+;;
+;; Proves the `Color` typeclass's `fg`/`bg` methods dispatch on the color
+;; value's depth-carrying type (Color4 / Color8 / Color24) and emit the
+;; exact same SGR bytes as the depth-specific primitives they replace. Same
+;; pipe-capture harness as color_test.tur.
+
+(defmodule ansi/tests/color-class
+  (import ansi/color)
+
+  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
+    ```c
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+           (long long)idx, (const char *)name);
+    ```)
+
+  (defn tap-plan [count : int fails : int] #{Unsafe} : void
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (fails == 0) {
+      fprintf(stderr, "# All %lld ansi/color-class tests passed.\n", (long long)count);
+    } else {
+      fprintf(stderr, "# %lld ansi/color-class tests failed.\n", (long long)fails);
+    }
+    ```)
+
+  (defn bool->fail [ok : bool] : int (if ok 0 1))
+  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
+    (do (tap-line idx name ok) (bool->fail ok)))
+
+  (defn __capture-begin [] #{Unsafe} : void
+    ```c
+    /* __tur_include__: static int g_cc_saved_fd = -1; */
+    /* __tur_include__: static int g_cc_pipe_r = -1; */
+    /* __tur_include__: static int g_cc_pipe_w = -1; */
+    fflush(stdout);
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    int sf = fcntl(fds[0], F_GETFL, 0);
+    if (sf >= 0) fcntl(fds[0], F_SETFL, sf | O_NONBLOCK);
+    g_cc_pipe_r = fds[0];
+    g_cc_pipe_w = fds[1];
+    g_cc_saved_fd = dup(STDOUT_FILENO);
+    dup2(g_cc_pipe_w, STDOUT_FILENO);
+    ```)
+
+  (defn __capture-check [test-id : int] #{Unsafe} : bool
+    ```c
+    fflush(stdout);
+    if (g_cc_saved_fd < 0) return 0;
+    dup2(g_cc_saved_fd, STDOUT_FILENO);
+    close(g_cc_saved_fd);
+    close(g_cc_pipe_w);
+    g_cc_saved_fd = -1;
+    g_cc_pipe_w = -1;
+    char buf[256];
+    size_t len = 0;
+    for (;;) {
+      if (len >= sizeof(buf) - 1) break;
+      ssize_t n = read(g_cc_pipe_r, buf + len, sizeof(buf) - 1 - len);
+      if (n <= 0) break;
+      len += (size_t)n;
+    }
+    buf[len] = '\0';
+    close(g_cc_pipe_r);
+    g_cc_pipe_r = -1;
+    const char *expected = "";
+    size_t exp_len = 0;
+    switch ((int)test_id) {
+      case 1: expected = "\033[31m";          exp_len = 5;  break; /* fg Color4 red    */
+      case 2: expected = "\033[40m";          exp_len = 5;  break; /* bg Color4 black  */
+      case 3: expected = "\033[97m";          exp_len = 5;  break; /* fg Color4 br-wht */
+      case 4: expected = "\033[38;5;208m";    exp_len = 11; break; /* fg Color8 208    */
+      case 5: expected = "\033[48;5;0m";      exp_len = 9;  break; /* bg Color8 0      */
+      case 6: expected = "\033[38;2;255;128;0m"; exp_len = 17; break; /* fg Color24    */
+      case 7: expected = "\033[48;2;0;0;0m";  exp_len = 13; break; /* bg Color24 0,0,0 */
+      default: return 0;
+    }
+    if (len != exp_len) return 0;
+    return memcmp(buf, expected, exp_len) == 0;
+    ```)
+
+  (defn t-fg-c4-red    [] #{Unsafe} : bool (do (__capture-begin) (fg (color4 (color-red)))          (__capture-check 1)))
+  (defn t-bg-c4-black  [] #{Unsafe} : bool (do (__capture-begin) (bg (color4 (color-black)))        (__capture-check 2)))
+  (defn t-fg-c4-brwht  [] #{Unsafe} : bool (do (__capture-begin) (fg (color4 (color-bright-white))) (__capture-check 3)))
+  (defn t-fg-c8-orange [] #{Unsafe} : bool (do (__capture-begin) (fg (color8 208))                  (__capture-check 4)))
+  (defn t-bg-c8-zero   [] #{Unsafe} : bool (do (__capture-begin) (bg (color8 0))                    (__capture-check 5)))
+  (defn t-fg-c24-orng  [] #{Unsafe} : bool (do (__capture-begin) (fg (rgb 255 128 0))               (__capture-check 6)))
+  (defn t-bg-c24-black [] #{Unsafe} : bool (do (__capture-begin) (bg (rgb 0 0 0))                    (__capture-check 7)))
+
+  (defn main [] #{Unsafe} : int
+    (let [r1 (run-case 1 "fg (color4 red) = CSI 31m"          (t-fg-c4-red))
+          r2 (run-case 2 "bg (color4 black) = CSI 40m"        (t-bg-c4-black))
+          r3 (run-case 3 "fg (color4 bright-white) = CSI 97m" (t-fg-c4-brwht))
+          r4 (run-case 4 "fg (color8 208) = CSI 38;5;208m"    (t-fg-c8-orange))
+          r5 (run-case 5 "bg (color8 0) = CSI 48;5;0m"        (t-bg-c8-zero))
+          r6 (run-case 6 "fg (rgb 255 128 0) = CSI 38;2;...m" (t-fg-c24-orng))
+          r7 (run-case 7 "bg (rgb 0 0 0) = CSI 48;2;0;0;0m"   (t-bg-c24-black))]
+      (do
+        (tap-plan 7 (+ r1 (+ r2 (+ r3 (+ r4 (+ r5 (+ r6 r7)))))))
+        (if (= (+ r1 (+ r2 (+ r3 (+ r4 (+ r5 (+ r6 r7)))))) 0) 0 1))))
+
+) ;; end defmodule
