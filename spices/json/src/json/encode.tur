@@ -11,7 +11,9 @@
 ;; be revisited when those land.
 
 (defmodule json/encode
-  (export derive-json __json-chain __json-obj-build
+  (export derive-json derive-json-encode derive-json-decode
+          derive-json-opaque derive-json-opaque-encode derive-json-opaque-decode
+          __json-chain __json-obj-build
           __decode-field __decode-fields __decode-make-struct)
 
 (import json/decode :refer [json-obj-get])
@@ -349,5 +351,108 @@
        (decode [doc val]
          (:: (ok (__decode-make-struct ~type-name ~fields))
              (Result ~type-name cstr))))))
+
+;;; derive-json-encode -- emit only the Encode instance for a defstruct,
+;;; matching the `(derive-json T ... :only [:encode])` shape from the
+;;; uplift plan. Useful when the type is produced by the program but
+;;; never parsed back from wire (logging, telemetry, write-only audit
+;;; records). Avoids the Decode side's `(:: ... (Result T cstr))`
+;;; carrier ascription, which can be expensive at elaboration time for
+;;; deep record nests, and keeps the Decode dispatch table smaller.
+;;;
+;;; Syntax mirrors `derive-json`:
+;;;   (derive-json-encode T (f1 t1) (f2 t2) ...)
+;;;
+;;; Example:
+;;;   (defstruct LogEntry [level : cstr  msg : cstr])
+;;;   (derive-json-encode LogEntry (level cstr) (msg cstr))
+;;;   ;; (encode (make-struct LogEntry "info" "hi"))
+;;;   ;;   =>  {"level":"info","msg":"hi"}
+(defmacro derive-json-encode [type-name & fields]
+  `(definstance Encode [~type-name]
+     (encode [x] (unsafe (__json-obj-build (__json-chain ~fields))))))
+
+;;; derive-json-decode -- emit only the Decode instance for a defstruct,
+;;; matching the `(derive-json T ... :only [:decode])` shape. Useful for
+;;; read-only inbound records whose Turmeric value never gets serialized
+;;; back (config blobs, third-party API responses), or when the
+;;; canonical Encode is hand-written to honor a non-derivable wire
+;;; layout (custom field order, computed fields).
+;;;
+;;; Syntax mirrors `derive-json`:
+;;;   (derive-json-decode T (f1 t1) (f2 t2) ...)
+;;;
+;;; Example:
+;;;   (defstruct Config [port : int  host : cstr])
+;;;   (derive-json-decode Config (port int) (host cstr))
+;;;   ;; (:: (decode doc root) (Result Config cstr))
+;;;   ;;   parses {"port":8080,"host":"localhost"} into a Config.
+(defmacro derive-json-decode [type-name & fields]
+  `(definstance Decode [~type-name]
+     (decode [doc val]
+       (:: (ok (__decode-make-struct ~type-name ~fields))
+           (Result ~type-name cstr)))))
+
+;;; derive-json-opaque -- emit Encode + Decode instances for a `defopaque`
+;;; newtype by delegating to the carrier's typeclass instances.
+;;;
+;;; `(defopaque T :int)` (and the other carrier shapes) tags `T` as
+;;; nominally distinct but ABI-identical to its carrier. The plan's
+;;; default is to refuse to derive a JSON instance for an opaque -- its
+;;; wire representation is *not* its carrier in the general case. This
+;;; macro is the explicit `:as :carrier` opt-in: the caller is saying
+;;; "yes, encode/decode this opaque exactly as its underlying int / cstr
+;;; / bool / float." Use it for thin newtypes whose wire form genuinely
+;;; matches the carrier (`UserId :int` -> integer, `EmailAddr :cstr` ->
+;;; string).
+;;;
+;;; Syntax:
+;;;   (derive-json-opaque T :as int)         ;; both directions
+;;;
+;;; Example:
+;;;   (defopaque UserId :int)
+;;;   (derive-json-opaque UserId :as int)
+;;;   ;; (encode (:: 42 UserId))                      => "42"
+;;;   ;; (:: (decode doc val) (Result UserId cstr))   => parses int as UserId
+;;;
+;;; Carriers supported: any type with `Encode` / `Decode` instances --
+;;; `int`, `bool`, `cstr`, `float` ship in this module; user-defined
+;;; carriers work if their instances are in scope at the derive site.
+(defmacro derive-json-opaque [type-name _as carrier]
+  `(do
+     (definstance Encode [~type-name]
+       (encode [x] (encode (:: x ~carrier))))
+     (definstance Decode [~type-name]
+       (decode [doc val]
+         (:: (ok (:: (ok-val (:: (decode doc val) (Result ~carrier cstr)))
+                     ~type-name))
+             (Result ~type-name cstr))))))
+
+;;; derive-json-opaque-encode -- emit only the Encode instance for a
+;;; defopaque newtype, delegating to its carrier's Encode. Mirrors
+;;; `derive-json-encode` for product types: useful when the opaque is
+;;; produced by the program but never parsed back from the wire (log
+;;; tokens, telemetry IDs, write-only audit handles).
+;;;
+;;; Syntax:
+;;;   (derive-json-opaque-encode T :as int)
+(defmacro derive-json-opaque-encode [type-name _as carrier]
+  `(definstance Encode [~type-name]
+     (encode [x] (encode (:: x ~carrier)))))
+
+;;; derive-json-opaque-decode -- emit only the Decode instance for a
+;;; defopaque newtype, delegating to its carrier's Decode and wrapping
+;;; the result back into the opaque. Mirrors `derive-json-decode` for
+;;; product types: useful for read-only inbound IDs whose Turmeric
+;;; value never gets serialized back.
+;;;
+;;; Syntax:
+;;;   (derive-json-opaque-decode T :as int)
+(defmacro derive-json-opaque-decode [type-name _as carrier]
+  `(definstance Decode [~type-name]
+     (decode [doc val]
+       (:: (ok (:: (ok-val (:: (decode doc val) (Result ~carrier cstr)))
+                   ~type-name))
+           (Result ~type-name cstr)))))
 
 ) ;; end defmodule json/encode

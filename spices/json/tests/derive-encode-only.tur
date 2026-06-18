@@ -1,0 +1,12 @@
+;; derive-json-encode emits only the Encode instance. Verifies the
+;; encode-only direction of the U2 :only [:encode] surface from the
+;; spices-type-features uplift plan.
+;;
+;; Expected: {"level":"info","msg":"hi"}
+(defmodule derive_encode_only_test (export)
+(import json/encode :refer [derive-json-encode])
+(defstruct LogEntry [level : cstr  msg : cstr])
+(derive-json-encode LogEntry (level cstr) (msg cstr))
+(defn main [] : int
+  (println (encode (make-struct LogEntry "info" "hi")))
+  0))

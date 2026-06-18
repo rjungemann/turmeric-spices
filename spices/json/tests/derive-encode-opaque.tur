@@ -1,0 +1,12 @@
+;; derive-json-opaque emits an Encode instance for a defopaque newtype
+;; by delegating to the carrier's Encode. Verifies the encode side of the
+;; U2 :as :carrier opt-in from the spices-type-features uplift plan.
+;;
+;; Expected: 42
+(defmodule derive_encode_opaque_test (export)
+(import json/encode :refer [derive-json-opaque-encode])
+(defopaque UserId :int)
+(derive-json-opaque-encode UserId :as int)
+(defn main [] : int
+  (println (encode (:: 42 UserId)))
+  0))

@@ -1,0 +1,24 @@
+;; Full round-trip for the U2 derive-json-opaque opt-in: decode a JSON
+;; int into a defopaque UserId, then re-encode it through the macro-
+;; emitted Encode instance. Exercises both directions of the carrier
+;; delegation path.
+;;
+;; Expected:
+;;   42
+
+(defmodule round_trip_opaque_test (export)
+
+(import json/encode :refer [derive-json-opaque])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+
+(defopaque UserId :int)
+(derive-json-opaque UserId :as int)
+
+(defn main [] : int
+  (let [doc  (unsafe (json-parse-doc "42"))
+        root (unsafe (json-doc-root doc))
+        uid  (ok-val (:: (decode doc root) (Result UserId cstr)))]
+    (println (encode uid))
+    (unsafe (json-doc-free doc))
+    0))
+)

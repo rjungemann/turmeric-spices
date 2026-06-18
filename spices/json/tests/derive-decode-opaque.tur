@@ -1,0 +1,27 @@
+;; derive-json-opaque emits a Decode instance for a defopaque newtype
+;; by delegating to the carrier's Decode and wrapping the result back
+;; into the opaque. Verifies the decode side of the U2 :as :carrier
+;; opt-in from the spices-type-features uplift plan.
+;;
+;; Expected:
+;;   42
+
+(defmodule derive_decode_opaque_test (export)
+
+(import json/encode :refer [derive-json-opaque-decode])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+
+(defn __int->cstr [n : int] #{Unsafe} : cstr
+  ```c char *b = (char*)malloc(24); snprintf(b, 24, "%lld", (long long)n); return b; ```)
+
+(defopaque UserId :int)
+(derive-json-opaque-decode UserId :as int)
+
+(defn main [] : int
+  (let [doc  (unsafe (json-parse-doc "42"))
+        root (unsafe (json-doc-root doc))
+        uid  (ok-val (:: (decode doc root) (Result UserId cstr)))]
+    (println (unsafe (__int->cstr (:: uid int))))
+    (unsafe (json-doc-free doc))
+    0))
+)
