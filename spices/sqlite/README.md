@@ -53,6 +53,21 @@ let [db ok-val(db-open("app.db"))]
   db-close(db)
 ```
 
+### Linear `Db` / `Stmt` (U1)
+
+`Db` and `Stmt` are `:linear` opaques. A connection from `db-of` (or
+`ok-val`) must be closed exactly once with `db-close`, and a prepared
+statement from `stmt-of` must be finalized exactly once with
+`stmt-finalize`. The query / step / bind / column operations take their
+handle by `^borrow`, observing it without discharging that obligation.
+Under `-Xsubstructural` this makes use-after-close, use-after-finalize,
+double-close, and forgotten finalize into compile-time errors
+(`TUR-E0101` / `TUR-E0100`) instead of runtime faults. The discipline is
+inert in ordinary builds, so existing call sites compile unchanged. See
+`tests/errors/` for the rejected cases. (db-query's transient statement
+never escapes, so it stays a raw handle internally and needs no manual
+finalize.)
+
 ## See also
 
 - [API reference](api/)

@@ -11,8 +11,16 @@
 ;;; Client -- Valkey/Redis connection handle.
 ;;; Wraps a `redisContext*`. Construct with client-connect (or
 ;;; client-connect-unix); free with client-close.
+;;;
+;;; `Client` is `:linear` (U1): a connection extracted with client-of must
+;;; be consumed exactly once by client-close (which calls redisFree). The
+;;; command/pubsub/ping operations take it by `^borrow`, observing the
+;;; connection without discharging that obligation. Under -Xsubstructural
+;;; this makes use-after-close and connection leaks compile-time errors
+;;; (TUR-E0101 / TUR-E0100); the discipline is inert in ordinary builds,
+;;; so existing call sites compile unchanged.
 ;;; Since: 0.2.0
-(defopaque Client :int)
+(defopaque Client :int :linear)
 
 ;; -------------------------------------------------------------------------
 ;; Private: result type helpers (layout matches stdlib/result.tur)
@@ -96,7 +104,9 @@
 ;;; client-close -- close a connection and free its resources.
 ;;;
 ;;; Parameters:
-;;;   c -- ctx-ptr obtained from client-connect or client-connect-unix (ok-val)
+;;;   c -- ctx-ptr obtained from client-connect or client-connect-unix (ok-val).
+;;;        Consumes the linear Client: its single legal consumption, so any
+;;;        later use of the handle is rejected under -Xsubstructural.
 ;;;
 ;;; Returns:
 ;;;   void
@@ -124,7 +134,7 @@
 ;;;     (if (ok? r) (println "pong") (println "ping failed")))
 ;;;
 ;;; Since: VK0
-(defn client-ping [c : Client] : ptr<void>
+(defn client-ping [^borrow c : Client] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>

@@ -12,7 +12,14 @@
 ;;; Rows -- opaque handle to a libpq PGresult row set.
 ;;; Storage is int64_t (PGresult* cast). Construct via rows-of from a
 ;;; db-query / db-query-params / stmt-exec-prepared ok-result.
-(defopaque Rows :int)
+;;;
+;;; `Rows` is `:linear` (U1): a result set extracted with rows-of must be
+;;; consumed exactly once by rows-free (PQclear). The accessors
+;;; (rows-count, row-get, row-get-int, col-count, col-name) take it by
+;;; `^borrow`. Under -Xsubstructural this makes use-after-free and leaked
+;;; result sets compile-time errors (TUR-E0101 / TUR-E0100); the discipline
+;;; is inert in ordinary builds.
+(defopaque Rows :int :linear)
 
 ;;; rows-of -- extract a typed Rows handle from an ok result.
 ;;;
@@ -47,7 +54,7 @@
 ;;;   (rows-count rows)  ; => 3
 ;;;
 ;;; Since: PG0
-(defn rows-count [rows : Rows] : int
+(defn rows-count [^borrow rows : Rows] : int
   ```c
   #include <libpq-fe.h>
   return (int64_t)PQntuples((PGresult *)(intptr_t)rows);
@@ -85,7 +92,7 @@
 ;;;   (row-get rows 0 "name")  ; => "Alice"
 ;;;
 ;;; Since: PG0
-(defn row-get [rows : Rows i : int colname : cstr] : cstr
+(defn row-get [^borrow rows : Rows i : int colname : cstr] : cstr
   ```c
   #include <libpq-fe.h>
   PGresult *res = (PGresult *)(intptr_t)rows;
@@ -110,7 +117,7 @@
 ;;;   (row-get-int rows 0 "id")  ; => 42
 ;;;
 ;;; Since: PG0
-(defn row-get-int [rows : Rows i : int colname : cstr] : int
+(defn row-get-int [^borrow rows : Rows i : int colname : cstr] : int
   ```c
   #include <libpq-fe.h>
   #include <stdlib.h>
@@ -134,7 +141,7 @@
 ;;;   (col-count rows)  ; => 2
 ;;;
 ;;; Since: PG0
-(defn col-count [rows : Rows] : int
+(defn col-count [^borrow rows : Rows] : int
   ```c
   #include <libpq-fe.h>
   return (int64_t)PQnfields((PGresult *)(intptr_t)rows);
@@ -153,7 +160,7 @@
 ;;;   (col-name rows 0)  ; => "id"
 ;;;
 ;;; Since: PG0
-(defn col-name [rows : Rows j : int] : cstr
+(defn col-name [^borrow rows : Rows j : int] : cstr
   ```c
   #include <libpq-fe.h>
   const char *n = PQfname((PGresult *)(intptr_t)rows, (int)j);

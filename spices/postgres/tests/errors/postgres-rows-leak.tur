@@ -1,0 +1,13 @@
+;; U1 negative: a :linear Rows must be consumed (freed). Extracting a result
+;; set and reading it but never calling rows-free is a leak.
+;;   tur check -Xsubstructural tests/errors/postgres-rows-leak.tur
+;;   => error [TUR-E0100]: linear value 'rows' dropped without being consumed
+;; Compile-fail fixture (see postgres-conn-use-after-close.tur for the note).
+(defmodule postgres_rows_leak_test
+  (export)
+(import postgres/db  :refer [Conn db-query])
+(import postgres/row :refer [Rows rows-of rows-count])
+(defn leak-rows [^borrow conn : Conn] : int
+  (let [rows (rows-of (db-query conn "SELECT 1"))]
+    (rows-count rows)))   ;; ERROR TUR-E0100: rows never freed
+) ;; end

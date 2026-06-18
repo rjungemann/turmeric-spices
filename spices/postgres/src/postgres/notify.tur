@@ -116,7 +116,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __pq-exec-raw -- execute SQL with no params; returns 1 on success, 0 on failure.
-(defn __pq-exec-raw [conn : Conn sql : cstr] : int
+(defn __pq-exec-raw [^borrow conn : Conn sql : cstr] : int
   ```c
   #include <libpq-fe.h>
   PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
@@ -127,14 +127,14 @@
   ```)
 
 ;;; __pq-consume-input -- call PQconsumeInput; returns 1 on success, 0 on error.
-(defn __pq-consume-input [conn : Conn] : int
+(defn __pq-consume-input [^borrow conn : Conn] : int
   ```c
   #include <libpq-fe.h>
   return (int64_t)PQconsumeInput((PGconn *)(intptr_t)conn);
   ```)
 
 ;;; __pq-notifies -- call PQnotifies; returns PGnotify* as :int (0 if none pending).
-(defn __pq-notifies [conn : Conn] : int
+(defn __pq-notifies [^borrow conn : Conn] : int
   ```c
   #include <libpq-fe.h>
   PGnotify *n = PQnotifies((PGconn *)(intptr_t)conn);
@@ -158,7 +158,7 @@
 ;;;   (notify-listen conn "my_channel")
 ;;;
 ;;; Since: PG3
-(defn notify-listen [conn : Conn channel : cstr] : ptr<void>
+(defn notify-listen [^borrow conn : Conn channel : cstr] : ptr<void>
   (let [sql (__listen-sql channel)
         rc  (__pq-exec-raw conn sql)]
     (if (not= rc 0) (__ok 0) (__err 0))))
@@ -176,7 +176,7 @@
 ;;;   (notify-unlisten conn "my_channel")
 ;;;
 ;;; Since: PG3
-(defn notify-unlisten [conn : Conn channel : cstr] : ptr<void>
+(defn notify-unlisten [^borrow conn : Conn channel : cstr] : ptr<void>
   (let [sql (__unlisten-sql channel)
         rc  (__pq-exec-raw conn sql)]
     (if (not= rc 0) (__ok 0) (__err 0))))
@@ -202,7 +202,7 @@
 ;;;       (println "poll error")))
 ;;;
 ;;; Since: PG3
-(defn notify-poll [conn : Conn] : ptr<void>
+(defn notify-poll [^borrow conn : Conn] : ptr<void>
   (let [ci (__pq-consume-input conn)]
     (if (= ci 0)
       (__err 0)

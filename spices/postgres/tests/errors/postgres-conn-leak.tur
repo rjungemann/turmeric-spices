@@ -1,0 +1,12 @@
+;; U1 negative: a :linear Conn must be consumed (closed). Connecting and
+;; using it but never calling db-close is a leak.
+;;   tur check -Xsubstructural tests/errors/postgres-conn-leak.tur
+;;   => error [TUR-E0100]: linear value 'conn' dropped without being consumed
+;; Compile-fail fixture (see postgres-conn-use-after-close.tur for the note).
+(defmodule postgres_conn_leak_test
+  (export)
+(import postgres/db :refer [Conn db-connect conn-of db-exec])
+(defn leak-conn [] : ptr<void>
+  (let [conn (conn-of (db-connect "dbname=test"))]
+    (db-exec conn "SELECT 1")))   ;; ERROR TUR-E0100: conn never closed
+) ;; end

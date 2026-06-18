@@ -11,11 +11,17 @@
           load-sound unload-sound play-sound
           load-music-stream unload-music-stream play-music-stream update-music-stream)
 
+;; Sound and Music are `:linear` (U1): each has an unload-* consuming peer
+;; (unload-sound / unload-music-stream), so a handle from its loader must be
+;; consumed exactly once; play-sound / play-music-stream / update-music-stream
+;; take it by `^borrow`. Under -Xsubstructural use-after-unload and leaks
+;; become compile-time errors (TUR-E0101 / TUR-E0100); inert in normal builds.
+
 ;;; Sound -- opaque handle to a heap-allocated Raylib Sound struct.
-(defopaque Sound :int)
+(defopaque Sound :int :linear)
 
 ;;; Music -- opaque handle to a heap-allocated Raylib Music struct (streamed).
-(defopaque Music :int)
+(defopaque Music :int :linear)
 
 ;;; init-audio-device -- initialize the audio device and context.
 ;;;
@@ -87,7 +93,7 @@
 ;;;   (play-sound explosion)
 ;;;
 ;;; Since: P3
-(defn play-sound [sound : Sound] : void
+(defn play-sound [^borrow sound : Sound] : void
   ```c
   #include <raylib.h>
   Sound *s = (Sound *)(intptr_t)sound;
@@ -140,7 +146,7 @@
 ;;;   (play-music-stream bgm)
 ;;;
 ;;; Since: P3
-(defn play-music-stream [music : Music] : void
+(defn play-music-stream [^borrow music : Music] : void
   ```c
   #include <raylib.h>
   Music *m = (Music *)(intptr_t)music;
@@ -156,7 +162,7 @@
 ;;;   (update-music-stream bgm)  ; inside the game loop
 ;;;
 ;;; Since: P3
-(defn update-music-stream [music : Music] : void
+(defn update-music-stream [^borrow music : Music] : void
   ```c
   #include <raylib.h>
   Music *m = (Music *)(intptr_t)music;

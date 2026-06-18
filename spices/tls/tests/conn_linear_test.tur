@@ -1,0 +1,47 @@
+;; tests/conn_linear_test.tur -- U1 positive companion to tests/errors/.
+;;
+;; tls/conn's TlsConn is now a :linear opaque: the observing ops borrow it
+;; (^borrow) and tls-free consumes it exactly once. The matching negative
+;; fixtures (use-after-free / double-free) live in tests/errors/ and are
+;; asserted with `tur check -Xsubstructural` (TUR-E0101) pending the P5
+;; compile-fail harness.
+;;
+;; This file is the dependency-free positive: it reproduces the exact
+;; borrow/consume idiom on a local linear opaque (so it builds and runs
+;; without mbedTLS) and confirms a correct lifecycle elaborates and runs.
+;; It also keeps a flat *.tur in tests/, which routes CI's `tur test tests`
+;; through its non-recursive branch so the tests/errors/ compile-fail
+;; fixtures are not executed as ordinary tests.
+
+(defmodule tls/tests/conn-linear
+
+;; A miniature of TlsConn: a :linear handle observed by a borrow accessor
+;; and released by a consuming closer -- the U1 resource-handle shape.
+(defopaque Handle :int :linear)
+
+(defn handle-open [tag : int] : Handle ```c return (int64_t)tag; ```)
+(defn handle-peek [^borrow h : Handle] : int ```c return (int64_t)h; ```)
+(defn handle-close [h : Handle] : nil ```c (void)h; ```)
+
+(defn tap [idx : int name : cstr ok : bool] #{Unsafe} : int
+  ```c
+  printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
+  return ok ? 0 : 1;
+  ```)
+
+;; Open, borrow twice (non-consuming), then consume exactly once.
+(defn lifecycle-ok [] : int
+  (let [h (handle-open 7)]
+    (let [a (handle-peek h)
+          b (handle-peek h)]
+      (do (handle-close h) (+ a b)))))
+
+(defn main [] #{Unsafe} : int
+  (let [r1 (tap 1 "borrow-twice-then-consume yields handle value" (= (lifecycle-ok) 14))]
+    (do
+      (println "1..1")
+      (if (= r1 0)
+        (do (println "# All 1 tls/conn-linear tests passed.") 0)
+        1))))
+
+) ;; end defmodule tls/tests/conn-linear

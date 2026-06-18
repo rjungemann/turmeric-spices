@@ -1,0 +1,19 @@
+;; U1 negative fixture: db-close consumes the :linear Db, so closing twice
+;; must be rejected under -Xsubstructural.
+;;   tur check -Xsubstructural tests/errors/sqlite-db-double-close.tur
+;;   => error [TUR-E0101]: linear value 'db' used after being consumed
+;; Compile-fail fixture (see sqlite-db-use-after-close.tur for the note).
+
+(defmodule sqlite_db_double_close_test
+  (export)
+
+(import sqlite/db :refer [Db db-open db-of db-close])
+
+(defn double-close [] : int
+  (let [db (db-of (db-open ":memory:"))]
+    (do
+      (db-close db)    ;; single legal consumption
+      (db-close db)    ;; ERROR TUR-E0101: consume after consume
+      0)))
+
+) ;; end defmodule sqlite_db_double_close_test

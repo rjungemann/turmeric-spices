@@ -33,7 +33,20 @@
 (defopaque Program :int)
 
 ;;; Window -- opaque handle to a GLFWwindow* (pointer cast through intptr_t).
-(defopaque Window :int)
+;;;
+;;; `Window` is `:linear` (U1): a window from make-window must be consumed
+;;; exactly once by destroy-window (glfwDestroyWindow). The per-frame
+;;; observers (window-should-close?, swap-buffers, key-pressed?, mouse-pos,
+;;; mouse-button-pressed?) take it by `^borrow`. Under -Xsubstructural this
+;;; makes use-after-destroy and leaked windows compile-time errors
+;;; (TUR-E0101 / TUR-E0100); the discipline is inert in ordinary builds.
+;;;
+;;; The GPU-object handles below (Vao/Vbo/Ebo/Shader/Program/Texture) stay
+;;; plain opaques: they are nominally distinct (so confusing a Vao for a Vbo
+;;; is a type error), but the spice exposes no glDelete* wrapper for them, so
+;;; there is no consuming peer to anchor a linear discipline on. Add `:linear`
+;;; to a handle here if/when a deleter for it is added.
+(defopaque Window :int :linear)
 
 ;;; Texture -- opaque handle to a GL texture (GLuint).
 (defopaque Texture :int)

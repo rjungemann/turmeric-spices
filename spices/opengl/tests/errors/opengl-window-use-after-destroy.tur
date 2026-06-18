@@ -1,0 +1,17 @@
+;; U1 negative: using a Window after destroy-window must be rejected under
+;; -Xsubstructural. Window is :linear (consumed by destroy-window);
+;; swap-buffers borrows, so swapping a destroyed window is use-after-free.
+;;   tur check -Xsubstructural tests/errors/opengl-window-use-after-destroy.tur
+;;   => error [TUR-E0101]: linear value 'w' used after being consumed
+;; Violation in an uncalled defn (no main): compiles + `tur test` no-op-passes
+;; without the flag, keeping CI green under opengl's nested-test descend.
+;; Automated assertion awaits the P5 harness.
+(defmodule opengl_window_use_after_destroy_test
+  (export)
+(import opengl/window :refer [make-window destroy-window swap-buffers])
+(defn use-after-destroy [] : void
+  (let [w (make-window 800 600 "x")]
+    (do
+      (destroy-window w)   ;; single legal consumption
+      (swap-buffers w))))  ;; ERROR TUR-E0101: borrow after consume
+) ;; end

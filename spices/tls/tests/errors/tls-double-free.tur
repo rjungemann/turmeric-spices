@@ -1,0 +1,22 @@
+;; U1 negative fixture: tls-free consumes a :linear TlsConn, so freeing the
+;; same conn twice must be rejected by the elaborator under -Xsubstructural.
+;;
+;; Verify (from the tls spice root):
+;;   tur check -Xsubstructural tests/errors/tls-double-free.tur
+;;   => error [TUR-E0101]: linear value 'conn' used after being consumed
+;;
+;; Compile-fail fixture (see tls-use-after-free.tur for the placement note).
+
+(defmodule tls_double_free_test
+  (export)
+
+(import tls/ctx  :refer [tls-ctx-new])
+(import tls/conn :refer [TlsConn tls-wrap-fd tls-free])
+
+(defn main [] : int
+  (let [conn (tls-wrap-fd (tls-ctx-new) 0)]
+    (tls-free conn)    ;; the single legal consumption
+    (tls-free conn)    ;; ERROR TUR-E0101: consume after consume
+    0))
+
+) ;; end defmodule tls_double_free_test

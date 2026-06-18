@@ -1,0 +1,12 @@
+;; U1 negative: a :linear Window must be consumed (destroyed). Creating a
+;; window and using it but never calling destroy-window is a leak.
+;;   tur check -Xsubstructural tests/errors/opengl-window-leak.tur
+;;   => error [TUR-E0100]: linear value 'w' dropped without being consumed
+;; Compile-fail fixture (see opengl-window-use-after-destroy.tur for the note).
+(defmodule opengl_window_leak_test
+  (export)
+(import opengl/window :refer [make-window window-should-close?])
+(defn leak-window [] : bool
+  (let [w (make-window 800 600 "x")]
+    (window-should-close? w)))   ;; ERROR TUR-E0100: w never destroyed
+) ;; end

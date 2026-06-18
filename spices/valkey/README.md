@@ -54,6 +54,17 @@ let [c ok-val(client-connect("127.0.0.1" 6379))]
   client-close(c)
 ```
 
+### Linear `Client` (U1)
+
+`Client` is a `:linear` opaque. A connection extracted with `client-of`
+(or `ok-val`) must be released exactly once with `client-close`
+(`redisFree`); the command, pubsub, and ping operations take it by
+`^borrow`, observing the connection without discharging that obligation.
+Under `-Xsubstructural` this makes use-after-close and connection leaks
+compile-time errors (`TUR-E0101` / `TUR-E0100`) instead of runtime faults.
+The discipline is inert in ordinary builds, so existing call sites compile
+unchanged. See `tests/errors/` for the rejected cases.
+
 ## See also
 
 - [API reference](api/)

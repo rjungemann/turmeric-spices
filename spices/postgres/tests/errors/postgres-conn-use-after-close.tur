@@ -1,0 +1,16 @@
+;; U1 negative: using a Conn after db-close must be rejected under
+;; -Xsubstructural. Conn is :linear (consumed by db-close); db-exec borrows.
+;;   tur check -Xsubstructural tests/errors/postgres-conn-use-after-close.tur
+;;   => error [TUR-E0101]: linear value 'conn' used after being consumed
+;; Violation in an uncalled defn (no main): compiles + `tur test` no-op-passes
+;; without the flag, keeping CI green under postgres's nested-test descend.
+;; Automated assertion awaits the P5 harness.
+(defmodule postgres_conn_use_after_close_test
+  (export)
+(import postgres/db :refer [Conn db-connect conn-of db-close db-exec])
+(defn use-after-close [] : ptr<void>
+  (let [conn (conn-of (db-connect "dbname=test"))]
+    (do
+      (db-close conn)                ;; single legal consumption
+      (db-exec conn "SELECT 1"))))   ;; ERROR TUR-E0101: borrow after consume
+) ;; end

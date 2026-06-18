@@ -1,0 +1,20 @@
+;; U1 negative fixture: a :linear Client must be consumed (closed) exactly
+;; once. Connecting and using a client but never calling client-close is a
+;; leak, rejected under -Xsubstructural -- catching "forgot to close".
+;;
+;; Verify: tur check -Xsubstructural tests/errors/valkey-leak-no-close.tur
+;;   => error [TUR-E0100]: linear value 'c' dropped without being consumed
+;;
+;; Compile-fail fixture (see valkey-use-after-close.tur for the placement note).
+
+(defmodule valkey_leak_no_close_test
+  (export)
+
+(import valkey/client :refer [Client client-connect client-of])
+(import valkey/cmd    :refer [cmd-get])
+
+(defn leak-no-close [] : ptr<void>
+  (let [c (client-of (client-connect "127.0.0.1" 6379))]
+    (cmd-get c "key")))   ;; ERROR TUR-E0100: c never consumed (no client-close)
+
+) ;; end defmodule valkey_leak_no_close_test

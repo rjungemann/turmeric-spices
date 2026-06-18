@@ -1,0 +1,26 @@
+;; U1 negative fixture: using a TlsConn after tls-free must be rejected by
+;; the elaborator under -Xsubstructural. TlsConn is a :linear opaque whose
+;; single legal consumption is tls-free; tls-read borrows, so calling it on
+;; an already-freed conn is a use-after-free.
+;;
+;; Verify (from the tls spice root):
+;;   tur check -Xsubstructural tests/errors/tls-use-after-free.tur
+;;   => error [TUR-E0101]: linear value 'conn' used after being consumed
+;;
+;; Lives under tests/errors/ so the normal (non-recursive) `tur test tests`
+;; run skips it -- it is a compile-fail fixture, not a runnable test. Once
+;; the P5 negative-fixture harness lands it can assert the code automatically.
+
+(defmodule tls_use_after_free_test
+  (export)
+
+(import tls/ctx  :refer [tls-ctx-new])
+(import tls/conn :refer [TlsConn tls-wrap-fd tls-read tls-free])
+
+(defn main [] : int
+  (let [conn (tls-wrap-fd (tls-ctx-new) 0)]
+    (tls-free conn)        ;; the single legal consumption
+    (tls-read conn 0 0)    ;; ERROR TUR-E0101: borrow after consume
+    0))
+
+) ;; end defmodule tls_use_after_free_test

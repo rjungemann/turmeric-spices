@@ -31,95 +31,114 @@
     return 1;
     ```)
 
-  ;; Decode a literal byte sequence (selected by test-id) and compare the
-  ;; resulting key name against an expected name.
-  (defn decode-test [test-id : int expected : cstr] #{Unsafe} : bool
+  ;; The decode/encode tests call `parse-key-bytes` / `key-name->bytes`
+  ;; through their real Turmeric interface (imported above) rather than by
+  ;; reaching into the generated C symbol -- the latter hard-codes the
+  ;; compiler's name-mangling and silently breaks when it changes.  The C
+  ;; helpers below only supply literal byte fixtures and do the malloc-aware
+  ;; comparison; the function-under-test is invoked from Turmeric.
+
+  ;; Literal byte sequence for a decode test-id.  Every fixture is
+  ;; NUL-free, so `strlen` recovers the original length the parser needs.
+  (defn decode-bytes [test-id : int] #{Unsafe} : cstr
     ```c
-    const char *bytes = NULL;
-    int n = 0;
     switch ((int)test_id) {
-      case 1:  bytes = "\x1b[A";       n = 3;  break;
-      case 2:  bytes = "\x1b[B";       n = 3;  break;
-      case 3:  bytes = "\x1b[C";       n = 3;  break;
-      case 4:  bytes = "\x1b[D";       n = 3;  break;
-      case 5:  bytes = "\x1b[H";       n = 3;  break;
-      case 6:  bytes = "\x1b[F";       n = 3;  break;
-      case 7:  bytes = "\x1b[Z";       n = 3;  break;
-      case 8:  bytes = "\x1bOP";       n = 3;  break;
-      case 9:  bytes = "\x1bOQ";       n = 3;  break;
-      case 10: bytes = "\x1bOR";       n = 3;  break;
-      case 11: bytes = "\x1bOS";       n = 3;  break;
-      case 12: bytes = "\x1b[15~";     n = 5;  break;
-      case 13: bytes = "\x1b[17~";     n = 5;  break;
-      case 14: bytes = "\x1b[18~";     n = 5;  break;
-      case 15: bytes = "\x1b[19~";     n = 5;  break;
-      case 16: bytes = "\x1b[20~";     n = 5;  break;
-      case 17: bytes = "\x1b[21~";     n = 5;  break;
-      case 18: bytes = "\x1b[23~";     n = 5;  break;
-      case 19: bytes = "\x1b[24~";     n = 5;  break;
-      case 20: bytes = "\x1b[2~";      n = 4;  break;
-      case 21: bytes = "\x1b[3~";      n = 4;  break;
-      case 22: bytes = "\x1b[5~";      n = 4;  break;
-      case 23: bytes = "\x1b[6~";      n = 4;  break;
-      case 24: bytes = "\x01";         n = 1;  break;
-      case 25: bytes = "\x1a";         n = 1;  break;
-      case 26: bytes = "\r";           n = 1;  break;
-      case 27: bytes = "\n";           n = 1;  break;
-      case 28: bytes = "\t";           n = 1;  break;
-      case 29: bytes = "\x7f";         n = 1;  break;
-      case 30: bytes = "\x1b";         n = 1;  break;
-      case 31: bytes = "a";            n = 1;  break;
-      case 32: bytes = " ";            n = 1;  break;
-      case 33: bytes = "\x1b" "a";     n = 2;  break;
-      case 34: bytes = "\x1b[1;5A";    n = 6;  break;
-      case 35: bytes = "\x1b[1;2A";    n = 6;  break;
-      case 36: bytes = "\x1b[1;3A";    n = 6;  break;
-      case 37: bytes = "\x1b[1;7A";    n = 6;  break;
-      case 38: bytes = "\x1b[1;8A";    n = 6;  break;
-      case 39: bytes = "\x1b[3;5~";    n = 6;  break;
-      case 40: bytes = "\x1b[1;2P";    n = 6;  break;
-      default: return 0;
+      case 1:  return (const char *)"\x1b[A";
+      case 2:  return (const char *)"\x1b[B";
+      case 3:  return (const char *)"\x1b[C";
+      case 4:  return (const char *)"\x1b[D";
+      case 5:  return (const char *)"\x1b[H";
+      case 6:  return (const char *)"\x1b[F";
+      case 7:  return (const char *)"\x1b[Z";
+      case 8:  return (const char *)"\x1bOP";
+      case 9:  return (const char *)"\x1bOQ";
+      case 10: return (const char *)"\x1bOR";
+      case 11: return (const char *)"\x1bOS";
+      case 12: return (const char *)"\x1b[15~";
+      case 13: return (const char *)"\x1b[17~";
+      case 14: return (const char *)"\x1b[18~";
+      case 15: return (const char *)"\x1b[19~";
+      case 16: return (const char *)"\x1b[20~";
+      case 17: return (const char *)"\x1b[21~";
+      case 18: return (const char *)"\x1b[23~";
+      case 19: return (const char *)"\x1b[24~";
+      case 20: return (const char *)"\x1b[2~";
+      case 21: return (const char *)"\x1b[3~";
+      case 22: return (const char *)"\x1b[5~";
+      case 23: return (const char *)"\x1b[6~";
+      case 24: return (const char *)"\x01";
+      case 25: return (const char *)"\x1a";
+      case 26: return (const char *)"\r";
+      case 27: return (const char *)"\n";
+      case 28: return (const char *)"\t";
+      case 29: return (const char *)"\x7f";
+      case 30: return (const char *)"\x1b";
+      case 31: return (const char *)"a";
+      case 32: return (const char *)" ";
+      case 33: return (const char *)"\x1b" "a";
+      case 34: return (const char *)"\x1b[1;5A";
+      case 35: return (const char *)"\x1b[1;2A";
+      case 36: return (const char *)"\x1b[1;3A";
+      case 37: return (const char *)"\x1b[1;7A";
+      case 38: return (const char *)"\x1b[1;8A";
+      case 39: return (const char *)"\x1b[3;5~";
+      case 40: return (const char *)"\x1b[1;2P";
+      default: return (const char *)"";
     }
-    char *got = (char *)ansi__keys__parse_key_bytes(bytes, (int64_t)n);
-    int ok = strcmp(got, (const char *)expected) == 0;
-    free(got);
+    ```)
+
+  ;; Expected encoded byte sequence for an encode test-id.  Also NUL-free,
+  ;; so a plain strcmp against the encoder output is exact.
+  (defn encode-expected [test-id : int] #{Unsafe} : cstr
+    ```c
+    switch ((int)test_id) {
+      case 1:  return (const char *)"\x1b[A";
+      case 2:  return (const char *)"\x1b[B";
+      case 3:  return (const char *)"\x1b[C";
+      case 4:  return (const char *)"\x1b[D";
+      case 5:  return (const char *)"\x1b[Z";
+      case 6:  return (const char *)"\x1bOP";
+      case 7:  return (const char *)"\x1bOS";
+      case 8:  return (const char *)"\x1b[15~";
+      case 9:  return (const char *)"\x1b[24~";
+      case 10: return (const char *)"\x1b[3~";
+      case 11: return (const char *)"\x1b[5~";
+      case 12: return (const char *)"\x01";
+      case 13: return (const char *)"\x1a";
+      case 14: return (const char *)"\r";
+      case 15: return (const char *)"\t";
+      case 16: return (const char *)"\x7f";
+      case 17: return (const char *)"\x1b";
+      case 18: return (const char *)"a";
+      case 19: return (const char *)"\x1b" "a";
+      case 20: return (const char *)"\x1b[1;5A";
+      case 21: return (const char *)"\x1b[3;5~";
+      default: return (const char *)"";
+    }
+    ```)
+
+  ;; strlen as a Turmeric-callable int (the fixtures carry no embedded NUL).
+  (defn cstr-len [s : cstr] #{Unsafe} : int ```c return (int64_t)strlen((const char *)s); ```)
+
+  ;; Compare `got` (malloc'd by the function-under-test) against a static
+  ;; expected literal, then free `got`.  Returns whether they matched.
+  (defn streq-free [got : cstr expected : cstr] #{Unsafe} : bool
+    ```c
+    int ok = strcmp((const char *)got, (const char *)expected) == 0;
+    free((void *)got);
     return ok ? 1 : 0;
     ```)
 
+  ;; Decode a literal byte sequence (selected by test-id) via the real
+  ;; `parse-key-bytes` and compare the resulting key name against expected.
+  (defn decode-test [test-id : int expected : cstr] #{Unsafe} : bool
+    (let [bytes (decode-bytes test-id)]
+      (streq-free (parse-key-bytes bytes (cstr-len bytes)) expected)))
+
+  ;; Encode a key name via the real `key-name->bytes` and compare against
+  ;; the expected byte sequence for this test-id.
   (defn encode-test [test-id : int name : cstr] #{Unsafe} : bool
-    ```c
-    const char *expected = NULL;
-    int expected_len = 0;
-    switch ((int)test_id) {
-      case 1:  expected = "\x1b[A";    expected_len = 3; break;
-      case 2:  expected = "\x1b[B";    expected_len = 3; break;
-      case 3:  expected = "\x1b[C";    expected_len = 3; break;
-      case 4:  expected = "\x1b[D";    expected_len = 3; break;
-      case 5:  expected = "\x1b[Z";    expected_len = 3; break;
-      case 6:  expected = "\x1bOP";    expected_len = 3; break;
-      case 7:  expected = "\x1bOS";    expected_len = 3; break;
-      case 8:  expected = "\x1b[15~";  expected_len = 5; break;
-      case 9:  expected = "\x1b[24~";  expected_len = 5; break;
-      case 10: expected = "\x1b[3~";   expected_len = 4; break;
-      case 11: expected = "\x1b[5~";   expected_len = 4; break;
-      case 12: expected = "\x01";      expected_len = 1; break;
-      case 13: expected = "\x1a";      expected_len = 1; break;
-      case 14: expected = "\r";        expected_len = 1; break;
-      case 15: expected = "\t";        expected_len = 1; break;
-      case 16: expected = "\x7f";      expected_len = 1; break;
-      case 17: expected = "\x1b";      expected_len = 1; break;
-      case 18: expected = "a";         expected_len = 1; break;
-      case 19: expected = "\x1b" "a";  expected_len = 2; break;
-      case 20: expected = "\x1b[1;5A"; expected_len = 6; break;
-      case 21: expected = "\x1b[3;5~"; expected_len = 6; break;
-      default: return 0;
-    }
-    char *got = (char *)ansi__keys__key_name__bytes((const char *)name);
-    int n = (int)strlen(got);
-    int ok = (n == expected_len) && (memcmp(got, expected, expected_len) == 0);
-    free(got);
-    return ok ? 1 : 0;
-    ```)
+    (streq-free (key-name->bytes name) (encode-expected test-id)))
 
   (defn mod-check [name : cstr ctrl : int shift : int alt : int] #{Unsafe} : bool
     (and (= (key-ctrl? name) ctrl)
