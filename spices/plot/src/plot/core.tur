@@ -328,7 +328,14 @@
   ;;;   initial-samples -- baseline uniform sample count (clamped to >= 2)
   ;;;
   ;;; Since: plot-v0.1.0
-  (defn __plot-sample-adaptive [renderer : int canvas : int
+  ;;;
+  ;;; Pinned to the stable C symbol `plot_sample_adaptive` via `export-as` so
+  ;;; the inline-C call site in `plot-into-canvas` below can name it directly.
+  ;;; Without the pin, turmeric's injective identifier mangler encodes this
+  ;;; `__`-prefixed, kebab-cased name as `..._un_unplot_hysample_hyadaptive`,
+  ;;; which the hand-written C call could not track across mangling changes.
+  (defn (export-as "plot_sample_adaptive")
+        __plot-sample-adaptive [renderer : int canvas : int
                                 bx-min : float bx-max : float
                                 by-min : float by-max : float
                                 left : int top : int
@@ -1058,7 +1065,12 @@
             }
             if (started) plutovg_canvas_stroke((plutovg_canvas_t *)(intptr_t)canvas);
           } else {
-            plot__core____plot_sample_adaptive(
+            extern void plot_sample_adaptive(
+              int64_t renderer, int64_t canvas,
+              double bx_min, double bx_max, double by_min, double by_max,
+              int64_t left, int64_t top, int64_t plot_w, int64_t plot_h,
+              int64_t initial_samples);
+            plot_sample_adaptive(
               (int64_t)(intptr_t)r, canvas,
               bx_min, bx_max, by_min, by_max,
               left, top, plot_w, plot_h, n);
