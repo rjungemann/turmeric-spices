@@ -6,6 +6,28 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c sized-scheduler -- wire sized worlds through the parallel
+  `Stage` via the report's "by heap pointer" direction.** The
+  `docs/reported/sized-scheduler-system-stage-world-carrier.md` report
+  (direction 1) recommends running sized `(GameWorld n)` worlds through
+  the existing one-word run-fn carrier by heap-boxing the world and
+  having each system's run-fn cast the pointer back to its concrete
+  world type. The recipe is expressible at the spice layer today
+  without compiler work: the sized world is declared with
+  `sized-defworld-mono`, three per-world inline-C helpers
+  (`box-<W>` / `load-<W>` / `free-<W>-box`) heap-allocate the struct
+  and load it on the receiving side, each `[wp : int]` run-fn loads
+  the world back from the pointer to drive the cap-gated typed
+  accessors, and `make-system` + `stage-add!` + `stage-run!` schedule
+  the systems concurrently. Mutations flow through the int64 storage
+  handles inside the world struct, which remain shared across every
+  loaded copy. New regression test `tests/sized-stage.tur` exercises a
+  two-system wave (disjoint Pos / Hp masks) running in a single wave;
+  the `sized-defsystem` docstring now documents the recipe and points
+  at the test as the canonical example. Generalising `System` /
+  `Stage` over the world type (the report's direction 2 / gap-H) is
+  still gated on the monomorphisation-audit M2-M7 path.
+
 - **E2c slice 12 -- fallible `sized-spawn` returning `(Result int
   WorldFull)`.** The sized-world plan's Q3 result-returning spawn, the
   typed counterpart of the panicking `sized-spawn!`. On success it
