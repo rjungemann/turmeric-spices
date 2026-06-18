@@ -117,10 +117,18 @@ min-capacity probe. Design plan:
   generation no longer matches the slot's reads as dead).
 - `sized-defworld-copy-into` emits a `copy-into-<World>` that
   slot-copies a world into a larger one, preserving entity handles
-  across the resize (the generation array is carried over). The plan's
-  `world-resize` existential wrapper over this remains blocked on
-  compiler support for packing a multi-field world struct through the
-  existential carrier.
+  across the resize (the generation array is carried over).
+- `sized-defworld-world-resize` emits a `world-resize-<World>` that
+  grows a world to a fresh *runtime* capacity and hands it back inside
+  the size-hiding existential `(exists [n'] (<World> n'))`. It is the
+  thin client layer over `copy-into-<World>`: allocate the larger
+  destination, copy (handles preserved), and `pack` the result so
+  callers `open` it to recover an abstract `n'` and run
+  `sized-for-each` / the cap-gated accessors against the resized world.
+  The result is existential because the new capacity is a runtime
+  value, not a static `(Static k)`. (Unblocked by turmeric's
+  existential pack/open heap-boxing fix for multi-field struct
+  payloads.)
 
 ### What's not in (yet)
 
@@ -151,6 +159,7 @@ tur run -Xdata-literals tests/query-typed.tur   # E1  row-typed Query value (pri
 tur run tests/sized-world-spawn.tur       # E2c sized-spawn! / despawn / live / cap
 tur run tests/sized-world-spawn-result.tur # E2c fallible sized-spawn -> (Result int WorldFull)
 tur run tests/sized-for-each.tur          # E2c statically-rectangular sized-for-each
+tur run tests/sized-world-resize.tur      # E2c world-resize -> (exists [n'] (World n')) grow
 ```
 
 Each exits 0 on success.

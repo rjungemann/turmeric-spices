@@ -30,7 +30,7 @@
 
 (defmodule ecs/sized-world
   (export sized-defworld sized-defworld-mono
-          sized-defworld-copy-into
+          sized-defworld-copy-into sized-defworld-world-resize
           sized-defcomponent-accessors sized-defcomponent-accessors-mono
           sized-defsystem
           sized-state-new sized-state-free sized-state-copy-into
@@ -683,6 +683,76 @@
                (sized-copy-component-body src dst i ~comps)
                (set! i (+ i 1))))
            (sized-state-copy-into (.state src) (.state dst)))))))
+
+;;; sized-defworld-world-resize -- emit a per-world `world-resize-<Name>`
+;;; that grows a sized world to a fresh runtime capacity and hands the
+;;; result back inside the size-hiding existential
+;;; `(exists [n'] (<Name> n'))`.
+;;;
+;;; Syntax:
+;;;   (sized-defworld GameWorld [Pos Vel])
+;;;   (sized-defworld-copy-into GameWorld [Pos Vel])
+;;;   (sized-defworld-world-resize GameWorld)
+;;;
+;;; Unlike `sized-defworld-copy-into`, this macro does not need the
+;;; component vector: the per-component copy is delegated to the
+;;; already-emitted `copy-into-<Name>`, so the only names it weaves are
+;;; the world's constructor (`make-<Name>`) and copy function. The
+;;; component list therefore lives in exactly one place (the
+;;; `sized-defworld-copy-into` call). Emitting `world-resize-<Name>`
+;;; requires both `make-<Name>` (from `sized-defworld`) and
+;;; `copy-into-<Name>` (from `sized-defworld-copy-into`) to be in scope.
+;;;
+;;; The lowering:
+;;;
+;;;   (defn world-resize-GameWorld [n]
+;;;                                [^borrow src : (GameWorld n) k : int]
+;;;                                : (exists [n'] (GameWorld n'))
+;;;     (let [dst : (GameWorld (Static 0)) (make-GameWorld k)]
+;;;       (copy-into-GameWorld src dst)
+;;;       (pack dst (exists [n'] (GameWorld n')))))
+;;;
+;;; This is the thin client layer the sized-world plan calls out:
+;;; `copy-into-<Name>` does the slot-preserving, generation-threading
+;;; copy (so an `Entity` packed against `src` stays `sized-alive?` in
+;;; the resized world), and the `pack` lifts the fresh destination into
+;;; the existential so callers recover an abstract `n'` via `open` (or
+;;; the stdlib `open-sized`) and run `sized-for-each` / the cap-gated
+;;; accessors against it. The emitted `(pack v (exists [n'] (W n')))`
+;;; is exactly what `stdlib/sized-handle-existential.tur`'s `pack-sized`
+;;; macro expands to; the native form is used directly so the spice
+;;; carries no `load`-time dependency on that stdlib module.
+;;;
+;;; New capacity is a runtime argument (`k`), which is *why* the result
+;;; is existential: the destination cap is not known statically, so it
+;;; is sealed behind a fresh `n'` rather than surfaced as a concrete
+;;; `(<Name> (Static k))`. The phantom cap on the destination is
+;;; written as `(Static 0)` purely to give `make-<Name>` a ground type
+;;; to monomorphise against (the constructor only codegens at a ground
+;;; capacity); it is forgotten the instant the value is packed, and it
+;;; never reaches runtime -- every storage and the state cell are sized
+;;; from the runtime `k`, and `sized-dense-cap` / `sized-cap` read that
+;;; runtime width, so `sized-for-each`'s loop bound and the accessors'
+;;; bounds checks all see `k`, not `0`.
+;;;
+;;; Growing is the supported direction (`k >= src` capacity): the
+;;; underlying `sized-state-copy-into` aborts before any partial state
+;;; is observable if `k` is smaller than the source capacity, matching
+;;; `copy-into-<Name>`'s shrink-rejection guarantee.
+;;;
+;;; Since: E2c slice 11 follow-up (world-resize existential wrapper);
+;;; unblocked by turmeric's existential pack/open heap-boxing fix for
+;;; multi-field struct payloads.
+(defmacro sized-defworld-world-resize [name]
+  (let [fn-name   (str->sym (str-append "world-resize-" (symbol-name name)))
+        ctor-name (str->sym (str-append "make-"         (symbol-name name)))
+        copy-name (str->sym (str-append "copy-into-"    (symbol-name name)))]
+    `(defn ~fn-name [n] [^borrow src : (~name n) k : int]
+                        : (exists [n'] (~name n'))
+       (let [dst : (~name (Static 0)) (~ctor-name k)]
+         (do
+           (~copy-name src dst)
+           (pack dst (exists [n'] (~name n'))))))))
 
 ;;; sized-defcomponent-accessors -- emit cap-gated
 ;;; `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` accessors for one

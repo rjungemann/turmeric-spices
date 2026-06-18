@@ -6,6 +6,46 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **E2c slice 11 follow-up -- `sized-defworld-world-resize`, the
+  `world-resize` existential wrapper around `sized-defworld-copy-into`.**
+  Emits a per-world `world-resize-<Name>` that grows a sized world to a
+  fresh *runtime* capacity and hands the result back inside the
+  size-hiding existential `(exists [n'] (<Name> n'))`. It is the thin
+  client layer the sized-world plan calls out: it allocates the larger
+  destination via `make-<Name>`, delegates the slot-preserving,
+  generation-threading copy to the already-emitted `copy-into-<Name>`
+  (so an `Entity` packed against the source stays `sized-alive?` in the
+  resized world), and lifts the destination into the existential with a
+  native `(pack dst (exists [n'] (<Name> n')))` -- exactly what the
+  stdlib `pack-sized` macro expands to, written inline so the spice
+  carries no `load`-time dependency on `stdlib/sized-handle-existential`.
+  Callers recover an abstract `n'` via native `open` (or stdlib
+  `open-sized`) and run `sized-for-each` / the cap-gated accessors
+  against the opened world.
+
+  The new capacity is a runtime argument, which is *why* the result is
+  existential: the destination cap is not statically known, so it is
+  sealed behind a fresh `n'` rather than surfaced as a concrete
+  `(<Name> (Static k))`. The destination's phantom cap is written as
+  `(Static 0)` only to give `make-<Name>` a ground type to monomorphise
+  against (the constructor codegens only at a ground capacity); it is
+  forgotten the moment the value is packed and never reaches runtime --
+  every storage and the state cell are sized from the runtime argument,
+  and `sized-dense-cap` / `sized-cap` read that runtime width, so
+  `sized-for-each`'s loop bound and the accessors' bounds checks all see
+  the real capacity. Growing is the supported direction; the underlying
+  `sized-state-copy-into` aborts before any partial state is observable
+  if the new capacity is smaller than the source (matching
+  `copy-into-<Name>`'s shrink-rejection guarantee). Unblocked by
+  turmeric's existential pack/open heap-boxing fix for multi-field
+  struct payloads. New regression test `tests/sized-world-resize.tur`
+  grows a despawn-punched cap-4 world into a runtime cap-8 existential
+  and asserts Pos round-trip, generational aliveness preservation, live
+  count, and a `sized-for-each` sweep over the opened abstract-`n'`
+  world. The component vector lives in exactly one place (the
+  `sized-defworld-copy-into` call); `sized-defworld-world-resize` takes
+  only the world name.
+
 - **E2c sized-scheduler -- wire sized worlds through the parallel
   `Stage` via the report's "by heap pointer" direction.** The
   `docs/reported/sized-scheduler-system-stage-world-carrier.md` report
