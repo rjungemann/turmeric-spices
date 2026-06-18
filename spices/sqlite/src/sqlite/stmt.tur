@@ -17,7 +17,7 @@
 ;;;   (while (= 1 (stmt-step stmt)) (process-row stmt))
 ;;;
 ;;; Since: P2
-(defn stmt-step [stmt : Stmt] : int
+(defn stmt-step [^borrow stmt : Stmt] : int
   ```c
   #include <sqlite3.h>
   int rc = sqlite3_step((sqlite3_stmt *)(intptr_t)stmt);
@@ -40,7 +40,7 @@
 ;;;   (stmt-bind-int stmt 1 42)
 ;;;
 ;;; Since: P2
-(defn stmt-bind-int [stmt : Stmt i : int value : int] : bool
+(defn stmt-bind-int [^borrow stmt : Stmt i : int value : int] : bool
   ```c
   #include <sqlite3.h>
   return sqlite3_bind_int64((sqlite3_stmt *)(intptr_t)stmt,
@@ -61,7 +61,7 @@
 ;;;   (stmt-bind-real stmt 1 3.14)
 ;;;
 ;;; Since: P2
-(defn stmt-bind-real [stmt : Stmt i : int value : float] : bool
+(defn stmt-bind-real [^borrow stmt : Stmt i : int value : float] : bool
   ```c
   #include <sqlite3.h>
   return sqlite3_bind_double((sqlite3_stmt *)(intptr_t)stmt,
@@ -82,7 +82,7 @@
 ;;;   (stmt-bind-text stmt 1 "Alice")
 ;;;
 ;;; Since: P2
-(defn stmt-bind-text [stmt : Stmt i : int value : cstr] : bool
+(defn stmt-bind-text [^borrow stmt : Stmt i : int value : cstr] : bool
   ```c
   #include <sqlite3.h>
   return sqlite3_bind_text((sqlite3_stmt *)(intptr_t)stmt,
@@ -103,7 +103,7 @@
 ;;;   (stmt-bind-null stmt 2)
 ;;;
 ;;; Since: P2
-(defn stmt-bind-null [stmt : Stmt i : int] : bool
+(defn stmt-bind-null [^borrow stmt : Stmt i : int] : bool
   ```c
   #include <sqlite3.h>
   return sqlite3_bind_null((sqlite3_stmt *)(intptr_t)stmt, (int)i) == SQLITE_OK;
@@ -121,13 +121,16 @@
 ;;;   (stmt-reset stmt)
 ;;;
 ;;; Since: P2
-(defn stmt-reset [stmt : Stmt] : bool
+(defn stmt-reset [^borrow stmt : Stmt] : bool
   ```c
   #include <sqlite3.h>
   return sqlite3_reset((sqlite3_stmt *)(intptr_t)stmt) == SQLITE_OK;
   ```)
 
 ;;; stmt-finalize -- finalize and free a prepared statement.
+;;;
+;;; Consumes the linear Stmt: its single legal consumption, so any later
+;;; use of the handle is rejected under -Xsubstructural.
 ;;;
 ;;; Parameters:
 ;;;   stmt -- statement handle

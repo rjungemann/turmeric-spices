@@ -1,0 +1,17 @@
+;; U1 negative fixture: a :linear Stmt must be finalized exactly once.
+;; Preparing a statement and stepping it but never finalizing is a leak.
+;;   tur check -Xsubstructural tests/errors/sqlite-stmt-leak.tur
+;;   => error [TUR-E0100]: linear value 'st' dropped without being consumed
+;; Compile-fail fixture (see sqlite-db-use-after-close.tur for the note).
+
+(defmodule sqlite_stmt_leak_test
+  (export)
+
+(import sqlite/db   :refer [Db db-prepare stmt-of])
+(import sqlite/stmt :refer [stmt-step])
+
+(defn leak-stmt [^borrow db : Db] : int
+  (let [st (stmt-of (db-prepare db "SELECT 1"))]
+    (stmt-step st)))   ;; ERROR TUR-E0100: st never finalized
+
+) ;; end defmodule sqlite_stmt_leak_test
