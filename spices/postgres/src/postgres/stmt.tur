@@ -83,7 +83,7 @@
 ;; -------------------------------------------------------------------------
 
 ;;; __pq-prepare-raw -- PQprepare; returns 1 on success, 0 on failure.
-(defn __pq-prepare-raw [conn : Conn name : cstr sql : cstr nparams : int] : int
+(defn __pq-prepare-raw [^borrow conn : Conn name : cstr sql : cstr nparams : int] : int
   ```c
   #include <libpq-fe.h>
   PGresult *res = PQprepare((PGconn *)(intptr_t)conn,
@@ -98,7 +98,7 @@
   ```)
 
 ;;; __pq-exec-prepared-raw -- PQexecPrepared; returns PGresult* as :int (0 on failure).
-(defn __pq-exec-prepared-raw [conn : Conn name : cstr paramValues : int nparams : int] : int
+(defn __pq-exec-prepared-raw [^borrow conn : Conn name : cstr paramValues : int nparams : int] : int
   ```c
   #include <libpq-fe.h>
   const char **vals = (const char **)(intptr_t)paramValues;
@@ -113,7 +113,7 @@
   ```)
 
 ;;; __pq-exec-raw -- execute SQL with no params; returns 1 on success, 0 on failure.
-(defn __pq-exec-raw [conn : Conn sql : cstr] : int
+(defn __pq-exec-raw [^borrow conn : Conn sql : cstr] : int
   ```c
   #include <libpq-fe.h>
   PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
@@ -142,7 +142,7 @@
 ;;;   (stmt-prepare conn "insert-user" "INSERT INTO users (name) VALUES ($1)" 1)
 ;;;
 ;;; Since: PG2
-(defn stmt-prepare [conn : Conn name : cstr sql : cstr nparams : int] : ptr<void>
+(defn stmt-prepare [^borrow conn : Conn name : cstr sql : cstr nparams : int] : ptr<void>
   (let [rc (__pq-prepare-raw conn name sql nparams)]
     (if (not= rc 0) (__ok 0) (__err 0))))
 
@@ -162,7 +162,7 @@
 ;;;     (if (ok? r) (rows-free (rows-of r)) (println "exec failed")))
 ;;;
 ;;; Since: PG2
-(defn stmt-exec-prepared [conn : Conn name : cstr params : int] : ptr<void>
+(defn stmt-exec-prepared [^borrow conn : Conn name : cstr params : int] : ptr<void>
   (let [n    (__params-count params)
         vals (__params-values params n)
         raw  (__pq-exec-prepared-raw conn name vals n)]
@@ -181,7 +181,7 @@
 ;;;   (stmt-deallocate conn "insert-user")
 ;;;
 ;;; Since: PG2
-(defn stmt-deallocate [conn : Conn name : cstr] : ptr<void>
+(defn stmt-deallocate [^borrow conn : Conn name : cstr] : ptr<void>
   (let [sql (__dealloc-sql name)
         rc  (__pq-exec-raw conn sql)]
     (if (not= rc 0) (__ok 0) (__err 0))))

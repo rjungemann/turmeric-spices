@@ -54,6 +54,20 @@ let [r db-connect("postgresql://localhost/app")]
       db-close(db)
 ```
 
+### Linear `Conn` / `Rows` (U1)
+
+`Conn` and `Rows` are `:linear` opaques. A connection from `conn-of` (or
+`ok-val`) must be closed exactly once with `db-close` (PQfinish), and a
+result set from `rows-of` must be released exactly once with `rows-free`
+(PQclear). The exec / query / transaction / prepared-statement / notify
+operations and the row accessors take their handle by `^borrow`. Under
+`-Xsubstructural` this makes use-after-close, use-after-free, double-close,
+and leaked connections / result sets into compile-time errors (`TUR-E0101`
+/ `TUR-E0100`) instead of runtime faults. The discipline is inert in
+ordinary builds, so existing call sites compile unchanged. (Prepared
+statements are referenced by name, so there is no statement handle to
+track.) See `tests/errors/` for the rejected cases.
+
 ## See also
 
 - [API reference](api/)
