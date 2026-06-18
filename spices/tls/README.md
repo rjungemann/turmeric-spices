@@ -113,6 +113,19 @@ PEM-encoded file mbedTLS itself accepts.
   )
 ```
 
+### Linear `TlsConn` (U1)
+
+`TlsConn` is a `:linear` opaque. A conn returned by `tls-wrap-fd` must be
+released exactly once with `tls-free` (its single consumption); the
+observing operations -- `tls-handshake`, `tls-read`, `tls-write`,
+`tls-shutdown`, `tls-conn-null?` -- take it by `^borrow`, so they read it
+without discharging that obligation. Under `-Xsubstructural` this turns
+use-after-free (`tls-free` then `tls-read`) and forgetting to free into
+compile-time errors (`TUR-E0101` / `TUR-E0100`) instead of runtime faults.
+The discipline is inert in ordinary builds, so existing call sites compile
+unchanged. See `tests/conn_linear_test.tur` for the borrow/consume idiom
+and `tests/errors/` for the rejected cases.
+
 ## Quick start (HTTPS via stdlib/httpd)
 
 The H5 milestone of stdlib/httpd makes the integration one-line:

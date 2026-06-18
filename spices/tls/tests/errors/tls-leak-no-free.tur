@@ -1,0 +1,23 @@
+;; U1 negative fixture: a :linear TlsConn must be consumed (freed) exactly
+;; once. Opening a conn and using it but never calling tls-free is a leak,
+;; which the elaborator rejects under -Xsubstructural -- catching the
+;; "forgot to close the handle" bug at compile time.
+;;
+;; Verify (from the tls spice root):
+;;   tur check -Xsubstructural tests/errors/tls-leak-no-free.tur
+;;   => error [TUR-E0100]: linear value 'conn' dropped without being consumed
+;;
+;; Compile-fail fixture (see tls-use-after-free.tur for the placement note).
+
+(defmodule tls_leak_no_free_test
+  (export)
+
+(import tls/ctx  :refer [tls-ctx-new])
+(import tls/conn :refer [TlsConn tls-wrap-fd tls-handshake])
+
+(defn main [] : int
+  (let [conn (tls-wrap-fd (tls-ctx-new) 0)]
+    (tls-handshake conn)   ;; borrow only; conn never consumed
+    0))                    ;; ERROR TUR-E0100: linear value dropped
+
+) ;; end defmodule tls_leak_no_free_test
