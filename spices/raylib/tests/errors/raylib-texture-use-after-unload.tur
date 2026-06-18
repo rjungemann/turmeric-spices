@@ -1,0 +1,18 @@
+;; U1 negative: using a Texture2D after unload-texture must be rejected under
+;; -Xsubstructural. Texture2D is :linear (consumed by unload-texture);
+;; draw-texture borrows, so drawing an unloaded texture is use-after-free.
+;;   tur check -Xsubstructural tests/errors/raylib-texture-use-after-unload.tur
+;;   => error [TUR-E0101]: linear value 't' used after being consumed
+;; Violation in an uncalled defn (no main); compiles + no-op-passes without
+;; the flag. Asserted manually under -Xsubstructural (cf. swap_reject_test's
+;; tur-check convention) pending the P5 harness.
+(defmodule raylib_texture_use_after_unload_test
+  (export)
+(import raylib/types    :refer [Texture2D Color])
+(import raylib/textures :refer [load-texture unload-texture draw-texture])
+(defn use-after-unload [tint : Color] : void
+  (let [t (load-texture "x.png")]
+    (do
+      (unload-texture t)         ;; single legal consumption
+      (draw-texture t 0 0 tint)))) ;; ERROR TUR-E0101: borrow after consume
+) ;; end

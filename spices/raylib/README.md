@@ -60,6 +60,22 @@ while not(window-should-close())
 close-window()
 ```
 
+### Linear resource handles (U1)
+
+The handles with an `unload-*` peer -- `Texture2D`, `Font`, `Model`,
+`Sound`, `Music` -- are `:linear` opaques: a handle from its loader must be
+released exactly once with the matching `unload-*`, and the draw / play /
+update operations take it by `^borrow`. Under `-Xsubstructural` this makes
+use-after-unload and leaked GPU/audio resources compile-time errors
+(`TUR-E0101` / `TUR-E0100`); the discipline is inert in ordinary builds, so
+existing call sites compile unchanged.
+
+The value-like opaques (`Color`, `Vector2`, `Rectangle`, `Camera2D`,
+`Camera3D`, `Mesh`, `Material`, `Matrix`) are nominally distinct -- mixing
+them up is a type error (see `tests/raylib/swap_reject_test.tur`) -- but
+have no deleter, so they stay plain. See `tests/errors/` for the rejected
+linear cases.
+
 ## See also
 
 - [API reference](api/)
