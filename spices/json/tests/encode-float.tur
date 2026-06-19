@@ -1,0 +1,43 @@
+;; Encode [float] -- mirror of Decode [float], closing the float
+;; round-trip.  Finite doubles render as the shortest %g form that
+;; re-parses to the same value; non-finite doubles (Infinity / NaN,
+;; which JSON cannot represent) render as "null".
+;;
+;; Expected:
+;;   3.14
+;;   2
+;;   -0.5
+;;   100000000
+;;   null
+;;   null
+;;   rt=3.14
+
+(defmodule encode_float_test (export)
+
+(import json/encode)
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
+
+(defn __inf [] #{Unsafe} : float
+  ```c double z = 0.0; return 1.0 / z; ```)
+
+(defn __nan [] #{Unsafe} : float
+  ```c double z = 0.0; return z / z; ```)
+
+(defn __show-rt [s : cstr] #{Unsafe} : nil
+  ```c printf("rt=%s\n", (const char *)s); ```)
+
+(defn main [] : int
+  (println (encode 3.14))
+  (println (encode 2.0))
+  (println (encode -0.5))
+  (println (encode 100000000.0))
+  (println (encode (unsafe (__inf))))
+  (println (encode (unsafe (__nan))))
+  ;; Round-trip: parse a JSON number into a float, then re-encode it.
+  (let [doc  (unsafe (json-parse-doc "{\"pi\":3.14}"))
+        root (unsafe (json-doc-root doc))
+        pi   (ok-val (:: (decode doc (unsafe (json-obj-get doc root "pi")))
+                         (Result float cstr)))]
+    (unsafe (__show-rt (encode pi)))
+    (unsafe (json-doc-free doc))
+    0)))
