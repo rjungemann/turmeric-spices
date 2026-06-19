@@ -62,11 +62,11 @@
     size_t blen = strlen(buf) + 32;
     char *emsg = malloc(blen);
     snprintf(emsg, blen, "offset %zu: %s", erroffset, buf);
-    return tur_err((int64_t)(intptr_t)emsg);
+    return tur_box_err((int64_t)(intptr_t)emsg);
   }
   struct __re_wrap { pcre2_code *re; } *w = malloc(sizeof(*w));
   w->re = re;
-  return tur_ok((int64_t)(intptr_t)w);
+  return tur_box_ok((int64_t)(intptr_t)w);
   ```)
 
 ;;; regex-free -- free a compiled Regex handle.
@@ -132,7 +132,7 @@
     size_t bl = strlen(buf);
     char *emsg = malloc(bl + 1);
     memcpy(emsg, buf, bl + 1);
-    return tur_err((int64_t)(intptr_t)emsg);
+    return tur_box_err((int64_t)(intptr_t)emsg);
   }
 
   char *sub_copy = malloc(sub_len + 1);
@@ -145,7 +145,7 @@
   m->match_count = rc;
   m->re          = w->re;
 
-  return tur_ok((int64_t)(intptr_t)m);
+  return tur_box_ok((int64_t)(intptr_t)m);
   ```)
 
 ;;; regex-match-all -- find all non-overlapping matches in a subject string.
@@ -270,7 +270,7 @@
     size_t bl = strlen(buf);
     char *emsg = malloc(bl + 1);
     memcpy(emsg, buf, bl + 1);
-    return tur_err((int64_t)(intptr_t)emsg);
+    return tur_box_err((int64_t)(intptr_t)emsg);
   }
 
   /* out_len is updated by pcre2_substitute to the output length */
@@ -279,7 +279,7 @@
   final[out_len] = '\0';
   free(out_buf);
 
-  return tur_ok((int64_t)(intptr_t)final);
+  return tur_box_ok((int64_t)(intptr_t)final);
   ```)
 
 ;;; regex-of -- extract a typed Regex handle from an ok result returned by regex-compile.
