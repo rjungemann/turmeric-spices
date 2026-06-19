@@ -1,0 +1,20 @@
+;; derive-json-sum-encode emits an Encode instance for a defdata sum type
+;; using the externally-tagged convention `{"Ctor": {...fields...}}`.
+;;
+;; Expected:
+;;   {"Click":{"x":3,"y":4}}
+;;   {"Scroll":{"dy":9}}
+
+(defmodule derive_encode_sum_test (export)
+
+(import json/encode :refer [derive-json-sum-encode])
+
+(defdata Event :copy [] (Click :int :int) (Scroll :int))
+(derive-json-sum-encode Event
+  (Click (x int) (y int))
+  (Scroll (dy int)))
+
+(defn main [] : int
+  (println (encode (Click 3 4)))
+  (println (encode (Scroll 9)))
+  0))

@@ -5,16 +5,20 @@
 ;; builder. The `encode` method returns a JSON fragment as a malloc'd cstr
 ;; that the caller owns and must free (or let GC handle).
 ;;
-;; Decode + defdata sum types + opaque `:as :carrier` opt-in are deferred
-;; to a follow-up commit; the design questions noted in the uplift plan
-;; (field-name renaming, missing-field policy, `:skip` annotations) will
-;; be revisited when those land.
+;; Since the minimal slice, the Decode direction, `defopaque :as :carrier`
+;; opt-in (`derive-json-opaque`), and `defdata` sum types via the
+;; externally-tagged `derive-json-sum` have all landed. The remaining design
+;; questions from the uplift plan (field-name renaming, missing-field policy,
+;; `:skip` annotations, structured decode errors) are still open follow-ups.
 
 (defmodule json/encode
   (export derive-json derive-json-encode derive-json-decode
           derive-json-opaque derive-json-opaque-encode derive-json-opaque-decode
-          __json-chain __json-obj-build
-          __decode-field __decode-fields __decode-make-struct)
+          derive-json-sum derive-json-sum-encode derive-json-sum-decode
+          __json-chain __json-obj-build __json-tag
+          __decode-field __decode-fields __decode-make-struct
+          __sum-fnames __sum-vchain __sum-enc-arms
+          __sum-dfields __sum-dec-arms)
 
 (import json/decode :refer [json-obj-get])
 
@@ -153,6 +157,36 @@
       w += 4;
     }
     written++;
+  }
+  out[w++] = '}';
+  out[w] = '\0';
+  return out;
+  ```)
+
+;; Runtime helper: wrap an already-encoded JSON fragment in a single-key
+;; object `{"Tag": <inner>}`. This is the externally-tagged discriminator
+;; convention used by `derive-json-sum` for `defdata` sum types: a value
+;; built with constructor `Click` encodes as `{"Click": {...fields...}}`.
+;; Frees the `inner` buffer it consumes (each arm's `__json-obj-build`
+;; result is malloc'd and owned here); the static tag literal is not freed.
+(defn __json-tag [name : cstr inner : cstr] #{Unsafe} : cstr
+  ```c
+  size_t kn = name ? strlen((const char *)name) : 0;
+  size_t vn = inner ? strlen((const char *)inner) : 4 /* "null" */;
+  char *out = (char *)malloc(kn + vn + 6);
+  size_t w = 0;
+  out[w++] = '{';
+  out[w++] = '"';
+  if (name) { memcpy(out + w, (const char *)name, kn); w += kn; }
+  out[w++] = '"';
+  out[w++] = ':';
+  if (inner) {
+    memcpy(out + w, (const char *)inner, vn);
+    w += vn;
+    free((void *)inner);
+  } else {
+    memcpy(out + w, "null", 4);
+    w += 4;
   }
   out[w++] = '}';
   out[w] = '\0';
@@ -454,5 +488,140 @@
        (:: (ok (:: (ok-val (:: (decode doc val) (Result ~carrier cstr)))
                    ~type-name))
            (Result ~type-name cstr)))))
+
+;; ---------------------------------------------------------------------------
+;; derive-json-sum: Encode/Decode for `defdata` sum-of-products types, using
+;; the externally-tagged discriminator convention `{"Ctor": {...fields...}}`.
+;;
+;; Turmeric macros cannot introspect a `defdata`'s constructor list at
+;; expansion time, so the constructors are passed explicitly, mirroring the
+;; `(field-name field-type)` shape `derive-json` uses for structs:
+;;
+;;   (defdata Event :copy [] (Click :int :int) (Scroll :int))
+;;   (derive-json-sum Event
+;;     (Click (x int) (y int))
+;;     (Scroll (dy int)))
+;;
+;; Each constructor spec is `(CtorName (f1 t1) (f2 t2) ...)`; the field names
+;; double as the inner-object JSON keys and as the `match`/constructor binders
+;; (defdata payloads are positional, so the names are purely cosmetic on the
+;; wire but must be listed in constructor order).
+;;
+;; Encoding `(Click 3 4)` yields `{"Click":{"x":3,"y":4}}`. Decoding looks up
+;; each known tag in order and, on the first present one, decodes that inner
+;; object's fields; the last constructor is the unconditional fallthrough.
+;; Like the struct `derive-json`, field decode does not yet accumulate
+;; structured errors -- a failed inner field surfaces via the field's own
+;; `Result` (see the `__decode-field` note above).
+;; ---------------------------------------------------------------------------
+
+;; Encode: splice the field names into a constructor `match` pattern,
+;; e.g. fields ((x int) (y int)) -> the binder list `x y` for `(Click x y)`.
+(defmacro __sum-fnames [fields]
+  (if (empty? fields)
+    `()
+    `(~(first (first fields)) ~@(__sum-fnames ~(rest fields)))))
+
+;; Encode: build the `__json-obj-build` (key, fragment) chain for one
+;; constructor's fields, binding each fragment to the match-bound field var.
+;; Mirrors `__json-chain` but encodes the bare binder `nm` instead of `(.nm x)`.
+(defmacro __sum-vchain [fields]
+  (if (empty? fields)
+    0
+    `(cons ~(symbol-name (first (first fields)))
+           (cons (encode ~(first (first fields)))
+                 (__sum-vchain ~(rest fields))))))
+
+;; Encode: emit the flat `match` arm list -- for each constructor a pattern
+;; `(Ctor f0 f1 ...)` followed by its tagged-object body -- then recurse.
+(defmacro __sum-enc-arms [ctors]
+  (if (empty? ctors)
+    `()
+    `((~(first (first ctors)) ~@(__sum-fnames ~(rest (first ctors))))
+      (unsafe (__json-tag ~(symbol-name (first (first ctors)))
+                          (__json-obj-build (__sum-vchain ~(rest (first ctors))))))
+      ~@(__sum-enc-arms ~(rest ctors)))))
+
+;; Decode: build the positional constructor arguments for one constructor,
+;; reading each field from the tag's inner object bound to `__obj`.
+(defmacro __sum-dfields [fields]
+  (if (empty? fields)
+    `()
+    `((ok-val (:: (decode doc (unsafe (json-obj-get doc __obj ~(symbol-name (first (first fields))))))
+                  (Result ~(first (rest (first fields))) cstr)))
+      ~@(__sum-dfields ~(rest fields)))))
+
+;; Decode: chain `(if <tag present> (Ctor ...) <next>)` over the constructors.
+;; The last constructor is the unconditional fallthrough (no guard), matching
+;; the struct side's "no structured error propagation yet" stance.
+(defmacro __sum-dec-arms [ctors]
+  (if (empty? (rest ctors))
+    `(let [__obj (unsafe (json-obj-get doc val ~(symbol-name (first (first ctors)))))]
+       (~(first (first ctors)) ~@(__sum-dfields ~(rest (first ctors)))))
+    `(let [__obj (unsafe (json-obj-get doc val ~(symbol-name (first (first ctors)))))]
+       (if (not (= __obj 0))
+         (~(first (first ctors)) ~@(__sum-dfields ~(rest (first ctors))))
+         (__sum-dec-arms ~(rest ctors))))))
+
+;;; derive-json-sum-encode -- emit only the `Encode` instance for a
+;;; `defdata` sum type, using the externally-tagged convention. Useful when
+;;; the sum is produced but never parsed back (event logs, telemetry unions).
+;;;
+;;; Syntax:
+;;;   (derive-json-sum-encode T (Ctor1 (f t) ...) (Ctor2 (f t) ...) ...)
+(defmacro derive-json-sum-encode [type-name & ctors]
+  `(definstance Encode [~type-name]
+     (encode [__self] (match __self ~@(__sum-enc-arms ~ctors)))))
+
+;;; derive-json-sum-decode -- emit only the `Decode` instance for a `defdata`
+;;; sum type. Reads the externally-tagged discriminator and dispatches to the
+;;; matching constructor. Useful for read-only inbound unions.
+;;;
+;;; Syntax:
+;;;   (derive-json-sum-decode T (Ctor1 (f t) ...) (Ctor2 (f t) ...) ...)
+;;;
+;;; The constructed `(ok <adt>)` is boxed into the `(Result T cstr)` carrier
+;;; by a generated standalone helper `defn`, NOT inline in the method body:
+;;; a typeclass method whose tail is a bare `(ok <adt-value>)` currently
+;;; miscompiles (the carrier-box for an ADT-typed result slot is assigned an
+;;; int64 handle -- the value-struct case was fixed but the sum/ADT case is
+;;; not). Delegating to a plain `defn`, whose return path boxes the handle
+;;; correctly, sidesteps that gap until the compiler closes it.
+(defmacro derive-json-sum-decode [type-name & ctors]
+  (let [impl (str->sym (str-append "__derive-sum-decode-impl-" (symbol-name type-name)))]
+    `(do
+       (defn ~impl [doc : int  val : int] : (Result ~type-name cstr)
+         (:: (ok (__sum-dec-arms ~ctors)) (Result ~type-name cstr)))
+       (definstance Decode [~type-name]
+         (decode [doc val] (~impl doc val))))))
+
+;;; derive-json-sum -- emit both Encode and Decode instances for a `defdata`
+;;; sum-of-products type using the externally-tagged convention
+;;; `{"Ctor": {...fields...}}`.
+;;;
+;;; Syntax:
+;;;   (derive-json-sum T (Ctor1 (f1 t1) ...) (Ctor2 (f1 t1) ...) ...)
+;;;
+;;; Example:
+;;;   (defdata Event :copy [] (Click :int :int) (Scroll :int))
+;;;   (derive-json-sum Event (Click (x int) (y int)) (Scroll (dy int)))
+;;;   ;; (encode (Click 3 4))                          => {"Click":{"x":3,"y":4}}
+;;;   ;; (:: (decode doc root) (Result Event cstr))    parses it back
+;;;
+;;; Limitations (carried from the struct slice):
+;;;   - Field-name policy is identity; `:rename-fields` not honored yet.
+;;;   - Inner field decode does not accumulate structured errors yet.
+;;;   - Nullary constructors encode as `{"Ctor":{}}` (empty inner object).
+(defmacro derive-json-sum [type-name & ctors]
+  ;; Decode is split into a standalone helper `defn` + a delegating instance;
+  ;; see `derive-json-sum-decode` for why the box can't happen in the method.
+  (let [impl (str->sym (str-append "__derive-sum-decode-impl-" (symbol-name type-name)))]
+    `(do
+       (definstance Encode [~type-name]
+         (encode [__self] (match __self ~@(__sum-enc-arms ~ctors))))
+       (defn ~impl [doc : int  val : int] : (Result ~type-name cstr)
+         (:: (ok (__sum-dec-arms ~ctors)) (Result ~type-name cstr)))
+       (definstance Decode [~type-name]
+         (decode [doc val] (~impl doc val))))))
 
 ) ;; end defmodule json/encode

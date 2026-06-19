@@ -1,0 +1,52 @@
+;; derive-json-sum-decode reads the externally-tagged discriminator and
+;; dispatches to the matching constructor. Decode two different tags out of
+;; their JSON encodings and confirm the constructor + payload survive.
+;;
+;; Expected:
+;;   click x=3 y=4
+;;   scroll dy=9
+
+(defmodule derive_decode_sum_test (export)
+
+(import json/encode :refer [derive-json-sum-decode])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+
+(defn __int->cstr [n : int] #{Unsafe} : cstr
+  ```c char *b = (char*)malloc(24); snprintf(b, 24, "%lld", (long long)n); return b; ```)
+
+(defn __cat6 [a : cstr b : cstr c : cstr d : cstr e : cstr f : cstr] #{Unsafe} : cstr
+  ```c
+  const char *ps[6] = {(const char*)a,(const char*)b,(const char*)c,
+                       (const char*)d,(const char*)e,(const char*)f};
+  size_t total = 0, ln[6];
+  for (int i = 0; i < 6; i++) { ln[i] = ps[i] ? strlen(ps[i]) : 0; total += ln[i]; }
+  char *o = (char*)malloc(total + 1);
+  size_t w = 0;
+  for (int i = 0; i < 6; i++) { if (ps[i]) { memcpy(o + w, ps[i], ln[i]); w += ln[i]; } }
+  o[w] = '\0';
+  return o;
+  ```)
+
+(defdata Event :copy [] (Click :int :int) (Scroll :int))
+(derive-json-sum-decode Event
+  (Click (x int) (y int))
+  (Scroll (dy int)))
+
+(defn show [e : Event] : cstr
+  (match e
+    (Click x y) (unsafe (__cat6 "click x=" (unsafe (__int->cstr x))
+                                " y=" (unsafe (__int->cstr y)) "" ""))
+    (Scroll d)  (unsafe (__cat6 "scroll dy=" (unsafe (__int->cstr d)) "" "" "" ""))))
+
+(defn decode-event [s : cstr] : cstr
+  (let [doc  (unsafe (json-parse-doc s))
+        root (unsafe (json-doc-root doc))
+        e    (ok-val (:: (decode doc root) (Result Event cstr)))
+        out  (show e)]
+    (unsafe (json-doc-free doc))
+    out))
+
+(defn main [] : int
+  (println (decode-event "{\"Click\":{\"x\":3,\"y\":4}}"))
+  (println (decode-event "{\"Scroll\":{\"dy\":9}}"))
+  0))
