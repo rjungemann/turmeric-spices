@@ -13,6 +13,11 @@
   top-level function. `plot`, `plot-write-png`, and `plot-into-canvas`
   remain as thin wrappers that route through `render-to`, so existing
   call sites are unchanged.
+- `render` in `plot/core`: a single entry point generic over `Backend`
+  (`(defn render [^Backend B b : B  renderers : int  opts : int] ...)`),
+  so plot-building code can dispatch to any sink without knowing the
+  concrete backend type -- the "plot DSL becomes generic in Backend"
+  the uplift plan called for.
 
 ### Fixed
 

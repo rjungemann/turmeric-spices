@@ -1,7 +1,7 @@
 ;; plot/core.tur -- renderer representation and plot entrypoints.
 
 (defmodule plot/core
-  (export plot plot-write-png plot-into-canvas
+  (export plot plot-write-png plot-into-canvas render
           __make-renderer __renderer-floats __renderer-ints __renderer-bounds
           __surface-create __surface-destroy __surface-write-png
           __canvas-create __canvas-destroy
@@ -1505,6 +1505,20 @@
             (__surface-destroy s)
             wr)
           (__err (__err-val r))))))
+
+  ;;; render -- draw `renderers` to any Backend, generic over the sink.
+  ;;;
+  ;;; This is the plan's "the plot DSL becomes generic in Backend": one entry
+  ;;; point polymorphic over the output target, so a caller can hold a backend
+  ;;; value and dispatch to the right instance regardless of concrete type.
+  ;;; `plot`, `plot-write-png`, and `plot-into-canvas` are the convenience
+  ;;; monomorphic wrappers; `render` is the generic form.
+  ;;;
+  ;;; Example:
+  ;;;   (render (make-struct PngBackend "out.png") rs opts)
+  ;;;   (render (make-struct SurfaceBackend 0 0)   rs opts)
+  (defn render [^Backend B b : B  renderers : int  opts : int] : ptr<void>
+    (render-to b renderers opts))
 
   ;;; plot -- render a Vec[Renderer] to a new surface and return it.
   ;;;

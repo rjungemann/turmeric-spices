@@ -3,7 +3,7 @@
 ;; through the single `render-to` method instead of the legacy entrypoints.
 
 (defmodule plot/tests/backend
-  (import plot/core  :refer [plot-into-canvas
+  (import plot/core  :refer [plot-into-canvas render
                              __ok? __ok-val __surface-create __canvas-create
                              __canvas-destroy __surface-destroy
                              __surface-width __surface-height
@@ -92,6 +92,27 @@
            (assert-true (file-exists? out))
            (assert-true (>i (file-size out) 100)))))
 
+  ;; The headline win of the collapse: plot/core's `render` is generic over
+  ;; *any* Backend (`(defn render [^Backend B b : B ...])`), so one call site
+  ;; dispatches to whichever concrete instance is passed -- the "plot DSL
+  ;; becomes generic in Backend" the uplift plan called for.
+  (defn generic-helper-ok [] : bool
+    (let [sr (render (make-struct SurfaceBackend 256 192)
+                     (demo-renderers) (default-plot-opts))]
+      (if (__ok? sr)
+        (let [s (__ok-val sr)
+              ok? (>i (__count-non-background s 0 0 256 192) 0)]
+          (__surface-destroy s)
+          (assert-true ok?))
+        (assert-true false))))
+
+  (defn generic-helper-png-ok [] : bool
+    (let [out "/tmp/tur-plot-backend-generic.png"
+          wr  (do (unlink-file out)
+                  (render (make-struct PngBackend out)
+                          (demo-renderers) (default-plot-opts)))]
+      (and (assert-ok wr) (assert-true (file-exists? out)))))
+
   (defn main [] : int
     (describe "plot/backend"
       (it "SurfaceBackend renders to a fresh surface"
@@ -101,6 +122,10 @@
       (it "CanvasBackend draws into an existing canvas"
         (canvas-backend-ok))
       (it "PngBackend writes a PNG file"
-        (png-backend-ok)))
+        (png-backend-ok))
+      (it "a Backend-generic helper dispatches to SurfaceBackend"
+        (generic-helper-ok))
+      (it "the same generic helper dispatches to PngBackend"
+        (generic-helper-png-ok)))
     (run-all)
     0))
