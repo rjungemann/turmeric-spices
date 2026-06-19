@@ -18,14 +18,14 @@
 ;;; Carrier note / element scope. Every storage *handle* (`(Dense A)`,
 ;;; `(Sparse A)`, `Tag`) rides the `int64` carrier, so no method *C*
 ;;; signature depends on `(Storage T)`. The carried *element* type `Elem`
-;;; must likewise ride the int64 carrier (an int, an int-carried opaque such
-;;; as `(defopaque Hp :int)`, a pointer): the generic instance bodies
-;;; monomorphise `Elem` to the int64 carrier, so a by-value *struct* element
-;;; would mismatch the C ABI at `storage-insert!` / `storage-get`. Struct
-;;; components therefore keep the direct `dense-*` accessor path
-;;; (`defcomponent-accessors`) until the value-level projection caveat the
-;;; plan gates P6 against is closed upstream. Int-carried components dispatch
-;;; through the class cleanly today.
+;;; rides the same int64 carrier for int-carried components (an int, an
+;;; int-carried opaque such as `(defopaque Hp :int)`, a pointer). A
+;;; by-value *struct* element now also dispatches cleanly: turmeric's
+;;; parametric struct-element projection (PR #446, 2026-06-19) grounds the
+;;; instance head's element tyvar to the concrete struct and mints a
+;;; by-value spec, so `storage-insert!` / `storage-get` thread a `Pos` by
+;;; value instead of carrier-collapsing it to int64. This is what unblocked
+;;; routing `defcomponent-accessors` through `StorageOps` (`ecs/world`).
 ;;;
 ;;; Return-position witness. `storage-get` returns the associated `Elem`. The
 ;;; elaborator does not yet project `Elem` to a concrete type in *return*

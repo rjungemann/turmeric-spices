@@ -22,11 +22,14 @@
 ;;;   (defcomponent-accessors GameWorld Vel)
 ;;;     ;; same trio for Vel
 ;;;
-;;; The accessors are thin wrappers over `dense-set!` / `dense-get` /
-;;; `dense-has?`. They are deliberately *not* emitted by `defworld`
-;;; itself -- some worlds mix dense components with `Tag` bitset fields
-;;; that have no `dense-*` accessors -- so call `defcomponent-accessors`
-;;; only for the dense components you want typed get/set/has helpers for.
+;;; The accessors dispatch the `StorageOps` methods (`storage-insert!` /
+;;; `storage-get` / `storage-has?`) against the component's `(Storage T)`
+;;; field, so the same accessor body works over whichever backend the
+;;; component's `Component` instance selects. They are deliberately *not*
+;;; emitted by `defworld` itself -- some worlds mix storage-backed
+;;; components with `Tag` bitset fields, which are payload-less and have no
+;;; `StorageOps` instance -- so call `defcomponent-accessors` only for the
+;;; storage-backed components you want typed get/set/has helpers for.
 ;;;
 ;;; Since E2d-P5, `defworld` projects component fields through
 ;;; `(Storage T)`, so every component must be a real type with a
@@ -46,6 +49,15 @@
   (export defcomponent defworld defcomponent-accessors
           defcomponent-class defcomponent-class-instance
           world-alloc-entity! world-despawn!)
+
+;;; `defcomponent-accessors` lowers to the `StorageOps` class methods
+;;; (`storage-insert!` / `storage-get` / `storage-has?`) rather than the
+;;; hard-coded `dense-*` family, so the generated accessors dispatch by the
+;;; storage handle's type (`(Storage Comp)`). Importing it here registers
+;;; the class + its `(Dense A)` / `(Sparse A)` instances globally, so any
+;;; module that imports `ecs/world` gets the methods the accessor expansion
+;;; emits transitively -- the same way `Component` / `(Storage T)` resolve.
+(import ecs/storage-ops)
 
 ;;; Component -- the associated-type storage class (E2d-P2).
 ;;;
@@ -98,11 +110,18 @@
 ;;; `defworld`; can also be called directly if a user is mixing
 ;;; hand-written and macro-generated parts of a world.
 ;;;
-;;; Each accessor wraps the corresponding `dense-*` operation against
-;;; the storage field named after the component type (`(.Pos w)`,
-;;; `(.Vel w)`, ...). The typed-let binding in `get-<Comp>` propagates
-;;; the component type into the generic `dense-get`'s A parameter so
-;;; struct-by-value components round-trip cleanly without a witness arg.
+;;; Each accessor dispatches the corresponding `StorageOps` method
+;;; (`storage-insert!` / `storage-get` / `storage-has?`) against the
+;;; storage field named after the component type (`(.Pos w)`, `(.Vel w)`,
+;;; ...). The field's type is `(Storage Comp)`, so the backend is chosen by
+;;; the component's `Component` instance: a `(Dense Comp)` field drives the
+;;; dense instance and a `(Sparse Comp)` field the sparse instance through
+;;; the identical accessor body -- the "swap the backend with one line"
+;;; payoff carried by the type system. The typed-let binding in
+;;; `get-<Comp>` propagates the component type into `storage-get`'s
+;;; associated `Elem` return so struct-by-value components round-trip
+;;; cleanly without a witness arg (unblocked by turmeric's parametric
+;;; struct-element projection landing, 2026-06-19).
 ;;;
 ;;; **Cap-gated since I4.** `get-<Comp>` takes `^borrow cap :
 ;;; (ReadCap Comp)` as its first parameter and `set-<Comp>!` takes
@@ -121,8 +140,11 @@
 ;;;
 ;;; Required imports at the call site:
 ;;;   (import ecs/cap :refer [WriteCap ReadCap])
+;;; The `StorageOps` methods the expansion emits arrive transitively via
+;;; `(import ecs/world)` (which imports `ecs/storage-ops`), so the call
+;;; site needs no separate storage import.
 ;;;
-;;; Since: E2 (initial); I4 (cap gating)
+;;; Since: E2 (initial); I4 (cap gating); E2d-P6 (StorageOps routing)
 (defmacro defcomponent-accessors [world-name comp-name]
   (let [getter (str->sym (str-append "get-"  (symbol-name comp-name)))
         setter (str->sym (str-append "set-"  (symbol-name comp-name) "!"))
@@ -133,15 +155,15 @@
                       ^borrow w   : ~world-name
                       e           : int]
                     : ~comp-name
-         (let [p : ~comp-name (dense-get (~field w) e)] p))
+         (let [p : ~comp-name (storage-get (~field w) e)] p))
        (defn ~setter [^borrow cap : (WriteCap ~comp-name)
                       ^borrow w   : ~world-name
                       e           : int
                       v           : ~comp-name]
                     : nil
-         (dense-set! (~field w) e v))
+         (storage-insert! (~field w) e v))
        (defn ~haser [^borrow w : ~world-name e : int] : bool
-         (dense-has? (~field w) e)))))
+         (storage-has? (~field w) e)))))
 
 ;;; world-fields -- expand a component vector into the flat
 ;;; `Comp : (Storage Comp)` field triples a `defstruct` body wants.

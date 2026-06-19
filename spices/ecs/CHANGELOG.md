@@ -4,6 +4,27 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **E2d-P6 follow-up -- `defcomponent-accessors` now routes through
+  `StorageOps`.** The generated `get-<Comp>` / `set-<Comp>!` /
+  `has-<Comp>?` accessors dispatch the `StorageOps` methods
+  (`storage-get` / `storage-insert!` / `storage-has?`) against the
+  component's `(Storage Comp)` field instead of the hard-coded `dense-*`
+  family. The accessor body is now backend-agnostic: a component whose
+  `Component` instance binds `(Sparse Comp)` drives the sparse instance
+  through byte-identical accessor code -- the "swap the backend with one
+  line" payoff, now carried by the type system rather than prose.
+  Struct-by-value components round-trip cleanly through `storage-get`'s
+  associated `Elem` return; this was the last gate, unblocked by
+  turmeric's parametric struct-element projection landing (turmeric
+  PR #446, 2026-06-19). `ecs/world` imports `ecs/storage-ops` so the
+  routed methods reach the call site transitively through
+  `(import ecs/world)` -- no new import at the call site. Regressions:
+  `tests/defcomponent-accessors.tur` (dense, struct round-trip) and the
+  new `tests/defcomponent-accessors-sparse.tur` (same accessors over a
+  sparse-backed component).
+
 ### Added
 
 - **E2c slice 11 follow-up -- `sized-defworld-world-resize`, the
