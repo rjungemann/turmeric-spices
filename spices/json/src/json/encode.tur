@@ -102,6 +102,34 @@
   return buf;
   ```))
 
+;;; Encode [float] -- a JSON number for an IEEE-754 double.  The mirror of
+;;; `Decode [float]`, so a float survives a decode -> encode round-trip.
+;;; JSON has no NaN / Infinity, so non-finite values emit "null" (matching
+;;; `Encode [cstr]`'s null-for-missing stance) rather than producing an
+;;; invalid fragment.  Finite values use the shortest %g representation that
+;;; re-parses to the same double, so `3.14` stays `3.14` rather than widening
+;;; to `3.1400000000000001`.
+(definstance Encode [float] (encode [x] : cstr
+  ```c
+  /* (x - x) is 0 for every finite double and NaN for both NaN and
+   * Infinity, so the inequality flags exactly the non-finite cases
+   * without pulling in <math.h>/<float.h>. */
+  if ((x - x) != 0.0) {
+    char *buf = (char *)malloc(5);
+    memcpy(buf, "null", 5);
+    return buf;
+  }
+  char tmp[32];
+  for (int prec = 15; prec <= 17; prec++) {
+    snprintf(tmp, sizeof(tmp), "%.*g", prec, (double)x);
+    if (strtod(tmp, NULL) == (double)x) break;
+  }
+  size_t n = strlen(tmp);
+  char *buf = (char *)malloc(n + 1);
+  memcpy(buf, tmp, n + 1);
+  return buf;
+  ```))
+
 ;; ---------------------------------------------------------------------------
 ;; derive-json: emit an Encode instance for a defstruct product type. Lives
 ;; in this module (alongside Encode) so the orphan-instance check sees the

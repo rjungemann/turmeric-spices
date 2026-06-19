@@ -57,7 +57,8 @@ let [r json-parse("{\"user\":{\"name\":\"Alice\",\"age\":30}}")]
 
 The `Encode` typeclass + `derive-json` macro give defstruct types a
 JSON serializer without hand-writing per-type code. Primitive instances
-ship for `int`, `bool`, and `cstr`; the macro emits one for any
+ship for `int`, `bool`, `cstr`, and `float` (mirroring the `Decode`
+primitives, so floats round-trip); the macro emits one for any
 `defstruct` product type whose fields you list explicitly:
 
 ```turmeric
