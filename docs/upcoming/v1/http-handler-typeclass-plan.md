@@ -1,6 +1,8 @@
 # Plan: `http` / `httpd` Handler Typeclass + JSON Codec Integration (U2, v1)
 
-> Status: planning
+> Status: in progress — P1+P2 landed (turmeric-spices PR #23); P3 landed
+> (httpd JSON body codecs). P4 (http client codecs) + P5 (negative
+> fixtures/docs) remain.
 > Tracks: spices-type-features-uplift-plan **U2 target — http/httpd**
 > Scope: `spices/httpd/` and `spices/http/`; no compiler dependency expected
 > Builds on: json `Encode`/`Decode` typeclasses (turmeric-spices PRs #20 +
@@ -152,10 +154,33 @@ instance to that signature without changing the server internals.
 - The generated trampoline compiles as a `(c-fn [int] int)` (captureless
   check passes).
 
-### P3 — JSON codec helpers for handler bodies (`httpd/handler.tur`)
+### P3 — JSON codec helpers for handler bodies (`httpd/handler.tur`) — LANDED
 
 This is the "codecs use json's Encode/Decode" half. Handlers should decode
 a typed request body and encode a typed response without inline-C.
+
+**Landed:** `req-decode` / `with-json-body` (macros, type-directed decode),
+`json-ok` / `json-resp` (generic over `Encode`). Test:
+`tests/httpd/json_codec_test.tur` round-trips a typed JSON POST body to a
+typed JSON response, asserts `Content-Type: application/json`, and rejects a
+malformed body with `400`.
+
+Two findings worth recording:
+
+- **Transitive native deps are not propagated across workspace siblings.**
+  httpd importing json (whose `Encode`/`Decode` instances emit
+  `#include <yyjson.h>`) does not inherit json's `yyjson` cmake-dep. Each
+  consumer that ultimately links a native lib re-declares it — httpd now
+  carries `yyjson` in its own `build.tur` `:cmake-deps`, exactly as
+  `ecs-raylib` re-declares `raylib`. This is the repo convention, not a
+  compiler gap.
+- **`http/response`'s `response-json` had a latent include-scope bug.** It
+  did `#include <yyjson.h>` *inside* the function body under
+  `__has_include`; this was dormant only because no httpd test had yyjson on
+  its include path. Once httpd linked yyjson, every httpd test importing
+  `http/response` failed to compile (`static inline` functions are illegal
+  inside a function body). Fixed by hoisting the guarded include to a
+  file-scope C block; the stub-when-absent behavior is unchanged.
 
 **Tasks**
 - `(req-decode req T) : (Result T cstr)` — parse `(req-body req)` with

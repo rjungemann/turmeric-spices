@@ -7,6 +7,21 @@
 (defmodule http/response
   (export response-status response-header response-body response-json)
 
+;; file-scope-c-block: yyjson is an optional native dep. The header declares
+;; `static inline` functions, which are illegal inside a function body, so it
+;; must be included at file scope -- not inside response-json. Guard on
+;; __has_include so http still builds (and response-json returns an err stub)
+;; when no consumer has yyjson on the include path; a consumer that links
+;; yyjson (e.g. httpd's json codecs) activates the real parser.
+```c
+#if defined(__has_include)
+#  if __has_include(<yyjson.h>)
+#    define __TUR_HTTP_HAVE_YYJSON 1
+#    include <yyjson.h>
+#  endif
+#endif
+```
+
 ;;; response-status -- HTTP status code of a response.
 ;;;
 ;;; Parameters:
@@ -107,17 +122,12 @@
   ```c
   #include <string.h>
   #include <stdlib.h>
-  /* yyjson is optional. When the header is absent the function still links
-     but returns an err at runtime instead of failing the build. */
-  #if defined(__has_include)
-  #  if __has_include(<yyjson.h>)
-  #    define __TUR_HTTP_HAVE_YYJSON 1
-  #  endif
-  #endif
+  /* yyjson.h (when available) is included at file scope above -- see the
+     file-scope-c-block at the top of this module. It must not be included
+     here: it declares `static inline` functions, illegal inside a function. */
   struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
   struct __pr *res = malloc(sizeof(*res));
   #ifdef __TUR_HTTP_HAVE_YYJSON
-  #include <yyjson.h>
   struct __resp {
     int    status;
     char  *body;
