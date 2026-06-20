@@ -1,547 +1,336 @@
-;;; linalg/small -- fixed-size concrete helpers: vec2/vec3/vec4, mat4
+;;; linalg/small -- fixed-size concrete helpers: vec2/vec3/vec4, mat2/mat3/mat4
 ;;;
-;;; This module provides stack-allocated, fixed-size vector and matrix types
-;;; for graphics and geometry. These are value structs backed by small
-;;; stack-friendly float arrays -- not heap allocations.
+;;; This module provides small, fixed-size vector and matrix value types for
+;;; graphics and geometry. Under turmeric v0.21.0 these are `:copy` struct
+;;; *values* (passed/returned by value, freely duplicated) accessed with
+;;; `(.field v)` and built with `make-struct` -- no heap allocation, no
+;;; `:int`-pointer handles. Fields are `:float` (float64).
 ;;;
 ;;; The mat4 type uses column-major storage to match OpenGL's uniform upload
 ;;; convention. This is different from the row-major storage used by mat.
 
 (defmodule linalg/small
   (export vec2 vec3 vec4 mat2 mat3 mat4
+          vec2-of vec3-of vec4-of
+          mat2-identity mat3-identity
           vec2-dot vec3-dot vec3-cross vec3-normalize vec3-length
+          vec3-sub vec4-dot vec3->vec4
           mat4-identity mat4-mul mat4-mul-vec4 mat4-transpose mat4-inv
           mat4-translate mat4-scale mat4-rotate-x mat4-rotate-y mat4-rotate-z
           mat4-rotate mat4-perspective mat4-ortho mat4-look-at
           mat4-ptr vec3-ptr)
 
-;;; vec2 -- 2D vector (float32)
-(defstruct vec2
-  x :float
-  y :float)
+;; Math from libm (double-precision, matching :float = float64).
+(extern-c sin  [x : float] : float)
+(extern-c cos  [x : float] : float)
+(extern-c tan  [x : float] : float)
+(extern-c sqrt [x : float] : float)
 
-;;; vec3 -- 3D vector (float32)
-(defstruct vec3
-  x :float
-  y :float
-  z :float)
+;;; vec2 -- 2D vector
+(defstruct vec2 :copy [x : float  y : float])
 
-;;; vec4 -- 4D vector (float32)
-(defstruct vec4
-  x :float
-  y :float
-  z :float
-  w :float)
+;;; vec3 -- 3D vector
+(defstruct vec3 :copy [x : float  y : float  z : float])
 
-;;; mat2 -- 2x2 matrix (float32, column-major)
-(defstruct mat2
-  m00 :float  m01 :float
-  m10 :float  m11 :float)
+;;; vec4 -- 4D vector
+(defstruct vec4 :copy [x : float  y : float  z : float  w : float])
 
-;;; mat3 -- 3x3 matrix (float32, column-major)
-(defstruct mat3
-  m00 :float  m01 :float  m02 :float
-  m10 :float  m11 :float  m12 :float
-  m20 :float  m21 :float  m22 :float)
+;;; mat2 -- 2x2 matrix (column-major)
+(defstruct mat2 :copy
+  [m00 : float  m01 : float
+   m10 : float  m11 : float])
 
-;;; mat4 -- 4x4 matrix (float32, column-major to match OpenGL)
-(defstruct mat4
-  m00 :float  m01 :float  m02 :float  m03 :float
-  m10 :float  m11 :float  m12 :float  m13 :float
-  m20 :float  m21 :float  m22 :float  m23 :float
-  m30 :float  m31 :float  m32 :float  m33 :float)
+;;; mat3 -- 3x3 matrix (column-major)
+(defstruct mat3 :copy
+  [m00 : float  m01 : float  m02 : float
+   m10 : float  m11 : float  m12 : float
+   m20 : float  m21 : float  m22 : float])
 
-;;; vec2 constructor
-;;; Returns: vec2
-(defn vec2 [x y] : vec2
-  (let [v (malloc (sizeof vec2))]
-    (set! (vec2-x v) (float x))
-    (set! (vec2-y v) (float y))
-    v))
+;;; mat4 -- 4x4 matrix (column-major to match OpenGL)
+(defstruct mat4 :copy
+  [m00 : float  m01 : float  m02 : float  m03 : float
+   m10 : float  m11 : float  m12 : float  m13 : float
+   m20 : float  m21 : float  m22 : float  m23 : float
+   m30 : float  m31 : float  m32 : float  m33 : float])
 
-;;; vec3 constructor
-;;; Returns: vec3
-(defn vec3 [x y z] : vec3
-  (let [v (malloc (sizeof vec3))]
-    (set! (vec3-x v) (float x))
-    (set! (vec3-y v) (float y))
-    (set! (vec3-z v) (float z))
-    v))
+;;; vec2 constructor -- Returns: vec2
+(defn vec2-of [x : float  y : float] : vec2 (make-struct vec2 x y))
 
-;;; vec4 constructor
-;;; Returns: vec4
-(defn vec4 [x y z w] : vec4
-  (let [v (malloc (sizeof vec4))]
-    (set! (vec4-x v) (float x))
-    (set! (vec4-y v) (float y))
-    (set! (vec4-z v) (float z))
-    (set! (vec4-w v) (float w))
-    v))
+;;; vec3 constructor -- Returns: vec3
+(defn vec3-of [x : float  y : float  z : float] : vec3 (make-struct vec3 x y z))
 
-;;; mat2-identity -- create 2x2 identity matrix
-;;; Returns: mat2
+;;; vec4 constructor -- Returns: vec4
+(defn vec4-of [x : float  y : float  z : float  w : float] : vec4
+  (make-struct vec4 x y z w))
+
+;;; mat2-identity -- 2x2 identity matrix -- Returns: mat2
 (defn mat2-identity [] : mat2
-  (let [m (malloc (sizeof mat2))]
-    (set! (mat2-m00 m) 1.0)
-    (set! (mat2-m11 m) 1.0)
-    (set! (mat2-m01 m) 0.0)
-    (set! (mat2-m10 m) 0.0)
-    m))
+  (make-struct mat2  1.0 0.0  0.0 1.0))
 
-;;; mat3-identity -- create 3x3 identity matrix
-;;; Returns: mat3
+;;; mat3-identity -- 3x3 identity matrix -- Returns: mat3
 (defn mat3-identity [] : mat3
-  (let [m (malloc (sizeof mat3))]
-    (set! (mat3-m00 m) 1.0)
-    (set! (mat3-m11 m) 1.0)
-    (set! (mat3-m22 m) 1.0)
-    (set! (mat3-m01 m) 0.0)
-    (set! (mat3-m02 m) 0.0)
-    (set! (mat3-m10 m) 0.0)
-    (set! (mat3-m12 m) 0.0)
-    (set! (mat3-m20 m) 0.0)
-    (set! (mat3-m21 m) 0.0)
-    m))
+  (make-struct mat3  1.0 0.0 0.0  0.0 1.0 0.0  0.0 0.0 1.0))
 
-;;; mat4-identity -- create 4x4 identity matrix
-;;; Returns: mat4
+;;; mat4-identity -- 4x4 identity matrix -- Returns: mat4
 (defn mat4-identity [] : mat4
-  (let [m (malloc (sizeof mat4))]
-    (set! (mat4-m00 m) 1.0)
-    (set! (mat4-m11 m) 1.0)
-    (set! (mat4-m22 m) 1.0)
-    (set! (mat4-m33 m) 1.0)
-    (set! (mat4-m01 m) 0.0)
-    (set! (mat4-m02 m) 0.0)
-    (set! (mat4-m03 m) 0.0)
-    (set! (mat4-m10 m) 0.0)
-    (set! (mat4-m12 m) 0.0)
-    (set! (mat4-m13 m) 0.0)
-    (set! (mat4-m20 m) 0.0)
-    (set! (mat4-m21 m) 0.0)
-    (set! (mat4-m23 m) 0.0)
-    (set! (mat4-m30 m) 0.0)
-    (set! (mat4-m31 m) 0.0)
-    (set! (mat4-m32 m) 0.0)
-    m))
+  (make-struct mat4
+    1.0 0.0 0.0 0.0
+    0.0 1.0 0.0 0.0
+    0.0 0.0 1.0 0.0
+    0.0 0.0 0.0 1.0))
 
-;;; vec2-dot -- dot product of two vec2
-;;; a: vec2
-;;; b: vec2
-;;; Returns: :float
-(defn vec2-dot [a b] : float
-  (+ (* (vec2-x a) (vec2-x b))
-     (* (vec2-y a) (vec2-y b))))
+;;; vec2-dot -- dot product of two vec2 -- Returns: :float
+(defn vec2-dot [a : vec2  b : vec2] : float
+  (+ (* (.x a) (.x b))
+     (* (.y a) (.y b))))
 
-;;; vec3-dot -- dot product of two vec3
-;;; a: vec3
-;;; b: vec3
-;;; Returns: :float
-(defn vec3-dot [a b] : float
-  (+ (* (vec3-x a) (vec3-x b))
-     (* (vec3-y a) (vec3-y b))
-     (* (vec3-z a) (vec3-z b))))
+;;; vec3-dot -- dot product of two vec3 -- Returns: :float
+(defn vec3-dot [a : vec3  b : vec3] : float
+  (+ (* (.x a) (.x b))
+     (+ (* (.y a) (.y b))
+        (* (.z a) (.z b)))))
 
-;;; vec3-cross -- cross product of two vec3
-;;; a: vec3
-;;; b: vec3
-;;; Returns: vec3
-(defn vec3-cross [a b] : vec3
-  (vec3 (- (* (vec3-y a) (vec3-z b)) (* (vec3-z a) (vec3-y b)))
-        (- (* (vec3-z a) (vec3-x b)) (* (vec3-x a) (vec3-z b)))
-        (- (* (vec3-x a) (vec3-y b)) (* (vec3-y a) (vec3-x b)))))
+;;; vec3-cross -- cross product of two vec3 -- Returns: vec3
+(defn vec3-cross [a : vec3  b : vec3] : vec3
+  (vec3-of (- (* (.y a) (.z b)) (* (.z a) (.y b)))
+        (- (* (.z a) (.x b)) (* (.x a) (.z b)))
+        (- (* (.x a) (.y b)) (* (.y a) (.x b)))))
 
-;;; vec3-length -- length (norm) of a vec3
-;;; v: vec3
-;;; Returns: :float
-(defn vec3-length [v] : float
-  (sqrt (+ (* (vec3-x v) (vec3-x v))
-           (* (vec3-y v) (vec3-y v))
-           (* (vec3-z v) (vec3-z v)))))
+;;; vec3-length -- length (L2 norm) of a vec3 -- Returns: :float
+(defn vec3-length [v : vec3] : float
+  (sqrt (+ (* (.x v) (.x v))
+           (+ (* (.y v) (.y v))
+              (* (.z v) (.z v))))))
 
-;;; vec3-normalize -- normalize a vec3 to unit length
-;;; v: vec3
-;;; Returns: vec3
-(defn vec3-normalize [v] : vec3
+;;; vec3-normalize -- normalize a vec3 to unit length -- Returns: vec3
+(defn vec3-normalize [v : vec3] : vec3
   (let [len (vec3-length v)]
     (when (< len 1e-6)
-      (error "vec3-normalize: cannot normalize zero vector"))
+      (panic "vec3-normalize: cannot normalize zero vector"))
     (let [inv-len (/ 1.0 len)]
-      (vec3 (* (vec3-x v) inv-len)
-            (* (vec3-y v) inv-len)
-            (* (vec3-z v) inv-len)))))
+      (vec3-of (* (.x v) inv-len)
+            (* (.y v) inv-len)
+            (* (.z v) inv-len)))))
 
-;;; mat4-mul -- multiply two mat4 matrices (column-major)
-;;; a: mat4
-;;; b: mat4
-;;; Returns: mat4
-(defn mat4-mul [a b] : mat4
-  (let [c (mat4-identity)]
-    (set! (mat4-m00 c) (+ (+ (+ (* (mat4-m00 a) (mat4-m00 b))
-                              (* (mat4-m01 a) (mat4-m10 b)))
-                           (* (mat4-m02 a) (mat4-m20 b)))
-                          (* (mat4-m03 a) (mat4-m30 b))))
-    (set! (mat4-m01 c) (+ (+ (+ (* (mat4-m00 a) (mat4-m01 b))
-                              (* (mat4-m01 a) (mat4-m11 b)))
-                           (* (mat4-m02 a) (mat4-m21 b)))
-                          (* (mat4-m03 a) (mat4-m31 b))))
-    (set! (mat4-m02 c) (+ (+ (+ (* (mat4-m00 a) (mat4-m02 b))
-                              (* (mat4-m01 a) (mat4-m12 b)))
-                           (* (mat4-m02 a) (mat4-m22 b)))
-                          (* (mat4-m03 a) (mat4-m32 b))))
-    (set! (mat4-m03 c) (+ (+ (+ (* (mat4-m00 a) (mat4-m03 b))
-                              (* (mat4-m01 a) (mat4-m13 b)))
-                           (* (mat4-m02 a) (mat4-m23 b)))
-                          (* (mat4-m03 a) (mat4-m33 b))))
-    
-    (set! (mat4-m10 c) (+ (+ (+ (* (mat4-m10 a) (mat4-m00 b))
-                              (* (mat4-m11 a) (mat4-m10 b)))
-                           (* (mat4-m12 a) (mat4-m20 b)))
-                          (* (mat4-m13 a) (mat4-m30 b))))
-    (set! (mat4-m11 c) (+ (+ (+ (* (mat4-m10 a) (mat4-m01 b))
-                              (* (mat4-m11 a) (mat4-m11 b)))
-                           (* (mat4-m12 a) (mat4-m21 b)))
-                          (* (mat4-m13 a) (mat4-m31 b))))
-    (set! (mat4-m12 c) (+ (+ (+ (* (mat4-m10 a) (mat4-m02 b))
-                              (* (mat4-m11 a) (mat4-m12 b)))
-                           (* (mat4-m12 a) (mat4-m22 b)))
-                          (* (mat4-m13 a) (mat4-m32 b))))
-    (set! (mat4-m13 c) (+ (+ (+ (* (mat4-m10 a) (mat4-m03 b))
-                              (* (mat4-m11 a) (mat4-m13 b)))
-                           (* (mat4-m12 a) (mat4-m23 b)))
-                          (* (mat4-m13 a) (mat4-m33 b))))
-    
-    (set! (mat4-m20 c) (+ (+ (+ (* (mat4-m20 a) (mat4-m00 b))
-                              (* (mat4-m21 a) (mat4-m10 b)))
-                           (* (mat4-m22 a) (mat4-m20 b)))
-                          (* (mat4-m23 a) (mat4-m30 b))))
-    (set! (mat4-m21 c) (+ (+ (+ (* (mat4-m20 a) (mat4-m01 b))
-                              (* (mat4-m21 a) (mat4-m11 b)))
-                           (* (mat4-m22 a) (mat4-m21 b)))
-                          (* (mat4-m23 a) (mat4-m31 b))))
-    (set! (mat4-m22 c) (+ (+ (+ (* (mat4-m20 a) (mat4-m02 b))
-                              (* (mat4-m21 a) (mat4-m12 b)))
-                           (* (mat4-m22 a) (mat4-m22 b)))
-                          (* (mat4-m23 a) (mat4-m32 b))))
-    (set! (mat4-m23 c) (+ (+ (+ (* (mat4-m20 a) (mat4-m03 b))
-                              (* (mat4-m21 a) (mat4-m13 b)))
-                           (* (mat4-m22 a) (mat4-m23 b)))
-                          (* (mat4-m23 a) (mat4-m33 b))))
-    
-    (set! (mat4-m30 c) (+ (+ (+ (* (mat4-m30 a) (mat4-m00 b))
-                              (* (mat4-m31 a) (mat4-m10 b)))
-                           (* (mat4-m32 a) (mat4-m20 b)))
-                          (* (mat4-m33 a) (mat4-m30 b))))
-    (set! (mat4-m31 c) (+ (+ (+ (* (mat4-m30 a) (mat4-m01 b))
-                              (* (mat4-m31 a) (mat4-m11 b)))
-                           (* (mat4-m32 a) (mat4-m21 b)))
-                          (* (mat4-m33 a) (mat4-m31 b))))
-    (set! (mat4-m32 c) (+ (+ (+ (* (mat4-m30 a) (mat4-m02 b))
-                              (* (mat4-m31 a) (mat4-m12 b)))
-                           (* (mat4-m32 a) (mat4-m22 b)))
-                          (* (mat4-m33 a) (mat4-m32 b))))
-    (set! (mat4-m33 c) (+ (+ (+ (* (mat4-m30 a) (mat4-m03 b))
-                              (* (mat4-m31 a) (mat4-m13 b)))
-                           (* (mat4-m32 a) (mat4-m23 b)))
-                          (* (mat4-m33 a) (mat4-m33 b))))
+;;; vec3-sub -- subtract two vec3 -- Returns: vec3
+(defn vec3-sub [a : vec3  b : vec3] : vec3
+  (vec3-of (- (.x a) (.x b))
+        (- (.y a) (.y b))
+        (- (.z a) (.z b))))
+
+;;; vec4-dot -- dot product of two vec4 -- Returns: :float
+(defn vec4-dot [a : vec4  b : vec4] : float
+  (+ (+ (+ (* (.x a) (.x b))
+           (* (.y a) (.y b)))
+        (* (.z a) (.z b)))
+     (* (.w a) (.w b))))
+
+;;; mat4-mul -- multiply two mat4 (column-major) -- Returns: mat4
+(defn mat4-mul [a : mat4  b : mat4] : mat4
+  (let [^mut c (mat4-identity)]
+    (set! (.m00 c) (+ (+ (+ (* (.m00 a) (.m00 b)) (* (.m01 a) (.m10 b)))
+                         (* (.m02 a) (.m20 b))) (* (.m03 a) (.m30 b))))
+    (set! (.m01 c) (+ (+ (+ (* (.m00 a) (.m01 b)) (* (.m01 a) (.m11 b)))
+                         (* (.m02 a) (.m21 b))) (* (.m03 a) (.m31 b))))
+    (set! (.m02 c) (+ (+ (+ (* (.m00 a) (.m02 b)) (* (.m01 a) (.m12 b)))
+                         (* (.m02 a) (.m22 b))) (* (.m03 a) (.m32 b))))
+    (set! (.m03 c) (+ (+ (+ (* (.m00 a) (.m03 b)) (* (.m01 a) (.m13 b)))
+                         (* (.m02 a) (.m23 b))) (* (.m03 a) (.m33 b))))
+    (set! (.m10 c) (+ (+ (+ (* (.m10 a) (.m00 b)) (* (.m11 a) (.m10 b)))
+                         (* (.m12 a) (.m20 b))) (* (.m13 a) (.m30 b))))
+    (set! (.m11 c) (+ (+ (+ (* (.m10 a) (.m01 b)) (* (.m11 a) (.m11 b)))
+                         (* (.m12 a) (.m21 b))) (* (.m13 a) (.m31 b))))
+    (set! (.m12 c) (+ (+ (+ (* (.m10 a) (.m02 b)) (* (.m11 a) (.m12 b)))
+                         (* (.m12 a) (.m22 b))) (* (.m13 a) (.m32 b))))
+    (set! (.m13 c) (+ (+ (+ (* (.m10 a) (.m03 b)) (* (.m11 a) (.m13 b)))
+                         (* (.m12 a) (.m23 b))) (* (.m13 a) (.m33 b))))
+    (set! (.m20 c) (+ (+ (+ (* (.m20 a) (.m00 b)) (* (.m21 a) (.m10 b)))
+                         (* (.m22 a) (.m20 b))) (* (.m23 a) (.m30 b))))
+    (set! (.m21 c) (+ (+ (+ (* (.m20 a) (.m01 b)) (* (.m21 a) (.m11 b)))
+                         (* (.m22 a) (.m21 b))) (* (.m23 a) (.m31 b))))
+    (set! (.m22 c) (+ (+ (+ (* (.m20 a) (.m02 b)) (* (.m21 a) (.m12 b)))
+                         (* (.m22 a) (.m22 b))) (* (.m23 a) (.m32 b))))
+    (set! (.m23 c) (+ (+ (+ (* (.m20 a) (.m03 b)) (* (.m21 a) (.m13 b)))
+                         (* (.m22 a) (.m23 b))) (* (.m23 a) (.m33 b))))
+    (set! (.m30 c) (+ (+ (+ (* (.m30 a) (.m00 b)) (* (.m31 a) (.m10 b)))
+                         (* (.m32 a) (.m20 b))) (* (.m33 a) (.m30 b))))
+    (set! (.m31 c) (+ (+ (+ (* (.m30 a) (.m01 b)) (* (.m31 a) (.m11 b)))
+                         (* (.m32 a) (.m21 b))) (* (.m33 a) (.m31 b))))
+    (set! (.m32 c) (+ (+ (+ (* (.m30 a) (.m02 b)) (* (.m31 a) (.m12 b)))
+                         (* (.m32 a) (.m22 b))) (* (.m33 a) (.m32 b))))
+    (set! (.m33 c) (+ (+ (+ (* (.m30 a) (.m03 b)) (* (.m31 a) (.m13 b)))
+                         (* (.m32 a) (.m23 b))) (* (.m33 a) (.m33 b))))
     c))
 
-;;; mat4-mul-vec4 -- multiply mat4 by vec4
-;;; m: mat4
-;;; v: vec4
-;;; Returns: vec4
-(defn mat4-mul-vec4 [m v] : vec4
-  (vec4 (+ (+ (+ (* (mat4-m00 m) (vec4-x v))
-                (* (mat4-m01 m) (vec4-y v)))
-             (* (mat4-m02 m) (vec4-z v)))
-            (* (mat4-m03 m) (vec4-w v)))
-        
-        (+ (+ (+ (* (mat4-m10 m) (vec4-x v))
-                (* (mat4-m11 m) (vec4-y v)))
-             (* (mat4-m12 m) (vec4-z v)))
-            (* (mat4-m13 m) (vec4-w v)))
-        
-        (+ (+ (+ (* (mat4-m20 m) (vec4-x v))
-                (* (mat4-m21 m) (vec4-y v)))
-             (* (mat4-m22 m) (vec4-z v)))
-            (* (mat4-m23 m) (vec4-w v)))
-        
-        (+ (+ (+ (* (mat4-m30 m) (vec4-x v))
-                (* (mat4-m31 m) (vec4-y v)))
-             (* (mat4-m32 m) (vec4-z v)))
-            (* (mat4-m33 m) (vec4-w v)))))
+;;; mat4-mul-vec4 -- multiply mat4 by vec4 -- Returns: vec4
+(defn mat4-mul-vec4 [m : mat4  v : vec4] : vec4
+  (vec4-of (+ (+ (+ (* (.m00 m) (.x v)) (* (.m01 m) (.y v)))
+              (* (.m02 m) (.z v))) (* (.m03 m) (.w v)))
+        (+ (+ (+ (* (.m10 m) (.x v)) (* (.m11 m) (.y v)))
+              (* (.m12 m) (.z v))) (* (.m13 m) (.w v)))
+        (+ (+ (+ (* (.m20 m) (.x v)) (* (.m21 m) (.y v)))
+              (* (.m22 m) (.z v))) (* (.m23 m) (.w v)))
+        (+ (+ (+ (* (.m30 m) (.x v)) (* (.m31 m) (.y v)))
+              (* (.m32 m) (.z v))) (* (.m33 m) (.w v)))))
 
-;;; mat4-transpose -- transpose a mat4
-;;; m: mat4
-;;; Returns: mat4
-(defn mat4-transpose [m] : mat4
-  (let [t (mat4-identity)]
-    (set! (mat4-m00 t) (mat4-m00 m))
-    (set! (mat4-m01 t) (mat4-m10 m))
-    (set! (mat4-m02 t) (mat4-m20 m))
-    (set! (mat4-m03 t) (mat4-m30 m))
-    (set! (mat4-m10 t) (mat4-m01 m))
-    (set! (mat4-m11 t) (mat4-m11 m))
-    (set! (mat4-m12 t) (mat4-m21 m))
-    (set! (mat4-m13 t) (mat4-m31 m))
-    (set! (mat4-m20 t) (mat4-m02 m))
-    (set! (mat4-m21 t) (mat4-m12 m))
-    (set! (mat4-m22 t) (mat4-m22 m))
-    (set! (mat4-m23 t) (mat4-m32 m))
-    (set! (mat4-m30 t) (mat4-m03 m))
-    (set! (mat4-m31 t) (mat4-m13 m))
-    (set! (mat4-m32 t) (mat4-m23 m))
-    (set! (mat4-m33 t) (mat4-m33 m))
+;;; mat4-transpose -- transpose a mat4 -- Returns: mat4
+(defn mat4-transpose [m : mat4] : mat4
+  (let [^mut t (mat4-identity)]
+    (set! (.m00 t) (.m00 m)) (set! (.m01 t) (.m10 m))
+    (set! (.m02 t) (.m20 m)) (set! (.m03 t) (.m30 m))
+    (set! (.m10 t) (.m01 m)) (set! (.m11 t) (.m11 m))
+    (set! (.m12 t) (.m21 m)) (set! (.m13 t) (.m31 m))
+    (set! (.m20 t) (.m02 m)) (set! (.m21 t) (.m12 m))
+    (set! (.m22 t) (.m22 m)) (set! (.m23 t) (.m32 m))
+    (set! (.m30 t) (.m03 m)) (set! (.m31 t) (.m13 m))
+    (set! (.m32 t) (.m23 m)) (set! (.m33 t) (.m33 m))
     t))
 
-;;; mat4-inv -- compute inverse of a mat4
-;;; m: mat4
-;;; Returns: mat4 or error if singular
-(defn mat4-inv [m] : mat4
-  (let [s0 (vec4 (mat4-m00 m) (mat4-m10 m) (mat4-m20 m) (mat4-m30 m))
-        s1 (vec4 (mat4-m01 m) (mat4-m11 m) (mat4-m21 m) (mat4-m31 m))
-        s2 (vec4 (mat4-m02 m) (mat4-m12 m) (mat4-m22 m) (mat4-m32 m))
-        s3 (vec4 (mat4-m03 m) (mat4-m13 m) (mat4-m23 m) (mat4-m33 m))
-        inv (mat4-identity)]
-    
-    (set! (mat4-m00 inv) (vec4-dot s1 (vec3-cross s2 s3)))
-    (set! (mat4-m10 inv) (vec4-dot s2 (vec3-cross s3 s1)))
-    (set! (mat4-m20 inv) (vec4-dot s3 (vec3-cross s1 s2)))
-    (set! (mat4-m30 inv) (vec4-dot s0 (vec3-cross s1 s2)))
-    
-    (let [det (vec4-dot s0 (vec4 (mat4-m00 inv) (mat4-m10 inv) (mat4-m20 inv) (mat4-m30 inv)))]
-      (when (== det 0.0)
-        (free inv)
-        (error "mat4-inv: matrix is singular"))
-      
-      (let [inv-det (/ 1.0 det)]
-        (set! (mat4-m00 inv) (* (mat4-m00 inv) inv-det))
-        (set! (mat4-m10 inv) (* (mat4-m10 inv) inv-det))
-        (set! (mat4-m20 inv) (* (mat4-m20 inv) inv-det))
-        (set! (mat4-m30 inv) (* (mat4-m30 inv) inv-det))
-        
-        (set! (mat4-m01 inv) (* (vec4-dot s2 (vec3-cross s0 s3)) inv-det))
-        (set! (mat4-m11 inv) (* (vec4-dot s3 (vec3-cross s0 s2)) inv-det))
-        (set! (mat4-m21 inv) (* (vec4-dot s0 (vec3-cross s1 s3)) inv-det))
-        (set! (mat4-m31 inv) (* (vec4-dot s1 (vec3-cross s2 s0)) inv-det))
-        
-        (set! (mat4-m02 inv) (* (vec4-dot s3 (vec3-cross s0 s1)) inv-det))
-        (set! (mat4-m12 inv) (* (vec4-dot s0 (vec3-cross s1 s2)) inv-det))
-        (set! (mat4-m22 inv) (* (vec4-dot s1 (vec3-cross s2 s0)) inv-det))
-        (set! (mat4-m32 inv) (* (vec4-dot s2 (vec3-cross s0 s1)) inv-det))
-        
-        (set! (mat4-m03 inv) (* (vec4-dot s0 (vec3-cross s1 s2)) (- inv-det)))
-        (set! (mat4-m13 inv) (* (vec4-dot s1 (vec3-cross s2 s0)) (- inv-det)))
-        (set! (mat4-m23 inv) (* (vec4-dot s2 (vec3-cross s0 s1)) (- inv-det)))
-        (set! (mat4-m33 inv) (* (vec4-dot s3 (vec3-cross s0 s1)) (- inv-det)))
-        
-        inv))))
+;;; mat4-inv -- inverse of a mat4. NOT YET PORTED to v0.21.0 typed structs.
+;;;
+;;; The previous implementation computed cofactors by calling `vec3-cross`
+;;; (a 3-vector op) and `vec4-dot` (a 4-vector op) on the SAME column values.
+;;; That only type-checked under the old untyped `:int`-pointer model, where a
+;;; "vec3" and a "vec4" were both just an int handle and the 4th lane was read
+;;; or ignored ad hoc. Under typed `:copy` structs the two ops have distinct,
+;;; non-interchangeable types, so the old body cannot be ported mechanically --
+;;; it needs a type-correct reimplementation (explicit adjugate, or Gaussian
+;;; elimination) landed together with a numerical round-trip test. Until then
+;;; this panics rather than ship unvalidated linear algebra.
+;;; TODO(linalg-u4): reimplement type-correctly with a test.
+(defn mat4-inv [m : mat4] : mat4
+  (panic "mat4-inv: not yet ported to v0.21.0 typed structs (see TODO)"))
 
-;;; Helper: create vec4 from vec3 with w=1.0
-(defn vec3->vec4 [v] : vec4
-  (vec4 (vec3-x v) (vec3-y v) (vec3-z v) 1.0))
+;;; vec3->vec4 -- promote a vec3 to vec4 with w=1.0 -- Returns: vec4
+(defn vec3->vec4 [v : vec3] : vec4
+  (vec4-of (.x v) (.y v) (.z v) 1.0))
 
-;;; mat4-translate -- create translation matrix
-;;; v: vec3 (translation vector)
-;;; Returns: mat4
-(defn mat4-translate [v] : mat4
-  (let [m (mat4-identity)]
-    (set! (mat4-m30 m) (vec3-x v))
-    (set! (mat4-m31 m) (vec3-y v))
-    (set! (mat4-m32 m) (vec3-z v))
+;;; mat4-translate -- translation matrix -- Returns: mat4
+(defn mat4-translate [v : vec3] : mat4
+  (let [^mut m (mat4-identity)]
+    (set! (.m30 m) (.x v))
+    (set! (.m31 m) (.y v))
+    (set! (.m32 m) (.z v))
     m))
 
-;;; mat4-scale -- create scaling matrix
-;;; v: vec3 (scale vector)
-;;; Returns: mat4
-(defn mat4-scale [v] : mat4
-  (let [m (mat4-identity)]
-    (set! (mat4-m00 m) (vec3-x v))
-    (set! (mat4-m11 m) (vec3-y v))
-    (set! (mat4-m22 m) (vec3-z v))
+;;; mat4-scale -- scaling matrix -- Returns: mat4
+(defn mat4-scale [v : vec3] : mat4
+  (let [^mut m (mat4-identity)]
+    (set! (.m00 m) (.x v))
+    (set! (.m11 m) (.y v))
+    (set! (.m22 m) (.z v))
     m))
 
-;;; mat4-rotate-x -- create rotation matrix around x-axis
-;;; angle: rotation angle in radians
-;;; Returns: mat4
-(defn mat4-rotate-x [angle] : mat4
-  (let [m (mat4-identity)
+;;; mat4-rotate-x -- rotation about x-axis (radians) -- Returns: mat4
+(defn mat4-rotate-x [angle : float] : mat4
+  (let [^mut m (mat4-identity)
         s (sin angle)
         c (cos angle)]
-    (set! (mat4-m11 m) c)
-    (set! (mat4-m12 m) (- s))
-    (set! (mat4-m21 m) s)
-    (set! (mat4-m22 m) c)
+    (set! (.m11 m) c)
+    (set! (.m12 m) (- 0.0 s))
+    (set! (.m21 m) s)
+    (set! (.m22 m) c)
     m))
 
-;;; mat4-rotate-y -- create rotation matrix around y-axis
-;;; angle: rotation angle in radians
-;;; Returns: mat4
-(defn mat4-rotate-y [angle] : mat4
-  (let [m (mat4-identity)
+;;; mat4-rotate-y -- rotation about y-axis (radians) -- Returns: mat4
+(defn mat4-rotate-y [angle : float] : mat4
+  (let [^mut m (mat4-identity)
         s (sin angle)
         c (cos angle)]
-    (set! (mat4-m00 m) c)
-    (set! (mat4-m02 m) s)
-    (set! (mat4-m20 m) (- s))
-    (set! (mat4-m22 m) c)
+    (set! (.m00 m) c)
+    (set! (.m02 m) s)
+    (set! (.m20 m) (- 0.0 s))
+    (set! (.m22 m) c)
     m))
 
-;;; mat4-rotate-z -- create rotation matrix around z-axis
-;;; angle: rotation angle in radians
-;;; Returns: mat4
-(defn mat4-rotate-z [angle] : mat4
-  (let [m (mat4-identity)
+;;; mat4-rotate-z -- rotation about z-axis (radians) -- Returns: mat4
+(defn mat4-rotate-z [angle : float] : mat4
+  (let [^mut m (mat4-identity)
         s (sin angle)
         c (cos angle)]
-    (set! (mat4-m00 m) c)
-    (set! (mat4-m01 m) (- s))
-    (set! (mat4-m10 m) s)
-    (set! (mat4-m11 m) c)
+    (set! (.m00 m) c)
+    (set! (.m01 m) (- 0.0 s))
+    (set! (.m10 m) s)
+    (set! (.m11 m) c)
     m))
 
-;;; mat4-rotate -- create rotation matrix around arbitrary axis
-;;; axis: vec3 (normalized rotation axis)
-;;; angle: rotation angle in radians
-;;; Returns: mat4
-(defn mat4-rotate [axis angle] : mat4
-  (let [x (vec3-x axis)
-        y (vec3-y axis)
-        z (vec3-z axis)
+;;; mat4-rotate -- rotation about an arbitrary (normalized) axis -- Returns: mat4
+(defn mat4-rotate [axis : vec3  angle : float] : mat4
+  (let [x (.x axis)
+        y (.y axis)
+        z (.z axis)
         s (sin angle)
         c (cos angle)
         om-c (- 1.0 c)
-        m (mat4-identity)]
-    
-    (set! (mat4-m00 m) (+ (* x x) (* om-c (* y y) (* z z))))
-    (set! (mat4-m01 m) (+ (* x y om-c) (* s z)))
-    (set! (mat4-m02 m) (+ (* x z om-c) (* (- s) y)))
-    
-    (set! (mat4-m10 m) (+ (* y x om-c) (* (- s) z)))
-    (set! (mat4-m11 m) (+ (* y y) (* om-c (* x x) (* z z))))
-    (set! (mat4-m12 m) (+ (* y z om-c) (* s x)))
-    
-    (set! (mat4-m20 m) (+ (* z x om-c) (* s y)))
-    (set! (mat4-m21 m) (+ (* z y om-c) (* (- s) x)))
-    (set! (mat4-m22 m) (+ (* z z) (* om-c (* x x) (* y y))))
-    
+        ^mut m (mat4-identity)]
+    (set! (.m00 m) (+ (* x x) (* om-c (* y y) (* z z))))
+    (set! (.m01 m) (+ (* x y om-c) (* s z)))
+    (set! (.m02 m) (+ (* x z om-c) (* (- 0.0 s) y)))
+    (set! (.m10 m) (+ (* y x om-c) (* (- 0.0 s) z)))
+    (set! (.m11 m) (+ (* y y) (* om-c (* x x) (* z z))))
+    (set! (.m12 m) (+ (* y z om-c) (* s x)))
+    (set! (.m20 m) (+ (* z x om-c) (* s y)))
+    (set! (.m21 m) (+ (* z y om-c) (* (- 0.0 s) x)))
+    (set! (.m22 m) (+ (* z z) (* om-c (* x x) (* y y))))
     m))
 
-;;; mat4-perspective -- create perspective projection matrix
-;;; fovy: vertical field of view in radians
-;;; aspect: aspect ratio (width / height)
-;;; near: near clipping plane
-;;; far: far clipping plane
-;;; Returns: mat4
-(defn mat4-perspective [fovy aspect near far] : mat4
-  (let [m (mat4-identity)
+;;; mat4-perspective -- perspective projection -- Returns: mat4
+(defn mat4-perspective [fovy : float  aspect : float  near : float  far : float] : mat4
+  (let [^mut m (mat4-identity)
         f (/ 1.0 (tan (/ fovy 2.0)))]
-    (set! (mat4-m00 m) (/ f aspect))
-    (set! (mat4-m11 m) f)
-    (set! (mat4-m22 m) (/ (+ far near) (- near far)))
-    (set! (mat4-m23 m) -1.0)
-    (set! (mat4-m32 m) (/ (* 2.0 far near) (- near far)))
-    (set! (mat4-m33 m) 0.0)
+    (set! (.m00 m) (/ f aspect))
+    (set! (.m11 m) f)
+    (set! (.m22 m) (/ (+ far near) (- near far)))
+    (set! (.m23 m) -1.0)
+    (set! (.m32 m) (/ (* 2.0 far near) (- near far)))
+    (set! (.m33 m) 0.0)
     m))
 
-;;; mat4-ortho -- create orthographic projection matrix
-;;; l: left clipping plane
-;;; r: right clipping plane
-;;; b: bottom clipping plane
-;;; t: top clipping plane
-;;; near: near clipping plane
-;;; far: far clipping plane
-;;; Returns: mat4
-(defn mat4-ortho [l r b t near far] : mat4
-  (let [m (mat4-identity)
-        w (/ (- r l))
-        h (/ (- t b))
-        d (/ (- far near))]
-    (set! (mat4-m00 m) (* 2.0 w))
-    (set! (mat4-m11 m) (* 2.0 h))
-    (set! (mat4-m22 m) (- (* 2.0 d)))
-    (set! (mat4-m03 m) (/ (- (+ r l)) w))
-    (set! (mat4-m13 m) (/ (- (+ t b)) h))
-    (set! (mat4-m23 m) (/ (- (+ far near)) d))
-    (set! (mat4-m33 m) 1.0)
+;;; mat4-ortho -- orthographic projection -- Returns: mat4
+(defn mat4-ortho [l : float  r : float  b : float  t : float  near : float  far : float] : mat4
+  (let [^mut m (mat4-identity)
+        w (/ 1.0 (- r l))
+        h (/ 1.0 (- t b))
+        d (/ 1.0 (- far near))]
+    (set! (.m00 m) (* 2.0 w))
+    (set! (.m11 m) (* 2.0 h))
+    (set! (.m22 m) (- 0.0 (* 2.0 d)))
+    (set! (.m03 m) (/ (- 0.0 (+ r l)) w))
+    (set! (.m13 m) (/ (- 0.0 (+ t b)) h))
+    (set! (.m23 m) (/ (- 0.0 (+ far near)) d))
+    (set! (.m33 m) 1.0)
     m))
 
-;;; mat4-look-at -- create view matrix (camera transformation)
-;;; eye: vec3 (camera position)
-;;; center: vec3 (point to look at)
-;;; up: vec3 (up direction)
-;;; Returns: mat4
-(defn mat4-look-at [eye center up] : mat4
+;;; mat4-look-at -- view (camera) matrix -- Returns: mat4
+(defn mat4-look-at [eye : vec3  center : vec3  up : vec3] : mat4
   (let [f (vec3-normalize (vec3-sub center eye))
         s (vec3-normalize (vec3-cross f (vec3-normalize up)))
         u (vec3-cross s f)
-        m (mat4-identity)]
-    
-    (set! (mat4-m00 m) (vec3-x s))
-    (set! (mat4-m01 m) (vec3-y s))
-    (set! (mat4-m02 m) (vec3-z s))
-    
-    (set! (mat4-m10 m) (vec3-x u))
-    (set! (mat4-m11 m) (vec3-y u))
-    (set! (mat4-m12 m) (vec3-z u))
-    
-    (set! (mat4-m20 m) (- (vec3-x f)))
-    (set! (mat4-m21 m) (- (vec3-y f)))
-    (set! (mat4-m22 m) (- (vec3-z f)))
-    
-    (set! (mat4-m30 m) (vec3-x eye))
-    (set! (mat4-m31 m) (vec3-y eye))
-    (set! (mat4-m32 m) (vec3-z eye))
-    
-    (free f)
-    (free s)
-    (free u)
+        ^mut m (mat4-identity)]
+    (set! (.m00 m) (.x s))
+    (set! (.m01 m) (.y s))
+    (set! (.m02 m) (.z s))
+    (set! (.m10 m) (.x u))
+    (set! (.m11 m) (.y u))
+    (set! (.m12 m) (.z u))
+    (set! (.m20 m) (- 0.0 (.x f)))
+    (set! (.m21 m) (- 0.0 (.y f)))
+    (set! (.m22 m) (- 0.0 (.z f)))
+    (set! (.m30 m) (.x eye))
+    (set! (.m31 m) (.y eye))
+    (set! (.m32 m) (.z eye))
     m))
 
-;;; Helper functions for vec3 arithmetic (needed for look-at)
+;;; mat4-ptr -- address of a mat4's 16 column-major float64 fields, as an int.
+;;; For OpenGL-style uniform upload. The pointer is only valid for the duration
+;;; of the call (the borrow's storage); copy out before the borrow ends.
+;;; Returns: :int (pointer)
+(defn mat4-ptr [^borrow m : mat4] : int
+  ```c return (int64_t)(intptr_t)&(m.m00); ```)
 
-;;; vec3-sub -- subtract two vec3
-;;; a: vec3
-;;; b: vec3
-;;; Returns: vec3
-(defn vec3-sub [a b] : vec3
-  (vec3 (- (vec3-x a) (vec3-x b))
-        (- (vec3-y a) (vec3-y b))
-        (- (vec3-z a) (vec3-z b))))
-
-;;; vec3-dot (already defined above)
-
-;;; vec3-cross (already defined above)
-
-;;; vec4-dot -- dot product of two vec4
-;;; a: vec4
-;;; b: vec4
-;;; Returns: :float
-(defn vec4-dot [a b] : float
-  (+ (+ (+ (* (vec4-x a) (vec4-x b))
-           (* (vec4-y a) (vec4-y b)))
-        (* (vec4-z a) (vec4-z b)))
-     (* (vec4-w a) (vec4-w b))))
-
-;;; mat4-ptr -- get pointer to mat4 data (for OpenGL uniform uploads)
-;;; m: mat4
-;;; Returns: :ptr (stack pointer; valid for call duration only)
-(defn mat4-ptr [m] : int
-  (int m))
-
-;;; vec3-ptr -- get pointer to vec3 data
-;;; v: vec3
-;;; Returns: :ptr (stack pointer; valid for call duration only)
-(defn vec3-ptr [v] : int
-  (int v))
-
-;;; inline-C helpers for math functions
-```c
-#include <math.h>
-float sin(float x) { return sinf(x); }
-float cos(float x) { return cosf(x); }
-float tan(float x) { return tanf(x); }
-float sqrt(float x) { return sqrtf(x); }
-```
+;;; vec3-ptr -- address of a vec3's 3 float64 fields, as an int.
+;;; Same call-duration-only validity as mat4-ptr. Returns: :int (pointer)
+(defn vec3-ptr [^borrow v : vec3] : int
+  ```c return (int64_t)(intptr_t)&(v.x); ```)
 
 ) ;; end defmodule linalg/small

@@ -1,12 +1,43 @@
 ---
 title: linalg is blocked on a rearchitecture against turmeric v0.21.0
 category: Spice-uplift blocker (Track C / U4 prerequisite)
-status: OPEN — needs a dedicated rearchitecture task or a turmeric-side compat decision
+status: IN PROGRESS — linalg/small migrated (proven :copy template); 5 modules remain
 verified-on: turmeric 0.21.0, main @ 48e99d9 (post #462/#463/#464; built from source)
 verified-by: turmeric-spices Claude (Track C, branch claude/track-c-turmeric-3ghmwl)
 ---
 
 # linalg — blocked on rearchitecture for v0.21.0
+
+## Progress (2026-06-20)
+
+- **`linalg/small` is migrated and verified** — it is the self-contained,
+  fixed-size module (`vec2/3/4`, `mat2/3/4`, the mat4 graphics ops). It now uses
+  `:copy` struct *values* with `make-struct` + `(.field v)`, `^mut` locals for
+  build-by-mutate, libm via `extern-c [x : float] : float`, and inline-C
+  address-of (`&(m.m00)`) for the OpenGL `*-ptr` helpers. Checks clean and a
+  cross-module smoke test (constructors, `vec3-cross`, `mat4-mul`,
+  `mat4-mul-vec4`, `mat4-ptr`) compiles+runs. This is the **proven `:copy`
+  template** for any other fixed-size struct work. Two notes: the constructor
+  names moved `vecN` → `vecN-of` (the type name `vecN` is now the make-struct
+  tag and can't double as a function), and `mat4-inv` is **stubbed with a
+  `panic`** — its old body mixed `vec3-cross`/`vec4-dot` on the same values
+  (only valid under int-pointer aliasing) and needs a type-correct reimpl + a
+  numerical test (TODO(linalg-u4)).
+- **Remaining (5 modules):** `vec`/`mat` (core, need the `(Vec float)` + `^borrow`
+  dynamic model), `solve`/`decomp`/`fmt` (same, plus the pre-existing paren
+  bugs). These are the larger rewrite; `small` did not need `Vec`/borrows.
+
+## Additional v0.21.0 idiom changes found during the `small` migration
+
+Beyond `sizeof` / accessor-functions / `float64*` (below), the rewrite also hit:
+`(float x)` coercion removed (type params `: float` instead, or `int->float`);
+unary `(- x)` and reciprocal `(/ x)` removed (use `(- 0.0 x)` / `(/ 1.0 x)`);
+struct field mutation needs a `^mut` binding; `defstruct Foo` reserves `Foo` as
+the constructor tag (collides with a same-named `defn`); `(error ...)` is not a
+turmeric form (use `(panic ...)`); a `^borrow :copy` struct is passed *by value*
+in inline C (`v.x`, not `v->x`). These belong in the Report #2 migration note.
+
+---
 
 `linalg` does not build against turmeric v0.21.0. While paying down the Track C
 type-hygiene work, an attempt was made to migrate it (rename the colliding
