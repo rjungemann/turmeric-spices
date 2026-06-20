@@ -6,6 +6,7 @@
           __surface-create __surface-destroy __surface-write-png
           __canvas-create __canvas-destroy
           __plot-sample-adaptive
+          BBox renderer-bbox bbox-empty?
           __ok? __ok-val __err-val
           __surface-width __surface-height __surface-pixel-byte
           __pixel-is-background? __count-non-background)
@@ -515,6 +516,208 @@
     return (int64_t)(intptr_t)p;
     ```)
 
+  ;;; __renderer-bbox -- compute a single renderer's data-space bounding box.
+  ;;;
+  ;;; P0 de-monolith of the plot Renderer typeclass plan: this is the former
+  ;;; per-kind bounds-union `switch` lifted verbatim out of `plot-into-canvas`
+  ;;; into a standalone, independently-callable function. Each renderer kind
+  ;;; unions its own points into a local box; `plot-into-canvas` now folds the
+  ;;; returned box corners instead of inlining ~80 lines of per-kind C.
+  ;;;
+  ;;; Returns a malloc'd carrier `{ double x0, x1, y0, y1; int valid; }` (an
+  ;;; int64 handle). `valid == 0` means the renderer contributed no finite
+  ;;; point, so callers must skip it. The caller owns the buffer and frees it.
+  ;;;
+  ;;; Folding box corners is identical to unioning the underlying points:
+  ;;; min/max over all points == min/max over per-renderer box corners, so the
+  ;;; resolved plot bounds (and therefore every pixel) are unchanged.
+  ;;;
+  ;;; Pinned to the stable C symbol `plot_renderer_bbox` via `export-as` so the
+  ;;; inline-C fold site in `plot-into-canvas` can name it directly, mirroring
+  ;;; the `plot_sample_adaptive` pin above.
+  (defn (export-as "plot_renderer_bbox") __renderer-bbox [renderer : int] : ptr<void>
+    ```c
+    #include <stdlib.h>
+    #include <stdint.h>
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct __plot_renderer {
+      int64_t kind;
+      int64_t style1, style2;
+      int64_t data1, data2, data3, data4, data5;
+      double f1, f2, f3, f4, f5, f6;
+      int64_t i1, i2, i3, i4;
+      char *label;
+      char *text;
+      double x_min, x_max, y_min, y_max;
+    } PlotRenderer;
+    typedef struct { double x0, x1, y0, y1; int valid; } RBBox;
+
+    enum {
+      RK_HRULE = 7, RK_VRULE = 8, RK_LABEL = 9,
+      RK_LINES = 20, RK_FUNCTION = 21, RK_PARAMETRIC = 22, RK_POLAR = 23, RK_INVERSE = 24, RK_DENSITY = 25,
+      RK_POINTS = 30, RK_ERROR_BARS = 31, RK_VECTOR_FIELD = 32, RK_ARROWS = 33,
+      RK_FUNCTION_INTERVAL = 40, RK_LINES_INTERVAL = 41, RK_PARAM_INTERVAL = 42, RK_POLAR_INTERVAL = 43,
+      RK_RECTANGLES = 50, RK_AREA_HIST = 51, RK_DISCRETE_HIST = 52, RK_STACKED_HIST = 53,
+      RK_ISOLINE = 60, RK_CONTOURS = 61, RK_CONTOUR_INTERVALS = 62, RK_COLOR_FIELD = 63
+    };
+
+    #define BITS_DBL(v) (((union { double d; int64_t i; }){.i=(v)}).d)
+    #define ISNAN(v) ((v) != (v))
+
+    RBBox *out = (RBBox *)malloc(sizeof(*out));
+    double lx0 = 0.0, lx1 = 0.0, ly0 = 0.0, ly1 = 0.0;
+    int lvalid = 0;
+    #define UNION_POINT(X, Y) do { \
+      double __ux = (X), __uy = (Y); \
+      if (!ISNAN(__ux) && !ISNAN(__uy)) { \
+        if (!lvalid) { lx0 = lx1 = __ux; ly0 = ly1 = __uy; lvalid = 1; } \
+        else { \
+          if (__ux < lx0) lx0 = __ux; \
+          if (__ux > lx1) lx1 = __ux; \
+          if (__uy < ly0) ly0 = __uy; \
+          if (__uy > ly1) ly1 = __uy; \
+        } \
+      } \
+    } while (0)
+    #define UNION_LIST_POINTS(LST) do { \
+      for (Cons *__p = (Cons *)(intptr_t)(LST); __p; __p = (Cons *)(intptr_t)__p->tail) { \
+        Cons *__pt = (Cons *)(intptr_t)__p->head; \
+        if (!__pt) continue; \
+        UNION_POINT(BITS_DBL(__pt->head), BITS_DBL(__pt->tail)); \
+      } \
+    } while (0)
+
+    PlotRenderer *r = (PlotRenderer *)(intptr_t)renderer;
+    if (!r) { out->x0 = out->x1 = out->y0 = out->y1 = 0.0; out->valid = 0; return (int64_t)(intptr_t)out; }
+
+    switch ((int)r->kind) {
+      case RK_LINES:
+      case RK_POINTS:
+      case RK_ARROWS:
+        UNION_LIST_POINTS(r->data1);
+        break;
+      case RK_ERROR_BARS: {
+        for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+          Cons *a = (Cons *)(intptr_t)p->head;
+          if (!a) continue;
+          double x = BITS_DBL(a->head);
+          Cons *b = (Cons *)(intptr_t)a->tail;
+          if (!b) continue;
+          double y = BITS_DBL(b->head);
+          double h = BITS_DBL(b->tail);
+          if (r->i1) { UNION_POINT(x - h, y); UNION_POINT(x + h, y); }
+          else { UNION_POINT(x, y - h); UNION_POINT(x, y + h); }
+        }
+      } break;
+      case RK_HRULE: UNION_POINT(0.0, r->f1); break;
+      case RK_VRULE: UNION_POINT(r->f1, 0.0); break;
+      case RK_LABEL: UNION_POINT(r->f1, r->f2); break;
+      case RK_RECTANGLES:
+      case RK_AREA_HIST: {
+        for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
+          Cons *a = (Cons *)(intptr_t)p->head;
+          if (!a) continue;
+          double x0 = BITS_DBL(a->head);
+          Cons *b = (Cons *)(intptr_t)a->tail;
+          double x1 = BITS_DBL(b->head);
+          Cons *c = (Cons *)(intptr_t)b->tail;
+          double y0 = BITS_DBL(c->head);
+          double y1 = BITS_DBL(c->tail);
+          UNION_POINT(x0, y0);
+          UNION_POINT(x1, y1);
+        }
+      } break;
+      case RK_DISCRETE_HIST: {
+        int idx = 0;
+        for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail, idx++) {
+          Cons *bar = (Cons *)(intptr_t)p->head;
+          if (!bar) continue;
+          double h = BITS_DBL(bar->tail);
+          if (r->i1) { UNION_POINT(0.0, idx); UNION_POINT(h, idx + 0.8); }
+          else { UNION_POINT(idx, 0.0); UNION_POINT(idx + 0.8, h); }
+        }
+      } break;
+      case RK_STACKED_HIST: {
+        int idx = 0;
+        for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail, idx++) {
+          Cons *grp = (Cons *)(intptr_t)p->head;
+          double sum = 0.0;
+          for (Cons *vals = (Cons *)(intptr_t)grp->tail; vals; vals = (Cons *)(intptr_t)vals->tail)
+            sum += BITS_DBL(vals->head);
+          if (r->i1) { UNION_POINT(0.0, idx); UNION_POINT(sum, idx + 0.8); }
+          else { UNION_POINT(idx, 0.0); UNION_POINT(idx + 0.8, sum); }
+        }
+      } break;
+      case RK_FUNCTION:
+      case RK_INVERSE:
+      case RK_DENSITY:
+      case RK_PARAMETRIC:
+      case RK_POLAR:
+      case RK_FUNCTION_INTERVAL:
+      case RK_PARAM_INTERVAL:
+      case RK_POLAR_INTERVAL:
+      case RK_ISOLINE:
+      case RK_CONTOURS:
+      case RK_CONTOUR_INTERVALS:
+      case RK_COLOR_FIELD:
+      case RK_VECTOR_FIELD:
+        if (!ISNAN(r->x_min) && !ISNAN(r->x_max) && !ISNAN(r->y_min) && !ISNAN(r->y_max)) {
+          UNION_POINT(r->x_min, r->y_min);
+          UNION_POINT(r->x_max, r->y_max);
+        }
+        break;
+      case RK_LINES_INTERVAL: UNION_LIST_POINTS(r->data1); UNION_LIST_POINTS(r->data2); break;
+      default: break;
+    }
+
+    out->x0 = lx0; out->x1 = lx1; out->y0 = ly0; out->y1 = ly1; out->valid = lvalid;
+    return (int64_t)(intptr_t)out;
+    #undef UNION_POINT
+    #undef UNION_LIST_POINTS
+    #undef BITS_DBL
+    #undef ISNAN
+    ```)
+
+  ;;; BBox -- an axis-aligned data-space bounding box: the typed result of the
+  ;;; bounds pass (P1 of the plot Renderer typeclass plan, the shape the future
+  ;;; `Renderer` `bounds` method returns). An empty box -- a renderer that
+  ;;; contributed no finite point -- is represented with `x-min` = NaN; use
+  ;;; `bbox-empty?` to test for it.
+  (defstruct BBox :copy [x-min : float  x-max : float  y-min : float  y-max : float])
+
+  ;; Raw-carrier accessors over __renderer-bbox's { x0,x1,y0,y1; valid } buffer.
+  (defn __rbb-valid? [b : ptr<void>] : bool
+    ```c return ((struct { double x0,x1,y0,y1; int valid; } *)b)->valid != 0; ```)
+  (defn __rbb-get [b : ptr<void> which : int] : float
+    ```c
+    struct RBB { double x0,x1,y0,y1; int valid; } *p = (struct RBB *)b;
+    switch ((int)which) { case 0: return p->x0; case 1: return p->x1;
+                          case 2: return p->y0; default: return p->y1; }
+    ```)
+  (defn __rbb-free [b : ptr<void>] : void ```c free(b); ```)
+  (defn __rbb-nan [] : float ```c return 0.0 / 0.0; ```)
+
+  ;;; bbox-empty? -- true when a BBox carries no finite extent (x-min is NaN).
+  (defn bbox-empty? [bb : BBox] : bool
+    (let [lo (.x-min bb)] (not (= lo lo))))
+
+  ;;; renderer-bbox -- a renderer's data-space bounding box as a typed BBox.
+  ;;;
+  ;;; The Turmeric-level wrapper over the P0 `__renderer-bbox` extraction: it
+  ;;; reads the raw carrier and packs a `BBox` (building it with `make-struct`,
+  ;;; so no struct-by-value crosses the inline-C boundary). A renderer with no
+  ;;; finite points yields an empty box (`bbox-empty?` true). This is the value
+  ;;; the forthcoming `Renderer` typeclass's `bounds` method will hand back.
+  (defn renderer-bbox [renderer : int] : BBox
+    (let [b (__renderer-bbox renderer)]
+      (if (__rbb-valid? b)
+        (let [box (make-struct BBox (__rbb-get b 0) (__rbb-get b 1)
+                                    (__rbb-get b 2) (__rbb-get b 3))]
+          (do (__rbb-free b) box))
+        (let [n (__rbb-nan)
+              box (make-struct BBox n n n n)]
+          (do (__rbb-free b) box)))))
+
   ;;; plot-into-canvas -- render into an existing canvas and viewport.
   ;;;
   ;;; renderers is a Vec[Renderer] (built with vec-of or vec-new/vec-push!),
@@ -689,84 +892,20 @@
         categorical = 1;
         categories = r->data2;
       }
-      switch ((int)r->kind) {
-        case RK_LINES:
-        case RK_POINTS:
-        case RK_ARROWS:
-          UNION_LIST_POINTS(r->data1);
-          break;
-        case RK_ERROR_BARS: {
-          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
-            Cons *a = (Cons *)(intptr_t)p->head;
-            if (!a) continue;
-            double x = BITS_DBL(a->head);
-            Cons *b = (Cons *)(intptr_t)a->tail;
-            if (!b) continue;
-            double y = BITS_DBL(b->head);
-            double h = BITS_DBL(b->tail);
-            if (r->i1) { UNION_POINT(x - h, y); UNION_POINT(x + h, y); }
-            else { UNION_POINT(x, y - h); UNION_POINT(x, y + h); }
+      /* P0: the per-kind bounds-union switch now lives in __renderer-bbox
+         (pinned C symbol plot_renderer_bbox). Fold its box corners here --
+         identical to unioning the underlying points. */
+      {
+        extern void *plot_renderer_bbox(int64_t renderer);
+        typedef struct { double x0, x1, y0, y1; int valid; } RBBox;
+        RBBox *bb = (RBBox *)plot_renderer_bbox((int64_t)(intptr_t)r);
+        if (bb) {
+          if (bb->valid) {
+            UNION_POINT(bb->x0, bb->y0);
+            UNION_POINT(bb->x1, bb->y1);
           }
-        } break;
-        case RK_HRULE: UNION_POINT(0.0, r->f1); break;
-        case RK_VRULE: UNION_POINT(r->f1, 0.0); break;
-        case RK_LABEL: UNION_POINT(r->f1, r->f2); break;
-        case RK_RECTANGLES:
-        case RK_AREA_HIST: {
-          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail) {
-            Cons *a = (Cons *)(intptr_t)p->head;
-            if (!a) continue;
-            double x0 = BITS_DBL(a->head);
-            Cons *b = (Cons *)(intptr_t)a->tail;
-            double x1 = BITS_DBL(b->head);
-            Cons *c = (Cons *)(intptr_t)b->tail;
-            double y0 = BITS_DBL(c->head);
-            double y1 = BITS_DBL(c->tail);
-            UNION_POINT(x0, y0);
-            UNION_POINT(x1, y1);
-          }
-        } break;
-        case RK_DISCRETE_HIST: {
-          int idx = 0;
-          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail, idx++) {
-            Cons *bar = (Cons *)(intptr_t)p->head;
-            if (!bar) continue;
-            double h = BITS_DBL(bar->tail);
-            if (r->i1) { UNION_POINT(0.0, idx); UNION_POINT(h, idx + 0.8); }
-            else { UNION_POINT(idx, 0.0); UNION_POINT(idx + 0.8, h); }
-          }
-        } break;
-        case RK_STACKED_HIST: {
-          int idx = 0;
-          for (Cons *p = (Cons *)(intptr_t)r->data1; p; p = (Cons *)(intptr_t)p->tail, idx++) {
-            Cons *grp = (Cons *)(intptr_t)p->head;
-            double sum = 0.0;
-            for (Cons *vals = (Cons *)(intptr_t)grp->tail; vals; vals = (Cons *)(intptr_t)vals->tail)
-              sum += BITS_DBL(vals->head);
-            if (r->i1) { UNION_POINT(0.0, idx); UNION_POINT(sum, idx + 0.8); }
-            else { UNION_POINT(idx, 0.0); UNION_POINT(idx + 0.8, sum); }
-          }
-        } break;
-        case RK_FUNCTION:
-        case RK_INVERSE:
-        case RK_DENSITY:
-        case RK_PARAMETRIC:
-        case RK_POLAR:
-        case RK_FUNCTION_INTERVAL:
-        case RK_PARAM_INTERVAL:
-        case RK_POLAR_INTERVAL:
-        case RK_ISOLINE:
-        case RK_CONTOURS:
-        case RK_CONTOUR_INTERVALS:
-        case RK_COLOR_FIELD:
-        case RK_VECTOR_FIELD:
-          if (!ISNAN(r->x_min) && !ISNAN(r->x_max) && !ISNAN(r->y_min) && !ISNAN(r->y_max)) {
-            UNION_POINT(r->x_min, r->y_min);
-            UNION_POINT(r->x_max, r->y_max);
-          }
-          break;
-        case RK_LINES_INTERVAL: UNION_LIST_POINTS(r->data1); UNION_LIST_POINTS(r->data2); break;
-        default: break;
+          free(bb);
+        }
       }
     }
 
