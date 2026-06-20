@@ -1,0 +1,89 @@
+;; tests/plot/renderer_test.tur -- P2 of the plot Renderer typeclass plan.
+;;
+;; The `Renderer` typeclass collapses the per-kind renderer dispatch: each kind
+;; is a struct (LinesR / PointsR / LabelR) carrying its real typed payload, and
+;; `bounds` computes the data extent from named fields. These tests prove the
+;; method dispatches on the per-kind struct type and that a typed LinesR reports
+;; exactly the same box as the legacy slot-bag `lines` renderer.
+
+(defmodule plot/tests/renderer
+  (import plot/core  :refer [renderer-bbox bbox-empty? BBox
+                             lines-r points-r label-r])
+  (import plot/line  :refer [lines])
+  (import plot/style :refer [default-line-style])
+  (import test/assert :refer [assert-true])
+  (import test/suite  :refer [describe it])
+  (import test/runner :refer [run-all])
+
+  ;; A point is a cons of the two coordinate doubles' bit patterns; a point
+  ;; list is a cons-list of those pairs terminated by 0 (mirrors line_test).
+  (defn xy-pair [x : float y : float] : int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *p = malloc(sizeof(*p));
+    union { double d; int64_t i; } ux, uy;
+    ux.d = x; uy.d = y;
+    p->head = ux.i; p->tail = uy.i;
+    return (int64_t)(intptr_t)p;
+    ```)
+
+  (defn t-cons [v : int n : int] : int
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *c = malloc(sizeof(*c));
+    c->head = v; c->tail = n;
+    return (int64_t)(intptr_t)c;
+    ```)
+
+  (defn close? [a : float b : float] : bool
+    ```c
+    double d = (double)a - (double)b;
+    if (d < 0) d = -d;
+    return d < 1e-9;
+    ```)
+
+  ;; Points (-2,-1), (-1,0.5), (1,1.5) -> box x:[-2,1] y:[-1,1.5].
+  (defn sample-points [] : int
+    (t-cons (xy-pair -2.0 -1.0)
+      (t-cons (xy-pair -1.0 0.5)
+        (t-cons (xy-pair 1.0 1.5) 0))))
+
+  (defn bbox-eq? [bb : BBox  x0 : float x1 : float y0 : float y1 : float] : bool
+    (and (assert-true (not (bbox-empty? bb)))
+         (assert-true (close? x0 (.x-min bb)))
+         (assert-true (close? x1 (.x-max bb)))
+         (assert-true (close? y0 (.y-min bb)))
+         (assert-true (close? y1 (.y-max bb)))))
+
+  ;; `bounds` on a LinesR computes the box from its typed `points` field.
+  (defn lines-r-bounds [] : bool
+    (bbox-eq? (bounds (lines-r (sample-points) (default-line-style) ""))
+              -2.0 1.0 -1.0 1.5))
+
+  ;; PointsR is a distinct kind/type but shares the point-list bounds rule.
+  (defn points-r-bounds [] : bool
+    (bbox-eq? (bounds (points-r (sample-points) (default-line-style) ""))
+              -2.0 1.0 -1.0 1.5))
+
+  ;; LabelR's bounds is the single anchor point.
+  (defn label-r-bounds [] : bool
+    (bbox-eq? (bounds (label-r 3.0 4.0 "hi" (default-line-style)))
+              3.0 3.0 4.0 4.0))
+
+  ;; The typed LinesR must agree with the legacy slot-bag `lines` renderer.
+  (defn matches-legacy [] : bool
+    (let [typed  (bounds (lines-r (sample-points) (default-line-style) ""))
+          legacy (renderer-bbox (lines (sample-points) (default-line-style) ""))]
+      (and (assert-true (close? (.x-min typed) (.x-min legacy)))
+           (assert-true (close? (.x-max typed) (.x-max legacy)))
+           (assert-true (close? (.y-min typed) (.y-min legacy)))
+           (assert-true (close? (.y-max typed) (.y-max legacy))))))
+
+  (defn main [] : int
+    (describe "plot/core Renderer typeclass -- bounds"
+      (it "LinesR bounds from typed points field"  (lines-r-bounds))
+      (it "PointsR bounds (distinct kind, shared rule)" (points-r-bounds))
+      (it "LabelR bounds is the anchor point"       (label-r-bounds))
+      (it "typed LinesR matches legacy lines bounds" (matches-legacy)))
+    (run-all)
+    0))
