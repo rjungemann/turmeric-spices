@@ -16,7 +16,7 @@
 (defmodule notebook/image
   (import ansi/image :refer [image-display image-display-rgba image-placeholder])
   (import ansi/term  :refer [term-image-protocol])
-  (import png/reader :refer [png-read img-free])
+  (import png/reader :refer [png-read img-free img-of])
   (import png/info   :refer [img-width img-height img-pixels])
   (export image-marker
           image-hook-record-path
@@ -174,10 +174,14 @@
                 handle (__img-result-handle res)]
             (if (= handle 0)
               (image-placeholder path)
-              (do
-                (image-display-rgba (img-width handle) (img-height handle)
-                                    (img-pixels handle))
-                (img-free handle))))
+              ;; img-of recovers the nominal Img opaque from the result so the
+              ;; png/info accessors (which take Img, not a bare int handle)
+              ;; type-check after png's defopaque uplift.
+              (let [img (img-of res)]
+                (do
+                  (image-display-rgba (img-width img) (img-height img)
+                                      (img-pixels img))
+                  (img-free img)))))
           ;; Kitty / iTerm2 / placeholder: let ansi/image pick.
           (image-display path))
         ```c fputc('\n', stdout); fflush(stdout); ```

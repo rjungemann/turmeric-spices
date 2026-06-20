@@ -824,17 +824,15 @@
   ;; landed in turmeric main (PRs #452 open-dispatch, #456 vec-get type
   ;; preservation, #458 by-value struct payload pack).
   ;;
-  ;; The `bounds`/`to-legacy` folds below thread a by-value `BBox` / `(Vec int)`
-  ;; accumulator through a top-level recursive `defn`. turmeric main fixed the
-  ;; self-recursive carrier typing (both `defn` and `letrec`) and fresh `vec-new`
-  ;; argument unification, so the scalar-carrier workaround and the `(Vec int)`
-  ;; construction-site ascription are gone. The folds stay `defn`s rather than
-  ;; the tighter local `letrec` closures because of one residual codegen gap: a
-  ;; `letrec` closure that *captures* the existential `rs` and dereferences it via
-  ;; `open` inside its lifted body mis-emits the captured binding in C
-  ;; ('rs_NNNN' undeclared) -- a plain `(Vec int)` capture is fine, only the
-  ;; existential-element + `open` capture trips it (W3, see
-  ;; docs/spice-uplift-residual-soft-blockers-2026-06-20.md).
+  ;; The `bounds`/`to-legacy` folds below are local `letrec` closures that
+  ;; capture the existential `rs` and dereference it via `open` inside the lifted
+  ;; closure body. turmeric main fixed the self-recursive carrier typing (both
+  ;; `defn` and `letrec`) and fresh `vec-new` argument unification, and #464
+  ;; closed the last gap (W3): a captured binding referenced inside
+  ;; `open`/`pack`/`dispatch` is now collected into the closure's capture set and
+  ;; resolves to its env slot instead of mis-emitting an undeclared C name. So
+  ;; the folds no longer need to be hoisted to top-level `defn`s that thread `rs`
+  ;; as an explicit parameter.
   ;; (Callers building a heterogeneous `(Vec (exists ...))` literal still ascribe
   ;; the element type at construction -- see the `mixed-vec` helper in the
   ;; any_renderer test -- because the existential element is not back-inferred
@@ -870,52 +868,42 @@
           (if (< (.y-min a) (.y-min b)) (.y-min a) (.y-min b))
           (if (> (.y-max a) (.y-max b)) (.y-max a) (.y-max b))))))
 
-  ;; __renderers-bbox-go -- tail-recursive fold of `bounds` over a Vec of boxed
-  ;; renderers. Each element is `open`ed to recover its concrete renderer under a
-  ;; fresh abstract type, and `bounds` dispatches through the packed witness; the
-  ;; per-element box is unioned into a `BBox` accumulator (seeded from
-  ;; `bbox-empty-box`, the union identity).
-  ;;
-  ;; A top-level `defn` rather than a `letrec`-bound closure (which would be the
-  ;; tighter form now that the letrec self-call carrier typing is fixed): a
-  ;; `letrec` closure that *captures* the existential `rs` and dereferences it via
-  ;; `open (vec-get rs i)` inside its lifted body still mis-emits the captured
-  ;; binding in C ('rs_NNNN' undeclared) -- a plain `(Vec int)` capture is fine,
-  ;; only the existential-element + `open` capture trips it. See the W3 note in
-  ;; docs/spice-uplift-residual-soft-blockers-2026-06-20.md.
-  (defn __renderers-bbox-go [rs : (Vec (exists [a] [(Renderer a)] a))
-                             n : int  i : int  acc : BBox] : BBox
-    (if (>= i n) acc
-      (__renderers-bbox-go rs n (+ i 1)
-        (bbox-union acc (open (vec-get rs i) [a v] (bounds v))))))
-
   ;;; renderers-bbox -- data-space bounding box of a heterogeneous renderer Vec,
   ;;; unioning each element's `bounds` through the `AnyRenderer` existential.
   ;;; The P3 payoff: the union is driven by coherent typeclass dispatch, not the
   ;;; legacy ~30-arm `kind` switch in `__renderer-bbox`.
+  ;;;
+  ;;; The fold is a local `letrec` closure that captures the existential `rs` and
+  ;;; `open`s each element under a fresh abstract type, dispatching `bounds`
+  ;;; through the packed witness; the per-element box is unioned into a `BBox`
+  ;;; accumulator seeded from `bbox-empty-box` (the union identity). The captured
+  ;;; `rs`/`open` form is correct since turmeric #464 (W3).
   (defn renderers-bbox [rs : (Vec (exists [a] [(Renderer a)] a))] : BBox
-    (__renderers-bbox-go rs (vec-len rs) 0 (bbox-empty-box)))
-
-  ;; __any-to-legacy-go -- fold a (Vec AnyRenderer) into a legacy (Vec int) of
-  ;; slot-bag handles by dispatching `to-legacy` through each box. The legacy Vec
-  ;; threads through the recursion as a mutated-in-place accumulator. A top-level
-  ;; `defn` for the same reason as `__renderers-bbox-go`: a `letrec` closure that
-  ;; captures the existential `rs` and `open`s it mis-emits the capture (W3).
-  (defn __any-to-legacy-go [rs : (Vec (exists [a] [(Renderer a)] a))
-                            n : int  i : int  out : (Vec int)] : (Vec int)
-    (if (>= i n) out
-      (let [h (open (vec-get rs i) [a v] (to-legacy v))]
-        (do (vec-push! out h)
-            (__any-to-legacy-go rs n (+ i 1) out)))))
+    (let [n (vec-len rs)]
+      (letrec [go (fn [i : int  acc : BBox] : BBox
+                    (if (>= i n) acc
+                      (go (+ i 1)
+                          (bbox-union acc (open (vec-get rs i) [a v] (bounds v))))))]
+        (go 0 (bbox-empty-box)))))
 
   ;;; anyrenderers->legacy -- materialise a (Vec AnyRenderer) as the legacy
   ;;; (Vec int) of slot-bag handles the C draw pass consumes. Each element's
-  ;;; lowering dispatches through its packed Renderer dictionary. The seed `out`
-  ;;; is a bare `(vec-new)`: turmeric main now unifies a fresh `vec-new`'s element
-  ;;; tyvar against the concrete `(Vec int)` parameter at the call site (W2 fix),
-  ;;; so the former construction-site ascription is gone.
+  ;;; lowering dispatches through its packed Renderer dictionary (`to-legacy`).
+  ;;;
+  ;;; A local `letrec` closure folds the Vec: it captures the existential `rs`
+  ;;; and the legacy `out` accumulator, `open`s each element, and pushes the
+  ;;; lowered handle in place. The seed `out` is a bare `(vec-new)` (turmeric
+  ;;; unifies its element tyvar against the `(Vec int)` result, W2), and the
+  ;;; captured-`rs` `open` body emits correctly since #464 (W3).
   (defn anyrenderers->legacy [rs : (Vec (exists [a] [(Renderer a)] a))] : (Vec int)
-    (__any-to-legacy-go rs (vec-len rs) 0 (vec-new)))
+    (let [n   (vec-len rs)
+          out (vec-new)]
+      (letrec [go (fn [i : int] : (Vec int)
+                    (if (>= i n) out
+                      (let [h (open (vec-get rs i) [a v] (to-legacy v))]
+                        (do (vec-push! out h)
+                            (go (+ i 1))))))]
+        (go 0))))
 
   ;;; plot-anyrenderers -- render a heterogeneous (Vec AnyRenderer) to a new
   ;;; surface (returns the same :ptr<void> result envelope as `plot`). Each
