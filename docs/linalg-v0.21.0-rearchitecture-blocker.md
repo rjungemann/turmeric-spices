@@ -1,14 +1,68 @@
 ---
-title: linalg is blocked on a rearchitecture against turmeric v0.21.0
+title: linalg rearchitecture against turmeric v0.21.0 — DONE
 category: Spice-uplift blocker (Track C / U4 prerequisite)
-status: IN PROGRESS — linalg/small migrated (proven :copy template); 5 modules remain
-verified-on: turmeric 0.21.0, main @ 48e99d9 (post #462/#463/#464; built from source)
-verified-by: turmeric-spices Claude (Track C, branch claude/track-c-turmeric-3ghmwl)
+status: RESOLVED — all 6 modules migrated, check-clean, 36-test suite green
+verified-on: turmeric 0.21.0, main @ a826bce (post #465/#466/#467; built from source)
+verified-by: turmeric-spices Claude (Track C, branch claude/track-c-turmeric-yi27rv)
 ---
 
-# linalg — blocked on rearchitecture for v0.21.0
+# linalg — rearchitected for v0.21.0 (resolved)
 
-## Progress (2026-06-20)
+## Resolution (2026-06-20)
+
+linalg is fully migrated. All six `src/linalg/*.tur` modules `tur check`
+clean and the rewritten `tests/linalg.tur` (36 checks) passes under
+`tur test tests`. The #465 (separate-compilation codegen) and #466 (legacy
+`:int`-pointer migration diagnostics/guide) changes landed in turmeric main
+were the enabling work referenced as the blockers.
+
+**The model that shipped** (dynamic modules `vec`/`mat`/`solve`/`decomp`/`fmt`):
+
+- A vector is a typed `lavec` struct owning a heap `(Vec float)`; a matrix is a
+  `mat` owning a row-major `(Vec float)`. Both are move-only — readers take the
+  receiver `^borrow`, the `*-free` consume it. Element reads go through
+  `(:: (vec-get (.data x) i) :float)` (carrier reinterpret per stdlib/vec).
+- The `vec` type/ops are named `lavec` / `la-vec-*` to avoid colliding with the
+  auto-loaded `stdlib/vec` prelude, which is now the backing store.
+- Counted loops are `letrec` closures (`dotimes` is not a v0.21.0 form).
+- The numeric kernels in `decomp`/`solve` (Cholesky, LU+pivot, Householder QR,
+  fwd/back-sub, det, Q^T b) run in **inline C over the backing buffers** — this
+  is both faster and sidesteps the codegen limitations noted below, and it was
+  the cleanest place to fix the pre-existing paren bugs. `fmt` likewise formats
+  in inline C over the buffer.
+- `small` (the earlier `:copy` fixed-size module) is unchanged.
+
+### Workarounds for turmeric codegen limitations found during the port
+
+These are spice-side workarounds; each is a candidate turmeric report (the
+list-API one is already on the turmeric agent's list):
+
+1. **A hyphen in a `defstruct` type name does not survive C codegen.**
+   `(defstruct la-vec ...)` type-checks but emits `la-vec <var>` (invalid C).
+   Worked around by hyphen-free type names (`lavec`, `cholfac`, `lufac`,
+   `qrfac`); the *functions* keep hyphens fine.
+2. **A `^mut` float accumulator captured by a `letrec` closure does not
+   propagate its mutations back out** (captured by value), and **threading a
+   float accumulator through the recursive self-call mis-carriers to 0**. Both
+   make pure-Turmeric float reductions return 0. Worked around with a
+   one-element heap `(Vec float)` accumulator cell (writes through the shared
+   pointer escape the closure) or by returning the verdict directly from the
+   loop; the numeric modules dodge it entirely by reducing in inline C.
+3. **No `-lm` for a cmake-dep-less spice**, so libm `sqrt`/`fabs` won't link.
+   Worked around with libm-free inline-C `la-sqrt` (Newton) / `la-fabs`.
+4. **List API is half-present** (`cons` builtin survives; `car`/`cdr`/`null?`/
+   `length` are gone; `(list ...)`/`tcons` are int-only so float lists can't be
+   built). The cons-list `*-from-list` constructors were replaced with variadic
+   `la-vec-of` / `mat-of` macros over `(Vec float)`.
+
+`mat4-inv` in `small` remains the one stubbed `panic` (TODO(linalg-u4)) — its
+type-correct reimplementation is independent of this rearchitecture.
+
+---
+
+## Historical record (the original blocker, pre-migration)
+
+## Progress (2026-06-20, superseded by the Resolution above)
 
 - **`linalg/small` is migrated and verified** — it is the self-contained,
   fixed-size module (`vec2/3/4`, `mat2/3/4`, the mat4 graphics ops). It now uses
@@ -25,7 +79,8 @@ verified-by: turmeric-spices Claude (Track C, branch claude/track-c-turmeric-3gh
   numerical test (TODO(linalg-u4)).
 - **Remaining (5 modules):** `vec`/`mat` (core, need the `(Vec float)` + `^borrow`
   dynamic model), `solve`/`decomp`/`fmt` (same, plus the pre-existing paren
-  bugs). These are the larger rewrite; `small` did not need `Vec`/borrows.
+  bugs). These are the larger rewrite; `small` did not need `Vec`/borrows. **(All
+  five are now done — see Resolution.)**
 
 ## Additional v0.21.0 idiom changes found during the `small` migration
 
