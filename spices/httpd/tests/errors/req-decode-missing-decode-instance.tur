@@ -1,0 +1,28 @@
+;; U2/P5 negative fixture: decoding a request body into a type that has no
+;; json `Decode` instance must be rejected at elaboration. `req-decode`
+;; dispatches the `decode` method through a `(Result T cstr)` ascription, so a
+;; `T` with no `(definstance Decode [T] ...)` (i.e. one never passed to
+;; `derive-json`) has no instance to resolve.
+;;
+;; Verify (from the httpd spice root):
+;;   tur check tests/errors/req-decode-missing-decode-instance.tur
+;;   => error: no instance 'Decode NoCodec'
+;; (reported at the `decode` call inside the `req-decode` macro expansion in
+;;  httpd/handler.tur; the point is that this fixture fails to compile.)
+;;
+;; Lives under tests/errors/ so the non-recursive `tur test tests` run skips
+;; it -- a compile-fail fixture, not a runnable test. Positive companion:
+;; tests/json_codec_test.tur.
+
+(defmodule req_decode_missing_decode_instance_test (export)
+  (import httpd/handler :refer [req-decode])
+  (import httpd/types   :refer [Request])
+
+  ;; NoCodec is never run through derive-json, so it has no Decode instance.
+  (defstruct NoCodec [x : int])
+
+  (defn handle-it [req : Request] : int
+    (let [r (req-decode req NoCodec)]   ;; ERROR: no instance 'Decode NoCodec'
+      0))
+
+  (defn main [] : int 0))

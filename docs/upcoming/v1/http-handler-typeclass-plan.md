@@ -1,10 +1,11 @@
 # Plan: `http` / `httpd` Handler Typeclass + JSON Codec Integration (U2, v1)
 
 > Status: complete — P1+P2 landed (turmeric-spices PR #23); P3 (httpd JSON
-> body codecs); P4 (http client codecs); P5 (tests/docs + the one enforceable
-> negative fixture). Two P5 negative-fixture deliverables are blocked by
-> turmeric limitations (instance-method return unification; call-site
-> discharge of `^Class` `defn` constraints) and are documented under P5.
+> body codecs); P4 (http client codecs); P5 (tests/docs + negative fixtures).
+> The two type-checking gaps P5 first hit (instance-method return not unified;
+> `^Class` `defn` constraint not discharged at the call site) were fixed in
+> turmeric main and are now enforced -- all four negative fixtures below fail
+> to compile as intended.
 > Tracks: spices-type-features-uplift-plan **U2 target — http/httpd**
 > Scope: `spices/httpd/` and `spices/http/`; no compiler dependency expected
 > Builds on: json `Encode`/`Decode` typeclasses (turmeric-spices PRs #20 +
@@ -163,7 +164,7 @@ a typed request body and encode a typed response without inline-C.
 
 **Landed:** `req-decode` / `with-json-body` (macros, type-directed decode),
 `json-ok` / `json-resp` (generic over `Encode`). Test:
-`tests/httpd/json_codec_test.tur` round-trips a typed JSON POST body to a
+`tests/json_codec_test.tur` round-trips a typed JSON POST body to a
 typed JSON response, asserts `Content-Type: application/json`, and rejects a
 malformed body with `400`.
 
@@ -257,69 +258,55 @@ Two notes worth recording:
   request whose body is the encoded struct and whose `Content-Type` is
   `application/json`.
 
-### P5 — Tests, negative fixtures, docs — LANDED (with two limitations recorded)
+### P5 — Tests, negative fixtures, docs — LANDED
 
-**Done:**
-- Positive tests: `tests/httpd/json_codec_test.tur` (serve + `with-json-body`
-  round-trip, landed P3) and `tests/codec_test.tur` in http (`json-request` +
-  `response-decode`, landed P4).
+**Positive tests + docs:**
+- `spices/httpd/tests/json_codec_test.tur` (serve + `with-json-body`
+  round-trip, landed P3) and `spices/http/tests/codec_test.tur`
+  (`json-request` + `response-decode`, landed P4).
 - READMEs: both `spices/httpd/README.md` and `spices/http/README.md` show the
   typed codec path; the raw `(c-fn [int] int)` `server-start` stays documented
   as the lower-level API.
-- Negative fixture (the one guarantee the compiler actually enforces):
-  `spices/http/tests/errors/response-decode-missing-decode-instance.tur` --
-  `response-decode` into a type with no `Decode` instance fails at elaboration
-  with `error: no instance 'Decode NoCodec'`. Verified with
-  `tur check tests/errors/response-decode-missing-decode-instance.tur`.
 
-**Two negative-fixture deliverables could NOT be shipped -- turmeric
-limitations (probed tip-of-main 0.21.0):**
+**Negative fixtures (all four fail to compile as intended).** Each carries a
+header with its `tur check` command and expected diagnostic, and lives under
+`tests/errors/` so the non-recursive `tur test tests` run skips it.
 
-1. **A non-`Response` handler return is *not* a compile error.** Typeclass
-   instance method bodies are elaborated (an unknown function inside the body
-   *is* caught), but the body's result type is not unified with the declared
-   method signature's return type. A `(definstance Handler [Bad] (respond
-   [self req] 42))` -- or even one returning a `cstr` or an unrelated struct
-   -- type-checks clean. This is consistent with the Track-A carrier ABI
-   bridge (values coerce through the int64 carrier), but it means the
-   "handler must return a `Response`" contract is not statically enforced.
-   No fixture can demonstrate a failure that does not happen.
+| Fixture | Guarantee | Diagnostic |
+|---|---|---|
+| `httpd/tests/errors/handler-non-response-return.tur` | a `Handler` `respond` body must return a `Response` | `TUR-E0001`: instance method 'respond' declares return type 'Response' but its body returns Other |
+| `httpd/tests/errors/req-decode-missing-decode-instance.tur` | `req-decode` into a type with no `Decode` instance | `no instance 'Decode NoCodec'` |
+| `http/tests/errors/response-decode-missing-decode-instance.tur` | `response-decode` into a type with no `Decode` instance | `no instance 'Decode NoCodec'` |
+| `http/tests/errors/json-request-missing-encode-instance.tur` | `json-request` body with no `Encode` instance | `TUR-E0001`: no 'Encode' instance for 'NoCodec' in constrained call to 'json-request' |
 
-2. **A missing `Encode` instance at a `json-ok` / `json-request` call site is
-   *not* a compile error.** These are ordinary `^Encode T`-constrained
-   `defn`s; the constraint is checked abstractly inside the body but not
-   re-discharged at the call site when `T` is instantiated to a type with no
-   `Encode` instance. `(json-ok (make-struct NoEnc 1))` type-checks clean.
-   Only the *method-via-ascription* path (`decode` in `req-decode` /
-   `response-decode`) enforces instance existence -- which is why the one
-   shippable negative fixture is on the decode side.
+The first and last of these were initially blocked by two turmeric
+type-checking gaps that P5 surfaced and that have since been **fixed in
+turmeric main** (the change that also added the `return-type-nominal-*`
+compiler fixtures; reported under
+`docs/reported/instance-method-return-not-unified.md` and
+`docs/reported/...-defn-constraint-not-discharged-at-call-site.md`):
 
-Both are turmeric-side gaps (instance-method return unification; call-site
-discharge of `^Class` `defn` constraints), not spice bugs -- worth a report
-against the turmeric repo.
+1. **Instance method body result type now unifies with the class signature.**
+   `(definstance Handler [Bad] (respond [self req] (make-struct Other 1)))` is
+   now a `TUR-E0001`. (A bare `int` return still type-checks -- `Response` is a
+   `defopaque :int`, so the int<->carrier coercion is intentional; the fixture
+   returns a struct to exercise a genuine nominal conflict.)
+2. **A `^Class` `defn` constraint is now discharged at the call site.**
+   `(json-request … (make-struct NoCodec 1) …)` with no `Encode [NoCodec]` is
+   now a `TUR-E0001`, the same way the `decode`-via-ascription path already
+   rejected a missing `Decode`.
 
-**CI-harness note:** the negative fixture lives in http because http's tests
-are a single flat `tests/*.tur`, so CI runs the non-recursive `tur test
-tests` and skips `tests/errors/`. httpd's suite is nested under
-`tests/httpd/`, so CI *descends* and would try to run any `tests/errors/`
-file -- and an unconditionally-failing fixture (unlike the
-`-Xsubstructural`-gated U1 fixtures, which pass under plain `tur test`) fails
-that run. So httpd's identical `req-decode` guarantee is documented here and
-verifiable by hand rather than committed as a CI-run fixture:
-
-```
-;; from spices/httpd, with a NoCodec struct that was never derive-json'd:
-(req-decode req NoCodec)   ;; => error: no instance 'Decode NoCodec'
-```
-
-A landed `requires.compile-fails` harness (uplift-plan P5) would let httpd
-carry this fixture directly.
+**CI-harness note:** both spices now use a flat `tests/*.tur` layout, so CI
+runs the non-recursive `tur test tests` (all suites at the top level) and
+skips the `tests/errors/` subdir. httpd was flattened from `tests/httpd/` for
+exactly this reason -- under the descend-and-run path a nested layout uses,
+CI would try to *run* (and fail on) an unconditionally-failing fixture, unlike
+the `-Xsubstructural`-gated U1 fixtures which pass under plain `tur test`.
 
 **Acceptance**
 - `tur test spices/httpd/tests` and `tur test spices/http/tests` green.
 - READMEs show the typed handler path end to end.
-- The missing-`Decode`-instance guarantee has a committed negative fixture;
-  the two guarantees blocked by compiler limitations are documented above.
+- All four negative fixtures fail to compile with the diagnostics above.
 
 ### Dependency graph
 
