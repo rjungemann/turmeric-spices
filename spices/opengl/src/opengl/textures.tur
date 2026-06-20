@@ -5,7 +5,8 @@
 
 (defmodule opengl/textures
   (import opengl/types :refer [Texture])
-  (export make-texture bind-texture upload-texture-rgba
+  (export make-texture bind-texture unbind-texture delete-texture
+          upload-texture-rgba
           set-texture-wrap set-texture-filter
           generate-mipmaps active-texture)
 
@@ -27,18 +28,41 @@
   ```)
 
 ;;; bind-texture -- bind a 2D texture as the current GL_TEXTURE_2D target.
+;;; Borrows the handle (use unbind-texture to clear).
 ;;;
 ;;; Parameters:
-;;;   t -- texture handle from make-texture, or 0 to unbind
+;;;   t -- texture handle from make-texture (borrowed, not consumed)
 ;;;
 ;;; Example:
 ;;;   (bind-texture t)
 ;;;
 ;;; Since: v0.1.0
-(defn bind-texture [t : Texture] : void
+(defn bind-texture [^borrow t : Texture] : void
   ```c
   #include <glad/gl.h>
   glBindTexture(GL_TEXTURE_2D, (GLuint)t);
+  ```)
+
+;;; unbind-texture -- clear the GL_TEXTURE_2D binding (glBindTexture(...,0)).
+;;;
+;;; Since: v0.3.0
+(defn unbind-texture [] : void
+  ```c
+  #include <glad/gl.h>
+  glBindTexture(GL_TEXTURE_2D, 0);
+  ```)
+
+;;; delete-texture -- delete a texture (glDeleteTextures), consuming the handle.
+;;;
+;;; Parameters:
+;;;   t -- texture handle from make-texture (consumed)
+;;;
+;;; Since: v0.3.0
+(defn delete-texture [t : Texture] : void
+  ```c
+  #include <glad/gl.h>
+  GLuint name = (GLuint)t;
+  glDeleteTextures(1, &name);
   ```)
 
 ;;; upload-texture-rgba -- upload raw RGBA8 pixel data to the bound texture.

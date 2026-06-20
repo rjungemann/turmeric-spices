@@ -6,6 +6,8 @@
 (defmodule opengl/buffers
   (export make-vao make-vbo make-ebo
           bind-vao bind-vbo bind-ebo
+          unbind-vao unbind-vbo unbind-ebo
+          delete-vao delete-vbo delete-ebo
           upload-vertices upload-indices
           vertex-attrib with-vao)
 
@@ -56,45 +58,111 @@
   return (int64_t)ebo;
   ```)
 
-;;; bind-vao -- make a VAO current (or unbind with 0).
+;;; bind-vao -- make a VAO current. Borrows the handle (use unbind-vao to clear).
 ;;;
 ;;; Parameters:
-;;;   vao -- VAO handle from make-vao, or 0 to unbind
+;;;   vao -- VAO handle from make-vao (borrowed, not consumed)
 ;;;
 ;;; Example:
 ;;;   (bind-vao vao)
 ;;;   ...
-;;;   (bind-vao 0)
+;;;   (unbind-vao)
 ;;;
 ;;; Since: v0.1.0
-(defn bind-vao [vao : Vao] : void
+(defn bind-vao [^borrow vao : Vao] : void
   ```c
   #include <glad/gl.h>
   glBindVertexArray((GLuint)vao);
   ```)
 
-;;; bind-vbo -- bind a VBO to GL_ARRAY_BUFFER (or unbind with 0).
+;;; bind-vbo -- bind a VBO to GL_ARRAY_BUFFER. Borrows the handle.
 ;;;
 ;;; Parameters:
-;;;   vbo -- VBO handle from make-vbo, or 0 to unbind
+;;;   vbo -- VBO handle from make-vbo (borrowed, not consumed)
 ;;;
 ;;; Since: v0.1.0
-(defn bind-vbo [vbo : Vbo] : void
+(defn bind-vbo [^borrow vbo : Vbo] : void
   ```c
   #include <glad/gl.h>
   glBindBuffer(GL_ARRAY_BUFFER, (GLuint)vbo);
   ```)
 
-;;; bind-ebo -- bind an EBO to GL_ELEMENT_ARRAY_BUFFER (or unbind with 0).
+;;; bind-ebo -- bind an EBO to GL_ELEMENT_ARRAY_BUFFER. Borrows the handle.
 ;;;
 ;;; Parameters:
-;;;   ebo -- EBO handle from make-ebo, or 0 to unbind
+;;;   ebo -- EBO handle from make-ebo (borrowed, not consumed)
 ;;;
 ;;; Since: v0.1.0
-(defn bind-ebo [ebo : Ebo] : void
+(defn bind-ebo [^borrow ebo : Ebo] : void
   ```c
   #include <glad/gl.h>
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint)ebo);
+  ```)
+
+;;; unbind-vao -- clear the current VAO binding (glBindVertexArray(0)).
+;;;
+;;; Since: v0.3.0
+(defn unbind-vao [] : void
+  ```c
+  #include <glad/gl.h>
+  glBindVertexArray(0);
+  ```)
+
+;;; unbind-vbo -- clear the GL_ARRAY_BUFFER binding.
+;;;
+;;; Since: v0.3.0
+(defn unbind-vbo [] : void
+  ```c
+  #include <glad/gl.h>
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  ```)
+
+;;; unbind-ebo -- clear the GL_ELEMENT_ARRAY_BUFFER binding.
+;;;
+;;; Since: v0.3.0
+(defn unbind-ebo [] : void
+  ```c
+  #include <glad/gl.h>
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+  ```)
+
+;;; delete-vao -- delete a VAO (glDeleteVertexArrays), consuming the handle.
+;;;
+;;; Parameters:
+;;;   vao -- VAO handle from make-vao (consumed)
+;;;
+;;; Since: v0.3.0
+(defn delete-vao [vao : Vao] : void
+  ```c
+  #include <glad/gl.h>
+  GLuint name = (GLuint)vao;
+  glDeleteVertexArrays(1, &name);
+  ```)
+
+;;; delete-vbo -- delete a VBO (glDeleteBuffers), consuming the handle.
+;;;
+;;; Parameters:
+;;;   vbo -- VBO handle from make-vbo (consumed)
+;;;
+;;; Since: v0.3.0
+(defn delete-vbo [vbo : Vbo] : void
+  ```c
+  #include <glad/gl.h>
+  GLuint name = (GLuint)vbo;
+  glDeleteBuffers(1, &name);
+  ```)
+
+;;; delete-ebo -- delete an EBO (glDeleteBuffers), consuming the handle.
+;;;
+;;; Parameters:
+;;;   ebo -- EBO handle from make-ebo (consumed)
+;;;
+;;; Since: v0.3.0
+(defn delete-ebo [ebo : Ebo] : void
+  ```c
+  #include <glad/gl.h>
+  GLuint name = (GLuint)ebo;
+  glDeleteBuffers(1, &name);
   ```)
 
 ;;; upload-vertices -- stream a float array into the currently-bound VBO.
@@ -184,10 +252,12 @@
   glEnableVertexAttribArray((GLuint)index);
   ```)
 
-;;; with-vao -- bind a new VAO for the duration of body, then unbind it.
+;;; with-vao -- bind a new VAO for the duration of body, then unbind and delete
+;;; it. The VAO is created, bound, exposed to body by borrow, then consumed by
+;;; delete-vao at the end -- so body must not itself delete it.
 ;;;
 ;;; Parameters:
-;;;   v    -- symbol to bind the :int VAO handle
+;;;   v    -- symbol to bind the VAO handle
 ;;;   body -- one or more expressions executed with v in scope
 ;;;
 ;;; Example:
@@ -201,6 +271,7 @@
   `(let [~v (make-vao)]
      (bind-vao ~v)
      ~@body
-     (bind-vao 0)))
+     (unbind-vao)
+     (delete-vao ~v)))
 
 ) ;; end defmodule opengl/buffers

@@ -17,39 +17,45 @@
 ;; conflating e.g. a Vao with a Vbo or a Program with a Window is a
 ;; compile error.
 
+;;; Every handle below is `:linear` (U1): it is produced once and must be
+;;; consumed exactly once by its deleting peer. The bind/use/upload paths take
+;;; the handle by `^borrow`, and each GL object is unbound with a nullary
+;;; `unbind-*` / `unuse-program` (you can no longer pass a bare `0`, which kept
+;;; the borrow honest -- a borrow needs a real handle, not an int literal).
+;;; Under -Xsubstructural this turns leaked GPU objects (TUR-E0100) and
+;;; use-after-delete (TUR-E0101) into compile-time errors; the discipline is
+;;; inert in ordinary builds, so existing code keeps working.
+;;;
+;;; Consuming peer for each handle:
+;;;   Vao     -> delete-vao            Program -> delete-program
+;;;   Vbo     -> delete-vbo            Texture -> delete-texture
+;;;   Ebo     -> delete-ebo            Window  -> destroy-window
+;;;   Shader  -> shader-program (links then glDeleteShader's each input)
+
 ;;; Vao -- opaque handle to a Vertex Array Object (GLuint).
-(defopaque Vao :int)
+(defopaque Vao :int :linear)
 
 ;;; Vbo -- opaque handle to a Vertex Buffer Object (GLuint).
-(defopaque Vbo :int)
+(defopaque Vbo :int :linear)
 
 ;;; Ebo -- opaque handle to an Element Buffer Object (GLuint).
-(defopaque Ebo :int)
+(defopaque Ebo :int :linear)
 
-;;; Shader -- opaque handle to a compiled GL shader (GLuint).
-(defopaque Shader :int)
+;;; Shader -- opaque handle to a compiled GL shader (GLuint). Consumed by
+;;; shader-program, which deletes each shader once it is linked into a program;
+;;; reusing a shader handle after linking is therefore use-after-delete.
+(defopaque Shader :int :linear)
 
 ;;; Program -- opaque handle to a linked GL shader program (GLuint).
-(defopaque Program :int)
+(defopaque Program :int :linear)
 
 ;;; Window -- opaque handle to a GLFWwindow* (pointer cast through intptr_t).
-;;;
-;;; `Window` is `:linear` (U1): a window from make-window must be consumed
-;;; exactly once by destroy-window (glfwDestroyWindow). The per-frame
-;;; observers (window-should-close?, swap-buffers, key-pressed?, mouse-pos,
-;;; mouse-button-pressed?) take it by `^borrow`. Under -Xsubstructural this
-;;; makes use-after-destroy and leaked windows compile-time errors
-;;; (TUR-E0101 / TUR-E0100); the discipline is inert in ordinary builds.
-;;;
-;;; The GPU-object handles below (Vao/Vbo/Ebo/Shader/Program/Texture) stay
-;;; plain opaques: they are nominally distinct (so confusing a Vao for a Vbo
-;;; is a type error), but the spice exposes no glDelete* wrapper for them, so
-;;; there is no consuming peer to anchor a linear discipline on. Add `:linear`
-;;; to a handle here if/when a deleter for it is added.
+;;; Consumed exactly once by destroy-window (glfwDestroyWindow); the per-frame
+;;; observers (window-should-close?, swap-buffers, ...) take it by `^borrow`.
 (defopaque Window :int :linear)
 
 ;;; Texture -- opaque handle to a GL texture (GLuint).
-(defopaque Texture :int)
+(defopaque Texture :int :linear)
 
 ;;; draw-usage->gl -- map a draw-usage keyword to the GL enum integer.
 ;;;

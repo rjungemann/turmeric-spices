@@ -6,7 +6,8 @@
 
 (defmodule opengl/shaders
   (import opengl/types :refer [Shader Program])
-  (export compile-shader shader-program use-program with-program
+  (export compile-shader delete-shader shader-program use-program unuse-program
+          delete-program with-program
           set-uniform-int set-uniform-float
           set-uniform-vec2 set-uniform-vec3 set-uniform-vec4
           set-uniform-mat4)
@@ -56,6 +57,20 @@
     exit(1);
   }
   return (int64_t)shader;
+  ```)
+
+;;; delete-shader -- delete a compiled shader object (glDeleteShader),
+;;; consuming the handle. Use this for a shader you compiled but decided not to
+;;; pass to shader-program (which deletes its inputs itself after linking).
+;;;
+;;; Parameters:
+;;;   sh -- shader handle from compile-shader (consumed)
+;;;
+;;; Since: v0.3.0
+(defn delete-shader [sh : Shader] : void
+  ```c
+  #include <glad/gl.h>
+  glDeleteShader((GLuint)sh);
   ```)
 
 ;;; shader-program -- link compiled shader objects into a GL program.
@@ -117,24 +132,49 @@
   return (int64_t)prog;
   ```)
 
-;;; use-program -- install a shader program as the current program.
+;;; use-program -- install a shader program as the current program. Borrows the
+;;; handle (use unuse-program to uninstall).
 ;;;
 ;;; Parameters:
-;;;   prog -- program handle from shader-program, or 0 to uninstall
+;;;   prog -- program handle from shader-program (borrowed, not consumed)
 ;;;
 ;;; Example:
 ;;;   (use-program prog)
 ;;;   ...
-;;;   (use-program 0)
+;;;   (unuse-program)
 ;;;
 ;;; Since: v0.1.0
-(defn use-program [prog : Program] : void
+(defn use-program [^borrow prog : Program] : void
   ```c
   #include <glad/gl.h>
   glUseProgram((GLuint)prog);
   ```)
 
-;;; with-program -- install a program for the duration of body, then uninstall it.
+;;; unuse-program -- uninstall the current shader program (glUseProgram(0)).
+;;;
+;;; Since: v0.3.0
+(defn unuse-program [] : void
+  ```c
+  #include <glad/gl.h>
+  glUseProgram(0);
+  ```)
+
+;;; delete-program -- delete a shader program (glDeleteProgram), consuming the
+;;; handle.
+;;;
+;;; Parameters:
+;;;   prog -- program handle from shader-program (consumed)
+;;;
+;;; Since: v0.3.0
+(defn delete-program [prog : Program] : void
+  ```c
+  #include <glad/gl.h>
+  glDeleteProgram((GLuint)prog);
+  ```)
+
+;;; with-program -- install a program for the duration of body, then uninstall
+;;; it. The program is borrowed, not consumed -- delete it yourself with
+;;; delete-program when you are done with it for good.
 ;;;
 ;;; Parameters:
 ;;;   prog -- program handle from shader-program
@@ -150,7 +190,7 @@
   `(do
      (use-program ~prog)
      ~@body
-     (use-program 0)))
+     (unuse-program)))
 
 ;;; set-uniform-int -- set an integer uniform in a shader program.
 ;;;
@@ -163,7 +203,7 @@
 ;;;   (set-uniform-int prog "texture1" 0)
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-int [prog : Program name : cstr v : int] : void
+(defn set-uniform-int [^borrow prog : Program name : cstr v : int] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -178,7 +218,7 @@
 ;;;   v    -- float value
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-float [prog : Program name : cstr v : float] : void
+(defn set-uniform-float [^borrow prog : Program name : cstr v : float] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -193,7 +233,7 @@
 ;;;   x y  -- vector components
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-vec2 [prog : Program name : cstr x : float y : float] : void
+(defn set-uniform-vec2 [^borrow prog : Program name : cstr x : float y : float] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -211,7 +251,7 @@
 ;;;   (set-uniform-vec3 prog "light-pos" 1.5 1.5 1.5)
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-vec3 [prog : Program name : cstr x : float y : float z : float] : void
+(defn set-uniform-vec3 [^borrow prog : Program name : cstr x : float y : float z : float] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);
@@ -226,7 +266,7 @@
 ;;;   x y z w   -- vector components
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-vec4 [prog : Program name : cstr
+(defn set-uniform-vec4 [^borrow prog : Program name : cstr
                          x : float y : float z : float w : float] : void
   ```c
   #include <glad/gl.h>
@@ -245,7 +285,7 @@
 ;;;   (set-uniform-mat4 prog "model" (mat4-ptr model-mat))
 ;;;
 ;;; Since: v0.1.0
-(defn set-uniform-mat4 [prog : Program name : cstr mat : int] : void
+(defn set-uniform-mat4 [^borrow prog : Program name : cstr mat : int] : void
   ```c
   #include <glad/gl.h>
   GLint loc = glGetUniformLocation((GLuint)prog, (const char*)(intptr_t)name);

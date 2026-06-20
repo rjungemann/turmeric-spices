@@ -1,0 +1,20 @@
+;; U1 negative: a Shader is :linear and consumed by shader-program, which
+;; glDeleteShader's each input once the program is linked. Touching a shader
+;; handle after it has been linked is therefore use-after-delete.
+;;   tur check -Xsubstructural tests/errors/opengl-shader-use-after-link.tur
+;;   => error [TUR-E0101]: linear value 'vs' used after being consumed
+;; Demonstrates that the variadic `& shaders : Shader` parameter consumes its
+;; arguments. Violation in an uncalled defn (no main): compiles + `tur test`
+;; no-op-passes without the flag, keeping CI green under the nested-test descend.
+(defmodule opengl_shader_use_after_link_test
+  (export)
+(import opengl/shaders :refer [compile-shader shader-program
+                               delete-shader delete-program])
+(defn use-after-link [] : void
+  (let [vs (compile-shader ":vertex"   "v")
+        fs (compile-shader ":fragment" "f")
+        p  (shader-program vs fs)]   ;; consumes vs and fs
+    (do
+      (delete-shader vs)             ;; ERROR TUR-E0101: vs already consumed
+      (delete-program p))))
+) ;; end
