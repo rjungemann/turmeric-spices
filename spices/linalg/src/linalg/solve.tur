@@ -1,248 +1,193 @@
-;;; linalg/solve -- linear system solvers and matrix inverse
-
-(declare malloc free)
+;;; linalg/solve -- linear system solvers and matrix inverse/determinant
+;;;
+;;; v0.21.0 model: triangular substitutions, the LU permutation-determinant,
+;;; and Q^T b run in inline C over the backing `(Vec float)` / `(Vec int)`
+;;; buffers; the Turmeric layer allocates results and composes the factor-based
+;;; solvers.
 
 (defmodule linalg/solve
   (export fwd-sub back-sub chol-solve lu-solve qr-solve
           mat-solve mat-inv mat-det)
 
-  (import linalg/mat :refer [mat mat-new mat-new-zeroed mat-free mat-rows mat-cols
-                              mat-data mat-get mat-set! mat-copy mat-transpose
-                              mat-mul mat-mul-vec mat-add mat-scale mat-identity
-                              mat-approx-eq? mat-square?])
-  (import linalg/vec :refer [vec vec-new vec-new-zeroed vec-free vec-len
-                              vec-data vec-get vec-set! vec-copy vec-dot])
-  (import linalg/decomp :refer [chol-factor lu-factor qr-factor
-                                  chol chol-free lu lu-free qr qr-free]))
+  (import linalg/mat :refer [mat mat-new mat-new-zeroed mat-transpose mat-free
+                             mat-rows mat-cols mat-get mat-set! mat-square?])
+  (import linalg/vec :refer [lavec la-vec-new la-vec-len la-vec-get la-vec-set!
+                             la-vec-free])
+  (import linalg/decomp :refer [cholfac lufac qrfac chol chol-free
+                                lu lu-free qr qr-free])
 
-;;; LA3 -- Forward and backward substitution
+;;; LA3 -- forward / backward substitution
 
-;;; fwd-sub -- solve Lx = b where L is lower triangular
-;;; L: mat (lower triangular)
-;;; b: vec
-;;; Returns: vec (solution x)
-(defn fwd-sub [L b] : int
-  (let [n (mat-rows L)
-        m (mat-cols L)]
-    (when (or (not (mat-square? L)) (not= n (vec-len b)))
-      (error "fwd-sub: L must be square and same size as b"))
-    
-    (let [x (vec-new-zeroed n)
-          xdata (vec-data x)
-          Ldata (mat-data L)
-          bdata (vec-data b)]
-      (dotimes [i n]
-        (let [sum 0.0]
-          (dotimes [j i]
-            (set! sum (+ sum (* (float64* Ldata (+ (* i n) j))
-                               (float64* xdata j))))
-          (set! (float64* xdata i) (/ (- (float64* bdata i) sum)
-                                  (float64* Ldata (+ (* i n) i)))))
+;;; __fwd-sub-kernel -- solve L x = b, L lower triangular (n x n).
+(defn __fwd-sub-kernel [xd : (Vec float)  Ld : (Vec float)  bd : (Vec float)  n : int] : int
+  ```c
+  struct __V { int64_t *data; int64_t len; int64_t cap; };
+  double *x = (double*)(void*)((struct __V*)(intptr_t)xd)->data;
+  double *L = (double*)(void*)((struct __V*)(intptr_t)Ld)->data;
+  double *b = (double*)(void*)((struct __V*)(intptr_t)bd)->data;
+  for (int64_t i = 0; i < n; i++) {
+    double s = b[i];
+    for (int64_t j = 0; j < i; j++) s -= L[i*n+j] * x[j];
+    x[i] = s / L[i*n+i];
+  }
+  return 0;
+  ```)
+
+;;; __back-sub-kernel -- solve U x = b, U upper triangular (n x n, row stride n).
+(defn __back-sub-kernel [xd : (Vec float)  Ud : (Vec float)  bd : (Vec float)  n : int] : int
+  ```c
+  struct __V { int64_t *data; int64_t len; int64_t cap; };
+  double *x = (double*)(void*)((struct __V*)(intptr_t)xd)->data;
+  double *U = (double*)(void*)((struct __V*)(intptr_t)Ud)->data;
+  double *b = (double*)(void*)((struct __V*)(intptr_t)bd)->data;
+  for (int64_t i = n - 1; i >= 0; i--) {
+    double s = b[i];
+    for (int64_t j = i + 1; j < n; j++) s -= U[i*n+j] * x[j];
+    x[i] = s / U[i*n+i];
+  }
+  return 0;
+  ```)
+
+;;; fwd-sub -- solve L x = b where L is lower triangular.
+(defn fwd-sub [^borrow l : mat  ^borrow b : lavec] : lavec
+  (let [n (mat-rows l)
+        x (la-vec-new n)]
+    (__fwd-sub-kernel (.data x) (.data l) (.data b) n)
+    x))
+
+;;; back-sub -- solve U x = b where U is upper triangular.
+(defn back-sub [^borrow u : mat  ^borrow b : lavec] : lavec
+  (let [n (mat-rows u)
+        x (la-vec-new n)]
+    (__back-sub-kernel (.data x) (.data u) (.data b) n)
+    x))
+
+;;; chol-solve -- solve A x = b given a Cholesky factor (A = L L').
+(defn chol-solve [^borrow f : cholfac  ^borrow b : lavec] : lavec
+  (let [y (fwd-sub (.L f) b)
+        lt (mat-transpose (.L f))
+        x (back-sub lt y)]
+    (la-vec-free y)
+    (mat-free lt)
+    x))
+
+;;; lu-solve -- solve A x = b given an LU factor (P A = L U).
+(defn lu-solve [^borrow f : lufac  ^borrow b : lavec] : lavec
+  (let [n (la-vec-len b)
+        pb (la-vec-new n)
+        ^mut i 0]
+    ;; Pb[i] = b[piv[i]]
+    (letrec [go (fn [] : int
+                  (if (>= i n) 0
+                    (do (la-vec-set! pb i (la-vec-get b (vec-get (.piv f) i)))
+                        (set! i (+ i 1)) (go))))]
+      (go))
+    (let [y (fwd-sub (.L f) pb)
+          x (back-sub (.U f) y)]
+      (la-vec-free pb)
+      (la-vec-free y)
       x)))
 
-;;; back-sub -- solve Ux = b where U is upper triangular
-;;; U: mat (upper triangular)
-;;; b: vec
-;;; Returns: vec (solution x)
-(defn back-sub [U b] : int
-  (let [n (mat-rows U)
-        m (mat-cols U)]
-    (when (or (not (mat-square? U)) (not= n (vec-len b)))
-      (error "back-sub: U must be square and same size as b"))
-    
-    (let [x (vec-new-zeroed n)
-          xdata (vec-data x)
-          Udata (mat-data U)
-          bdata (vec-data b)]
-      ;; Solve from bottom up
-      (let loop [i (- n 1)]
-        (when (>= i 0)
-          (let [sum 0.0]
-            (dotimes [j (+ i 1)]
-              (set! sum (+ sum (* (float64* Udata (+ (* i n) j))
-                                 (float64* xdata j))))
-            (set! (float64* xdata i) (/ (- (float64* bdata i) sum)
-                                    (float64* Udata (+ (* i n) i))))
-          (loop (- i 1)))
-        x)))))
+;;; __qt-b-kernel -- c[i] = sum_j Q[j*m+i] * b[j] for i in 0..n (Q is m x m).
+(defn __qt-b-kernel [cd : (Vec float)  Qd : (Vec float)  bd : (Vec float)
+                     m : int  n : int] : int
+  ```c
+  struct __V { int64_t *data; int64_t len; int64_t cap; };
+  double *c = (double*)(void*)((struct __V*)(intptr_t)cd)->data;
+  double *Q = (double*)(void*)((struct __V*)(intptr_t)Qd)->data;
+  double *b = (double*)(void*)((struct __V*)(intptr_t)bd)->data;
+  for (int64_t i = 0; i < n; i++) {
+    double s = 0.0;
+    for (int64_t j = 0; j < m; j++) s += Q[j*m+i] * b[j];
+    c[i] = s;
+  }
+  return 0;
+  ```)
 
-;;; chol-solve -- solve Ax = b using Cholesky factorization
-;;; f: chol-factor (A = L L')
-;;; b: vec
-;;; Returns: vec (solution x)
-(defn chol-solve [f b] : int
-  (let [L (chol-factor-L f)
-        n (mat-rows L)]
-    (when (not= n (vec-len b))
-      (error "chol-solve: dimension mismatch"))
-    
-    (let [y (fwd-sub L b)
-          x (back-sub (mat-transpose L) y)]
-      (vec-free y)
+;;; qr-solve -- least-squares solve of A x ~= b given a QR factor (A = Q R).
+;;; Computes x = R1^-1 (Q^T b) over the leading n x n block of R.
+(defn qr-solve [^borrow f : qrfac  ^borrow b : lavec] : lavec
+  (let [m (mat-rows (.Q f))
+        n (mat-cols (.R f))
+        c (la-vec-new n)]
+    (__qt-b-kernel (.data c) (.data (.Q f)) (.data b) m n)
+    ;; R has n columns, so its leading n x n block has row stride n -- back-sub
+    ;; over (.R f) directly solves R1 x = c.
+    (let [x (back-sub (.R f) c)]
+      (la-vec-free c)
       x)))
 
-;;; LA4 -- LU-based solvers
+;;; mat-solve -- factorize and solve A x = b. spd? = 1 selects Cholesky.
+(defn mat-solve [^borrow a : mat  ^borrow b : lavec  spd? : int] : lavec
+  (when (not (= (mat-square? a) 1))
+    (panic "mat-solve: matrix must be square"))
+  (if (= spd? 1)
+    (let [f (chol a)
+          x (chol-solve f b)]
+      (chol-free f)
+      x)
+    (let [f (lu a)
+          x (lu-solve f b)]
+      (lu-free f)
+      x)))
 
-;;; lu-solve -- solve Ax = b using LU factorization
-;;; f: lu-factor (PA = LU)
-;;; b: vec
-;;; Returns: vec (solution x)
-(defn lu-solve [f b] : int
-  (let [L (lu-factor-L f)
-        U (lu-factor-U f)
-        piv (lu-factor-piv f)
-        n (mat-rows L)]
-    (when (not= n (vec-len b))
-      (error "lu-solve: dimension mismatch"))
-    
-    ;; Apply permutation to b: Pb
-    (let [Pb (vec-new n)
-          Pbdata (vec-data Pb)
-          bdata (vec-data b)]
-      (dotimes [i n]
-        (set! (float64* Pbdata i) (float64* bdata (int32* piv i))))
-      
-      ;; Solve L y = Pb
-      (let [y (fwd-sub L Pb)]
-        (vec-free Pb)
-        
-        ;; Solve U x = y
-        (let [x (back-sub U y)]
-          (vec-free y)
-          x))))))
+;;; mat-inv -- inverse of a square matrix via LU column solves.
+(defn mat-inv [^borrow a : mat] : mat
+  (when (not (= (mat-square? a) 1))
+    (panic "mat-inv: matrix must be square"))
+  (let [n (mat-rows a)
+        f (lu a)
+        inv (mat-new n n)
+        ^mut col 0]
+    (letrec [goc (fn [] : int
+                   (if (>= col n) 0
+                     (let [e (la-vec-new n)]
+                       (la-vec-set! e col 1.0)
+                       (let [x (lu-solve f e)
+                             ^mut r 0]
+                         (letrec [gor (fn [] : int
+                                        (if (>= r n) 0
+                                          (do (mat-set! inv r col (la-vec-get x r))
+                                              (set! r (+ r 1)) (gor))))]
+                           (gor))
+                         (la-vec-free e)
+                         (la-vec-free x))
+                       (set! col (+ col 1)) (goc))))]
+      (goc))
+    (lu-free f)
+    inv))
 
-;;; mat-solve -- solve Ax = b (factorize and solve in one call)
-;;; A: mat (square, non-singular)
-;;; b: vec
-;;; spd?: :int (1 if A is symmetric positive-definite, 0 otherwise)
-;;; Returns: result<vec> or err
-(defn mat-solve [A b spd?] : int
-  (let [n (mat-rows A)]
-    (when (or (not (mat-square? A)) (not= n (vec-len b)))
-      (return (err "mat-solve: A must be square and same size as b")))
-    
-    (if (= spd? 1)
-      ;; Use Cholesky
-      (let [f (chol A)]
-        (when (err? f)
-          (return (err "mat-solve: Cholesky failed (matrix not SPD): %v" (err-val f))))
-        (let [x (chol-solve f b)]
-          (chol-free f)
-          x))
-      
-      ;; Use LU
-      (let [f (lu A)]
-        (when (err? f)
-          (return (err "mat-solve: LU failed: %v" (err-val f))))
-        (let [x (lu-solve f b)]
-          (lu-free f)
-          x)))))
+;;; __lu-det-kernel -- determinant from an LU factor: product of U diagonal
+;;; times the sign of the row permutation piv.
+(defn __lu-det-kernel [Ud : (Vec float)  pivd : (Vec int)  n : int] : float
+  ```c
+  struct __V { int64_t *data; int64_t len; int64_t cap; };
+  double *U = (double*)(void*)((struct __V*)(intptr_t)Ud)->data;
+  int64_t *piv = (int64_t*)(void*)((struct __V*)(intptr_t)pivd)->data;
+  double det = 1.0;
+  for (int64_t i = 0; i < n; i++) det *= U[i*n+i];
+  char *seen = (char*)calloc((size_t)n, 1);
+  int64_t swaps = 0;
+  for (int64_t i = 0; i < n; i++) {
+    if (!seen[i]) {
+      int64_t j = i, len = 0;
+      while (!seen[j]) { seen[j] = 1; j = piv[j]; len++; }
+      swaps += len - 1;
+    }
+  }
+  free(seen);
+  if (swaps & 1) det = -det;
+  return det;
+  ```)
 
-;;; mat-inv -- compute matrix inverse using LU decomposition
-;;; A: mat (square, non-singular)
-;;; Returns: result<mat> or err
-(defn mat-inv [A] : int
-  (let [n (mat-rows A)]
-    (when (not (mat-square? A))
-      (return (err "mat-inv: matrix must be square")))
-    
-    (let [f (lu A)]
-      (when (err? f)
-        (return (err "mat-inv: LU failed: %v" (err-val f))))
-      
-      (let [Ainv (mat-new-zeroed n n)
-            Ainvdata (mat-data Ainv)]
-        
-        ;; Solve A x_i = e_i for each column of identity
-        (dotimes [i n]
-          (let [ei (vec-new-zeroed n)
-                eidata (vec-data ei)]
-            (set! (float64* eidata i) 1.0)
-            
-            (let [x (lu-solve f ei)]
-              (vec-free ei)
-              
-              ;; Copy x into column i of Ainv
-              (let [xdata (vec-data x)]
-                (dotimes [r n]
-                  (set! (float64* Ainvdata (+ (* r n) i)) (float64* xdata r)))
-                (vec-free x)))))
-        
-        (lu-free f)
-        Ainv))))
-
-;;; mat-det -- compute determinant using LU decomposition
-;;; A: mat (square)
-;;; Returns: result<:float> or err
-(defn mat-det [A] : float
-  (let [n (mat-rows A)]
-    (when (not (mat-square? A))
-      (return (err "mat-det: matrix must be square")))
-    
-    (let [f (lu A)]
-      (when (err? f)
-        (return (err "mat-det: LU failed: %v" (err-val f))))
-      
-      (let [U (lu-factor-U f)
-            Udata (mat-data U)
-            piv (lu-factor-piv f)
-            det 1.0
-            sign 1.0]
-        
-        ;; Product of diagonal elements of U
-        (dotimes [i n]
-          (set! det (* det (float64* Udata (+ (* i n) i)))))
-        
-        ;; Account for row permutations (pivot vector)
-        (dotimes [i n]
-          (when (not= (int32* piv i) i)
-            (let [j i]
-              (while (not= (int32* piv j) i)
-                (set! j (int32* piv j))
-              (set! sign (* sign -1.0)))))
-        
-        (lu-free f)
-        (* det sign)))))
-
-;;; LA5 -- QR-based least squares solver
-
-;;; qr-solve -- solve min ||Ax - b|| using QR decomposition
-;;; f: qr-factor (A = QR)
-;;; b: vec
-;;; Returns: vec (solution x that minimizes ||Ax - b||)
-;;;
-;;; For overdetermined systems (m > n), this finds the least-squares solution.
-;;; For square systems (m = n), this is equivalent to direct solve.
-(defn qr-solve [f b] : int
-  (let [Q (qr-factor-Q f)
-        R (qr-factor-R f)
-        m (mat-rows Q)
-        n (mat-cols R)]
-    (when (not= (vec-len b) m)
-      (error "qr-solve: dimension mismatch"))
-    
-    ;; Compute Q^T b
-    (let [Qtb (vec-new-zeroed n)
-          Qtbdata (vec-data Qtb)
-          bdata (vec-data b)
-          Qdata (mat-data Q)]
-      
-      (dotimes [i n]
-        (let [sum 0.0]
-          (dotimes [j m]
-            (set! sum (+ sum (* (float64* Qdata (+ (* j m) i))
-                               (float64* bdata j))))
-          (set! (float64* Qtbdata i) sum)))
-      
-      ;; Solve R x = Q^T b using back substitution
-      (let [x (back-sub R Qtb)]
-        (vec-free Qtb)
-        x))))
-
-;;; inline-C helpers for math functions
-```c
-#include <math.h>
-double fabs(double x) { return fabs(x); }
-```
+;;; mat-det -- determinant of a square matrix via LU.
+(defn mat-det [^borrow a : mat] : float
+  (when (not (= (mat-square? a) 1))
+    (panic "mat-det: matrix must be square"))
+  (let [n (mat-rows a)
+        f (lu a)
+        d (__lu-det-kernel (.data (.U f)) (.piv f) n)]
+    (lu-free f)
+    d))
 
 ) ;; end defmodule linalg/solve
