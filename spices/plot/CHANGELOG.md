@@ -37,11 +37,13 @@
   `BBox` accumulator through `bbox-union` (the raw `{x0,x1,y0,y1;valid}`
   carrier and its `__rbb-new-empty` / `__rbb-union-corners!` helpers are
   removed); `__any-to-legacy-go` drops its recursive-call `(:: ... (Vec int))`
-  ascription. No public-surface or pixel change. Two residual soft blockers
-  kept their one-line workarounds and are documented in
-  `docs/spice-uplift-residual-soft-blockers-2026-06-20.md` for a later
-  turmeric report (letrec self-recursive closure carrier typing; bare
-  `vec-new` as a concrete `(Vec T)` argument).
+  ascription, and `anyrenderers->legacy` drops its `(:: (vec-new) (Vec int))`
+  seed ascription now that turmeric #463 unifies a fresh `vec-new` against a
+  concrete `(Vec T)` argument. No public-surface or pixel change. One residual
+  codegen gap keeps the two folds as top-level `defn`s rather than local
+  `letrec` closures: a `letrec` closure that captures the existential renderer
+  vec and `open`s it mis-emits the captured binding in C — documented as W3 in
+  `docs/spice-uplift-residual-soft-blockers-2026-06-20.md` for a turmeric report.
 
 ## 0.3.0
 
