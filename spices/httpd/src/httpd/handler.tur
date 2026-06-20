@@ -1,0 +1,116 @@
+;;; httpd/handler -- typed request handlers via the Handler typeclass.
+;;;
+;;; The low-level server API (`server-start` and friends in httpd/server)
+;;; takes a bare `(c-fn [int] int)` handler: a Request handle in, a Response
+;;; handle out, with the types erased to int. This module lifts that contract
+;;; to the type layer.
+;;;
+;;; A handler is any witness type with a `Handler` instance. The witness is a
+;;; `defopaque :int` used purely to select the instance -- its value carries
+;;; no per-request state (that lives in the `Request`), so it is constructed
+;;; captureless and for free as `(:: 0 T)`:
+;;;
+;;;   (defopaque Hello :int)               ;; instance witness
+;;;   (definstance Handler [Hello]
+;;;     (respond [self req]
+;;;       (resp-ok "text/plain" "hi")))
+;;;
+;;; The C function-pointer rep the server consumes has no environment slot, so
+;;; handlers stay captureless -- the witness is rebuilt inside the generated
+;;; trampoline at zero cost (it is just an int).
+;;;
+;;; `serve` bridges an instance to `server-start`'s `(c-fn [int] int)` by
+;;; emitting that captureless top-level trampoline:
+;;;
+;;;   (def srv (serve 8080 Hello))   ;; start a server dispatching to Hello
+;;;
+;;; The method is named `respond` rather than `handle` because `handle` is a
+;;; reserved special form (effect/error handling) in turmeric.
+;;;
+;;; Since: U2 (Handler typeclass)
+
+(defmodule httpd/handler
+  (import httpd/types    :refer [Request Response])
+  (import httpd/server   :refer [server-start server-start-pool server-start-spawn])
+  (export serve serve-pool serve-spawn)
+
+;;; Handler -- typeclass for a typed HTTP request handler.
+;;;
+;;; The single method maps a parsed `Request` to a `Response`. The `self`
+;;; argument is the instance witness (it selects the instance and carries no
+;;; per-request state); dispatch is value-directed on its type, mirroring the
+;;; json `Encode`/`Decode` and ansi `Color` precedent.
+;;;
+;;; Method:
+;;;   respond : self -> Request -> Response
+;;;
+;;; Example:
+;;;   (defopaque Hello :int)
+;;;   (definstance Handler [Hello]
+;;;     (respond [self req] (resp-ok "text/plain" "hi")))
+;;;   ;; (respond (:: 0 Hello) req)  => a 200 text/plain Response
+(defclass Handler [a]
+  (respond [self  req : Request] : Response))
+
+;; ---------------------------------------------------------------------------
+;; serve: bridge a Handler instance to the server's (c-fn [int] int) contract.
+;;
+;; The three server entry points all take `(c-fn [int] int)` -- a captureless
+;; C-ABI function pointer (Request handle in, Response handle out, types
+;; erased to int). A `Handler` method is `(self, Request) -> Response`, so we
+;; generate a per-type top-level trampoline that rebuilds the opaque witness,
+;; dispatches `respond`, and re-erases the types to int:
+;;
+;;   (serve port T) expands to roughly:
+;;     (do
+;;       (defn __httpd-trampoline-T [req : int] : int
+;;         (:: (respond (:: 0 T) (:: req Request)) :int))
+;;       (server-start port __httpd-trampoline-T))
+;;
+;; The trampoline is a top-level `defn` (named uniquely from the type), so it
+;; compiles to the captureless function pointer `server-start` requires --
+;; the same standalone-helper idiom json's `derive-json-sum` uses. Because it
+;; introduces a top-level binding, `serve` must be used at module top level,
+;; not nested in an expression.
+;; ---------------------------------------------------------------------------
+
+;;; serve -- start a pool-dispatched server whose handler is the `Handler`
+;;; instance for witness type `T`. Top-level form; binds a server handle.
+;;;
+;;; Syntax:
+;;;   (def srv (serve 8080 Hello))
+;;;
+;;; Returns the `:ptr<void>` server handle (pass to `server-stop`), or NULL
+;;; if the listener could not be created -- exactly like `server-start`.
+(defmacro serve [port type-name]
+  (let [tramp (str->sym (str-append "__httpd-trampoline-" (symbol-name type-name)))]
+    `(do
+       (defn ~tramp [req : int] : int
+         (:: (respond (:: 0 ~type-name) (:: req Request)) :int))
+       (server-start ~port ~tramp))))
+
+;;; serve-pool -- like `serve` but with an explicit worker-pool size,
+;;; bridging to `server-start-pool`.
+;;;
+;;; Syntax:
+;;;   (def srv (serve-pool 8080 Hello 32))
+(defmacro serve-pool [port type-name size]
+  (let [tramp (str->sym (str-append "__httpd-trampoline-pool-" (symbol-name type-name)))]
+    `(do
+       (defn ~tramp [req : int] : int
+         (:: (respond (:: 0 ~type-name) (:: req Request)) :int))
+       (server-start-pool ~port ~tramp ~size))))
+
+;;; serve-spawn -- like `serve` but using the thread-per-connection
+;;; dispatcher, bridging to `server-start-spawn`.
+;;;
+;;; Syntax:
+;;;   (def srv (serve-spawn 8080 Hello))
+(defmacro serve-spawn [port type-name]
+  (let [tramp (str->sym (str-append "__httpd-trampoline-spawn-" (symbol-name type-name)))]
+    `(do
+       (defn ~tramp [req : int] : int
+         (:: (respond (:: 0 ~type-name) (:: req Request)) :int))
+       (server-start-spawn ~port ~tramp))))
+
+) ;; end defmodule httpd/handler

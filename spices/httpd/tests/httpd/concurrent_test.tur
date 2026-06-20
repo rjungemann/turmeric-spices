@@ -12,6 +12,12 @@
 ;; end (8 successful responses) will fail or the test will hang
 ;; on server-stop.
 
+;; stdlib/thread.tur (thread-spawn-fn / thread-join) is a T19-C/D library
+;; module, deliberately NOT auto-loaded -- pull it in explicitly so the
+;; client threads resolve. See turmeric src/main.c:731 + the resolved
+;; thread-spawn-fn report.
+(load "stdlib/thread.tur")
+
 (defmodule httpd/tests/concurrent
   (import httpd/server   :refer [server-start-pool server-stop])
   (import httpd/response :refer [resp-ok])
@@ -96,24 +102,27 @@
         (__cnt 0)
 
         ;; Spawn 8 client threads -- 2x the pool size, so the listener
-        ;; must back-pressure into the ring buffer.
-        (let [t1 (thread-spawn-fn client-task (null-ptr))
-              t2 (thread-spawn-fn client-task (null-ptr))
-              t3 (thread-spawn-fn client-task (null-ptr))
-              t4 (thread-spawn-fn client-task (null-ptr))
-              t5 (thread-spawn-fn client-task (null-ptr))
-              t6 (thread-spawn-fn client-task (null-ptr))
-              t7 (thread-spawn-fn client-task (null-ptr))
-              t8 (thread-spawn-fn client-task (null-ptr))]
-          (do
-            (thread-join t1)
-            (thread-join t2)
-            (thread-join t3)
-            (thread-join t4)
-            (thread-join t5)
-            (thread-join t6)
-            (thread-join t7)
-            (thread-join t8)))
+        ;; must back-pressure into the ring buffer. thread-spawn-fn /
+        ;; thread-join are #{Unsafe}, so the spawn+join block runs under
+        ;; an explicit (unsafe ...).
+        (unsafe
+          (let [t1 (thread-spawn-fn client-task (null-ptr))
+                t2 (thread-spawn-fn client-task (null-ptr))
+                t3 (thread-spawn-fn client-task (null-ptr))
+                t4 (thread-spawn-fn client-task (null-ptr))
+                t5 (thread-spawn-fn client-task (null-ptr))
+                t6 (thread-spawn-fn client-task (null-ptr))
+                t7 (thread-spawn-fn client-task (null-ptr))
+                t8 (thread-spawn-fn client-task (null-ptr))]
+            (do
+              (thread-join t1)
+              (thread-join t2)
+              (thread-join t3)
+              (thread-join t4)
+              (thread-join t5)
+              (thread-join t6)
+              (thread-join t7)
+              (thread-join t8))))
 
         (describe "httpd concurrent -- pool saturation"
           (it "all 8 concurrent clients receive 200 OK"

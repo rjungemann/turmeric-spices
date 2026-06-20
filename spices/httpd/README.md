@@ -44,6 +44,40 @@ The three are deliberately separate so any layer can be used independently.
 (server-stop srv)
 ```
 
+## Typed handlers (`Handler` typeclass)
+
+`server-start` takes a bare `(c-fn [int] int)` whose `int`s are really a
+`Request` and a `Response` with the types erased. The `httpd/handler` module
+lifts that contract to the type layer: a handler is a witness type with a
+`Handler` instance whose `respond` method maps a `Request` to a `Response`
+directly. `serve` generates the captureless trampoline and starts the server.
+
+```turmeric
+(import httpd/handler  :refer [serve])
+(import httpd/request  :refer [req-path])
+(import httpd/response :refer [resp-ok not-found])
+(import httpd/server   :refer [server-stop])
+
+;; The witness is a defopaque :int used only to select the instance; its
+;; value carries no state (the method reads everything from the Request).
+(defopaque App :int)
+
+(definstance Handler [App]
+  (respond [self req]
+    (if (cstr-eq? "/health" (req-path (:: req :Request)))
+      (resp-ok "text/plain" "ok")
+      (not-found "no such route"))))
+
+(def srv (serve 8080 App))     ;; serve-pool / serve-spawn mirror server-start-*
+;; ... application code ...
+(server-stop srv)
+```
+
+The method is named `respond` (not `handle`, which is a reserved special
+form). `server-start` and the bare `(c-fn [int] int)` API remain available as
+the lower-level path. JSON request/response codec helpers built on the json
+spice's `Encode`/`Decode` are a planned follow-up.
+
 ## Status
 
 Early in development. See

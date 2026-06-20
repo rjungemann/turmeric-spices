@@ -260,11 +260,11 @@
   #include <yyjson.h>
   (void)doc;
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  if (!v) return tur_err((int64_t)(intptr_t)"decode int: missing field");
+  if (!v) return tur_box_err((int64_t)(intptr_t)"decode int: missing field");
   if (!yyjson_is_int(v) && !yyjson_is_uint(v) && !yyjson_is_sint(v)) {
-    return tur_err((int64_t)(intptr_t)"decode int: not an integer");
+    return tur_box_err((int64_t)(intptr_t)"decode int: not an integer");
   }
-  return tur_ok((int64_t)yyjson_get_sint(v));
+  return tur_box_ok((int64_t)yyjson_get_sint(v));
   ```))
 
 ;;; Decode [cstr] -- read the value at `val` as a JSON string. Returns a
@@ -275,15 +275,15 @@
   #include <yyjson.h>
   (void)doc;
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  if (!v) return tur_err((int64_t)(intptr_t)"decode cstr: missing field");
-  if (!yyjson_is_str(v)) return tur_err((int64_t)(intptr_t)"decode cstr: not a string");
+  if (!v) return tur_box_err((int64_t)(intptr_t)"decode cstr: missing field");
+  if (!yyjson_is_str(v)) return tur_box_err((int64_t)(intptr_t)"decode cstr: not a string");
   const char *s = yyjson_get_str(v);
   size_t n = yyjson_get_len(v);
   char *out = (char *)malloc(n + 1);
-  if (!out) return tur_err((int64_t)(intptr_t)"decode cstr: oom");
+  if (!out) return tur_box_err((int64_t)(intptr_t)"decode cstr: oom");
   memcpy(out, s, n);
   out[n] = '\0';
-  return tur_ok((int64_t)(intptr_t)out);
+  return tur_box_ok((int64_t)(intptr_t)out);
   ```))
 
 ;;; Decode [bool] -- accept JSON `true` / `false` only. Rejects numbers,
@@ -293,9 +293,9 @@
   #include <yyjson.h>
   (void)doc;
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  if (!v) return tur_err((int64_t)(intptr_t)"decode bool: missing field");
-  if (!yyjson_is_bool(v)) return tur_err((int64_t)(intptr_t)"decode bool: not a boolean");
-  return tur_ok((int64_t)(yyjson_get_bool(v) ? 1 : 0));
+  if (!v) return tur_box_err((int64_t)(intptr_t)"decode bool: missing field");
+  if (!yyjson_is_bool(v)) return tur_box_err((int64_t)(intptr_t)"decode bool: not a boolean");
+  return tur_box_ok((int64_t)(yyjson_get_bool(v) ? 1 : 0));
   ```))
 
 ;;; Decode [float] -- read the value at `val` as an IEEE-754 double. Accepts
@@ -307,12 +307,12 @@
   #include <yyjson.h>
   (void)doc;
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  if (!v) return tur_err((int64_t)(intptr_t)"decode float: missing field");
-  if (!yyjson_is_num(v)) return tur_err((int64_t)(intptr_t)"decode float: not a number");
+  if (!v) return tur_box_err((int64_t)(intptr_t)"decode float: missing field");
+  if (!yyjson_is_num(v)) return tur_box_err((int64_t)(intptr_t)"decode float: not a number");
   double d = yyjson_get_num(v);
   int64_t bits;
   memcpy(&bits, &d, sizeof(bits));
-  return tur_ok(bits);
+  return tur_box_ok(bits);
   ```))
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
