@@ -13,18 +13,8 @@
           mat-mul-vec mat-transpose mat-trace mat-norm-fro mat-norm-max
           mat-square? mat-approx-eq? la-vec-outer)
 
-  (import linalg/vec :refer [lavec la-vec-new la-vec-len la-vec-get la-vec-set!])
-
-;; libm-free math helpers (a linalg spice has no cmake deps, so no -lm).
-(defn la-sqrt [x : float] : float
-  ```c
-  if (x <= 0.0) return 0.0;
-  double g = x;
-  for (int k = 0; k < 64; k++) g = 0.5 * (g + x / g);
-  return g;
-  ```)
-(defn la-fabs [x : float] : float
-  ```c return x < 0.0 ? -x : x; ```)
+  (import linalg/vec :refer [lavec la-vec-new la-vec-len la-vec-get la-vec-set!
+                             sqrt fabs])
 
 ;;; mat -- a row-major rows x cols float64 matrix over a heap (Vec float).
 (defstruct mat [rows : int  cols : int  data : (Vec float)])
@@ -287,44 +277,32 @@
 (defn mat-trace [^borrow m : mat] : float
   (when (not= (.rows m) (.cols m))
     (panic "mat-trace: matrix must be square"))
-  (let [n (.rows m)
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
-                    (do (vec-set! cell 0 (+ (:: (vec-get cell 0) :float) (mat-get m i i)))
-                        (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (:: (vec-get cell 0) :float)] (vec-free cell) r)))
+  (let [n (.rows m)]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n)
+                    acc
+                    (go (+ i 1) (+ acc (mat-get m i i)))))]
+      (go 0 0.0))))
 
 ;;; mat-norm-fro -- Frobenius norm.
 (defn mat-norm-fro [^borrow m : mat] : float
-  (let [n (* (.rows m) (.cols m))
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
+  (let [n (* (.rows m) (.cols m))]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n)
+                    acc
                     (let [x (:: (vec-get (.data m) i) :float)]
-                      (vec-set! cell 0 (+ (:: (vec-get cell 0) :float) (* x x)))
-                      (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (la-sqrt (:: (vec-get cell 0) :float))] (vec-free cell) r)))
+                      (go (+ i 1) (+ acc (* x x))))))]
+      (sqrt (go 0 0.0)))))
 
 ;;; mat-norm-max -- maximum absolute element.
 (defn mat-norm-max [^borrow m : mat] : float
-  (let [n (* (.rows m) (.cols m))
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
-                    (let [a (la-fabs (:: (vec-get (.data m) i) :float))]
-                      (when (> a (:: (vec-get cell 0) :float)) (vec-set! cell 0 a))
-                      (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (:: (vec-get cell 0) :float)] (vec-free cell) r)))
+  (let [n (* (.rows m) (.cols m))]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n)
+                    acc
+                    (let [a (fabs (:: (vec-get (.data m) i) :float))]
+                      (go (+ i 1) (if (> a acc) a acc)))))]
+      (go 0 0.0))))
 
 ;;; mat-square? -- 1 if rows == cols else 0.
 (defn mat-square? [^borrow m : mat] : int
@@ -338,8 +316,8 @@
       (letrec [go (fn [i : int] : int
                     (if (>= i n)
                       1
-                      (if (> (la-fabs (- (:: (vec-get (.data a) i) :float)
-                                         (:: (vec-get (.data b) i) :float))) tol)
+                      (if (> (fabs (- (:: (vec-get (.data a) i) :float)
+                                      (:: (vec-get (.data b) i) :float))) tol)
                         0
                         (go (+ i 1)))))]
         (go 0)))))
