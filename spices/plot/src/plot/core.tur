@@ -824,13 +824,21 @@
   ;; landed in turmeric main (PRs #452 open-dispatch, #456 vec-get type
   ;; preservation, #458 by-value struct payload pack).
   ;;
-  ;; Two idioms the current compiler requires:
-  ;;   - Ascribe the vec's element type at construction:
-  ;;       (:: (vec-new) (Vec (exists [a] [(Renderer a)] a)))
-  ;;     vec-new/vec-push! do not infer the element type from the pushes.
-  ;;   - Iterate with a top-level recursive `defn` (see __renderers-bbox-go),
-  ;;     not a `letrec`-bound closure: a self-recursive `letrec`/`fn` currently
-  ;;     mis-emits its own binding in C ('go' undeclared).
+  ;; The `bounds`/`to-legacy` folds below thread a by-value `BBox` / `(Vec int)`
+  ;; accumulator through a top-level recursive `defn`. turmeric main fixed the
+  ;; self-recursive carrier typing (both `defn` and `letrec`) and fresh `vec-new`
+  ;; argument unification, so the scalar-carrier workaround and the `(Vec int)`
+  ;; construction-site ascription are gone. The folds stay `defn`s rather than
+  ;; the tighter local `letrec` closures because of one residual codegen gap: a
+  ;; `letrec` closure that *captures* the existential `rs` and dereferences it via
+  ;; `open` inside its lifted body mis-emits the captured binding in C
+  ;; ('rs_NNNN' undeclared) -- a plain `(Vec int)` capture is fine, only the
+  ;; existential-element + `open` capture trips it (W3, see
+  ;; docs/spice-uplift-residual-soft-blockers-2026-06-20.md).
+  ;; (Callers building a heterogeneous `(Vec (exists ...))` literal still ascribe
+  ;; the element type at construction -- see the `mixed-vec` helper in the
+  ;; any_renderer test -- because the existential element is not back-inferred
+  ;; from the pushes; that is a separate, narrower case from the `(Vec int)` one.)
   ;; ===========================================================================
 
   ;;; any-renderer -- box a value whose type has a `Renderer` instance as an
@@ -848,93 +856,66 @@
   ;;; bbox-union -- the smallest box covering both inputs; an empty box is the
   ;;; identity (so folding from `bbox-empty-box` recovers the first non-empty).
   ;;
-  ;; Each branch rebuilds a fresh `BBox` with `make-struct` rather than
-  ;; returning a parameter directly: a multi-field `:copy` struct is passed by
-  ;; pointer, and returning such a parameter by value currently mis-emits in C
-  ;; ('incompatible types ... BBox from const BBox *'). Rebuilding from the
-  ;; fields sidesteps that.
+  ;; An empty input returns the other box directly. (A multi-field `:copy`
+  ;; struct is passed by pointer; returning such a parameter by value used to
+  ;; mis-emit in C as 'incompatible types ... BBox from const BBox *' -- that
+  ;; codegen bug is fixed in turmeric main, so the param can be returned as-is
+  ;; instead of being rebuilt field-by-field.)
   (defn bbox-union [a : BBox  b : BBox] : BBox
-    (if (bbox-empty? a) (make-struct BBox (.x-min b) (.x-max b) (.y-min b) (.y-max b))
-      (if (bbox-empty? b) (make-struct BBox (.x-min a) (.x-max a) (.y-min a) (.y-max a))
+    (if (bbox-empty? a) b
+      (if (bbox-empty? b) a
         (make-struct BBox
           (if (< (.x-min a) (.x-min b)) (.x-min a) (.x-min b))
           (if (> (.x-max a) (.x-max b)) (.x-max a) (.x-max b))
           (if (< (.y-min a) (.y-min b)) (.y-min a) (.y-min b))
           (if (> (.y-max a) (.y-max b)) (.y-max a) (.y-max b))))))
 
-  ;; __rbb-new-empty -- a fresh invalid (empty) { x0,x1,y0,y1; valid } carrier.
-  (defn __rbb-new-empty [] : ptr<void>
-    ```c
-    #include <stdlib.h>
-    struct RBB { double x0,x1,y0,y1; int valid; } *b = malloc(sizeof(*b));
-    b->x0 = b->x1 = b->y0 = b->y1 = 0.0; b->valid = 0;
-    return b;
-    ```)
-
-  ;; __rbb-union-corners! -- fold one box's corners into the raw carrier and
-  ;; return it. NaN corners (an empty BBox) are skipped, so the accumulator
-  ;; stays the union of the finite boxes seen so far.
-  (defn __rbb-union-corners! [raw : ptr<void> x0 : float x1 : float
-                              y0 : float y1 : float] : ptr<void>
-    ```c
-    struct RBB { double x0,x1,y0,y1; int valid; } *b = (struct RBB *)raw;
-    if (x0 != x0 || x1 != x1 || y0 != y0 || y1 != y1) return b; /* skip empty */
-    if (!b->valid) { b->x0 = x0; b->x1 = x1; b->y0 = y0; b->y1 = y1; b->valid = 1; }
-    else {
-      if (x0 < b->x0) b->x0 = x0;
-      if (x1 > b->x1) b->x1 = x1;
-      if (y0 < b->y0) b->y0 = y0;
-      if (y1 > b->y1) b->y1 = y1;
-    }
-    return b;
-    ```)
-
   ;; __renderers-bbox-go -- tail-recursive fold of `bounds` over a Vec of boxed
-  ;; renderers. A top-level `defn` (not a letrec closure -- see the idiom note
-  ;; above). Each element is `open`ed to recover its concrete renderer under a
-  ;; fresh abstract type, and `bounds` dispatches through the packed witness.
+  ;; renderers. Each element is `open`ed to recover its concrete renderer under a
+  ;; fresh abstract type, and `bounds` dispatches through the packed witness; the
+  ;; per-element box is unioned into a `BBox` accumulator (seeded from
+  ;; `bbox-empty-box`, the union identity).
   ;;
-  ;; The accumulator is the raw `{x0,x1,y0,y1;valid}` carrier (an int handle),
-  ;; not a `BBox` value: a self-recursive `defn` that threads a by-value
-  ;; `:copy` struct through its accumulator currently mis-types the recursive
-  ;; call as the carrier int (then=BBox/else=int) and mis-emits it. Folding a
-  ;; scalar carrier sidesteps that; `renderers-bbox` packs the result into a
-  ;; `BBox` once at the end via `bbox-from-raw`.
+  ;; A top-level `defn` rather than a `letrec`-bound closure (which would be the
+  ;; tighter form now that the letrec self-call carrier typing is fixed): a
+  ;; `letrec` closure that *captures* the existential `rs` and dereferences it via
+  ;; `open (vec-get rs i)` inside its lifted body still mis-emits the captured
+  ;; binding in C ('rs_NNNN' undeclared) -- a plain `(Vec int)` capture is fine,
+  ;; only the existential-element + `open` capture trips it. See the W3 note in
+  ;; docs/spice-uplift-residual-soft-blockers-2026-06-20.md.
   (defn __renderers-bbox-go [rs : (Vec (exists [a] [(Renderer a)] a))
-                             n : int  i : int  raw : ptr<void>] : ptr<void>
-    (if (>= i n) raw
+                             n : int  i : int  acc : BBox] : BBox
+    (if (>= i n) acc
       (__renderers-bbox-go rs n (+ i 1)
-        (open (vec-get rs i) [a v]
-          (let [bb (bounds v)]
-            (__rbb-union-corners! raw (.x-min bb) (.x-max bb)
-                                      (.y-min bb) (.y-max bb)))))))
+        (bbox-union acc (open (vec-get rs i) [a v] (bounds v))))))
 
   ;;; renderers-bbox -- data-space bounding box of a heterogeneous renderer Vec,
   ;;; unioning each element's `bounds` through the `AnyRenderer` existential.
   ;;; The P3 payoff: the union is driven by coherent typeclass dispatch, not the
   ;;; legacy ~30-arm `kind` switch in `__renderer-bbox`.
   (defn renderers-bbox [rs : (Vec (exists [a] [(Renderer a)] a))] : BBox
-    (bbox-from-raw (__renderers-bbox-go rs (vec-len rs) 0 (__rbb-new-empty))))
+    (__renderers-bbox-go rs (vec-len rs) 0 (bbox-empty-box)))
 
   ;; __any-to-legacy-go -- fold a (Vec AnyRenderer) into a legacy (Vec int) of
-  ;; slot-bag handles by dispatching `to-legacy` through each box. The legacy
-  ;; Vec is a plain int carrier (not a by-value struct), so it threads through
-  ;; the recursion without the struct-accumulator soft blocker; vec-push!
-  ;; mutates it in place.
+  ;; slot-bag handles by dispatching `to-legacy` through each box. The legacy Vec
+  ;; threads through the recursion as a mutated-in-place accumulator. A top-level
+  ;; `defn` for the same reason as `__renderers-bbox-go`: a `letrec` closure that
+  ;; captures the existential `rs` and `open`s it mis-emits the capture (W3).
   (defn __any-to-legacy-go [rs : (Vec (exists [a] [(Renderer a)] a))
                             n : int  i : int  out : (Vec int)] : (Vec int)
     (if (>= i n) out
       (let [h (open (vec-get rs i) [a v] (to-legacy v))]
         (do (vec-push! out h)
-            ;; ascribe the recursive result: a self-recursive defn types its
-            ;; own call at the carrier int, not the declared (Vec int).
-            (:: (__any-to-legacy-go rs n (+ i 1) out) (Vec int))))))
+            (__any-to-legacy-go rs n (+ i 1) out)))))
 
   ;;; anyrenderers->legacy -- materialise a (Vec AnyRenderer) as the legacy
   ;;; (Vec int) of slot-bag handles the C draw pass consumes. Each element's
-  ;;; lowering dispatches through its packed Renderer dictionary.
+  ;;; lowering dispatches through its packed Renderer dictionary. The seed `out`
+  ;;; is a bare `(vec-new)`: turmeric main now unifies a fresh `vec-new`'s element
+  ;;; tyvar against the concrete `(Vec int)` parameter at the call site (W2 fix),
+  ;;; so the former construction-site ascription is gone.
   (defn anyrenderers->legacy [rs : (Vec (exists [a] [(Renderer a)] a))] : (Vec int)
-    (__any-to-legacy-go rs (vec-len rs) 0 (:: (vec-new) (Vec int))))
+    (__any-to-legacy-go rs (vec-len rs) 0 (vec-new)))
 
   ;;; plot-anyrenderers -- render a heterogeneous (Vec AnyRenderer) to a new
   ;;; surface (returns the same :ptr<void> result envelope as `plot`). Each

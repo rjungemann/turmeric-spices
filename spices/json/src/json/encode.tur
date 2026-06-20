@@ -609,19 +609,14 @@
 ;;;   (derive-json-sum-decode T (Ctor1 (f t) ...) (Ctor2 (f t) ...) ...)
 ;;;
 ;;; The constructed `(ok <adt>)` is boxed into the `(Result T cstr)` carrier
-;;; by a generated standalone helper `defn`, NOT inline in the method body:
-;;; a typeclass method whose tail is a bare `(ok <adt-value>)` currently
-;;; miscompiles (the carrier-box for an ADT-typed result slot is assigned an
-;;; int64 handle -- the value-struct case was fixed but the sum/ADT case is
-;;; not). Delegating to a plain `defn`, whose return path boxes the handle
-;;; correctly, sidesteps that gap until the compiler closes it.
+;;; directly in the method body. (This previously had to be routed through a
+;;; generated standalone helper `defn` because a typeclass method whose tail was
+;;; a bare `(ok <adt-value>)` mis-boxed the ADT-typed result slot -- the
+;;; value-struct case was fixed first, the sum/ADT case later; turmeric main now
+;;; boxes the ADT handle correctly inline, so the delegation is gone.)
 (defmacro derive-json-sum-decode [type-name & ctors]
-  (let [impl (str->sym (str-append "__derive-sum-decode-impl-" (symbol-name type-name)))]
-    `(do
-       (defn ~impl [doc : int  val : int] : (Result ~type-name cstr)
-         (:: (ok (__sum-dec-arms ~ctors)) (Result ~type-name cstr)))
-       (definstance Decode [~type-name]
-         (decode [doc val] (~impl doc val))))))
+  `(definstance Decode [~type-name]
+     (decode [doc val] (:: (ok (__sum-dec-arms ~ctors)) (Result ~type-name cstr)))))
 
 ;;; derive-json-sum -- emit both Encode and Decode instances for a `defdata`
 ;;; sum-of-products type using the externally-tagged convention
@@ -641,15 +636,10 @@
 ;;;   - Inner field decode does not accumulate structured errors yet.
 ;;;   - Nullary constructors encode as `{"Ctor":{}}` (empty inner object).
 (defmacro derive-json-sum [type-name & ctors]
-  ;; Decode is split into a standalone helper `defn` + a delegating instance;
-  ;; see `derive-json-sum-decode` for why the box can't happen in the method.
-  (let [impl (str->sym (str-append "__derive-sum-decode-impl-" (symbol-name type-name)))]
-    `(do
-       (definstance Encode [~type-name]
-         (encode [__self] (match __self ~@(__sum-enc-arms ~ctors))))
-       (defn ~impl [doc : int  val : int] : (Result ~type-name cstr)
-         (:: (ok (__sum-dec-arms ~ctors)) (Result ~type-name cstr)))
-       (definstance Decode [~type-name]
-         (decode [doc val] (~impl doc val))))))
+  `(do
+     (definstance Encode [~type-name]
+       (encode [__self] (match __self ~@(__sum-enc-arms ~ctors))))
+     (definstance Decode [~type-name]
+       (decode [doc val] (:: (ok (__sum-dec-arms ~ctors)) (Result ~type-name cstr))))))
 
 ) ;; end defmodule json/encode
