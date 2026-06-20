@@ -18,14 +18,14 @@
 ;;; Carrier note / element scope. Every storage *handle* (`(Dense A)`,
 ;;; `(Sparse A)`, `Tag`) rides the `int64` carrier, so no method *C*
 ;;; signature depends on `(Storage T)`. The carried *element* type `Elem`
-;;; must likewise ride the int64 carrier (an int, an int-carried opaque such
-;;; as `(defopaque Hp :int)`, a pointer): the generic instance bodies
-;;; monomorphise `Elem` to the int64 carrier, so a by-value *struct* element
-;;; would mismatch the C ABI at `storage-insert!` / `storage-get`. Struct
-;;; components therefore keep the direct `dense-*` accessor path
-;;; (`defcomponent-accessors`) until the value-level projection caveat the
-;;; plan gates P6 against is closed upstream. Int-carried components dispatch
-;;; through the class cleanly today.
+;;; rides the same int64 carrier for int-carried components (an int, an
+;;; int-carried opaque such as `(defopaque Hp :int)`, a pointer). A
+;;; by-value *struct* element now also dispatches cleanly: turmeric's
+;;; parametric struct-element projection (PR #446, 2026-06-19) grounds the
+;;; instance head's element tyvar to the concrete struct and mints a
+;;; by-value spec, so `storage-insert!` / `storage-get` thread a `Pos` by
+;;; value instead of carrier-collapsing it to int64. This is what unblocked
+;;; routing `defcomponent-accessors` through `StorageOps` (`ecs/world`).
 ;;;
 ;;; Return-position witness. `storage-get` returns the associated `Elem`. The
 ;;; elaborator does not yet project `Elem` to a concrete type in *return*
@@ -36,15 +36,18 @@
 ;;; the same hole one level up). `storage-insert!` (Elem in argument
 ;;; position) and `storage-has?` (no Elem) need no witness.
 ;;;
-;;; Polymorphic-wrapper surface deferred. A function bounded on
-;;; `[S] [(StorageOps S)]` is the natural "generic over any backend" shape,
-;;; but it does not link today: the bounded body emits a call to the
-;;; unspecialised instance symbol while the instance is monomorphised against
-;;; `<struct>`, so `cc` fails with an undefined reference. This is the same
-;;; monomorphisation gap that keeps `defcomponent-class`'s typeclass-bounded
-;;; wrappers off the shipped surface (gap H). *Monomorphic* dispatch -- a
-;;; helper typed against a concrete `(Dense int)` / `(Sparse int)` -- works
-;;; end to end, which is the surface `tests/storage-ops-poly.tur` exercises.
+;;; Polymorphic-wrapper surface. A function bounded on
+;;; `[S] [(StorageOps S)]` -- the natural "generic over any backend" shape
+;;; -- now links and dispatches end to end at heterogeneous backends. gap H
+;;; closed upstream in two steps: turmeric #447 (multi-parameter ground
+;;; instance head) and #448 (single-parameter + associated-type head, this
+;;; module's shape), so the bounded body's interior dispatch call resolves
+;;; the authoritative per-instance symbol instead of the unspecialised one,
+;;; and `(Dense A)` / `(Sparse A)` clones no longer collide on the int64
+;;; carrier signature. This is the monomorphisation that direction-2
+;;; cross-world scheduling (`ecs/hstage`) rides. Monomorphic dispatch --
+;;; a helper typed against a concrete `(Dense int)` / `(Sparse int)` --
+;;; works too, exercised by `tests/storage-ops-poly.tur`.
 ;;;
 ;;; Tag is intentionally not an instance. `Tag` is payload-less: `tag-set!`
 ;;; takes no value and there is no element to `get`, so it has no honest

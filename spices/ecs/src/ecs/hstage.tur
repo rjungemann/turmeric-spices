@@ -1,0 +1,283 @@
+;;; ecs/hstage -- heterogeneous (cross-world) system scheduler.
+;;;
+;;; Direction 2 of the sized-scheduler plan (see
+;;; ../../../turmeric/docs/archive/sized-scheduler-system-stage-world-carrier.md).
+;;; Where `ecs/stage` runs every System against one shared world handle
+;;; (`stage-run! stage w` passes the same `w` to all run-fns), an
+;;; `HStage` binds each system to *its own* world. Different systems in
+;;; one stage may therefore drive *differently-typed* worlds in the same
+;;; frame -- the render-extract / client-server / snapshot patterns the
+;;; cross-world plan motivates.
+;;;
+;;; A `WorldSystem` is a `System` paired with a world identity and a
+;;; boxed world pointer:
+;;;
+;;;   world-id    -- a small int naming which world this system targets.
+;;;                  Two systems with *different* world-ids never conflict,
+;;;                  even if their component masks overlap: a write to
+;;;                  `Pos` in world 0 cannot race a read of `Pos` in
+;;;                  world 1, because they touch disjoint storage. This is
+;;;                  the (World, Component) lock-target refinement -- the
+;;;                  scheduler proves cross-world non-conflict statically
+;;;                  from the declared (world-id, mask) pairs, exactly as
+;;;                  the single-world scheduler proves it from masks alone.
+;;;   world       -- the system's own world handle (an `:int`; for a sized
+;;;                  by-value world, the heap-boxed pointer reinterpreted
+;;;                  as `:int`, the same carrier `sized-defsystem-scheduled`
+;;;                  uses). `hstage-run!` dispatches each run-fn against
+;;;                  its bound world rather than a single shared one.
+;;;
+;;; `bind-system` lifts any `System` (e.g. one produced by `defsystem` or
+;;; `sized-defsystem-scheduled`) into a `WorldSystem`, so the cap-gated
+;;; body / mask machinery is reused verbatim; only the scheduling layer
+;;; changes. The world-type-polymorphic system *bodies* this enables ride
+;;; the typeclass-bounded-wrapper monomorphisation that landed upstream
+;;; (turmeric gap-H, PRs #447/#448).
+;;;
+;;; Since: E2c sized-scheduler direction 2
+
+(defmodule ecs/hstage
+  (export WorldSystem make-world-system bind-system
+          world-system-conflicts?
+          HStage hstage-new hstage-add! hstage-len hstage-n-waves
+          hstage-run! hstage-free!)
+
+(import ecs/system :refer [System system-reads-mask system-writes-mask
+                           system-run-fn])
+
+;;; WorldSystem -- a System bound to one world (world-id + boxed handle).
+;;; :copy so it flows through Turmeric values cleanly, like System.
+;;; Since: direction 2
+(defstruct WorldSystem :copy
+  [world-id    : int
+   reads-mask  : int
+   writes-mask : int
+   run-fn      : ptr<void>
+   world       : int])
+
+;;; make-world-system -- bundle a (world-id, masks, run-fn, world) tuple.
+;;; Since: direction 2
+(defn make-world-system
+  [world-id    : int
+   reads-mask  : int
+   writes-mask : int
+   run-fn      : ptr<void>
+   world       : int]
+  : WorldSystem
+  (make-struct WorldSystem world-id reads-mask writes-mask run-fn world))
+
+;;; bind-system -- lift a `System` into a `WorldSystem` bound to a
+;;; specific world. Reuses the System's reads/writes masks and run-fn, so
+;;; a system declared with `defsystem` / `sized-defsystem-scheduled` is
+;;; scheduled cross-world with no change to its body.
+;;;
+;;; Parameters:
+;;;   sys       -- the System (carries masks + run-fn)
+;;;   world-id  -- which world this system targets (conflict key)
+;;;   world     -- the system's own boxed world handle (:int carrier)
+;;;
+;;; Since: direction 2
+(defn bind-system [sys : System world-id : int world : int] : WorldSystem
+  (make-world-system
+    world-id
+    (system-reads-mask sys)
+    (system-writes-mask sys)
+    (system-run-fn sys)
+    world))
+
+;;; world-system-conflicts? -- true if two WorldSystems cannot run
+;;; concurrently. They conflict only when they target the *same* world
+;;; (`world-id` equal) *and* their masks overlap on a write. Distinct
+;;; worlds are independent lock targets, so they never conflict.
+;;; Since: direction 2
+(defn world-system-conflicts? [a : WorldSystem b : WorldSystem] : bool
+  ```c
+  if (a.world_id != b.world_id) return 0;
+  int64_t aw = a.writes_mask;
+  int64_t ar = a.reads_mask;
+  int64_t bw = b.writes_mask;
+  int64_t br = b.reads_mask;
+  return (aw & (br | bw)) != 0 || (bw & (ar | aw)) != 0;
+  ```)
+
+;;; hstage-task -- pthread-callable worker. Reads {fn, world} from arg and
+;;; invokes the fn against its bound world. Top-level so it has a stable C
+;;; symbol pthread_create can target.
+;;; Since: direction 2
+(defn hstage-task [arg : ptr<void>] : ptr<void>
+  ```c
+  typedef struct { void (*fn)(int64_t); int64_t world; } __ecs_h_arg;
+  __ecs_h_arg *t = (__ecs_h_arg *)arg;
+  t->fn(t->world);
+  return NULL;
+  ```)
+
+;;; HStage -- heap container for a list of WorldSystems, pre-grouped into
+;;; conflict-free waves the first time `hstage-run!` is called. Mirrors
+;;; `Stage` but carries a per-system world-id and boxed world pointer so
+;;; the conflict test is (world-id, mask)-keyed and dispatch is per-world.
+;;; Since: direction 2
+(defopaque HStage :int)
+
+;;; hstage-new -- allocate an empty HStage.
+;;; Since: direction 2
+(defn hstage-new [] : HStage
+  ```c
+  #include <stdlib.h>
+  #include <stdint.h>
+  typedef struct {
+    int64_t *world_ids;
+    int64_t *reads;
+    int64_t *writes;
+    void   **fns;
+    int64_t *worlds;
+    int     *waves;
+    int      n_systems;
+    int      n_waves;
+    int      cap;
+    int      dirty;
+  } __ecs_hstage;
+  __ecs_hstage *s = (__ecs_hstage *)calloc(1, sizeof(*s));
+  return (int64_t)(intptr_t)s;
+  ```)
+
+;;; hstage-len -- count of WorldSystems added.
+;;; Since: direction 2
+(defn hstage-len [s : HStage] : int
+  ```c
+  typedef struct { int64_t *world_ids; int64_t *reads; int64_t *writes; void **fns; int64_t *worlds; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_hstage;
+  __ecs_hstage *st = (__ecs_hstage *)(intptr_t)s;
+  return (int64_t)st->n_systems;
+  ```)
+
+;;; hstage-add! -- append a WorldSystem. Invalidates the wave partition.
+;;; Since: direction 2
+(defn hstage-add! [s : HStage sys : WorldSystem] : nil
+  ```c
+  #include <stdlib.h>
+  typedef struct { int64_t *world_ids; int64_t *reads; int64_t *writes; void **fns; int64_t *worlds; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_hstage;
+  __ecs_hstage *st = (__ecs_hstage *)(intptr_t)s;
+  if (st->n_systems >= st->cap) {
+    int nc = st->cap ? st->cap * 2 : 8;
+    st->world_ids = (int64_t *)realloc(st->world_ids, nc * sizeof(int64_t));
+    st->reads     = (int64_t *)realloc(st->reads,     nc * sizeof(int64_t));
+    st->writes    = (int64_t *)realloc(st->writes,    nc * sizeof(int64_t));
+    st->fns       = (void   **)realloc(st->fns,       nc * sizeof(void *));
+    st->worlds    = (int64_t *)realloc(st->worlds,    nc * sizeof(int64_t));
+    st->waves     = (int     *)realloc(st->waves,     nc * sizeof(int));
+    st->cap = nc;
+  }
+  int i = st->n_systems++;
+  st->world_ids[i] = sys.world_id;
+  st->reads[i]     = sys.reads_mask;
+  st->writes[i]    = sys.writes_mask;
+  st->fns[i]       = sys.run_fn;
+  st->worlds[i]    = sys.world;
+  st->dirty        = 1;
+  ```)
+
+;;; __hstage-recompute-waves -- internal: greedy first-fit grouping with
+;;; the (world-id, mask) conflict rule. Two systems in the same wave must
+;;; not conflict; systems over distinct worlds never conflict, so they
+;;; coalesce into the same wave freely.
+;;; Since: direction 2
+(defn __hstage-recompute-waves [s : HStage] : nil
+  ```c
+  typedef struct { int64_t *world_ids; int64_t *reads; int64_t *writes; void **fns; int64_t *worlds; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_hstage;
+  __ecs_hstage *st = (__ecs_hstage *)(intptr_t)s;
+  int n_waves = 0;
+  for (int i = 0; i < st->n_systems; i++) {
+    int64_t wid = st->world_ids[i], r = st->reads[i], w = st->writes[i];
+    int placed = -1;
+    for (int wi = 0; wi < n_waves; wi++) {
+      int ok = 1;
+      for (int j = 0; j < i; j++) {
+        if (st->waves[j] != wi) continue;
+        if (st->world_ids[j] != wid) continue;   /* distinct worlds never conflict */
+        int64_t jr = st->reads[j], jw = st->writes[j];
+        if ((w & (jr | jw)) || (jw & (r | w))) { ok = 0; break; }
+      }
+      if (ok) { placed = wi; break; }
+    }
+    if (placed < 0) placed = n_waves++;
+    st->waves[i] = placed;
+  }
+  st->n_waves = n_waves;
+  st->dirty = 0;
+  ```)
+
+;;; __hstage-run-wave-raw -- dispatch the systems in `wave-idx`
+;;; concurrently, each against its own bound world. Spawns n-1 pthreads
+;;; and runs the first inline; joins all before returning.
+;;; Since: direction 2
+(defn __hstage-run-wave-raw [s : HStage wave-idx : int] : nil
+  ```c
+  #include <pthread.h>
+  typedef struct { int64_t *world_ids; int64_t *reads; int64_t *writes; void **fns; int64_t *worlds; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_hstage;
+  typedef struct { void (*fn)(int64_t); int64_t world; } __ecs_h_arg;
+  __ecs_hstage *st = (__ecs_hstage *)(intptr_t)s;
+  int idxs[64]; int n_in_wave = 0;
+  for (int i = 0; i < st->n_systems && n_in_wave < 64; i++) {
+    if (st->waves[i] == (int)wave_idx) idxs[n_in_wave++] = i;
+  }
+  if (n_in_wave == 0) return;
+  if (n_in_wave == 1) {
+    void (*fn)(int64_t) = (void (*)(int64_t))(uintptr_t)st->fns[idxs[0]];
+    fn(st->worlds[idxs[0]]);
+    return;
+  }
+  pthread_t threads[63];
+  __ecs_h_arg args[63];
+  for (int k = 1; k < n_in_wave; k++) {
+    args[k - 1].fn    = (void (*)(int64_t))(uintptr_t)st->fns[idxs[k]];
+    args[k - 1].world = st->worlds[idxs[k]];
+    pthread_create(&threads[k - 1], NULL,
+                   ecs__hstage__hstage_hytask, &args[k - 1]);
+  }
+  void (*fn0)(int64_t) = (void (*)(int64_t))(uintptr_t)st->fns[idxs[0]];
+  fn0(st->worlds[idxs[0]]);
+  for (int k = 1; k < n_in_wave; k++) pthread_join(threads[k - 1], NULL);
+  ```)
+
+;;; hstage-n-waves -- count of waves, recomputing the partition if stale.
+;;; Since: direction 2
+(defn hstage-n-waves [s : HStage] : int
+  ```c
+  typedef struct { int64_t *world_ids; int64_t *reads; int64_t *writes; void **fns; int64_t *worlds; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_hstage;
+  __ecs_hstage *st = (__ecs_hstage *)(intptr_t)s;
+  return (int64_t)st->n_waves;
+  ```)
+
+;;; __hstage-dirty? -- internal: is the wave partition stale?
+;;; Since: direction 2
+(defn __hstage-dirty? [s : HStage] : bool
+  ```c
+  typedef struct { int64_t *world_ids; int64_t *reads; int64_t *writes; void **fns; int64_t *worlds; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_hstage;
+  __ecs_hstage *st = (__ecs_hstage *)(intptr_t)s;
+  return st->dirty != 0;
+  ```)
+
+;;; hstage-run! -- run every WorldSystem, each against its bound world.
+;;; Waves run sequentially; systems within a wave run concurrently.
+;;; Recomputes the wave partition if modified since the last run.
+;;; Since: direction 2
+(defn hstage-run! [s : HStage] : nil
+  (when (__hstage-dirty? s)
+    (__hstage-recompute-waves s))
+  (let [^mut wi 0
+        n        (hstage-n-waves s)]
+    (while (< wi n)
+      (__hstage-run-wave-raw s wi)
+      (set! wi (+ wi 1)))))
+
+;;; hstage-free! -- release the HStage's backing arrays.
+;;; Since: direction 2
+(defn hstage-free! [s : HStage] : nil
+  ```c
+  #include <stdlib.h>
+  typedef struct { int64_t *world_ids; int64_t *reads; int64_t *writes; void **fns; int64_t *worlds; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_hstage;
+  __ecs_hstage *st = (__ecs_hstage *)(intptr_t)s;
+  if (st) { free(st->world_ids); free(st->reads); free(st->writes); free(st->fns); free(st->worlds); free(st->waves); free(st); }
+  ```)
+
+) ;; end defmodule ecs/hstage
