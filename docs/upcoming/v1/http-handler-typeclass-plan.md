@@ -1,8 +1,8 @@
 # Plan: `http` / `httpd` Handler Typeclass + JSON Codec Integration (U2, v1)
 
 > Status: in progress — P1+P2 landed (turmeric-spices PR #23); P3 landed
-> (httpd JSON body codecs). P4 (http client codecs) + P5 (negative
-> fixtures/docs) remain.
+> (httpd JSON body codecs); P4 landed (http client codecs). P5 (negative
+> fixtures/docs) remains.
 > Tracks: spices-type-features-uplift-plan **U2 target — http/httpd**
 > Scope: `spices/httpd/` and `spices/http/`; no compiler dependency expected
 > Builds on: json `Encode`/`Decode` typeclasses (turmeric-spices PRs #20 +
@@ -207,11 +207,35 @@ Two findings worth recording:
   crash.
 - `Content-Type: application/json` is set on `json-ok` responses.
 
-### P4 — Typed client body decode/encode (`http/response.tur`, `http/request.tur`)
+### P4 — Typed client body decode/encode (`http/response.tur`, `http/request.tur`) — LANDED
 
 Independent of the server work: the `http` client already has an
 untyped `response-json` (`http/response.tur:106`) that hands back a raw
 yyjson doc. Add a typed layer.
+
+**Landed:** `response-decode` (macro, in `http/response.tur`) and
+`json-request` (generic over `Encode`, in `http/request.tur`, with the
+`__hdr-cons` header-prepend helper). Test:
+`tests/http/codec_test.tur` verifies `json-request` encodes the struct body +
+sets `Content-Type: application/json`, and `response-decode` decodes a typed
+struct from a synthesized response body and rejects a non-JSON body — all
+without a network/TLS (only `http/request` + `http/response` are imported, so
+the mbedtls client path is never linked).
+
+Two notes worth recording:
+
+- **`http` now declares `yyjson`.** Same transitive-native-dep convention as
+  P3: `http` re-declares `yyjson` in its `build.tur` `:cmake-deps`. yyjson was
+  previously *optional* for `http` (only `response-json` used it, via a
+  `__has_include` stub); P4's `response-decode`/`json-request` import
+  `json/decode`/`json/encode` unconditionally, so yyjson becomes a first-class
+  `http` dependency. Every consumer of `http/response` (e.g. httpd) therefore
+  links yyjson transitively — httpd already declares it (P3), so the in-tree
+  suite is unaffected.
+- **Method/file placement matches the plan.** The codecs live in
+  `http/request.tur` / `http/response.tur` as specified, rather than a
+  separate codec module, accepting the above coupling as the deliberate cost
+  of first-class typed client codecs.
 
 **Tasks**
 - `(response-decode resp T) : (Result T cstr)` in `http/response.tur` —

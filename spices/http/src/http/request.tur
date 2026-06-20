@@ -5,7 +5,8 @@
 ;; (int64_t) of alternating key/value strings.  Pass to http-request.
 
 (defmodule http/request
-  (export request)
+  (import json/encode)
+  (export request json-request)
 
 ;;; request -- create an HTTP request handle.
 ;;;
@@ -41,5 +42,42 @@
   req->headers = headers;
   return (int64_t)(intptr_t)req;
   ```)
+
+;;; __cstr-free -- release a malloc'd JSON fragment returned by `encode`.
+;;; `request` strdups the body, so the fragment is freed right after.
+(defn __cstr-free [p : cstr] #{Unsafe} : void
+  ```c free((void *)(intptr_t)p); ```)
+
+;;; __hdr-cons -- prepend a `key`/`val` header pair onto a header cons-list.
+;;; Headers are a cons-list of alternating key/value :cstr nodes terminated
+;;; by 0; this returns key -> val -> `next`. The key/val pointers are taken
+;;; as-is (callers pass string literals with static lifetime).
+(defn __hdr-cons [key : cstr val : cstr next : int] #{Unsafe} : int
+  ```c
+  #include <stdlib.h>
+  struct __cons { int64_t value; int64_t next; };
+  struct __cons *vnode = malloc(sizeof(*vnode));
+  vnode->value = (int64_t)(intptr_t)val;
+  vnode->next  = next;
+  struct __cons *knode = malloc(sizeof(*knode));
+  knode->value = (int64_t)(intptr_t)key;
+  knode->next  = (int64_t)(intptr_t)vnode;
+  return (int64_t)(intptr_t)knode;
+  ```)
+
+;;; json-request -- build an HTTP request whose body is `x` encoded as JSON,
+;;; with `Content-Type: application/json` prepended to `headers`. Generic over
+;;; any `Encode` instance; the encoded fragment is freed after `request`
+;;; copies it. Returns the opaque request handle (pass to `http-request`).
+;;;
+;;; Example:
+;;;   (let [req (json-request "POST" url (make-struct User 1 "ann") (nil-value))]
+;;;     (http-request req))
+(defn json-request [^Encode T  method : cstr  url : cstr  x : T  headers : int] : int
+  (let [frag (encode x)
+        hdrs (unsafe (__hdr-cons "Content-Type" "application/json" headers))
+        req  (request method url frag hdrs)]
+    (unsafe (__cstr-free frag))
+    req))
 
 ) ;; end defmodule http/request

@@ -5,7 +5,10 @@
 ;; (the ok-val of the result returned by http-get / http-request).
 
 (defmodule http/response
-  (export response-status response-header response-body response-json)
+  (import json/encode)
+  (import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+  (export response-status response-header response-body response-json
+          response-decode)
 
 ;; file-scope-c-block: yyjson is an optional native dep. The header declares
 ;; `static inline` functions, which are illegal inside a function body, so it
@@ -161,5 +164,29 @@
   return res;
   #endif
   ```)
+
+;;; response-decode -- parse a response body as JSON and decode it into `T`
+;;; via the json `Decode [T]` instance. Returns `(Result T cstr)`: `ok` with
+;;; the decoded value, or `err` with a message when the body is not valid
+;;; JSON. The typed counterpart to `response-json`, which hands back an
+;;; untyped doc handle the caller has to walk by string key.
+;;;
+;;; A macro (not a function) because the target type drives instance
+;;; selection through the `(Result T cstr)` ascription. The yyjson document
+;;; is freed before returning; json's `Decode` instances copy strings out, so
+;;; the decoded value outlives the document.
+;;;
+;;; Example:
+;;;   (let [r (http-get url)]
+;;;     (when (ok? r)
+;;;       (response-decode (ok-val r) User)))   ;; => (Result User cstr)
+(defmacro response-decode [resp type-name]
+  `(let [__doc (unsafe (json-parse-doc (response-body ~resp)))]
+     (if (= __doc 0)
+       (:: (err "response-decode: response body is not valid JSON") (Result ~type-name cstr))
+       (let [__root (unsafe (json-doc-root __doc))
+             __res  (:: (decode __doc __root) (Result ~type-name cstr))]
+         (unsafe (json-doc-free __doc))
+         __res))))
 
 ) ;; end defmodule http/response

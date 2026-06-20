@@ -48,6 +48,41 @@ let [r http-get("https://httpbin.org/get")]
       println $ response-body resp
 ```
 
+## Typed JSON bodies
+
+`http/request` and `http/response` expose typed JSON codecs built on the json
+spice's `Encode`/`Decode` typeclasses, so a request/response body is a typed
+struct rather than a hand-walked document:
+
+- `(json-request method url x headers) : int` -- encode `x` as the request
+  body and prepend `Content-Type: application/json` to `headers`. Generic over
+  any `Encode` instance.
+- `(response-decode resp T) : (Result T cstr)` -- decode the response body
+  into `T` via its `Decode` instance, or `err` on a non-JSON body. The typed
+  counterpart to `response-json` (which returns an untyped doc handle).
+
+```turmeric
+(import http/client   :refer [http-request])
+(import http/request  :refer [json-request])
+(import http/response :refer [response-decode])
+
+(defstruct User [id : int  name : cstr])
+(derive-json User (id int) (name cstr))
+
+(let [req (json-request "POST" "https://api.example.com/users"
+                        (make-struct User 7 "ann") 0)
+      r   (http-request req)]
+  (when (ok? r)
+    (let [u (response-decode (ok-val r) User)]
+      (when (ok? u) (println (.name (ok-val u)))))))
+```
+
+These build on json's codec surface, so `http` declares `yyjson` in its
+`build.tur` `:cmake-deps` (a workspace-sibling's native deps are not
+propagated -- the same pattern `httpd` and `ecs-raylib` use). yyjson, which
+was previously optional (only `response-json` used it, stubbing out when
+absent), is now a first-class dependency of the typed codec path.
+
 ## See also
 
 - [API reference](api/)
