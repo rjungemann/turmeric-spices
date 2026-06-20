@@ -1,12 +1,14 @@
 # Plan: `plot` Renderer Typeclass Collapse (U2, v1)
 
 > Status: P0–P2 landed (per-kind structs, `Renderer` `bounds`, `Backend`
-> output collapse). **P3 foundation landed**: the existential `AnyRenderer`
-> box + `renderers-bbox` heterogeneous dispatch, after the turmeric compiler
-> blocker was fixed (PRs #452/#456/#458 — see P3). Four soft codegen/inference
-> blockers remain, worked around in the landed code and listed under P3. The
-> full constructor migration + `render`-method dispatch over all ~30 kinds
-> (P4) is the remaining, pixel-sensitive work.
+> output collapse). **P3 foundation landed** (existential `AnyRenderer` +
+> `renderers-bbox`) after the turmeric blocker was fixed (PRs #452/#456/#458).
+> **P4 render bridge landed**: `to-legacy` + `plot-anyrenderers` render a typed
+> `(Vec AnyRenderer)` through the existing pipeline, validated pixel-identical
+> to legacy `plot` (see P4). The remaining ~27 per-kind structs + the
+> constructor migration + the eventual per-kind `render` C de-monolith are the
+> pixel-sensitive remainder. Soft codegen/inference blockers worked around in
+> the landed code are listed under P3/P4.
 > Tracks: spices-type-features-uplift-plan **U2 target — plot**
 > Scope: `spices/plot/` only; P3 needed a compiler dependency after all, now
 > satisfied (see Risks).
@@ -249,24 +251,48 @@ migration of the public constructors to return `AnyRenderer` (so
 the larger, pixel-sensitive remainder. The mechanism is now proven to work;
 that migration is the next increment.
 
-### P4 — Migrate constructors; keep one-release shims
+### P4 — Render the typed path; migrate constructors
 
-**Tasks**
+**Landed (render bridge):** the typed `AnyRenderer` path is now *render-capable*
+and proven pixel-identical to the legacy path, without de-monolithing the C
+draw pass:
+- `Renderer` gained a second method `to-legacy [r] : int` that lowers each
+  typed struct to the exact slot-bag handle its legacy constructor emits
+  (`LinesR`→RK_LINES 20, `PointsR`→RK_POINTS 30, `LabelR`→RK_LABEL 9).
+- `anyrenderers->legacy` folds a `(Vec AnyRenderer)` into the legacy `(Vec int)`
+  the draw pass consumes, dispatching `to-legacy` through each packed `Renderer`
+  dictionary; `plot-anyrenderers` renders that vec through the existing `plot`
+  pipeline.
+- `tests/plot/render_bridge_test.tur` renders the *same* renderers through both
+  the typed and legacy paths and asserts byte-identical surfaces
+  (`__surfaces-equal?`) — the migration's correctness invariant, validated
+  with plutovg linked.
+
+This is the pixel-safe intermediate state: callers can build a typed,
+type-checked `(Vec AnyRenderer)` and render it, while the draw code is
+untouched. It exercised one more recursion-return soft blocker (a self-recursive
+`defn` returning `(Vec int)` types its own call at the carrier `int`; ascribe
+the recursive result).
+
+**Remaining (the larger, pixel-sensitive migration):**
 - Rewrite the public constructors in `plot/line.tur`, `point.tur`,
   `area.tur`, `contour.tur`, `interval.tur`, `decor.tur` to build the
-  typed struct and return `AnyRenderer` instead of calling
-  `__make-renderer`.
+  typed struct and return `AnyRenderer` (currently they return the legacy
+  `int` handle; `plot-anyrenderers` bridges the other direction).
+- Add the remaining ~27 per-kind structs + `Renderer` instances (only
+  `LinesR`/`PointsR`/`LabelR` exist today) with `bounds` + `to-legacy`.
+- Eventually replace `to-legacy` + the monolithic `__draw-renderers` switch
+  with a per-kind `render` method (the P0-per-kind C de-monolith), at which
+  point the slot-bag handle and `__make-renderer` can be retired.
 - Keep `__make-renderer` and the generic-slot helpers exported but
-  deprecated for one release (some downstream/example code may call them
-  directly); mark with a docstring note pointing here.
-- Update `spices/plot` README and `docs/guides/plutovg-guide.md` examples
-  to the typed constructors (output unchanged, so prose is minimal).
+  deprecated for one release; update the README / `plutovg-guide.md` examples.
 
 **Acceptance**
-- Every example under `spices/plot/` and the guide compiles against the
-  new constructors.
-- Removing the deprecated `__make-renderer` export (in a later release)
-  is the only follow-up; nothing in-tree depends on it after P4.
+- `plot-anyrenderers` is pixel-identical to legacy `plot` for the typed kinds
+  (done for `LinesR`/`PointsR`/`LabelR`).
+- Once constructors migrate: every example under `spices/plot/` and the guide
+  compiles against the typed constructors; removing `__make-renderer` is the
+  only follow-up.
 
 ### P5 — Tests, negative fixtures, image round-trip
 

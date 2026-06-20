@@ -9,6 +9,7 @@
           BBox renderer-bbox bbox-empty? bbox-from-raw
           LinesR PointsR LabelR lines-r points-r label-r
           any-renderer renderers-bbox bbox-union bbox-empty-box
+          anyrenderers->legacy plot-anyrenderers __surfaces-equal?
           __ok? __ok-val __err-val
           __surface-width __surface-height __surface-pixel-byte
           __pixel-is-background? __count-non-background)
@@ -772,10 +773,12 @@
 
   ;;; Renderer -- typeclass collapsing the per-kind renderer dispatch. Each kind
   ;;; is a struct carrying its real typed fields; `bounds` computes the data
-  ;;; extent from those fields. Lives beside its instances so the orphan-instance
-  ;;; check is satisfied (same as ansi Color / json Encode).
+  ;;; extent from those fields and `to-legacy` lowers the struct to the slot-bag
+  ;;; `int` handle the C draw pass still consumes. Lives beside its instances so
+  ;;; the orphan-instance check is satisfied (same as ansi Color / json Encode).
   (defclass Renderer [a]
-    (bounds [r] : BBox))
+    (bounds [r] : BBox)
+    (to-legacy [r] : int))
 
   ;;; LinesR / PointsR -- a polyline / scatter over an explicit (cons x y) list.
   ;;; PointsR is nominally distinct from LinesR though their payloads match, so
@@ -792,12 +795,24 @@
   (defn label-r  [x : float  y : float  text : cstr  style : int] : LabelR
     (make-struct LabelR x y text style))
 
+  ;; to-legacy rebuilds the exact slot-bag handle the legacy constructor emits
+  ;; (`lines` -> RK_LINES 20, `points` -> RK_POINTS 30, `point-label-styled`
+  ;; -> RK_LABEL 9), so routing a typed renderer through the existing draw pass
+  ;; is pixel-identical to the legacy path.
   (definstance Renderer [LinesR]
-    (bounds [r] (bbox-from-raw (__point-list-bbox (.points r)))))
+    (bounds [r] (bbox-from-raw (__point-list-bbox (.points r))))
+    (to-legacy [r] (__make-renderer 20 (.style r) 0 (.points r) 0 0 0 0 (.label r) "")))
   (definstance Renderer [PointsR]
-    (bounds [r] (bbox-from-raw (__point-list-bbox (.points r)))))
+    (bounds [r] (bbox-from-raw (__point-list-bbox (.points r))))
+    (to-legacy [r] (__make-renderer 30 (.style r) 0 (.points r) 0 0 0 0 (.label r) "")))
   (definstance Renderer [LabelR]
-    (bounds [r] (make-struct BBox (.x r) (.x r) (.y r) (.y r))))
+    (bounds [r] (make-struct BBox (.x r) (.x r) (.y r) (.y r)))
+    (to-legacy [r]
+      (__renderer-bounds
+        (__renderer-floats
+          (__make-renderer 9 (.style r) 0 0 0 0 0 0 "" (.text r))
+          (.x r) (.y r) 0.0 0.0 0.0 0.0)
+        (.x r) (.x r) (.y r) (.y r))))
 
   ;; ===========================================================================
   ;; AnyRenderer -- existential box for heterogeneous renderer vecs (P3).
@@ -900,6 +915,59 @@
   ;;; legacy ~30-arm `kind` switch in `__renderer-bbox`.
   (defn renderers-bbox [rs : (Vec (exists [a] [(Renderer a)] a))] : BBox
     (bbox-from-raw (__renderers-bbox-go rs (vec-len rs) 0 (__rbb-new-empty))))
+
+  ;; __any-to-legacy-go -- fold a (Vec AnyRenderer) into a legacy (Vec int) of
+  ;; slot-bag handles by dispatching `to-legacy` through each box. The legacy
+  ;; Vec is a plain int carrier (not a by-value struct), so it threads through
+  ;; the recursion without the struct-accumulator soft blocker; vec-push!
+  ;; mutates it in place.
+  (defn __any-to-legacy-go [rs : (Vec (exists [a] [(Renderer a)] a))
+                            n : int  i : int  out : (Vec int)] : (Vec int)
+    (if (>= i n) out
+      (let [h (open (vec-get rs i) [a v] (to-legacy v))]
+        (do (vec-push! out h)
+            ;; ascribe the recursive result: a self-recursive defn types its
+            ;; own call at the carrier int, not the declared (Vec int).
+            (:: (__any-to-legacy-go rs n (+ i 1) out) (Vec int))))))
+
+  ;;; anyrenderers->legacy -- materialise a (Vec AnyRenderer) as the legacy
+  ;;; (Vec int) of slot-bag handles the C draw pass consumes. Each element's
+  ;;; lowering dispatches through its packed Renderer dictionary.
+  (defn anyrenderers->legacy [rs : (Vec (exists [a] [(Renderer a)] a))] : (Vec int)
+    (__any-to-legacy-go rs (vec-len rs) 0 (:: (vec-new) (Vec int))))
+
+  ;;; plot-anyrenderers -- render a heterogeneous (Vec AnyRenderer) to a new
+  ;;; surface (returns the same :ptr<void> result envelope as `plot`). Each
+  ;;; renderer is lowered through the `Renderer` typeclass (`to-legacy`) and the
+  ;;; result handed to the existing draw pipeline -- so pixel output is identical
+  ;;; to building the same renderers with the legacy constructors and calling
+  ;;; `plot`, but the input is the typed, type-safe `AnyRenderer` vec.
+  (defn plot-anyrenderers [rs : (Vec (exists [a] [(Renderer a)] a)) opts : int] : ptr<void>
+    (plot (:: (anyrenderers->legacy rs) :int) opts))
+
+  ;;; __surfaces-equal? -- true when two plutovg surfaces have identical
+  ;;; dimensions and pixel bytes. Used to assert that the typed `AnyRenderer`
+  ;;; draw path is pixel-identical to the legacy constructor path.
+  (defn __surfaces-equal? [s1 : int s2 : int] : bool
+    ```c
+    #include <string.h>
+    extern unsigned char* plutovg_surface_get_data(const void*);
+    extern int plutovg_surface_get_width(const void*);
+    extern int plutovg_surface_get_height(const void*);
+    extern int plutovg_surface_get_stride(const void*);
+    if (!s1 || !s2) return false;
+    const void *a = (const void *)(intptr_t)s1, *b = (const void *)(intptr_t)s2;
+    int w = plutovg_surface_get_width(a), h = plutovg_surface_get_height(a);
+    if (w != plutovg_surface_get_width(b) || h != plutovg_surface_get_height(b)) return false;
+    int sa = plutovg_surface_get_stride(a), sb = plutovg_surface_get_stride(b);
+    unsigned char *da = plutovg_surface_get_data((void *)a);
+    unsigned char *db = plutovg_surface_get_data((void *)b);
+    if (!da || !db) return false;
+    for (int y = 0; y < h; y++) {
+      if (memcmp(da + (size_t)y * sa, db + (size_t)y * sb, (size_t)w * 4) != 0) return false;
+    }
+    return true;
+    ```)
 
   ;;; plot-into-canvas -- render into an existing canvas and viewport.
   ;;;
