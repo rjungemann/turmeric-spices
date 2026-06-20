@@ -126,11 +126,15 @@ at argument unification).
 
 ---
 
-## Out of scope (pre-existing, not introduced here)
+## Also retired this pass (was previously a documented spice workaround)
 
-`spices/json/src/json/encode.tur` (`derive-json-sum-decode`) routes its
-`(ok <adt>)` tail through a standalone `defn` because a typeclass method whose
-tail is a bare `(ok <adt-value>)` mis-boxes the ADT-typed result slot. This is a
-separate, still-open gap (the value-struct case was fixed; the sum/ADT case was
-not) and was **not** touched by this work — noted only for completeness.
+`spices/json/src/json/encode.tur` (`derive-json-sum-decode` / `derive-json-sum`)
+used to route its `(ok <adt>)` tail through a generated standalone `defn`
+because a typeclass method whose tail was a bare `(ok <adt-value>)` mis-boxed
+the ADT-typed result slot (the value-struct case had been fixed earlier, the
+sum/ADT case not). On this turmeric tree the inline box is correct, so the
+delegation was removed and the `Decode` instance boxes `(ok ...)` directly in
+the method body. Verified: the full json test suite (15 files) is green,
+including `round-trip-sum`, `derive-decode-sum`, `derive-encode-sum`. No
+turmeric report needed — this one is closed, not open.
 </content>
