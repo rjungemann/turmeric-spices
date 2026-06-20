@@ -1,14 +1,15 @@
 # Plan: `plot` Renderer Typeclass Collapse (U2, v1)
 
 > Status: P0–P2 landed (per-kind structs, `Renderer` `bounds`, `Backend`
-> output collapse); **P3 blocked on a turmeric compiler dependency**
-> (witness-indirected method dispatch through a constraint-carrying
-> existential -- see P3 and Risk #1); P4–P5 deferred behind P3.
+> output collapse). **P3 foundation landed**: the existential `AnyRenderer`
+> box + `renderers-bbox` heterogeneous dispatch, after the turmeric compiler
+> blocker was fixed (PRs #452/#456/#458 — see P3). Four soft codegen/inference
+> blockers remain, worked around in the landed code and listed under P3. The
+> full constructor migration + `render`-method dispatch over all ~30 kinds
+> (P4) is the remaining, pixel-sensitive work.
 > Tracks: spices-type-features-uplift-plan **U2 target — plot**
-> Scope: `spices/plot/` only; the `no compiler dependency expected` hope did
-> not hold for P3 (see Risks)
-> Prereq: ECS existential-wrapper pattern (PR #17) hides a size index, which
-> turned out not to cover P3's type-behind-constraint existential.
+> Scope: `spices/plot/` only; P3 needed a compiler dependency after all, now
+> satisfied (see Risks).
 
 ## Motivation
 
@@ -181,70 +182,72 @@ and stands on its own.
   `render` directly (no Vec yet), producing the same pixels as the legacy
   constructor for that kind.
 
-### P3 — Existential `Renderer` box for heterogeneous vecs — BLOCKED (turmeric compiler dependency)
+### P3 — Existential `Renderer` box for heterogeneous vecs — UNBLOCKED; foundation landed
 
-The public API takes a `Vec` of mixed renderer kinds
-(`plot-into-canvas` iterates `renderers` as a `Vec[Renderer]`,
-`core.tur:678-682`). Coherent typeclass dispatch needs a uniform element
-type, so mixed kinds must be boxed.
+The public API takes a `Vec` of mixed renderer kinds. Coherent typeclass
+dispatch needs a uniform element type, so mixed kinds are boxed as an
+existential carrying the `Renderer` dictionary.
 
-**Tasks (intended)**
-- Introduce an existential wrapper `AnyRenderer` that packs a value plus
-  its `Renderer` dictionary, following the ECS sized-world existential
-  pattern shipped in PR #17 (cite that file as the template).
-- Provide `(any-renderer x)` to box any `(Renderer a) => a` and have
-  `plot`, `plot-into-canvas`, `render` consume `(Vec AnyRenderer)`.
-- The iteration in `plot-into-canvas` calls `bounds`/`render` through the
-  boxed dictionary instead of switching on `kind`.
+**Originally blocked, now fixed in turmeric main.** The blocker reported here
+(witness-indirected `open` dispatch was deferred) was resolved by a cluster of
+turmeric PRs:
 
-**Status: BLOCKED on a turmeric compiler feature** -- Risk #1 below
-materialized. turmeric *does* have constraint-carrying existentials
-(`(exists [a] [(Renderer a)] a)`, `pack`/`open` with vtable witnesses;
-see `docs/guides/existential-types-guide.md`), but **method dispatch inside
-`open` does not go through the packed witnesses** -- it is documented as
-"reserved for a follow-on patch" (guide, "What is not (yet) supported"), and
-confirmed against turmeric main 0.21.0. The minimal repro:
+- **#452** -- `open`-site method dispatch now resolves through the packed
+  constraint witnesses (the original blocker; the 2-instance repro that used
+  to be `ambiguous method dispatch ... receiver erased to int64_t` now
+  type-checks).
+- **#456** -- `vec-get` preserves the existential element type (so a
+  `(Vec (exists …))` round-trips through indexing).
+- **#458** -- a by-value `:copy` struct payload is heap-boxed on a
+  constrained `pack` (so renderer structs, not just `int`/`bool`, can be
+  boxed).
 
-```turmeric
-(defclass Rdr [a] (rbound [x] : int))
-(defstruct LinesR  [v : int])
-(defstruct PointsR [v : int])
-(definstance Rdr [LinesR]  (rbound [x] (.v x)))
-(definstance Rdr [PointsR] (rbound [x] (+ 100 (.v x))))
+**Landed (foundation):** `spices/plot/src/plot/core.tur`
+- `any-renderer` macro -- `(pack x (exists [a] [(Renderer a)] a))` (the
+  `exists` form must be literal at the pack site, so it is a macro, mirroring
+  stdlib `showable`).
+- `renderers-bbox : (Vec (exists [a] [(Renderer a)] a)) -> BBox` -- unions each
+  element's `bounds` by `open`ing it and dispatching through the packed
+  `Renderer` witness, i.e. the P3 payoff: the union is driven by coherent
+  dispatch, not the legacy ~30-arm `kind` switch.
+- `bbox-union` / `bbox-empty-box` helpers.
+- Test: `tests/plot/any_renderer_test.tur` builds a heterogeneous
+  `(Vec AnyRenderer)` over `LinesR`/`PointsR`/`LabelR` and checks the unioned
+  box; the negative case `(any-renderer (make-struct NotR …))` fails to
+  compile with `pack: no instance 'Renderer' for type 'NotR'` (verified;
+  not committed as a CI fixture -- see "negative fixture" note below).
 
-(let [e (pack (make-struct LinesR 5) (exists [a] [(Rdr a)] a))]
-  (open e [a v] (rbound v)))   ;; <-- error
-;; error: ambiguous method dispatch: '.rbound' matches 2 instances
-;;        (Rdr[PointsR], Rdr[LinesR]) -- receiver type is erased (int64_t).
-```
+**Idioms / soft blockers the current compiler still imposes** (worked around
+in the landed code, worth a turmeric report so the workarounds can be dropped
+later):
 
-The failure is intrinsic to P3: an `AnyRenderer` box only earns its keep
-when ≥2 renderer kinds share a `Vec`, which is exactly when the class has
-≥2 instances and `open`-dispatch becomes ambiguous (the receiver is erased
-to `int64_t` and the witness vtable is not consulted). It fails the same way
-inline, through a `let`, and through a function parameter -- so neither
-keeping the pack/open at the construction site nor avoiding the `Vec`
-sidesteps it. The single-instance case "works" only because dispatch is
-trivially unambiguous, which is not the heterogeneous collection P3 needs.
+1. **Vec element type is not inferred from pushes.**
+   `(:: (vec-new) (Vec (exists [a] [(Renderer a)] a)))` must be ascribed;
+   `vec-new` + `vec-push!` alone leaves the element type a free `A`.
+2. **`letrec`-bound self-recursive closures mis-emit in C** (`'go'
+   undeclared`). Iterate with a top-level recursive `defn` instead.
+3. **A self-recursive `defn` that threads a by-value `:copy` struct as its
+   accumulator mis-types the recursive call as the carrier `int`**
+   (`then=BBox else=int`); ascribing past it then mis-emits
+   (aggregate-vs-int). Worked around by folding a raw `ptr<void>` carrier and
+   packing the `BBox` once at the end (`__rbb-union-corners!`).
+4. **Returning a multi-field by-value `:copy` struct *parameter* directly**
+   mis-emits (`incompatible types ... BBox from const BBox *`); a 2-field
+   register-class struct is fine. Worked around by rebuilding the result with
+   `make-struct` from the fields instead of returning the parameter.
 
-Per Risk #1 the plan pauses here rather than forcing a `kind`-tag bridge
-back in. P0-P2 already shipped the value that does not depend on P3 (named
-per-kind structs, the `Renderer` `bounds` method, and the `Backend`
-output-target collapse), so the spice is in a coherent intermediate state:
-the renderer `Vec` stays a `Vec` of `int` handles at the
-`plot-into-canvas` boundary until the compiler grows
-witness-indirected `open` dispatch.
+**Negative fixture note:** plot's tests are nested (`tests/plot/`), so a
+`tests/errors/` compile-fail fixture would be run (and fail) by CI's
+descend-and-run path. The negative guarantee is verified by hand (above) and
+documented; committing it as a CI fixture needs the plot suite flattened (as
+httpd was) or the `requires.compile-fails` harness.
 
-**Unblock condition:** turmeric implements vtable-indirected method dispatch
-through an existential record's constraint witnesses (the guide's deferred
-"heterogeneous-dispatch method calls"). Reported to the turmeric repo; once
-it lands, resume here.
-
-**Acceptance (deferred until unblocked)**
-- `(vec-of (function …) (points …) (lines …))` type-checks once each
-  constructor returns its `*R` struct boxed as `AnyRenderer`.
-- Negative fixture: a `Vec` element that is not a `Renderer` instance
-  fails to compile (the deliverable type-safety win).
+**Remaining P3/P4 work (not in this foundation):** the `Renderer` class still
+only carries `bounds`; the `render` method over all ~30 kinds and the
+migration of the public constructors to return `AnyRenderer` (so
+`plot-into-canvas` consumes `(Vec AnyRenderer)` instead of int handles) are
+the larger, pixel-sensitive remainder. The mechanism is now proven to work;
+that migration is the next increment.
 
 ### P4 — Migrate constructors; keep one-release shims
 
@@ -299,18 +302,18 @@ blocks on P2; P4/P5 close it out.
 
 ## Risks and open questions
 
-1. **Existential boxing support. — MATERIALIZED; P3 is blocked.** This is
-   the compiler dependency the plan flagged. ECS's PR #17 existential hides a
-   *size index* (`exists [n']`), not a *type behind a constraint*; the
-   `Renderer`-dictionary form turmeric needs (`exists [a] [(Renderer a)] a`)
-   exists, but `open`-site method dispatch does not go through the packed
-   witnesses (documented deferred; confirmed on main 0.21.0 -- see the repro
-   under P3 above). Per this risk the plan **pauses** here rather than forcing
-   a `kind`-tag bridge back in. P0–P2 still delivered value (named fields, the
-   `Renderer` `bounds` method, the `Backend` collapse); the renderer vec stays
-   a `Vec` of int handles at the boundary until turmeric grows
-   witness-indirected `open` dispatch. Reported to the turmeric repo (cannot
-   write to it from a spices-rooted session); resume P3 once it lands.
+1. **Existential boxing support. — MATERIALIZED, then RESOLVED.** This was
+   the compiler dependency the plan flagged: ECS's PR #17 existential hides a
+   *size index* (`exists [n']`), not a *type behind a constraint*, and
+   `open`-site dispatch through packed witnesses was deferred. It was reported
+   to the turmeric repo and fixed by PRs #452 (witness-indirected `open`
+   dispatch) / #456 (`vec-get` element-type preservation) / #458 (by-value
+   struct payload pack). The P3 foundation (`any-renderer`, `renderers-bbox`)
+   now builds and dispatches heterogeneously on main. Four narrower
+   codegen/inference rough edges remain (vec element-type inference; `letrec`
+   closure emit; struct-accumulator recursion; multi-field `:copy` struct
+   param return) — all worked around in the landed code and enumerated under
+   P3; each is worth its own turmeric report so the workarounds can be removed.
 
 2. **Pixel-identity regression budget.** The draw code is sensitive
    (adaptive subdivision thresholds, tick rounding). The plan's
