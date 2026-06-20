@@ -27,6 +27,22 @@
   legacy fold the inline-C call site hard-coded, which broke linking of
   the sampled-curve renderers against tip-of-main turmeric.
 
+### Changed
+
+- `AnyRenderer` fold internals: paid down the soft-blocker workarounds the
+  `bounds`/`to-legacy` folds carried, now that turmeric main fixed the
+  self-recursive-`defn` carrier typing and the pass-by-ptr struct-param
+  return. `bbox-union` returns an empty input's peer box directly instead
+  of rebuilding it field-by-field; `__renderers-bbox-go` threads a real
+  `BBox` accumulator through `bbox-union` (the raw `{x0,x1,y0,y1;valid}`
+  carrier and its `__rbb-new-empty` / `__rbb-union-corners!` helpers are
+  removed); `__any-to-legacy-go` drops its recursive-call `(:: ... (Vec int))`
+  ascription. No public-surface or pixel change. Two residual soft blockers
+  kept their one-line workarounds and are documented in
+  `docs/spice-uplift-residual-soft-blockers-2026-06-20.md` for a later
+  turmeric report (letrec self-recursive closure carrier typing; bare
+  `vec-new` as a concrete `(Vec T)` argument).
+
 ## 0.3.0
 
 ### Added
