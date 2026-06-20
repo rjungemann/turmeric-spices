@@ -4,6 +4,27 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Sized-scheduler direction 2 -- cross-world / heterogeneous
+  scheduling (`ecs/hstage`).** A new `HStage` runs systems over
+  *differently-typed* worlds in one stage, each system dispatched against
+  its own boxed world rather than the single shared world `ecs/stage`
+  passes. `bind-system` lifts any `System` (e.g. one produced by
+  `sized-defsystem-scheduled`) into a `WorldSystem` keyed on a
+  `(world-id, world)` pair, so the cap-gated body / mask machinery is
+  reused verbatim. The conflict test is lifted to a (World, Component)
+  key: two systems over *distinct* worlds never conflict even when their
+  component masks overlap, so the scheduler proves cross-world
+  non-conflict statically and coalesces them into one parallel wave;
+  same-world overlapping writes still serialise. This was the last Track B
+  follow-up, gated on gap-H world-type polymorphism -- the
+  typeclass-bounded-wrapper heterogeneous monomorphisation that closed
+  upstream in turmeric PRs #447 (multi-param head) and #448 (single-param
+  + associated-type head, the spice's `StorageOps` shape). Regression:
+  `tests/hstage-cross-world.tur` (two sized world types, cross-world
+  parallel wave + same-world serialisation).
+
 ### Changed
 
 - **E2d-P6 follow-up -- `defcomponent-accessors` now routes through

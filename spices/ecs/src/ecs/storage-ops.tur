@@ -36,15 +36,18 @@
 ;;; the same hole one level up). `storage-insert!` (Elem in argument
 ;;; position) and `storage-has?` (no Elem) need no witness.
 ;;;
-;;; Polymorphic-wrapper surface deferred. A function bounded on
-;;; `[S] [(StorageOps S)]` is the natural "generic over any backend" shape,
-;;; but it does not link today: the bounded body emits a call to the
-;;; unspecialised instance symbol while the instance is monomorphised against
-;;; `<struct>`, so `cc` fails with an undefined reference. This is the same
-;;; monomorphisation gap that keeps `defcomponent-class`'s typeclass-bounded
-;;; wrappers off the shipped surface (gap H). *Monomorphic* dispatch -- a
-;;; helper typed against a concrete `(Dense int)` / `(Sparse int)` -- works
-;;; end to end, which is the surface `tests/storage-ops-poly.tur` exercises.
+;;; Polymorphic-wrapper surface. A function bounded on
+;;; `[S] [(StorageOps S)]` -- the natural "generic over any backend" shape
+;;; -- now links and dispatches end to end at heterogeneous backends. gap H
+;;; closed upstream in two steps: turmeric #447 (multi-parameter ground
+;;; instance head) and #448 (single-parameter + associated-type head, this
+;;; module's shape), so the bounded body's interior dispatch call resolves
+;;; the authoritative per-instance symbol instead of the unspecialised one,
+;;; and `(Dense A)` / `(Sparse A)` clones no longer collide on the int64
+;;; carrier signature. This is the monomorphisation that direction-2
+;;; cross-world scheduling (`ecs/hstage`) rides. Monomorphic dispatch --
+;;; a helper typed against a concrete `(Dense int)` / `(Sparse int)` --
+;;; works too, exercised by `tests/storage-ops-poly.tur`.
 ;;;
 ;;; Tag is intentionally not an instance. `Tag` is payload-less: `tag-set!`
 ;;; takes no value and there is no element to `get`, so it has no honest

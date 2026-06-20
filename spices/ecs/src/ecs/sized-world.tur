@@ -862,11 +862,15 @@
 ;;; (sized world declared via `sized-defworld-mono`, per-world
 ;;; `box-<W>` / `load-<W>` / `free-<W>-box` inline-C helpers,
 ;;; `make-system` packed `[wp : int]` run-fns, wave-scheduled via
-;;; `stage-run!`). Generalising the `System`/`Stage` over the world
-;;; type so the run-fn carries `^borrow w : (WorldName n)` directly
-;;; (the report's direction 2 / gap-H) is still waiting on the
-;;; monomorphisation-audit M2-M7 path; the recipe is the supported
-;;; surface in the interim.
+;;; `stage-run!`). Direction 2 (cross-world / heterogeneous scheduling
+;;; -- one stage running systems over differently-typed worlds) shipped
+;;; as `ecs/hstage`: `bind-system` lifts a scheduled `System` into a
+;;; `WorldSystem` keyed on a `(world-id, world)` pair, and `HStage`
+;;; dispatches each system against its own boxed world with a
+;;; (World, Component) conflict key, so systems over distinct worlds
+;;; never falsely serialise. It rides the typeclass-bounded-wrapper
+;;; monomorphisation that closed gap-H upstream (turmeric #447/#448).
+;;; `tests/hstage-cross-world.tur` is the end-to-end regression.
 ;;;
 ;;; Callers that just want the typed cap-bound body without the
 ;;; scheduler wiring still invoke the macro-emitted impl directly:
