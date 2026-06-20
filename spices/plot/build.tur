@@ -12,6 +12,18 @@
              :subdir "spices/test"
              :optional true}
   }
+  ;; libplutovg (the C library) is a :cmake-deps of the plutovg *spice*, and a
+  ;; workspace sibling's native deps are not propagated to importers. plot's
+  ;; inline C calls plutovg_* directly, so plot re-declares plutovg here -- the
+  ;; same convention ecs-raylib uses for raylib and httpd/http for yyjson. This
+  ;; is what makes CI's "Fetch C dependencies" step build libplutovg so the
+  ;; drawing tests link.
+  :cmake-deps #{
+    "plutovg" #{:url     "https://github.com/sammycage/plutovg"
+                :ref     "v1.3.3"
+                :options #{:BUILD_SHARED_LIBS      "OFF"
+                           :PLUTOVG_BUILD_EXAMPLES "OFF"}}
+  }
   :exports #{
     "plot/style"    ["line-style" "point-style" "fill-style" "plot-opts"
                      "default-line-style" "default-point-style" "default-fill-style"
