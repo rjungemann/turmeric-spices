@@ -1,9 +1,14 @@
 # Plan: `plot` Renderer Typeclass Collapse (U2, v1)
 
-> Status: planning
+> Status: P0–P2 landed (per-kind structs, `Renderer` `bounds`, `Backend`
+> output collapse); **P3 blocked on a turmeric compiler dependency**
+> (witness-indirected method dispatch through a constraint-carrying
+> existential -- see P3 and Risk #1); P4–P5 deferred behind P3.
 > Tracks: spices-type-features-uplift-plan **U2 target — plot**
-> Scope: `spices/plot/` only; no compiler dependency expected (see Risks)
-> Prereq landed: ECS existential-wrapper pattern (turmeric-spices PR #17)
+> Scope: `spices/plot/` only; the `no compiler dependency expected` hope did
+> not hold for P3 (see Risks)
+> Prereq: ECS existential-wrapper pattern (PR #17) hides a size index, which
+> turned out not to cover P3's type-behind-constraint existential.
 
 ## Motivation
 
@@ -176,14 +181,14 @@ and stands on its own.
   `render` directly (no Vec yet), producing the same pixels as the legacy
   constructor for that kind.
 
-### P3 — Existential `Renderer` box for heterogeneous vecs
+### P3 — Existential `Renderer` box for heterogeneous vecs — BLOCKED (turmeric compiler dependency)
 
 The public API takes a `Vec` of mixed renderer kinds
 (`plot-into-canvas` iterates `renderers` as a `Vec[Renderer]`,
 `core.tur:678-682`). Coherent typeclass dispatch needs a uniform element
 type, so mixed kinds must be boxed.
 
-**Tasks**
+**Tasks (intended)**
 - Introduce an existential wrapper `AnyRenderer` that packs a value plus
   its `Renderer` dictionary, following the ECS sized-world existential
   pattern shipped in PR #17 (cite that file as the template).
@@ -192,7 +197,50 @@ type, so mixed kinds must be boxed.
 - The iteration in `plot-into-canvas` calls `bounds`/`render` through the
   boxed dictionary instead of switching on `kind`.
 
-**Acceptance**
+**Status: BLOCKED on a turmeric compiler feature** -- Risk #1 below
+materialized. turmeric *does* have constraint-carrying existentials
+(`(exists [a] [(Renderer a)] a)`, `pack`/`open` with vtable witnesses;
+see `docs/guides/existential-types-guide.md`), but **method dispatch inside
+`open` does not go through the packed witnesses** -- it is documented as
+"reserved for a follow-on patch" (guide, "What is not (yet) supported"), and
+confirmed against turmeric main 0.21.0. The minimal repro:
+
+```turmeric
+(defclass Rdr [a] (rbound [x] : int))
+(defstruct LinesR  [v : int])
+(defstruct PointsR [v : int])
+(definstance Rdr [LinesR]  (rbound [x] (.v x)))
+(definstance Rdr [PointsR] (rbound [x] (+ 100 (.v x))))
+
+(let [e (pack (make-struct LinesR 5) (exists [a] [(Rdr a)] a))]
+  (open e [a v] (rbound v)))   ;; <-- error
+;; error: ambiguous method dispatch: '.rbound' matches 2 instances
+;;        (Rdr[PointsR], Rdr[LinesR]) -- receiver type is erased (int64_t).
+```
+
+The failure is intrinsic to P3: an `AnyRenderer` box only earns its keep
+when ≥2 renderer kinds share a `Vec`, which is exactly when the class has
+≥2 instances and `open`-dispatch becomes ambiguous (the receiver is erased
+to `int64_t` and the witness vtable is not consulted). It fails the same way
+inline, through a `let`, and through a function parameter -- so neither
+keeping the pack/open at the construction site nor avoiding the `Vec`
+sidesteps it. The single-instance case "works" only because dispatch is
+trivially unambiguous, which is not the heterogeneous collection P3 needs.
+
+Per Risk #1 the plan pauses here rather than forcing a `kind`-tag bridge
+back in. P0-P2 already shipped the value that does not depend on P3 (named
+per-kind structs, the `Renderer` `bounds` method, and the `Backend`
+output-target collapse), so the spice is in a coherent intermediate state:
+the renderer `Vec` stays a `Vec` of `int` handles at the
+`plot-into-canvas` boundary until the compiler grows
+witness-indirected `open` dispatch.
+
+**Unblock condition:** turmeric implements vtable-indirected method dispatch
+through an existential record's constraint witnesses (the guide's deferred
+"heterogeneous-dispatch method calls"). Reported to the turmeric repo; once
+it lands, resume here.
+
+**Acceptance (deferred until unblocked)**
 - `(vec-of (function …) (points …) (lines …))` type-checks once each
   constructor returns its `*R` struct boxed as `AnyRenderer`.
 - Negative fixture: a `Vec` element that is not a `Renderer` instance
@@ -251,14 +299,18 @@ blocks on P2; P4/P5 close it out.
 
 ## Risks and open questions
 
-1. **Existential boxing support.** P3 assumes the same existential
-   facility ECS used in PR #17 works for a `Renderer` dictionary outside
-   the ECS world machinery. If it does not generalize, this is the one
-   place the plan could hit a compiler dependency — *pause and file a
-   report under `docs/reported/` in turmeric per CLAUDE.md* rather than
-   forcing it. P0–P2 still deliver value (named fields, killed draw
-   switch) even if the vec stays a `Vec` of int handles bridged at the
-   boundary.
+1. **Existential boxing support. — MATERIALIZED; P3 is blocked.** This is
+   the compiler dependency the plan flagged. ECS's PR #17 existential hides a
+   *size index* (`exists [n']`), not a *type behind a constraint*; the
+   `Renderer`-dictionary form turmeric needs (`exists [a] [(Renderer a)] a`)
+   exists, but `open`-site method dispatch does not go through the packed
+   witnesses (documented deferred; confirmed on main 0.21.0 -- see the repro
+   under P3 above). Per this risk the plan **pauses** here rather than forcing
+   a `kind`-tag bridge back in. P0–P2 still delivered value (named fields, the
+   `Renderer` `bounds` method, the `Backend` collapse); the renderer vec stays
+   a `Vec` of int handles at the boundary until turmeric grows
+   witness-indirected `open` dispatch. Reported to the turmeric repo (cannot
+   write to it from a spices-rooted session); resume P3 once it lands.
 
 2. **Pixel-identity regression budget.** The draw code is sensitive
    (adaptive subdivision thresholds, tick rounding). The plan's
