@@ -1,26 +1,34 @@
 ---
 title: Residual soft blockers found during Track C plot paydown (2026-06-20)
 category: Spice-uplift soft blockers — to be filed as turmeric reports
-status: OPEN (W3 only; W1/W2 fixed by #463)
+status: RESOLVED (W1/W2 fixed by #463; W3 fixed by #464)
 reported-by: turmeric-spices Claude (Track C, branch claude/track-c-turmeric-xaky6y)
-verified-on: turmeric 0.21.0, main @ f7bc09f (post #462 / #463; built from source)
+verified-on: turmeric 0.21.0, main @ 48e99d9 (post #462 / #463 / #464; built from source)
 ---
 
 # Residual soft blockers (Track C plot paydown)
 
 While paying down the S4–S7 workarounds in `spices/plot/src/plot/core.tur`,
-three soft workarounds surfaced. **W1 and W2 are now fixed in turmeric main
-(#463)** and their spice-side workarounds have been retired. **W3 is new** —
-uncovered when the W1 fix let the `letrec` fold type-check, only for codegen to
-fail on the captured existential vec — and is filed here so a report can be
-raised against `rjungemann/turmeric` (this session is rooted in
-turmeric-spices and cannot write to turmeric).
+three soft workarounds surfaced. **All three are now fixed in turmeric main:
+W1 and W2 by #463, W3 by #464.** Their spice-side workarounds have all been
+retired. This doc is kept for the paper trail.
 
-W3 does not block: the fold stays a top-level `defn` (no ascription needed).
+W3 never blocked: the fold stood as a top-level `defn` until #464 landed; it is
+now a local `letrec` closure again (see `renderers-bbox` / `anyrenderers->legacy`
+in `spices/plot/src/plot/core.tur`).
 
 ---
 
-## W3 — `letrec` self-recursive closure that *captures* an existential-element vec and `open`s it mis-emits the captured binding in C — OPEN
+## W3 — `letrec` self-recursive closure that *captures* an existential-element vec and `open`s it mis-emits the captured binding in C — FIXED (#464)
+
+Fixed by turmeric #464 ("Fix closure capture of bindings referenced inside
+open/pack/dispatch"): `collect_free_vars` now traverses the existential
+`open`/`pack`/`dispatch` forms, so a captured binding referenced inside an
+`open` body is added to the closure's capture set and resolves to its env slot
+instead of mis-emitting an undeclared outer C name. Verified: the repro below
+now checks **and** runs (returns 12), and the plot folds `renderers-bbox` /
+`anyrenderers->legacy` are local `letrec` closures again, with the pure-Turmeric
+`any_renderer`/`bbox` tests green.
 
 Severity: Low. Type-check passes; codegen emits a reference to the captured
 binding (`<name>_NNNN`) that is never declared in the lifted closure's C
