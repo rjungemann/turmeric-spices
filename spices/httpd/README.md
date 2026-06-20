@@ -75,8 +75,40 @@ directly. `serve` generates the captureless trampoline and starts the server.
 
 The method is named `respond` (not `handle`, which is a reserved special
 form). `server-start` and the bare `(c-fn [int] int)` API remain available as
-the lower-level path. JSON request/response codec helpers built on the json
-spice's `Encode`/`Decode` are a planned follow-up.
+the lower-level path.
+
+## JSON body codecs
+
+`httpd/handler` also exposes helpers that decode a typed request body and
+encode a typed response body through the json spice's `Encode`/`Decode`
+typeclasses, so a JSON endpoint needs no inline-C body parsing:
+
+- `(with-json-body req T f)` -- decode the body into `T`; on success call
+  `f` with the decoded value (which returns a `Response`), otherwise reply
+  `400 Bad Request` with the decode error.
+- `(req-decode req T) : (Result T cstr)` -- the lower-level decode used by
+  `with-json-body`.
+- `(json-ok x) : Response` / `(json-resp status x) : Response` -- encode `x`
+  as the JSON body of a `200` (or arbitrary-status) response, with
+  `Content-Type: application/json`.
+
+```turmeric
+(defstruct EchoReq  [msg : cstr])
+(defstruct EchoResp [echo : cstr  len : int])
+(derive-json EchoReq  (msg cstr))
+(derive-json EchoResp (echo cstr) (len int))
+
+(defopaque Echo :int)
+(definstance Handler [Echo]
+  (respond [self req]
+    (with-json-body (:: req :Request) EchoReq
+      (fn [r : EchoReq]
+        (json-ok (make-struct EchoResp (.msg r) (str-len (.msg r))))))))
+```
+
+These build on the json codec surface, so `httpd` re-declares `yyjson` in its
+`build.tur` `:cmake-deps` (a workspace-sibling's native deps are not
+propagated -- the same pattern `ecs-raylib` uses to re-declare `raylib`).
 
 ## Status
 

@@ -1,0 +1,36 @@
+;; U2/P5 negative fixture: a Handler instance whose `respond` body returns
+;; something other than a `Response` must be rejected at elaboration. The
+;; `Handler` class declares `respond : self -> Request -> Response`, so an
+;; instance body that yields an unrelated nominal type (here a struct) is a
+;; return-type conflict.
+;;
+;; Verify (from the httpd spice root):
+;;   tur check tests/errors/handler-non-response-return.tur
+;;   => error [TUR-E0001]: instance method 'respond' declares return type
+;;      'Response' but its body returns Other
+;;
+;; This guarantee relies on unifying an instance method body's result type
+;; with the declared class signature, which landed in turmeric main (the fix
+;; that also added the `return-type-nominal-*` fixtures; reported in
+;; docs/reported/instance-method-return-not-unified.md). Before it, this
+;; fixture compiled clean.
+;;
+;; NB: returning a bare `int` would still type-check -- `Response` is a
+;; `defopaque :int`, so int<->carrier coercion is intentional. The fixture
+;; returns a struct to exercise a genuine nominal conflict.
+;;
+;; Lives under tests/errors/ so the non-recursive `tur test tests` run skips
+;; it -- a compile-fail fixture, not a runnable test. Positive companion:
+;; tests/handler_test.tur and tests/json_codec_test.tur.
+
+(defmodule handler_non_response_return_test (export)
+  (import httpd/handler :refer [serve])
+  (import httpd/types   :refer [Request Response])
+
+  (defopaque Bad :int)
+  (defstruct Other [v : int])
+
+  (definstance Handler [Bad]
+    (respond [self req] (make-struct Other 1)))   ;; ERROR: returns Other, not Response
+
+  (defn main [] : int 0))

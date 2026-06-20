@@ -1,0 +1,32 @@
+;; U2/P5 negative fixture: encoding a request body whose type has no json
+;; `Encode` instance must be rejected at the `json-request` call site.
+;; `json-request` is `(json-request [^Encode T  method url x : T headers])`;
+;; instantiating `T` with a type that was never run through `derive-json`
+;; (so has no `(definstance Encode [T] ...)`) leaves the `^Encode` constraint
+;; undischarged.
+;;
+;; Verify (from the http spice root):
+;;   tur check tests/errors/json-request-missing-encode-instance.tur
+;;   => error [TUR-E0001]: no 'Encode' instance for 'NoCodec' in constrained
+;;      call to 'json-request'
+;;
+;; This guarantee relies on call-site discharge of a `^Class` `defn`
+;; constraint, which landed in turmeric main (the fix that also added the
+;; `return-type-nominal-*` fixtures; reported in docs/reported/
+;; class-constraint-on-defn-not-discharged-at-call-site.md). Before it, this
+;; fixture compiled clean.
+;;
+;; Lives under tests/errors/ so the non-recursive `tur test tests` run skips
+;; it -- a compile-fail fixture, not a runnable test. Positive companion:
+;; tests/codec_test.tur.
+
+(defmodule json_request_missing_encode_instance_test (export)
+  (import http/request :refer [json-request])
+
+  ;; NoCodec is never run through derive-json, so it has no Encode instance.
+  (defstruct NoCodec [x : int])
+
+  (defn build-it [] : int
+    (json-request "POST" "https://example.com" (make-struct NoCodec 1) 0))
+
+  (defn main [] : int 0))

@@ -12,6 +12,20 @@
             :ref "http-v0.1.0"
             :subdir "spices/http"
             :optional true}
+    "json" #{:path "../json"}
+  }
+  :cmake-deps #{
+    ;; json's Encode/Decode instances emit inline-C that #include <yyjson.h>
+    ;; and link libyyjson. Workspace-sibling imports don't propagate a
+    ;; sibling's cmake-deps (each consumer re-declares the native lib it
+    ;; ends up linking -- same pattern as ecs-raylib re-declaring raylib),
+    ;; so httpd declares yyjson itself to satisfy the json codec helpers.
+    "yyjson" #{:url "https://github.com/ibireme/yyjson"
+              :ref "0.10.0"
+              :targets ["yyjson"]
+              :options #{:BUILD_SHARED_LIBS "OFF"
+                        :YYJSON_BUILD_TESTS "OFF"
+                        :YYJSON_BUILD_FUZZER "OFF"}}
   }
   :exports #{
     "httpd/types"    ["Request" "Response" "Wbuf"]
@@ -21,5 +35,6 @@
     "httpd/response" ["response" "resp-ok" "not-found" "bad-request"
                       "with-header" "with-body" "with-status"
                       "free-response"]
-    "httpd/handler"  ["serve" "serve-pool" "serve-spawn"]
+    "httpd/handler"  ["serve" "serve-pool" "serve-spawn"
+                      "req-decode" "json-ok" "json-resp" "with-json-body"]
   })

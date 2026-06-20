@@ -5,7 +5,25 @@
 ;; (the ok-val of the result returned by http-get / http-request).
 
 (defmodule http/response
-  (export response-status response-header response-body response-json)
+  (import json/encode)
+  (import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+  (export response-status response-header response-body response-json
+          response-decode)
+
+;; file-scope-c-block: yyjson is an optional native dep. The header declares
+;; `static inline` functions, which are illegal inside a function body, so it
+;; must be included at file scope -- not inside response-json. Guard on
+;; __has_include so http still builds (and response-json returns an err stub)
+;; when no consumer has yyjson on the include path; a consumer that links
+;; yyjson (e.g. httpd's json codecs) activates the real parser.
+```c
+#if defined(__has_include)
+#  if __has_include(<yyjson.h>)
+#    define __TUR_HTTP_HAVE_YYJSON 1
+#    include <yyjson.h>
+#  endif
+#endif
+```
 
 ;;; response-status -- HTTP status code of a response.
 ;;;
@@ -107,17 +125,12 @@
   ```c
   #include <string.h>
   #include <stdlib.h>
-  /* yyjson is optional. When the header is absent the function still links
-     but returns an err at runtime instead of failing the build. */
-  #if defined(__has_include)
-  #  if __has_include(<yyjson.h>)
-  #    define __TUR_HTTP_HAVE_YYJSON 1
-  #  endif
-  #endif
+  /* yyjson.h (when available) is included at file scope above -- see the
+     file-scope-c-block at the top of this module. It must not be included
+     here: it declares `static inline` functions, illegal inside a function. */
   struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
   struct __pr *res = malloc(sizeof(*res));
   #ifdef __TUR_HTTP_HAVE_YYJSON
-  #include <yyjson.h>
   struct __resp {
     int    status;
     char  *body;
@@ -151,5 +164,29 @@
   return res;
   #endif
   ```)
+
+;;; response-decode -- parse a response body as JSON and decode it into `T`
+;;; via the json `Decode [T]` instance. Returns `(Result T cstr)`: `ok` with
+;;; the decoded value, or `err` with a message when the body is not valid
+;;; JSON. The typed counterpart to `response-json`, which hands back an
+;;; untyped doc handle the caller has to walk by string key.
+;;;
+;;; A macro (not a function) because the target type drives instance
+;;; selection through the `(Result T cstr)` ascription. The yyjson document
+;;; is freed before returning; json's `Decode` instances copy strings out, so
+;;; the decoded value outlives the document.
+;;;
+;;; Example:
+;;;   (let [r (http-get url)]
+;;;     (when (ok? r)
+;;;       (response-decode (ok-val r) User)))   ;; => (Result User cstr)
+(defmacro response-decode [resp type-name]
+  `(let [__doc (unsafe (json-parse-doc (response-body ~resp)))]
+     (if (= __doc 0)
+       (:: (err "response-decode: response body is not valid JSON") (Result ~type-name cstr))
+       (let [__root (unsafe (json-doc-root __doc))
+             __res  (:: (decode __doc __root) (Result ~type-name cstr))]
+         (unsafe (json-doc-free __doc))
+         __res))))
 
 ) ;; end defmodule http/response

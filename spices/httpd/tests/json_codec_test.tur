@@ -1,0 +1,124 @@
+;; tests/httpd/json_codec_test.tur -- U2 Handler JSON codecs (P3).
+;;
+;; Exercises the typed JSON body path end to end: a handler decodes a typed
+;; request struct from the POST body with `with-json-body` and replies with a
+;; typed response struct via `json-ok`. The request goes through the `serve`
+;; bridge + default pool dispatcher, same as handler_test, but the body is
+;; decoded/encoded through json's `Decode`/`Encode` typeclasses rather than
+;; hand-rolled inline-C.
+
+(defmodule httpd/tests/json_codec
+  (import httpd/handler  :refer [serve req-decode json-ok json-resp with-json-body])
+  (import httpd/request  :refer [req-body])
+  (import httpd/response :refer [bad-request])
+  (import httpd/server   :refer [server-stop])
+  (import httpd/types    :refer [Request Response])
+  ;; derive-json / Encode / Decode arrive transitively through httpd/handler.
+  (import http/client    :refer [http-post])
+  (import http/response  :refer [response-status response-body response-header])
+  (import test/suite     :refer [describe it])
+  (import test/assert    :refer [assert-eq assert-true])
+  (import test/runner    :refer [run-all])
+
+  ;; ---------------------------------------------------------------------
+  ;; Helpers: unwrap http/client's result<:int> and compare cstr equality.
+  ;; ---------------------------------------------------------------------
+
+  (defn __cr-ok? [r : ptr<void>] : bool
+    ```c
+    if (!r) return 0;
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return ((struct __cr *)r)->is_ok;
+    ```)
+
+  (defn __cr-val [r : ptr<void>] : int
+    ```c
+    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
+    return (int64_t)((struct __cr *)r)->ok_val;
+    ```)
+
+  (defn cstr-eq? [a : cstr b : cstr] : bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn __slen [s : cstr] : int
+    ```c
+    #include <string.h>
+    return (int64_t)strlen((const char *)s);
+    ```)
+
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; Typed JSON request/response shapes.
+  ;; ---------------------------------------------------------------------
+
+  (defstruct EchoReq  [msg : cstr])
+  (defstruct EchoResp [echo : cstr  len : int])
+  (derive-json EchoReq  (msg cstr))
+  (derive-json EchoResp (echo cstr) (len int))
+
+  ;; ---------------------------------------------------------------------
+  ;; Handler: decode the JSON body into EchoReq, reply with a JSON EchoResp.
+  ;; A malformed body is rejected with 400 by with-json-body before `f` runs.
+  ;; ---------------------------------------------------------------------
+
+  (defopaque JsonEcho :int)
+
+  (definstance Handler [JsonEcho]
+    (respond [self req]
+      (with-json-body (:: req :Request) EchoReq
+        (fn [r : EchoReq] (json-ok (make-struct EchoResp (.msg r) (__slen (.msg r))))))))
+
+  ;; ---------------------------------------------------------------------
+  ;; Test driver.
+  ;; ---------------------------------------------------------------------
+
+  (defn main [] : int
+    (let [srv (serve 18087 JsonEcho)]
+      (do
+        (unsafe (sleep-ms 50))
+
+        (describe "httpd Handler JSON codecs -- with-json-body / json-ok"
+
+          (it "POST a typed JSON body round-trips to a typed JSON response"
+            (let [r (http-post "http://127.0.0.1:18087/echo" "{\"msg\":\"hi\"}")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "{\"echo\":\"hi\",\"len\":2}"
+                                       (response-body (__cr-val r))))
+                (assert-true false))))
+
+          (it "JSON response is 200"
+            (let [r (http-post "http://127.0.0.1:18087/echo" "{\"msg\":\"hello\"}")]
+              (if (__cr-ok? r)
+                (assert-eq 200 (response-status (__cr-val r)))
+                (assert-true false))))
+
+          (it "Content-Type is application/json"
+            (let [r (http-post "http://127.0.0.1:18087/echo" "{\"msg\":\"x\"}")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "application/json"
+                                       (response-header (__cr-val r) "Content-Type")))
+                (assert-true false))))
+
+          (it "len field reflects the decoded message length"
+            (let [r (http-post "http://127.0.0.1:18087/echo" "{\"msg\":\"hello\"}")]
+              (if (__cr-ok? r)
+                (assert-true (cstr-eq? "{\"echo\":\"hello\",\"len\":5}"
+                                       (response-body (__cr-val r))))
+                (assert-true false))))
+
+          (it "a malformed JSON body is rejected with 400"
+            (let [r (http-post "http://127.0.0.1:18087/echo" "not json")]
+              (if (__cr-ok? r)
+                (assert-eq 400 (response-status (__cr-val r)))
+                (assert-true false)))))
+
+        (server-stop srv)
+        (run-all)))))

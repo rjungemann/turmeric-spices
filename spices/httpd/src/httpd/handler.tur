@@ -32,7 +32,16 @@
 (defmodule httpd/handler
   (import httpd/types    :refer [Request Response])
   (import httpd/server   :refer [server-start server-start-pool server-start-spawn])
-  (export serve serve-pool serve-spawn)
+  (import httpd/request  :refer [req-body])
+  (import httpd/response :refer [resp-ok response bad-request])
+  ;; json/encode brings the Encode/Decode classes (and the `encode`/`decode`
+  ;; methods) into scope; json/decode brings the yyjson document handles the
+  ;; body codecs parse against. yyjson is re-declared in httpd's build.tur
+  ;; :cmake-deps because a workspace-sibling's native deps are not propagated.
+  (import json/encode    :refer [derive-json])
+  (import json/decode    :refer [json-parse-doc json-doc-free json-doc-root])
+  (export serve serve-pool serve-spawn
+          req-decode json-ok json-resp with-json-body)
 
 ;;; Handler -- typeclass for a typed HTTP request handler.
 ;;;
@@ -112,5 +121,80 @@
        (defn ~tramp [req : int] : int
          (:: (respond (:: 0 ~type-name) (:: req Request)) :int))
        (server-start-spawn ~port ~tramp))))
+
+;; ---------------------------------------------------------------------------
+;; JSON body codecs (P3): decode a typed request body and encode a typed
+;; response body through json's `Decode`/`Encode` typeclasses, so a JSON
+;; endpoint is a few lines instead of inline-C body parsing.
+;;
+;; The request type is decoded with `req-decode` (or the `with-json-body`
+;; convenience), the response is built with `json-ok` / `json-resp`. Both
+;; sides reuse the already-shipped json codec surface; the only httpd-side
+;; glue is wiring `(req-body req)` into the parser and the encoded fragment
+;; into a Response with `Content-Type: application/json`.
+;; ---------------------------------------------------------------------------
+
+;;; __cstr-free -- release a malloc'd JSON fragment returned by `encode`.
+;;; json's contract is caller-owns; the Response constructors copy the body,
+;;; so the fragment is freed immediately after it is handed to `resp-ok` /
+;;; `response`.
+(defn __cstr-free [p : cstr] #{Unsafe} : void
+  ```c free((void *)(intptr_t)p); ```)
+
+;;; req-decode -- parse a request body as JSON and decode it into `T` via the
+;;; json `Decode [T]` instance. Returns `(Result T cstr)`: `ok` with the
+;;; decoded value, or `err` with a message when the body is not valid JSON.
+;;;
+;;; A macro (not a function) because the target type drives instance selection
+;;; through the `(Result T cstr)` ascription, mirroring json's own decode
+;;; idiom. The yyjson document is freed before returning; json's `Decode`
+;;; instances copy strings out, so the decoded value outlives the document.
+;;;
+;;; Syntax:
+;;;   (req-decode req EchoReq)   ;; => (Result EchoReq cstr)
+(defmacro req-decode [req type-name]
+  `(let [__doc (unsafe (json-parse-doc (req-body ~req)))]
+     (if (= __doc 0)
+       (:: (err "req-decode: request body is not valid JSON") (Result ~type-name cstr))
+       (let [__root (unsafe (json-doc-root __doc))
+             __res  (:: (decode __doc __root) (Result ~type-name cstr))]
+         (unsafe (json-doc-free __doc))
+         __res))))
+
+;;; json-ok -- a 200 response whose body is `x` encoded as JSON, with
+;;; `Content-Type: application/json`. Generic over any `Encode` instance.
+;;;
+;;; Example:
+;;;   (json-ok (make-struct EchoResp "hi" 2))
+(defn json-ok [^Encode T  x : T] : Response
+  (let [frag (encode x)
+        resp (resp-ok "application/json" frag)]
+    (unsafe (__cstr-free frag))
+    resp))
+
+;;; json-resp -- like `json-ok` but with an explicit status code (e.g. 201,
+;;; 422). Body is `x` encoded as JSON with `Content-Type: application/json`.
+;;;
+;;; Example:
+;;;   (json-resp 201 (make-struct Created (.id row)))
+(defn json-resp [^Encode T  status : int  x : T] : Response
+  (let [frag (encode x)
+        resp (response status "application/json" frag)]
+    (unsafe (__cstr-free frag))
+    resp))
+
+;;; with-json-body -- decode the request body into `T` and, on success, call
+;;; `f` with the decoded value (which must return a `Response`). On a decode
+;;; failure, short-circuit to a `400 Bad Request` carrying the error message,
+;;; so the handler happy path stays one expression.
+;;;
+;;; Syntax:
+;;;   (with-json-body req EchoReq
+;;;     (fn [r] (json-ok (make-struct EchoResp (.msg r) (str-len (.msg r))))))
+(defmacro with-json-body [req type-name f]
+  `(let [__r (req-decode ~req ~type-name)]
+     (if (ok? __r)
+       (~f (ok-val __r))
+       (bad-request (err-val __r)))))
 
 ) ;; end defmodule httpd/handler

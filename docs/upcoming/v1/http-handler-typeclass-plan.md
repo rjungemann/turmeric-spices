@@ -1,6 +1,11 @@
 # Plan: `http` / `httpd` Handler Typeclass + JSON Codec Integration (U2, v1)
 
-> Status: planning
+> Status: complete — P1+P2 landed (turmeric-spices PR #23); P3 (httpd JSON
+> body codecs); P4 (http client codecs); P5 (tests/docs + negative fixtures).
+> The two type-checking gaps P5 first hit (instance-method return not unified;
+> `^Class` `defn` constraint not discharged at the call site) were fixed in
+> turmeric main and are now enforced -- all four negative fixtures below fail
+> to compile as intended.
 > Tracks: spices-type-features-uplift-plan **U2 target — http/httpd**
 > Scope: `spices/httpd/` and `spices/http/`; no compiler dependency expected
 > Builds on: json `Encode`/`Decode` typeclasses (turmeric-spices PRs #20 +
@@ -152,10 +157,33 @@ instance to that signature without changing the server internals.
 - The generated trampoline compiles as a `(c-fn [int] int)` (captureless
   check passes).
 
-### P3 — JSON codec helpers for handler bodies (`httpd/handler.tur`)
+### P3 — JSON codec helpers for handler bodies (`httpd/handler.tur`) — LANDED
 
 This is the "codecs use json's Encode/Decode" half. Handlers should decode
 a typed request body and encode a typed response without inline-C.
+
+**Landed:** `req-decode` / `with-json-body` (macros, type-directed decode),
+`json-ok` / `json-resp` (generic over `Encode`). Test:
+`tests/json_codec_test.tur` round-trips a typed JSON POST body to a
+typed JSON response, asserts `Content-Type: application/json`, and rejects a
+malformed body with `400`.
+
+Two findings worth recording:
+
+- **Transitive native deps are not propagated across workspace siblings.**
+  httpd importing json (whose `Encode`/`Decode` instances emit
+  `#include <yyjson.h>`) does not inherit json's `yyjson` cmake-dep. Each
+  consumer that ultimately links a native lib re-declares it — httpd now
+  carries `yyjson` in its own `build.tur` `:cmake-deps`, exactly as
+  `ecs-raylib` re-declares `raylib`. This is the repo convention, not a
+  compiler gap.
+- **`http/response`'s `response-json` had a latent include-scope bug.** It
+  did `#include <yyjson.h>` *inside* the function body under
+  `__has_include`; this was dormant only because no httpd test had yyjson on
+  its include path. Once httpd linked yyjson, every httpd test importing
+  `http/response` failed to compile (`static inline` functions are illegal
+  inside a function body). Fixed by hoisting the guarded include to a
+  file-scope C block; the stub-when-absent behavior is unchanged.
 
 **Tasks**
 - `(req-decode req T) : (Result T cstr)` — parse `(req-body req)` with
@@ -182,11 +210,35 @@ a typed request body and encode a typed response without inline-C.
   crash.
 - `Content-Type: application/json` is set on `json-ok` responses.
 
-### P4 — Typed client body decode/encode (`http/response.tur`, `http/request.tur`)
+### P4 — Typed client body decode/encode (`http/response.tur`, `http/request.tur`) — LANDED
 
 Independent of the server work: the `http` client already has an
 untyped `response-json` (`http/response.tur:106`) that hands back a raw
 yyjson doc. Add a typed layer.
+
+**Landed:** `response-decode` (macro, in `http/response.tur`) and
+`json-request` (generic over `Encode`, in `http/request.tur`, with the
+`__hdr-cons` header-prepend helper). Test:
+`tests/http/codec_test.tur` verifies `json-request` encodes the struct body +
+sets `Content-Type: application/json`, and `response-decode` decodes a typed
+struct from a synthesized response body and rejects a non-JSON body — all
+without a network/TLS (only `http/request` + `http/response` are imported, so
+the mbedtls client path is never linked).
+
+Two notes worth recording:
+
+- **`http` now declares `yyjson`.** Same transitive-native-dep convention as
+  P3: `http` re-declares `yyjson` in its `build.tur` `:cmake-deps`. yyjson was
+  previously *optional* for `http` (only `response-json` used it, via a
+  `__has_include` stub); P4's `response-decode`/`json-request` import
+  `json/decode`/`json/encode` unconditionally, so yyjson becomes a first-class
+  `http` dependency. Every consumer of `http/response` (e.g. httpd) therefore
+  links yyjson transitively — httpd already declares it (P3), so the in-tree
+  suite is unaffected.
+- **Method/file placement matches the plan.** The codecs live in
+  `http/request.tur` / `http/response.tur` as specified, rather than a
+  separate codec module, accepting the above coupling as the deliberate cost
+  of first-class typed client codecs.
 
 **Tasks**
 - `(response-decode resp T) : (Result T cstr)` in `http/response.tur` —
@@ -206,25 +258,55 @@ yyjson doc. Add a typed layer.
   request whose body is the encoded struct and whose `Content-Type` is
   `application/json`.
 
-### P5 — Tests, negative fixtures, docs
+### P5 — Tests, negative fixtures, docs — LANDED
 
-**Tasks**
-- httpd: an integration test under `spices/httpd/tests/` exercising
-  `serve` + `with-json-body` round-trip (reuse the existing test harness;
-  the repo already runs httpd tests in CI).
-- http: a client test that encodes a request body and decodes a response
-  body through the typed helpers.
-- Negative fixture: a `Handler` instance whose `handle` returns a non-
-  `Response` is a type error; a `req-decode` ascribed to a type without a
-  `Decode` instance is a type error. (Gate on the uplift plan's negative-
-  fixture harness if present, else a `tur check`-expected-fail script.)
-- Update `spices/httpd/README.md` and `spices/http/README.md`: show the
-  `Handler` + `serve` + json-codec path as the recommended style; keep the
-  raw `(c-fn [int] int)` `server-start` documented as the lower-level API.
+**Positive tests + docs:**
+- `spices/httpd/tests/json_codec_test.tur` (serve + `with-json-body`
+  round-trip, landed P3) and `spices/http/tests/codec_test.tur`
+  (`json-request` + `response-decode`, landed P4).
+- READMEs: both `spices/httpd/README.md` and `spices/http/README.md` show the
+  typed codec path; the raw `(c-fn [int] int)` `server-start` stays documented
+  as the lower-level API.
+
+**Negative fixtures (all four fail to compile as intended).** Each carries a
+header with its `tur check` command and expected diagnostic, and lives under
+`tests/errors/` so the non-recursive `tur test tests` run skips it.
+
+| Fixture | Guarantee | Diagnostic |
+|---|---|---|
+| `httpd/tests/errors/handler-non-response-return.tur` | a `Handler` `respond` body must return a `Response` | `TUR-E0001`: instance method 'respond' declares return type 'Response' but its body returns Other |
+| `httpd/tests/errors/req-decode-missing-decode-instance.tur` | `req-decode` into a type with no `Decode` instance | `no instance 'Decode NoCodec'` |
+| `http/tests/errors/response-decode-missing-decode-instance.tur` | `response-decode` into a type with no `Decode` instance | `no instance 'Decode NoCodec'` |
+| `http/tests/errors/json-request-missing-encode-instance.tur` | `json-request` body with no `Encode` instance | `TUR-E0001`: no 'Encode' instance for 'NoCodec' in constrained call to 'json-request' |
+
+The first and last of these were initially blocked by two turmeric
+type-checking gaps that P5 surfaced and that have since been **fixed in
+turmeric main** (the change that also added the `return-type-nominal-*`
+compiler fixtures; reported under
+`docs/reported/instance-method-return-not-unified.md` and
+`docs/reported/...-defn-constraint-not-discharged-at-call-site.md`):
+
+1. **Instance method body result type now unifies with the class signature.**
+   `(definstance Handler [Bad] (respond [self req] (make-struct Other 1)))` is
+   now a `TUR-E0001`. (A bare `int` return still type-checks -- `Response` is a
+   `defopaque :int`, so the int<->carrier coercion is intentional; the fixture
+   returns a struct to exercise a genuine nominal conflict.)
+2. **A `^Class` `defn` constraint is now discharged at the call site.**
+   `(json-request … (make-struct NoCodec 1) …)` with no `Encode [NoCodec]` is
+   now a `TUR-E0001`, the same way the `decode`-via-ascription path already
+   rejected a missing `Decode`.
+
+**CI-harness note:** both spices now use a flat `tests/*.tur` layout, so CI
+runs the non-recursive `tur test tests` (all suites at the top level) and
+skips the `tests/errors/` subdir. httpd was flattened from `tests/httpd/` for
+exactly this reason -- under the descend-and-run path a nested layout uses,
+CI would try to *run* (and fail on) an unconditionally-failing fixture, unlike
+the `-Xsubstructural`-gated U1 fixtures which pass under plain `tur test`.
 
 **Acceptance**
 - `tur test spices/httpd/tests` and `tur test spices/http/tests` green.
 - READMEs show the typed handler path end to end.
+- All four negative fixtures fail to compile with the diagnostics above.
 
 ### Dependency graph
 
