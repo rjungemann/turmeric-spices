@@ -1,0 +1,160 @@
+;;; linalg/sized -- statically-sized float vectors (Track C / U4).
+;;;
+;;; `(LaVecN n)` is a dense column vector whose length `n` is carried in the
+;;; type as a phantom `Size` index (SZ6/SZ8). Operations that require equal
+;;; lengths -- `lavecn-add`, `lavecn-sub`, `lavecn-dot` -- name the *same* size
+;;; variable in both parameters, so mixing a length-2 vector with a length-3
+;;; one is a compile-time error (TUR-E0260: "shares size variable 'n' ...
+;;; argument 1 has size 2 while argument 2 has size 3"), not a runtime panic.
+;;; The check is always on -- it does not need the experimental `-Xsized-types`
+;;; flag for the cross-parameter case.
+;;;
+;;; This complements `linalg/vec` (dynamic `lavec`, length known only at run
+;;; time): reach for `LaVecN` when the dimension is statically known and you
+;;; want the elaborator to police it (vec3 math, fixed-width feature vectors).
+;;;
+;;; Representation: the carrier is an `:int` handle to a heap
+;;; `struct { int64_t len; double *data; }`. The `n` index is phantom -- it is
+;;; erased in codegen, so a `(LaVecN n)` is exactly as cheap as the raw buffer.
+;;;
+;;; `stdlib/sized.tur` (the `Size` / `Static` type) must be loaded for the
+;;; `(LaVecN (Static k))` annotations callers write; this module loads it.
+
+(load "stdlib/sized.tur")
+
+(defmodule linalg/sized
+  (export LaVecN
+          lavecn-zeros lavecn-free lavecn-len lavecn-get lavecn-set!
+          lavecn-add lavecn-sub lavecn-scale lavecn-dot lavecn-norm)
+
+  ;; (LaVecN n) -- phantom-indexed handle to a flat float64 buffer.
+  (defopaque LaVecN [n] :int)
+
+  ;; ===== raw int-carried implementation (private) =====
+
+  (defn __lavecn-new-zeroed-raw [k : int] #{Unsafe} : int
+    ```c
+    struct { int64_t len; double *data; } *b = malloc(sizeof(*b));
+    b->len  = k;
+    b->data = k > 0 ? (double *)calloc((size_t)k, sizeof(double)) : NULL;
+    return (int64_t)(intptr_t)b;
+    ```)
+
+  (defn __lavecn-free-raw [b : int] #{Unsafe} : nil
+    ```c
+    struct { int64_t len; double *data; } *v = (void *)(intptr_t)b;
+    if (v->data) free(v->data);
+    free(v);
+    ```)
+
+  (defn __lavecn-len-raw [b : int] #{Unsafe} : int
+    ```c struct { int64_t len; double *data; } *v = (void *)(intptr_t)b; return (int)v->len; ```)
+
+  (defn __lavecn-get-raw [b : int i : int] #{Unsafe} : float
+    ```c
+    struct { int64_t len; double *data; } *v = (void *)(intptr_t)b;
+    if (i < 0 || i >= v->len) {
+      fprintf(stderr, "lavecn-get: index %lld out of bounds (len %lld)\n",
+              (long long)i, (long long)v->len);
+      exit(1);
+    }
+    return v->data[i];
+    ```)
+
+  (defn __lavecn-set-raw [b : int i : int x : float] #{Unsafe} : nil
+    ```c
+    struct { int64_t len; double *data; } *v = (void *)(intptr_t)b;
+    if (i < 0 || i >= v->len) {
+      fprintf(stderr, "lavecn-set!: index %lld out of bounds (len %lld)\n",
+              (long long)i, (long long)v->len);
+      exit(1);
+    }
+    v->data[i] = x;
+    ```)
+
+  (defn __lavecn-dot-raw [a : int b : int] #{Unsafe} : float
+    ```c
+    struct { int64_t len; double *data; } *x = (void *)(intptr_t)a;
+    struct { int64_t len; double *data; } *y = (void *)(intptr_t)b;
+    double s = 0.0;
+    for (int64_t i = 0; i < x->len; i++) s += x->data[i] * y->data[i];
+    return s;
+    ```)
+
+  ;; element-wise a (op) b into a fresh buffer; sign = +1 add, -1 sub.
+  (defn __lavecn-zip-raw [a : int b : int sign : float] #{Unsafe} : int
+    ```c
+    struct { int64_t len; double *data; } *x = (void *)(intptr_t)a;
+    struct { int64_t len; double *data; } *y = (void *)(intptr_t)b;
+    struct { int64_t len; double *data; } *o = malloc(sizeof(*o));
+    o->len  = x->len;
+    o->data = x->len > 0 ? (double *)malloc((size_t)x->len * sizeof(double)) : NULL;
+    for (int64_t i = 0; i < x->len; i++) o->data[i] = x->data[i] + sign * y->data[i];
+    return (int64_t)(intptr_t)o;
+    ```)
+
+  (defn __lavecn-scale-raw [b : int s : float] #{Unsafe} : int
+    ```c
+    struct { int64_t len; double *data; } *x = (void *)(intptr_t)b;
+    struct { int64_t len; double *data; } *o = malloc(sizeof(*o));
+    o->len  = x->len;
+    o->data = x->len > 0 ? (double *)malloc((size_t)x->len * sizeof(double)) : NULL;
+    for (int64_t i = 0; i < x->len; i++) o->data[i] = x->data[i] * s;
+    return (int64_t)(intptr_t)o;
+    ```)
+
+  (defn __lavecn-norm-raw [b : int] #{Unsafe} : float
+    ```c
+    #include <math.h>
+    struct { int64_t len; double *data; } *x = (void *)(intptr_t)b;
+    double s = 0.0;
+    for (int64_t i = 0; i < x->len; i++) s += x->data[i] * x->data[i];
+    return sqrt(s);
+    ```)
+
+  ;; ===== public phantom-typed surface =====
+
+  ;;; lavecn-zeros -- a fresh length-k vector of zeros. The static length is
+  ;;; pinned by the caller's annotation, e.g.
+  ;;;   (defn mk3 [] : (LaVecN (Static 3)) (lavecn-zeros 3))
+  (defn lavecn-zeros [n] [k : int] : (LaVecN n)
+    (:: (unsafe (__lavecn-new-zeroed-raw k)) :LaVecN))
+
+  ;;; lavecn-free -- free a vector and its backing buffer.
+  (defn lavecn-free [n] [v : (LaVecN n)] : nil
+    (unsafe (__lavecn-free-raw (:: v :int))))
+
+  ;;; lavecn-len -- runtime element count (equals the static `n`).
+  (defn lavecn-len [n] [v : (LaVecN n)] : int
+    (unsafe (__lavecn-len-raw (:: v :int))))
+
+  ;;; lavecn-get -- bounds-checked element read at index i.
+  (defn lavecn-get [n] [v : (LaVecN n) i : int] : float
+    (unsafe (__lavecn-get-raw (:: v :int) i)))
+
+  ;;; lavecn-set! -- bounds-checked element write at index i.
+  (defn lavecn-set! [n] [v : (LaVecN n) i : int x : float] : nil
+    (unsafe (__lavecn-set-raw (:: v :int) i x)))
+
+  ;;; lavecn-dot -- dot product. Both operands share `n`, so a length mismatch
+  ;;; is a compile-time TUR-E0260.
+  (defn lavecn-dot [n] [a : (LaVecN n) b : (LaVecN n)] : float
+    (unsafe (__lavecn-dot-raw (:: a :int) (:: b :int))))
+
+  ;;; lavecn-add -- element-wise sum (shared `n`); returns a fresh vector.
+  (defn lavecn-add [n] [a : (LaVecN n) b : (LaVecN n)] : (LaVecN n)
+    (:: (unsafe (__lavecn-zip-raw (:: a :int) (:: b :int) 1.0)) :LaVecN))
+
+  ;;; lavecn-sub -- element-wise difference (shared `n`); returns a fresh vector.
+  (defn lavecn-sub [n] [a : (LaVecN n) b : (LaVecN n)] : (LaVecN n)
+    (:: (unsafe (__lavecn-zip-raw (:: a :int) (:: b :int) -1.0)) :LaVecN))
+
+  ;;; lavecn-scale -- multiply every element by s; returns a fresh vector.
+  (defn lavecn-scale [n] [v : (LaVecN n) s : float] : (LaVecN n)
+    (:: (unsafe (__lavecn-scale-raw (:: v :int) s)) :LaVecN))
+
+  ;;; lavecn-norm -- Euclidean (L2) norm.
+  (defn lavecn-norm [n] [v : (LaVecN n)] : float
+    (unsafe (__lavecn-norm-raw (:: v :int))))
+
+) ;; end defmodule linalg/sized

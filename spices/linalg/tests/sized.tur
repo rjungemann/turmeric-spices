@@ -1,0 +1,70 @@
+;;; sized.tur -- tests for linalg/sized statically-sized float vectors (U4).
+;;;
+;;; Positive coverage: same-length ops compute the right values. The negative
+;;; case -- mixing a (LaVecN (Static 2)) with a (LaVecN (Static 3)) -- is a
+;;; compile error (TUR-E0260) and so lives in tests/errors/, not here.
+;;;
+;;; Mirrors linalg.tur's TAP harness (inline-C fail counter; `finish` returns
+;;; non-zero if any check failed).
+
+(load "stdlib/sized.tur")
+
+(defmodule linalg/sized-test
+  (import linalg/sized :refer [LaVecN lavecn-zeros lavecn-free lavecn-len
+                               lavecn-get lavecn-set! lavecn-add lavecn-sub
+                               lavecn-scale lavecn-dot lavecn-norm])
+
+  ;; --- TAP harness (inline-C fail counter) ---
+  (defn check [idx : int  name : cstr  ok : bool] : void
+    ```c
+    /* __tur_include__: static int g_sz_fails = 0; */
+    if (!ok) g_sz_fails++;
+    printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
+    ```)
+
+  (defn finish [count : int] : int
+    ```c
+    printf("1..%lld\n", (long long)count);
+    if (g_sz_fails == 0) {
+      fprintf(stderr, "# All %lld linalg/sized tests passed.\n", (long long)count);
+      return 0;
+    }
+    fprintf(stderr, "# %d/%lld linalg/sized tests failed.\n", g_sz_fails, (long long)count);
+    return 1;
+    ```)
+
+  (defn fa [x : float] : float ```c return x < 0.0 ? -x : x; ```)
+  (defn approx [a : float  b : float] : bool (< (fa (- a b)) 1e-9))
+
+  ;; A length-2 vector [a b].
+  (defn v2 [a : float  b : float] : (LaVecN (Static 2))
+    (let [v (lavecn-zeros 2)]
+      (lavecn-set! v 0 a)
+      (lavecn-set! v 1 b)
+      v))
+
+  (defn t-len [] : int
+    (let [v (v2 3.0 4.0)] (let [n (lavecn-len v)] (lavecn-free v) n)))
+  (defn t-dot [] : float
+    (let [a (v2 3.0 4.0) b (v2 3.0 4.0)]
+      (let [d (lavecn-dot a b)] (lavecn-free a) (lavecn-free b) d)))   ;; 25
+  (defn t-norm [] : float
+    (let [v (v2 3.0 4.0)] (let [d (lavecn-norm v)] (lavecn-free v) d)))  ;; 5
+  (defn t-add [] : float
+    (let [a (v2 3.0 4.0) b (v2 1.0 2.0) c (lavecn-add a b)]
+      (let [x (lavecn-get c 1)] (lavecn-free a) (lavecn-free b) (lavecn-free c) x)))  ;; 6
+  (defn t-sub [] : float
+    (let [a (v2 3.0 4.0) b (v2 1.0 2.0) c (lavecn-sub a b)]
+      (let [x (lavecn-get c 0)] (lavecn-free a) (lavecn-free b) (lavecn-free c) x)))  ;; 2
+  (defn t-scale [] : float
+    (let [a (v2 3.0 4.0) c (lavecn-scale a 2.0)]
+      (let [x (lavecn-get c 1)] (lavecn-free a) (lavecn-free c) x)))  ;; 8
+
+  (defn main [] : int
+    (check 1 "lavecn-len"   (= (t-len) 2))
+    (check 2 "lavecn-dot"   (approx (t-dot) 25.0))
+    (check 3 "lavecn-norm"  (approx (t-norm) 5.0))
+    (check 4 "lavecn-add"   (approx (t-add) 6.0))
+    (check 5 "lavecn-sub"   (approx (t-sub) 2.0))
+    (check 6 "lavecn-scale" (approx (t-scale) 8.0))
+    (finish 6)))
