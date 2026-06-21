@@ -342,13 +342,33 @@
   return tur_box_ok(bits);
   ```))
 
-;; NOTE: a matching `Decode [Option]` is deferred. The encode direction works
-;; (see Encode [Option] above), but decoding into an optional needs to build a
-;; nested `(Result (Option A) cstr)` for a pointer-carried element A, and that
-;; nested-carrier construction still miscompiles for cstr/float (the `some`
-;; payload reads back as `none`) -- the int case round-trips, pointer-carried
-;; cases do not. turmeric main #475 fixed the encode-side `.field` dispatch but
-;; not this decode-side nested construction; filed as a follow-up report.
+;;; __json-absent? -- true when a value slot is missing (null handle, e.g. a
+;;; field absent from the object) or an explicit JSON `null`. Both decode to
+;;; `none` for an optional field.
+(defn __json-absent? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return (!v || yyjson_is_null(v));
+  ```)
+
+;;; Decode [Option] -- a missing slot or JSON `null` decodes to `none`; anything
+;;; else decodes the element by its own `(Decode A)` instance and wraps it in
+;;; `some`. The mirror of `Encode [Option]`, so an optional field round-trips.
+;;; Like the primitive Decode instances and `__decode-field`, a failing inner
+;;; decode is not propagated -- structured decode errors are a follow-up.
+;;;
+;;; Building the nested `(Result (Option A) cstr)` for a pointer-carried element
+;;; needs turmeric main #480 (nested generic construct in constrained instance
+;;; bodies); before it, the `some` payload read back as `none` for cstr/float.
+;;;
+;;; Since: U2 (Track C container instances)
+(definstance Decode [Option]
+  [(Decode A)]
+  (decode [doc val]
+    (if (unsafe (__json-absent? val))
+      (ok (:: (none) (Option A)))
+      (ok (some (ok-val (:: (decode doc val) (Result A cstr))))))))
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry
