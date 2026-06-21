@@ -18,18 +18,19 @@
           la-vec-add la-vec-sub la-vec-scale la-vec-dot la-vec-norm
           la-vec-norm-1 la-vec-norm-inf la-vec-normalize la-vec-approx-eq?)
 
-;; Math helpers implemented in inline C without libm: a linalg spice has no
-;; cmake deps, so `tur` does not link `-lm`. `la-sqrt` is Newton-Raphson;
-;; `la-fabs` is a branch.
+;; Math helpers via libm. turmeric links `-lm` unconditionally since main
+;; #471, so a pure spice (no cmake deps) can call `sqrt`/`fabs` directly --
+;; the prior libm-free Newton-Raphson / branch fallbacks are retired.
 (defn la-sqrt [x : float] : float
   ```c
-  if (x <= 0.0) return 0.0;
-  double g = x;
-  for (int k = 0; k < 64; k++) g = 0.5 * (g + x / g);
-  return g;
+  #include <math.h>
+  return x <= 0.0 ? 0.0 : sqrt(x);
   ```)
 (defn la-fabs [x : float] : float
-  ```c return x < 0.0 ? -x : x; ```)
+  ```c
+  #include <math.h>
+  return fabs(x);
+  ```)
 
 ;;; lavec -- a column vector of `len` float64 elements over a heap (Vec float).
 (defstruct lavec [len : int  data : (Vec float)])
@@ -131,70 +132,46 @@
       (go))
     c))
 
-;;; Note on float reductions: a `^mut` float accumulator captured by a letrec
-;;; closure does not propagate its mutations back out (the closure captures it
-;;; by value), and threading a float accumulator through the recursive call
-;;; mis-carriers to 0. Both are turmeric codegen limitations. The robust
-;;; workaround used below is a one-element heap `(Vec float)` accumulator cell:
-;;; writes through the shared pointer escape the closure the same way the data
-;;; buffer writes in la-vec-add/scale do.
+;;; Note on float reductions: a plain `float` accumulator threaded through the
+;;; recursive `letrec` self-call now carries correctly (turmeric main #469
+;;; fixed the self-recursive float accumulator collapsing to the int carrier),
+;;; so these reductions thread `acc : float` directly. The prior one-element
+;;; heap `(Vec float)` accumulator-cell workaround is retired.
 
 ;;; la-vec-dot -- dot product.
 (defn la-vec-dot [^borrow a : lavec  ^borrow b : lavec] : float
   (let [n (la-vec-len a)]
     (when (not= n (la-vec-len b))
       (panic "la-vec-dot: length mismatch"))
-    (let [cell (:: (vec-new) (Vec float))
-          ^mut i 0]
-      (vec-push! cell 0.0)
-      (letrec [go (fn [] : int
-                    (if (>= i n) 0
-                      (do (vec-set! cell 0 (+ (:: (vec-get cell 0) :float)
-                                              (* (la-vec-get a i) (la-vec-get b i))))
-                          (set! i (+ i 1)) (go))))]
-        (go))
-      (let [r (:: (vec-get cell 0) :float)] (vec-free cell) r))))
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n) acc
+                    (go (+ i 1) (+ acc (* (la-vec-get a i) (la-vec-get b i))))))]
+      (go 0 0.0))))
 
 ;;; la-vec-norm -- Euclidean (L2) norm.
 (defn la-vec-norm [^borrow v : lavec] : float
-  (let [n (la-vec-len v)
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
-                    (let [x (la-vec-get v i)]
-                      (vec-set! cell 0 (+ (:: (vec-get cell 0) :float) (* x x)))
-                      (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (la-sqrt (:: (vec-get cell 0) :float))] (vec-free cell) r)))
+  (let [n (la-vec-len v)]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n) acc
+                    (let [x (la-vec-get v i)] (go (+ i 1) (+ acc (* x x))))))]
+      (la-sqrt (go 0 0.0)))))
 
 ;;; la-vec-norm-1 -- L1 norm (sum of absolute values).
 (defn la-vec-norm-1 [^borrow v : lavec] : float
-  (let [n (la-vec-len v)
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
-                    (do (vec-set! cell 0 (+ (:: (vec-get cell 0) :float) (la-fabs (la-vec-get v i))))
-                        (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (:: (vec-get cell 0) :float)] (vec-free cell) r)))
+  (let [n (la-vec-len v)]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n) acc
+                    (go (+ i 1) (+ acc (la-fabs (la-vec-get v i))))))]
+      (go 0 0.0))))
 
 ;;; la-vec-norm-inf -- L-infinity norm (maximum absolute value).
 (defn la-vec-norm-inf [^borrow v : lavec] : float
-  (let [n (la-vec-len v)
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
+  (let [n (la-vec-len v)]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n) acc
                     (let [a (la-fabs (la-vec-get v i))]
-                      (when (> a (:: (vec-get cell 0) :float)) (vec-set! cell 0 a))
-                      (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (:: (vec-get cell 0) :float)] (vec-free cell) r)))
+                      (go (+ i 1) (if (> a acc) a acc)))))]
+      (go 0 0.0))))
 
 ;;; la-vec-normalize -- unit vector (panics on a zero vector).
 (defn la-vec-normalize [^borrow v : lavec] : lavec
