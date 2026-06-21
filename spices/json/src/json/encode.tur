@@ -427,6 +427,17 @@
       (ok (:: (none) (Option A)))
       (ok (some (ok-val (:: (decode doc val) (Result A cstr))))))))
 
+;; NOTE: `Decode [Cons]` (JSON array -> list, the mirror of `Encode [Cons]`) is
+;; deferred on a remaining compiler gap. The element decode dispatches fine, but
+;; building the list -- a self-recursive constrained `defn` returning `(Cons A)`
+;; that conses each decoded element with `tcons-of` -- miscompiles: the result
+;; comes back as a length-1 list with a garbage head (the self-recursive
+;; `(Cons A)` carrier-return / construction collapses in the constrained
+;; generic). A second issue blocks doing it as a typeclass instance: a `(Cons A)`
+;; coerces to `:int` in the `(Result a cstr)` result type, so the return-type
+;; dispatch that selects every other Decode instance cannot tell `(Cons A)` from
+;; `int`. Filed as a follow-up report.
+
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry
 ;; expands to `(ok-val (:: (decode doc (json-obj-get doc val "fname"))
