@@ -130,6 +130,33 @@
   return buf;
   ```))
 
+;;; __json-null-frag -- the JSON `null` literal as a fresh malloc'd cstr, so
+;;; callers can free it uniformly like any other Encode fragment.
+(defn __json-null-frag [] : cstr
+  ```c
+  char *buf = (char *)malloc(5);
+  memcpy(buf, "null", 5);
+  return buf;
+  ```)
+
+;;; Encode [Option] -- a present value encodes as its element's fragment; an
+;;; absent value (`none`) encodes as JSON `null`. Constrained on `(Encode A)`,
+;;; so the element is serialized by its own instance: `(Option int)` emits
+;;; `42` / `null`, `(Option cstr)` emits `"s"` / `null`, and so on -- letting a
+;;; derive-json struct carry optional fields.
+;;;
+;;; The body dispatches `encode` directly on `(.value x)`; recovering the
+;;; concrete element type through that field extraction needs turmeric main
+;;; #475 (constrained instance method dispatch on pointer-carried elements).
+;;;
+;;; Since: U2 (Track C container instances)
+(definstance Encode [Option]
+  [(Encode A)]
+  (encode [x] : cstr
+    (if (.is-some x)
+      (encode (.value x))
+      (__json-null-frag))))
+
 ;; ---------------------------------------------------------------------------
 ;; derive-json: emit an Encode instance for a defstruct product type. Lives
 ;; in this module (alongside Encode) so the orphan-instance check sees the
@@ -314,6 +341,14 @@
   memcpy(&bits, &d, sizeof(bits));
   return tur_box_ok(bits);
   ```))
+
+;; NOTE: a matching `Decode [Option]` is deferred. The encode direction works
+;; (see Encode [Option] above), but decoding into an optional needs to build a
+;; nested `(Result (Option A) cstr)` for a pointer-carried element A, and that
+;; nested-carrier construction still miscompiles for cstr/float (the `some`
+;; payload reads back as `none`) -- the int case round-trips, pointer-carried
+;; cases do not. turmeric main #475 fixed the encode-side `.field` dispatch but
+;; not this decode-side nested construction; filed as a follow-up report.
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry
