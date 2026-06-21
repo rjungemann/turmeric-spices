@@ -15,6 +15,7 @@
   (export derive-json derive-json-encode derive-json-decode
           derive-json-opaque derive-json-opaque-encode derive-json-opaque-decode
           derive-json-sum derive-json-sum-encode derive-json-sum-decode
+          decode-list
           __json-chain __json-obj-build __json-tag
           __decode-field __decode-fields __decode-make-struct
           __sum-fnames __sum-vchain __sum-enc-arms
@@ -427,23 +428,57 @@
       (ok (:: (none) (Option A)))
       (ok (some (ok-val (:: (decode doc val) (Result A cstr))))))))
 
-;; NOTE: `Decode [Cons]` (JSON array -> list, the mirror of `Encode [Cons]`) is
-;; deferred on remaining compiler gaps. The per-element decode dispatches fine;
-;; the array-walk that builds the `(Cons A)` is what miscompiles. Pinned down:
-;;   1. A constrained generic `defn` that calls *another* constrained generic
-;;      `defn` emits a call to the unspecialized base clone (`f(...)` not
-;;      `f__spec__...`), so the element type collapses to the int64 carrier --
-;;      a one-`defn` self-recursive walk works in isolation, but the moment a
-;;      public `decode-list` wraps it the list comes back length-1 with a
-;;      garbage head.
-;;   2. `tcons-of` in the constrained-recursive walk lowers with a head-arg ABI
-;;      mismatch (`Cons__int *` passed where the spec wants `int64_t`); the walk
-;;      is UB -- some phrasings return the right list, others segfault.
-;;   3. Selecting it as a `Decode [Cons]` *instance* is independently blocked:
-;;      a `(Cons A)` coerces to `:int` in `(Result a cstr)`, so the return-type
-;;      dispatch can't tell `(Cons A)` from `int` (and it also breaks inferring
-;;      `A` through a `(Result (Cons A) cstr)` ascription).
-;; Filed as a follow-up report.
+;;; __json-is-arr? -- true when the value is a JSON array.
+(defn __json-is-arr? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return (v && yyjson_is_arr(v));
+  ```)
+
+;;; __json-arr-size -- element count of a JSON array value.
+(defn __json-arr-size [val : int] #{Unsafe} : int
+  ```c
+  #include <yyjson.h>
+  return (int)yyjson_arr_size((yyjson_val *)(intptr_t)val);
+  ```)
+
+;;; __json-arr-get -- the i-th element value of a JSON array, as a yyjson_val
+;;; handle (carried as :int), to feed back into `decode`.
+(defn __json-arr-get [val : int  i : int] #{Unsafe} : int
+  ```c
+  #include <yyjson.h>
+  return (int64_t)(intptr_t)yyjson_arr_get((yyjson_val *)(intptr_t)val, (size_t)i);
+  ```)
+
+;; Decode array elements [i, size) into a (Cons A), head-to-tail, each element
+;; by its own (Decode A) instance. A self-recursive constrained generic
+;; returning a parametric container; correct monomorphization of this shape
+;; (and of decode-list calling it) needs turmeric main #481.
+(defn __json-arr-decode [A] [(Decode A)] [doc : int  arr : int  i : int  size : int] : (Cons A)
+  (if (>= i size)
+    (:: (tnil) (Cons A))
+    (tcons-of (ok-val (:: (decode doc (unsafe (__json-arr-get arr i))) (Result A cstr)))
+              (:: (__json-arr-decode doc arr (+ i 1) size) :int))))
+
+;;; decode-list -- decode a JSON array into a `(Cons A)`, the mirror of
+;;; `Encode [Cons]`. A non-array decodes to the empty list. Like the other
+;;; Decode paths a failing inner element decode is not propagated -- structured
+;;; errors are a follow-up.
+;;;
+;;; A standalone function rather than a `Decode [Cons]` instance, returning
+;;; `(Cons A)` directly rather than `(Result (Cons A) cstr)`: a `(Cons A)`
+;;; coerces to `:int` inside a `(Result ...)`, which both defeats the return-type
+;;; dispatch that would select a `Decode [Cons]` instance and breaks inferring
+;;; `A` through a `(Result (Cons A) cstr)` ascription. Call it with a `(Cons T)`
+;;; ascription so `A` is pinned:
+;;;   (:: (decode-list doc v) (Cons int))
+;;;
+;;; Since: U2 (Track C container instances)
+(defn decode-list [A] [(Decode A)] [doc : int  val : int] : (Cons A)
+  (if (unsafe (__json-is-arr? val))
+    (__json-arr-decode doc val 0 (unsafe (__json-arr-size val)))
+    (:: (tnil) (Cons A))))
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry
