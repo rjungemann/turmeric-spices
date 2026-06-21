@@ -6,6 +6,7 @@
   (import opengl/window  :refer [make-window destroy-window])
   (import opengl/buffers :refer [make-vao make-vbo make-ebo
                                   bind-vao bind-vbo bind-ebo
+                                  unbind-vao delete-vao delete-vbo delete-ebo
                                   vertex-attrib])
   (import test/assert    :refer [assert-true])
   (import test/suite     :refer [describe it])
@@ -23,7 +24,8 @@
       (if (__has-display)
         (let [w   (make-window 1 1 "test")
               vao (make-vao)
-              ok  (not (= vao 0))]
+              ok  (not (= (:: vao :int) 0))]
+          (delete-vao vao)
           (destroy-window w)
           (assert-true ok))
         (do (println "# SKIP: no display available") true)))
@@ -32,7 +34,8 @@
       (if (__has-display)
         (let [w   (make-window 1 1 "test")
               vbo (make-vbo)
-              ok  (not (= vbo 0))]
+              ok  (not (= (:: vbo :int) 0))]
+          (delete-vbo vbo)
           (destroy-window w)
           (assert-true ok))
         (do (println "# SKIP: no display available") true)))
@@ -41,7 +44,8 @@
       (if (__has-display)
         (let [w   (make-window 1 1 "test")
               ebo (make-ebo)
-              ok  (not (= ebo 0))]
+              ok  (not (= (:: ebo :int) 0))]
+          (delete-ebo ebo)
           (destroy-window w)
           (assert-true ok))
         (do (println "# SKIP: no display available") true))))
@@ -57,7 +61,9 @@
           (bind-vbo vbo)
           ;; Describe a 3-float position attribute at location 0, stride 12 bytes
           (vertex-attrib 0 3 ":float" false 12 0)
-          (bind-vao 0)
+          (unbind-vao)
+          (delete-vbo vbo)
+          (delete-vao vao)
           (destroy-window w)
           (assert-true true))
         (do (println "# SKIP: no display available") true)))
@@ -69,7 +75,9 @@
               ebo (make-ebo)]
           (bind-vao vao)
           (bind-ebo ebo)
-          (bind-vao 0)
+          (unbind-vao)
+          (delete-ebo ebo)
+          (delete-vao vao)
           (destroy-window w)
           (assert-true true))
         (do (println "# SKIP: no display available") true))))

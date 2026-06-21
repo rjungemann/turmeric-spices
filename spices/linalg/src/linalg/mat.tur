@@ -13,18 +13,8 @@
           mat-mul-vec mat-transpose mat-trace mat-norm-fro mat-norm-max
           mat-square? mat-approx-eq? la-vec-outer)
 
-  (import linalg/vec :refer [lavec la-vec-new la-vec-len la-vec-get la-vec-set!])
-
-;; libm-free math helpers (a linalg spice has no cmake deps, so no -lm).
-(defn la-sqrt [x : float] : float
-  ```c
-  if (x <= 0.0) return 0.0;
-  double g = x;
-  for (int k = 0; k < 64; k++) g = 0.5 * (g + x / g);
-  return g;
-  ```)
-(defn la-fabs [x : float] : float
-  ```c return x < 0.0 ? -x : x; ```)
+  (import linalg/vec :refer [lavec la-vec-new la-vec-len la-vec-get la-vec-set!
+                             sqrt fabs])
 
 ;;; mat -- a row-major rows x cols float64 matrix over a heap (Vec float).
 (defstruct mat [rows : int  cols : int  data : (Vec float)])
@@ -51,17 +41,13 @@
 (defn mat-wrap [rows : int  cols : int  d : (Vec float)] : mat
   (make-struct mat rows cols d))
 
-;;; Private: recursive push helper for the mat-of macro.
-(defmacro __mpush [d & xs]
-  (if (empty? xs)
-    d
-    (list do (list vec-push! d (first xs)) (list __mpush d ~@(rest xs)))))
-
 ;;; mat-of -- build a rows x cols matrix from row-major float literals.
 ;;;   (mat-of 2 2  1.0 2.0  3.0 4.0)
+;;; Lowers through the stdlib `(vec-of ...)` float-literal builder (turmeric
+;;; main #473), retiring the hand-rolled `__mpush` push-loop that existed only
+;;; because a `(Vec float)` literal could not be spelled before.
 (defmacro mat-of [rows cols & xs]
-  `(mat-wrap ~rows ~cols
-     (let [d (:: (vec-new) (Vec float))] (__mpush d ~@xs) d)))
+  `(mat-wrap ~rows ~cols (:: (vec-of ~@xs) (Vec float))))
 
 ;;; mat-rows / mat-cols -- shape accessors.
 (defn mat-rows [^borrow m : mat] : int (.rows m))
@@ -287,44 +273,32 @@
 (defn mat-trace [^borrow m : mat] : float
   (when (not= (.rows m) (.cols m))
     (panic "mat-trace: matrix must be square"))
-  (let [n (.rows m)
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
-                    (do (vec-set! cell 0 (+ (:: (vec-get cell 0) :float) (mat-get m i i)))
-                        (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (:: (vec-get cell 0) :float)] (vec-free cell) r)))
+  (let [n (.rows m)]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n)
+                    acc
+                    (go (+ i 1) (+ acc (mat-get m i i)))))]
+      (go 0 0.0))))
 
 ;;; mat-norm-fro -- Frobenius norm.
 (defn mat-norm-fro [^borrow m : mat] : float
-  (let [n (* (.rows m) (.cols m))
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
+  (let [n (* (.rows m) (.cols m))]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n)
+                    acc
                     (let [x (:: (vec-get (.data m) i) :float)]
-                      (vec-set! cell 0 (+ (:: (vec-get cell 0) :float) (* x x)))
-                      (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (la-sqrt (:: (vec-get cell 0) :float))] (vec-free cell) r)))
+                      (go (+ i 1) (+ acc (* x x))))))]
+      (sqrt (go 0 0.0)))))
 
 ;;; mat-norm-max -- maximum absolute element.
 (defn mat-norm-max [^borrow m : mat] : float
-  (let [n (* (.rows m) (.cols m))
-        cell (:: (vec-new) (Vec float))
-        ^mut i 0]
-    (vec-push! cell 0.0)
-    (letrec [go (fn [] : int
-                  (if (>= i n) 0
-                    (let [a (la-fabs (:: (vec-get (.data m) i) :float))]
-                      (when (> a (:: (vec-get cell 0) :float)) (vec-set! cell 0 a))
-                      (set! i (+ i 1)) (go))))]
-      (go))
-    (let [r (:: (vec-get cell 0) :float)] (vec-free cell) r)))
+  (let [n (* (.rows m) (.cols m))]
+    (letrec [go (fn [i : int  acc : float] : float
+                  (if (>= i n)
+                    acc
+                    (let [a (fabs (:: (vec-get (.data m) i) :float))]
+                      (go (+ i 1) (if (> a acc) a acc)))))]
+      (go 0 0.0))))
 
 ;;; mat-square? -- 1 if rows == cols else 0.
 (defn mat-square? [^borrow m : mat] : int
@@ -338,8 +312,8 @@
       (letrec [go (fn [i : int] : int
                     (if (>= i n)
                       1
-                      (if (> (la-fabs (- (:: (vec-get (.data a) i) :float)
-                                         (:: (vec-get (.data b) i) :float))) tol)
+                      (if (> (fabs (- (:: (vec-get (.data a) i) :float)
+                                      (:: (vec-get (.data b) i) :float))) tol)
                         0
                         (go (+ i 1)))))]
         (go 0)))))

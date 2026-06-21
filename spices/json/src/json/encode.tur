@@ -15,6 +15,7 @@
   (export derive-json derive-json-encode derive-json-decode
           derive-json-opaque derive-json-opaque-encode derive-json-opaque-decode
           derive-json-sum derive-json-sum-encode derive-json-sum-decode
+          decode-list
           __json-chain __json-obj-build __json-tag
           __decode-field __decode-fields __decode-make-struct
           __sum-fnames __sum-vchain __sum-enc-arms
@@ -129,6 +130,90 @@
   memcpy(buf, tmp, n + 1);
   return buf;
   ```))
+
+;;; __json-null-frag -- the JSON `null` literal as a fresh malloc'd cstr, so
+;;; callers can free it uniformly like any other Encode fragment.
+(defn __json-null-frag [] : cstr
+  ```c
+  char *buf = (char *)malloc(5);
+  memcpy(buf, "null", 5);
+  return buf;
+  ```)
+
+;;; Encode [Option] -- a present value encodes as its element's fragment; an
+;;; absent value (`none`) encodes as JSON `null`. Constrained on `(Encode A)`,
+;;; so the element is serialized by its own instance: `(Option int)` emits
+;;; `42` / `null`, `(Option cstr)` emits `"s"` / `null`, and so on -- letting a
+;;; derive-json struct carry optional fields.
+;;;
+;;; The body dispatches `encode` directly on `(.value x)`; recovering the
+;;; concrete element type through that field extraction needs turmeric main
+;;; #475 (constrained instance method dispatch on pointer-carried elements).
+;;;
+;;; Since: U2 (Track C container instances)
+(definstance Encode [Option]
+  [(Encode A)]
+  (encode [x] : cstr
+    (if (.is-some x)
+      (encode (.value x))
+      (__json-null-frag))))
+
+;; Runtime helper: join a cons-list of element fragments into `[e1,e2,...]`.
+;; Each list node's head is a malloc'd cstr fragment (from `encode`); they are
+;; freed as they are consumed, mirroring __json-obj-build.
+(defn __json-arr-build [lst : int] #{Unsafe} : cstr
+  ```c
+  typedef struct __c { int64_t head; int64_t tail; } cons_t;
+  size_t total = 2; /* [ ] */
+  cons_t *q = (cons_t *)(intptr_t)lst;
+  while (q) {
+    const char *v = (const char *)(intptr_t)q->head;
+    total += (v ? strlen(v) : 4 /* null */) + 1 /* , */;
+    q = (cons_t *)(intptr_t)q->tail;
+  }
+  char *out = (char *)malloc(total + 1);
+  size_t w = 0;
+  out[w++] = '[';
+  q = (cons_t *)(intptr_t)lst;
+  int written = 0;
+  while (q) {
+    const char *v = (const char *)(intptr_t)q->head;
+    if (written > 0) out[w++] = ',';
+    if (v) { size_t vn = strlen(v); memcpy(out + w, v, vn); w += vn; free((void *)v); }
+    else   { memcpy(out + w, "null", 4); w += 4; }
+    written++;
+    q = (cons_t *)(intptr_t)q->tail;
+  }
+  out[w++] = ']';
+  out[w] = '\0';
+  return out;
+  ```)
+
+;; Encode each element of a `(Cons A)` into a fresh cons-list of cstr fragments.
+;; A plain constrained `defn` (not the instance body) so the per-element
+;; `encode` dispatches on the real A and the `.head`/`.tail` of the `:heap`
+;; Cons cell are read with the element ABI (turmeric main #475 + #479).
+(defn __json-arr-frags [A] [(Encode A)] [cell : (Cons A)] : int
+  (if (tnil? (:: cell :int))
+    (tnil)
+    (cons (encode (.head cell))
+          (__json-arr-frags (:: (.tail cell) (Cons A))))))
+
+;;; Encode [Cons] -- a homogeneous list `(Cons A)` encodes as a JSON array, each
+;;; element via its own `(Encode A)` instance: `(Cons int)` -> `[1,2,3]`,
+;;; `(Cons cstr)` -> `["a","b"]`, the empty list -> `[]`.
+;;;
+;;; NOTE: a `(Cons A)` is a heap pointer carried as `:int`, the same carrier as
+;;; `int`, so a bare `(encode some-list)` is an ambiguous dispatch -- pin the
+;;; instance with `@Cons` (or rely on a statically `(Cons A)`-typed call site,
+;;; e.g. a derive-json struct field). Needs #475/#479 for the per-element
+;;; dispatch and `:heap` head extraction.
+;;;
+;;; Since: U2 (Track C container instances)
+(definstance Encode [Cons]
+  [(Encode A)]
+  (encode [xs] : cstr
+    (unsafe (__json-arr-build (__json-arr-frags (:: xs (Cons A)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; derive-json: emit an Encode instance for a defstruct product type. Lives
@@ -314,6 +399,86 @@
   memcpy(&bits, &d, sizeof(bits));
   return tur_box_ok(bits);
   ```))
+
+;;; __json-absent? -- true when a value slot is missing (null handle, e.g. a
+;;; field absent from the object) or an explicit JSON `null`. Both decode to
+;;; `none` for an optional field.
+(defn __json-absent? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return (!v || yyjson_is_null(v));
+  ```)
+
+;;; Decode [Option] -- a missing slot or JSON `null` decodes to `none`; anything
+;;; else decodes the element by its own `(Decode A)` instance and wraps it in
+;;; `some`. The mirror of `Encode [Option]`, so an optional field round-trips.
+;;; Like the primitive Decode instances and `__decode-field`, a failing inner
+;;; decode is not propagated -- structured decode errors are a follow-up.
+;;;
+;;; Building the nested `(Result (Option A) cstr)` for a pointer-carried element
+;;; needs turmeric main #480 (nested generic construct in constrained instance
+;;; bodies); before it, the `some` payload read back as `none` for cstr/float.
+;;;
+;;; Since: U2 (Track C container instances)
+(definstance Decode [Option]
+  [(Decode A)]
+  (decode [doc val]
+    (if (unsafe (__json-absent? val))
+      (ok (:: (none) (Option A)))
+      (ok (some (ok-val (:: (decode doc val) (Result A cstr))))))))
+
+;;; __json-is-arr? -- true when the value is a JSON array.
+(defn __json-is-arr? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return (v && yyjson_is_arr(v));
+  ```)
+
+;;; __json-arr-size -- element count of a JSON array value.
+(defn __json-arr-size [val : int] #{Unsafe} : int
+  ```c
+  #include <yyjson.h>
+  return (int)yyjson_arr_size((yyjson_val *)(intptr_t)val);
+  ```)
+
+;;; __json-arr-get -- the i-th element value of a JSON array, as a yyjson_val
+;;; handle (carried as :int), to feed back into `decode`.
+(defn __json-arr-get [val : int  i : int] #{Unsafe} : int
+  ```c
+  #include <yyjson.h>
+  return (int64_t)(intptr_t)yyjson_arr_get((yyjson_val *)(intptr_t)val, (size_t)i);
+  ```)
+
+;; Decode array elements [i, size) into a (Cons A), head-to-tail, each element
+;; by its own (Decode A) instance. A self-recursive constrained generic
+;; returning a parametric container; correct monomorphization of this shape
+;; (and of decode-list calling it) needs turmeric main #481.
+(defn __json-arr-decode [A] [(Decode A)] [doc : int  arr : int  i : int  size : int] : (Cons A)
+  (if (>= i size)
+    (:: (tnil) (Cons A))
+    (tcons-of (ok-val (:: (decode doc (unsafe (__json-arr-get arr i))) (Result A cstr)))
+              (:: (__json-arr-decode doc arr (+ i 1) size) :int))))
+
+;;; decode-list -- decode a JSON array into a `(Cons A)`, the mirror of
+;;; `Encode [Cons]`. A non-array decodes to the empty list. Like the other
+;;; Decode paths a failing inner element decode is not propagated -- structured
+;;; errors are a follow-up.
+;;;
+;;; A standalone function rather than a `Decode [Cons]` instance, returning
+;;; `(Cons A)` directly rather than `(Result (Cons A) cstr)`: a `(Cons A)`
+;;; coerces to `:int` inside a `(Result ...)`, which both defeats the return-type
+;;; dispatch that would select a `Decode [Cons]` instance and breaks inferring
+;;; `A` through a `(Result (Cons A) cstr)` ascription. Call it with a `(Cons T)`
+;;; ascription so `A` is pinned:
+;;;   (:: (decode-list doc v) (Cons int))
+;;;
+;;; Since: U2 (Track C container instances)
+(defn decode-list [A] [(Decode A)] [doc : int  val : int] : (Cons A)
+  (if (unsafe (__json-is-arr? val))
+    (__json-arr-decode doc val 0 (unsafe (__json-arr-size val)))
+    (:: (tnil) (Cons A))))
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry

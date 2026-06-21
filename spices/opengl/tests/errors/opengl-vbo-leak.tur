@@ -1,0 +1,13 @@
+;; U1 negative: a :linear Vbo must be consumed (deleted). Creating a VBO and
+;; binding it but never calling delete-vbo is a leak.
+;;   tur check -Xsubstructural tests/errors/opengl-vbo-leak.tur
+;;   => error [TUR-E0100]: linear value 'vbo' dropped without being consumed
+;; Violation in an uncalled defn (no main): compiles + `tur test` no-op-passes
+;; without the flag, keeping CI green under opengl's nested-test descend.
+(defmodule opengl_vbo_leak_test
+  (export)
+(import opengl/buffers :refer [make-vbo bind-vbo])
+(defn leak-vbo [] : void
+  (let [vbo (make-vbo)]
+    (bind-vbo vbo)))   ;; ERROR TUR-E0100: vbo never deleted
+) ;; end

@@ -1,0 +1,16 @@
+;; U1 negative: using a Vbo after delete-vbo must be rejected under
+;; -Xsubstructural. Vbo is :linear (consumed by delete-vbo); bind-vbo borrows,
+;; so binding a deleted buffer is use-after-free.
+;;   tur check -Xsubstructural tests/errors/opengl-vbo-use-after-delete.tur
+;;   => error [TUR-E0101]: linear value 'vbo' used after being consumed
+;; Violation in an uncalled defn (no main): compiles + `tur test` no-op-passes
+;; without the flag, keeping CI green under opengl's nested-test descend.
+(defmodule opengl_vbo_use_after_delete_test
+  (export)
+(import opengl/buffers :refer [make-vbo bind-vbo delete-vbo])
+(defn use-after-delete [] : void
+  (let [vbo (make-vbo)]
+    (do
+      (delete-vbo vbo)   ;; single legal consumption
+      (bind-vbo vbo))))  ;; ERROR TUR-E0101: borrow after consume
+) ;; end

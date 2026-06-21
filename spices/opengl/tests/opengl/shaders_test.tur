@@ -5,7 +5,8 @@
 ;; when no display is available.
 (defmodule opengl/tests/shaders
   (import opengl/window  :refer [make-window destroy-window])
-  (import opengl/shaders :refer [compile-shader shader-program use-program])
+  (import opengl/shaders :refer [compile-shader delete-shader shader-program
+                                 unuse-program delete-program])
   (import test/assert    :refer [assert-true])
   (import test/suite     :refer [describe it])
   (import test/runner    :refer [run-all])
@@ -28,7 +29,8 @@
       (if (__has-display)
         (let [w  (make-window 1 1 "test")
               sh (compile-shader ":vertex" __vert-src)
-              ok (not (= sh 0))]
+              ok (not (= (:: sh :int) 0))]
+          (delete-shader sh)
           (destroy-window w)
           (assert-true ok))
         (do (println "# SKIP: no display available") true)))
@@ -37,7 +39,8 @@
       (if (__has-display)
         (let [w  (make-window 1 1 "test")
               sh (compile-shader ":fragment" __frag-src)
-              ok (not (= sh 0))]
+              ok (not (= (:: sh :int) 0))]
+          (delete-shader sh)
           (destroy-window w)
           (assert-true ok))
         (do (println "# SKIP: no display available") true))))
@@ -50,15 +53,16 @@
               vs   (compile-shader ":vertex"   __vert-src)
               fs   (compile-shader ":fragment" __frag-src)
               prog (shader-program vs fs)
-              ok   (not (= prog 0))]
+              ok   (not (= (:: prog :int) 0))]
+          (delete-program prog)
           (destroy-window w)
           (assert-true ok))
         (do (println "# SKIP: no display available") true)))
 
-    (it "use-program with 0 does not crash"
+    (it "unuse-program does not crash"
       (if (__has-display)
         (let [w (make-window 1 1 "test")]
-          (use-program 0)
+          (unuse-program)
           (destroy-window w)
           (assert-true true))
         (do (println "# SKIP: no display available") true))))
