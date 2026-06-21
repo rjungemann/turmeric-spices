@@ -1,7 +1,7 @@
 ---
 title: Track C U3 (row-typed schemas) — compiler blockers retired by turmeric #479–#483
 category: Spice-uplift blocker assessment (Track C / U3)
-status: UNBLOCKED — every compiler prerequisite verified present; no spice code landed yet
+status: UNBLOCKED — every compiler prerequisite verified present; U3 target 1 (frame/typed) landed on this branch
 verified-on: turmeric main @ 99cc8b32 (post #479/#480/#481/#482/#483; built from source)
 verified-by: turmeric-spices Claude (Track C, branch claude/track-c-u3-turmeric-cgmo6u)
 plan: rjungemann/turmeric docs/upcoming/spices-type-features-uplift-plan.md (Phase U3)
@@ -87,18 +87,73 @@ miscompile; they now compile and run correctly. The last row demonstrates the
 U3 "negative fixture" deliverable already works: two rows with identical
 element types but different field names refuse to unify.
 
-## What is NOT yet done (scope of the actual U3 PRs)
+## U3 target 1 (`frame`): implemented
 
-This doc records only that the **compiler** side is ready. The spice-side work
-remains, one PR per target per the plan's within-spice ordering
+The first U3 target landed in this branch as `spices/frame/src/frame/typed.tur`
+(exported as the `frame/typed` module). `Frame` is a phantom row-typed newtype
+over the existing `:int` frame handle — the same machinery ECS's `Query` value
+uses — so a function pinned to a concrete schema rejects a frame with any other
+column-set row at the elaborator.
+
+Shape (mirrors `ecs/query.tur`):
+
+```turmeric
+(defstruct Frame [^&cols] (handle :int))
+(defn frame-typed  [^&cols] [h : int]          : (Frame cols) (make-struct Frame h))
+(defn frame-handle [^&cols] [f : (Frame cols)] : int          (.handle f))
+;; typed delegates: tframe-nrows / tcol-int32-at / tcol-utf8-at / ...
+```
+
+Because the module's definitions are row-*polymorphic*, the source and the
+runtime test check **flag-free** — `frame/typed` passes the CI `tur check` step
+and the `tur test tests/frame` suite (`tests/frame/typed_test.tur`, 4/4 green)
+without `-Xdata-literals`. A concrete `#row{...}` is only needed at a call site
+that names a specific schema.
+
+### Concrete-schema demonstrations (verified under `-Xdata-literals`)
+
+Naming a concrete row needs `-Xdata-literals`, and the U3 "negative fixture"
+must *fail to compile* — which the repo's `tur test` harness has no mode for
+yet (uplift-plan P5 is still open). So the positive/negative demonstrations are
+recorded here rather than as CI-run tests. Both verified against `tur` @
+`99cc8b32`:
+
+```turmeric
+;; POSITIVE — a frame ascribed to the matching schema row: checks + runs.
+(defn sum-users [f : (Frame #row{id : int  name : cstr})] : int (frame-handle f))
+(let [users (:: (frame-typed raw) (Frame #row{id : int  name : cstr}))]
+  (sum-users users))            ; => runs
+
+;; NEGATIVE — a frame with the WRONG schema row: rejected at elaboration.
+(let [wrong (:: (frame-typed raw) (Frame #row{uid : int  label : cstr}))]
+  (sum-users wrong))
+;; error [TUR-E0001]: function 'sum-users' arg 1:
+;;   expected (type-app Frame #row{id : int name : cstr}),
+;;   got (type-app Frame #row{uid : int label : cstr})
+```
+
+The negative case is the U3 deliverable: two frames whose schema rows differ
+(even with identical element types) are distinct types, caught at compile time.
+
+Note: the `frame` suite has 3 *pre-existing* failures against tip-of-main `tur`
+(`group_test`, `interop_test`, `reshape_test` — a linker error unrelated to
+U3); they fail with or without `frame/typed` and are out of scope here.
+
+## What is NOT yet done (remaining U3 targets)
+
+This branch lands the compiler-readiness assessment plus U3 target 1 (`frame`).
+The remaining targets follow, one PR per the plan's within-spice ordering
 (opaques before rows for postgres/sqlite):
 
-1. `frame` — `Frame<#row{...}>`; `col : Frame r -> (k in r) -> Col t`.
 2. `postgres`/`sqlite` — `Result<#row{...}>`, `Stmt<params cols>` (after U1 opaques).
 3. `http`/`httpd` — `Request<#row{headers...}>` / `Response<...>`.
 4. `json` — object shapes as rows; retire the hand-rolled cons-walk decoder in
    `spices/json/src/json/encode.tur` in favor of the now-unblocked container
    `Decode` path.
+
+A `Col t` typed-column newtype and the term-level `(k in r)` membership
+predicate (deferred per P0) remain follow-ups; `frame/typed`'s accessors take
+the column name as a `cstr` and type-safety rides at the whole-schema level.
 
 Shared infrastructure to factor once (per the decoder model): a `DecodeError`
 (path + expected-type + got-tag), a `Result<T, Vec<DecodeError>>` return
