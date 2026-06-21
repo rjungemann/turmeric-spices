@@ -157,6 +157,63 @@
       (encode (.value x))
       (__json-null-frag))))
 
+;; Runtime helper: join a cons-list of element fragments into `[e1,e2,...]`.
+;; Each list node's head is a malloc'd cstr fragment (from `encode`); they are
+;; freed as they are consumed, mirroring __json-obj-build.
+(defn __json-arr-build [lst : int] #{Unsafe} : cstr
+  ```c
+  typedef struct __c { int64_t head; int64_t tail; } cons_t;
+  size_t total = 2; /* [ ] */
+  cons_t *q = (cons_t *)(intptr_t)lst;
+  while (q) {
+    const char *v = (const char *)(intptr_t)q->head;
+    total += (v ? strlen(v) : 4 /* null */) + 1 /* , */;
+    q = (cons_t *)(intptr_t)q->tail;
+  }
+  char *out = (char *)malloc(total + 1);
+  size_t w = 0;
+  out[w++] = '[';
+  q = (cons_t *)(intptr_t)lst;
+  int written = 0;
+  while (q) {
+    const char *v = (const char *)(intptr_t)q->head;
+    if (written > 0) out[w++] = ',';
+    if (v) { size_t vn = strlen(v); memcpy(out + w, v, vn); w += vn; free((void *)v); }
+    else   { memcpy(out + w, "null", 4); w += 4; }
+    written++;
+    q = (cons_t *)(intptr_t)q->tail;
+  }
+  out[w++] = ']';
+  out[w] = '\0';
+  return out;
+  ```)
+
+;; Encode each element of a `(Cons A)` into a fresh cons-list of cstr fragments.
+;; A plain constrained `defn` (not the instance body) so the per-element
+;; `encode` dispatches on the real A and the `.head`/`.tail` of the `:heap`
+;; Cons cell are read with the element ABI (turmeric main #475 + #479).
+(defn __json-arr-frags [A] [(Encode A)] [cell : (Cons A)] : int
+  (if (tnil? (:: cell :int))
+    (tnil)
+    (cons (encode (.head cell))
+          (__json-arr-frags (:: (.tail cell) (Cons A))))))
+
+;;; Encode [Cons] -- a homogeneous list `(Cons A)` encodes as a JSON array, each
+;;; element via its own `(Encode A)` instance: `(Cons int)` -> `[1,2,3]`,
+;;; `(Cons cstr)` -> `["a","b"]`, the empty list -> `[]`.
+;;;
+;;; NOTE: a `(Cons A)` is a heap pointer carried as `:int`, the same carrier as
+;;; `int`, so a bare `(encode some-list)` is an ambiguous dispatch -- pin the
+;;; instance with `@Cons` (or rely on a statically `(Cons A)`-typed call site,
+;;; e.g. a derive-json struct field). Needs #475/#479 for the per-element
+;;; dispatch and `:heap` head extraction.
+;;;
+;;; Since: U2 (Track C container instances)
+(definstance Encode [Cons]
+  [(Encode A)]
+  (encode [xs] : cstr
+    (unsafe (__json-arr-build (__json-arr-frags (:: xs (Cons A)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; derive-json: emit an Encode instance for a defstruct product type. Lives
 ;; in this module (alongside Encode) so the orphan-instance check sees the
