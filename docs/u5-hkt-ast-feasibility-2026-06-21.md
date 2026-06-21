@@ -1,20 +1,25 @@
 ---
 title: Track C U5 (HKT recursion for ASTs) — feasibility after recent turmeric fixes
 category: Spice-uplift feasibility analysis
-status: PARTIALLY UNBLOCKED — AST-shaped targets are doable; json target is blocked + moot; one new compiler limitation to file
+status: UNBLOCKED — defdata applied-field blocker fixed by turmeric #483 (+#482); U5 AST targets are now doable. json target remains moot (yyjson-backed). Minor annotation-level edges remain.
 reported-by: turmeric-spices Claude (Track C, branch claude/track-c-u5-turmeric-2miu28)
-verified-on: turmeric 0.22.0, main @ 15cf5fe (post #444 end-to-end monomorphization, #468 HKT-via-match-scrutinee), built from source (build-release)
+verified-on: turmeric 0.22.0, main @ 99cc8b3 (post #483 "Allow applied type constructors in defdata constructor fields", #482 by-value parametric struct fields), built from source (build-release)
 ---
 
 # Track C U5 — can it be done after the recent turmeric fixes?
 
-**Short answer: partially.** The higher-kinded-recursion machinery the U5
-plan depends on (typed sum functors, `Functor`/`fmap`, `Fix`, recursive
-`cata`) now compiles **and runs** for the AST-shaped targets whose child
-positions are sub-nodes (c-dsl, glsl, scscm, regex, template). The
-**first-listed target — `json` — is both blocked by a genuine compiler
-limitation and moot** (the spice has no Turmeric-level recursive IR to
-collapse).
+**Short answer: yes, the blocker is fixed.** The `defdata` applied-field
+limitation reported on 2026-06-21 was resolved the same day by turmeric
+**#483** ("Allow applied type constructors in defdata constructor fields",
+main @ `99cc8b3`), together with **#482** (by-value parametric struct field
+layout). The single-param `defdata` kind wart is gone too. The full
+recursion-schemes pattern U5 needs — typed sum functors, `Functor`/`fmap`,
+a **by-value typed `Fix`**, and a recursive `cata` over container-typed
+children — now compiles **and runs**.
+
+The first-listed U5 target, `json`, remains **moot** for an unrelated
+reason: the spice is yyjson-backed and has no Turmeric-level recursive IR
+to collapse.
 
 U5 plan reference:
 `rjungemann/turmeric:docs/upcoming/spices-type-features-uplift-plan.md`
@@ -22,109 +27,81 @@ U5 plan reference:
 scscm, regex, template).
 
 All claims below were checked against a from-source `tur` 0.22.0
-(`cmake --build build-release`) on turmeric main @ `15cf5fe`.
+(`cmake --build build-release`) on turmeric main @ `99cc8b3`.
 
 ---
 
-## What the recent fixes unblocked (verified working)
+## What now works (verified — checks AND runs)
 
-The Track A end-to-end monomorphization land (#444) and the HKT
-instance-method fixes (#468 "HKT instance-method spec emitted when consumed
-by a match scrutinee", #438 Applicative `ap` fn-type preservation) make the
-core recursion-schemes pattern work end to end:
+1. **By-value typed `Fix`.** `(defdata Fix [^f] (Roll (f (Fix f))))` is
+   accepted (was rejected pre-#483). No more int-carrier `Roll :int`
+   indirection required.
 
-1. **Typed sum functor + `Functor` instance compiles and runs.** A
-   `(defdata ExprF [p a] (LitF :int) (AddF a a) (MulF a a))` with
-   `(definstance Functor [(ExprF P)] (fmap [c g] (match c ...)))` checks
-   clean, and an F-algebra over it (`(ExprF int int) -> int`) runs.
+2. **Sum functor + `Functor` instance, single param.**
+   `(defdata ExprF [a] (LitF :int) (AddF a a) (MulF a a))` with
+   `(definstance Functor [ExprF] (fmap [c g] (match c ...)))` checks clean.
+   The earlier `TUR-E0012` kind-`*` error on single-param `defdata` is
+   fixed — **no phantom-param / partial-app-head hack needed**.
 
-2. **Recursive `cata`/fold over a `Fix`-wrapped AST runs in pure
-   Turmeric** — no inline C for the recursion. A `+`/`*` evaluator built
-   from `roll`/`unroll` (stdlib `Fix`) folded `(add (add (lit 1) (lit 2))
-   (lit 10))` to `13` correctly. This is the actual U5 deliverable shape
-   for ASTs whose children are sub-nodes.
+3. **Recursive `cata` over a by-value `Fix`, in pure Turmeric.** An
+   arithmetic evaluator (`AddF`/`MulF` children as sub-nodes) folded
+   `(mul (add (lit 1) (lit 2)) (lit 10))` to `30`.
 
-   This is a real step beyond the `tests/fixtures/hkt-fix-cata` fixture in
-   turmeric: that fixture keeps the node construction and the fold in
-   **inline C** (`__opt_some`, a C `while` loop for `cata-nat`). The probe
-   here does the fold in Turmeric.
+4. **Container-typed children (the U5 json `Arr`/`Obj` shape).** A node
+   `(defdata JsonF [a] (JNumF :int) (JArrF (Vec a)))` with a `Functor`
+   instance, wrapped in the by-value `Fix`, folded a nested array
+   `[10, 20, [5, 7]]` to `42` via a `cata` that sums all numbers.
 
-3. `stdlib/fix.tur` (`Fix`/`roll`/`unroll`/`cata`/`ana`) and
-   `stdlib/typeclass-functor.tur` (`Functor [^f]`) ship and load.
-
-So **c-dsl `Expr`/`Stmt`, glsl, scscm `SExpr`, regex `Re`, and template
-node IR are unblocked**: their AST nodes carry children as the recursive
-type itself (bare type-var positions), which is exactly what works.
+So **every U5 AST target is unblocked**: c-dsl `Expr`/`Stmt`, glsl, scscm
+`SExpr`, regex `Re`, template node IR — including nodes whose children sit
+in a container, not just bare recursive positions.
 
 ---
 
-## Ergonomic warts (workable, worth noting)
+## Residual edges (annotation-level, not blockers)
 
-- **`stdlib/Fix` is still int-carrier.** `(defdata Fix [^f] (Roll :int))`,
-  `roll : [int] -> int`, `unroll : [int] -> int`. The fold therefore
-  threads through an `(:: (unroll fix) (ExprF int int))` ascription rather
-  than a fully by-value typed `Fix`. A by-value `Fix` would be
-  `(defdata Fix [^f] (Roll (f (Fix f))))` — but that is rejected by the
-  blocker below.
+1. **Use `Vec`/`Map`, not the `list`/`option` aliases, for container
+   children.** `(JArrF (Vec a))` and `(... (Map str a))` are accepted;
+   `(JArrF (list a))` / `(... (option a))` fail with `TUR-E0012: cannot
+   apply a type of kind '*' as a type constructor`, because `list` and
+   `option` are macro-aliases (nested `tcons` / tagged structs), not
+   arrow-kinded type constructors. The U5 plan writes the json node as
+   `Arr (list a) | Obj (map str a)`; re-spell those as `Vec`/`Map`.
 
-- **Single-param `defdata` reports kind `*`, not `* -> *`.**
-  `(definstance Functor [ExprF])` on a single-param `(defdata ExprF [a] ...)`
-  fails with `TUR-E0012: kind mismatch ... provides a kind-'*' type for
-  parameter 1 which expects kind '* -> *'`. `defstruct`/`defopaque`
-  single-param types do *not* have this problem (`Functor [Schema]`,
-  `Functor [Backtrack]` work). Workaround: add a phantom first param and
-  use a partial-application head, `(defdata ExprF [p a] ...)` +
-  `(definstance Functor [(ExprF P)] ...)`. Mildly ugly but functional.
+2. **Matching `(Roll layer)` does not refine the layer's recursive type
+   var.** After `(match e (Roll layer) ...)`, `layer` infers with its
+   recursion slot unresolved (children come back as `int`). Add one
+   ascription per fold: `(let [l (:: layer (ExprF (Fix ExprF)))] (match l
+   ...))`. With it, the fold checks and runs.
 
----
+3. **Generic `vec-get` returns the element at the int carrier.** When a
+   child lives in a `(Vec (Fix F))`, ascribe the read:
+   `(:: (vec-get xs i) (Fix F))`. One ascription per child access.
 
-## The blocker: `defdata` constructor fields cannot hold applied types
+4. **Bare 0-arg named type as a field is still rejected.** `(Cx C)` (a
+   non-applied named type) still triggers the old "field type must be a
+   keyword" message. Recursion through `(Fix F)` / applied forms sidesteps
+   this, so it rarely bites; worth a follow-up if a spice wants flat
+   mutually-recursive node types without `Fix`.
 
-A `defdata` constructor field must be a primitive keyword (`:int`, `:bool`,
-`:cstr`, ...) or a bare type variable. **Any applied type constructor in a
-field is rejected**, whether parametric or concrete:
-
-    (defdata Nest [a] (N (Wrap a)))            ; error: field type must be a keyword
-    (defdata ArrNode [a] (Arr (Box a)))        ; error
-    (defdata JsonNode (JArr (list JsonNode)))  ; error (even concrete!)
-    (defdata Fix [^f] (Roll (f (Fix f))))      ; error (blocks by-value Fix)
-
-Diagnostic: `error: defdata: constructor field type must be a keyword like
-:int, :bool, :cstr`.
-
-This is the gating limitation for the U5 **json** node, whose plan shape is
-
-    JsonF a = Null | Bool b | Num n | Str s | Arr (list a) | Obj (map str a)
-
-The `Arr (list a)` and `Obj (map str a)` arms need a sum constructor that
-carries a `(list a)` / `(map str a)` field by value — exactly what `defdata`
-rejects today. (regex's `ReF` and the SExpr/c-dsl shapes mostly dodge this
-because their children sit in bare recursive positions, e.g. `Alt a a`,
-`Star a`; a target that needs `(list a)` children — e.g. a variadic
-n-ary node — would hit the same wall.)
-
-This is **not** addressed by the recent monomorphization / HKT PRs (#444,
-#468, #469, #470, #471). It is a parser/elaborator restriction on
-`defdata` field types and should be filed as a turmeric report (see below).
+None of these block U5; they are the verbose-`cata` ergonomics the plan
+already anticipated (P4 `match-fix` sugar would erase #2/#3).
 
 ---
 
-## The json target is also moot
+## The json target is still moot
 
-Independent of the blocker: the `json` spice is **100% yyjson-backed**.
-`spices/json/src/json/{parse,emit,encode,decode,patch}.tur` are inline-C
-wrappers over `yyjson_*`; there is **no Turmeric-level recursive node IR**
-(`grep` for `defdata`/`deftype`/`Fix`/`cata`/`unroll` over `spices/json/src`
-finds only doc comments about `derive-json-sum`, no recursive node type).
-`emit.tur` is a single `yyjson_write` call, not the "manual recursion in
-`json__emit.c`" the U5 plan describes — that premise is stale.
-
-So even if the `defdata` applied-field limitation were lifted, there is
-nothing in the json spice to convert to a `cata`: the recursion lives in
-yyjson's C, which we are not going to replace with a slower pure-Turmeric
-tree walk. **json should be dropped from U5** (or the plan re-scoped to
-"document that the yyjson backend already subsumes the manual-recursion
-goal").
+Independent of the (now-fixed) compiler blocker: the `json` spice is
+**100% yyjson-backed**. `spices/json/src/json/{parse,emit,encode,decode,patch}.tur`
+are inline-C wrappers over `yyjson_*`; there is **no Turmeric-level
+recursive node IR**. `emit.tur` is a single `yyjson_write` call, not the
+"manual recursion in `json__emit.c`" the U5 plan describes — that premise
+is stale. There is nothing in the json spice to convert to a `cata`; the
+recursion lives in yyjson's C, which we should not replace with a slower
+pure-Turmeric tree walk. **json should be dropped from U5** (or the plan
+re-scoped to note the yyjson backend already subsumes the goal). The
+json-shaped functor itself is now expressible (verified above) — it just
+has no home in the current json spice.
 
 ---
 
@@ -132,43 +109,25 @@ goal").
 
 | Target   | Status | Notes |
 |----------|--------|-------|
-| json     | **Drop / moot** | yyjson-backed; no Turmeric IR; also hits the applied-field blocker if attempted |
-| c-dsl    | **Doable now** | `Expr`/`Stmt` children are sub-nodes (bare recursive positions); int-carrier `Fix` + recursive `cata` verified to work for this shape |
+| json     | **Drop / moot** | yyjson-backed; no Turmeric IR to collapse |
+| c-dsl    | **Doable now** | `Expr`/`Stmt` via by-value `Fix` + `cata` |
 | glsl     | **Doable now** | same shape as c-dsl |
-| scscm    | **Doable now** | `SExpr` children are sub-nodes |
-| regex    | **Doable now** | `ReF a = Lit c \| Alt a a \| Concat a a \| Star a` — all bare recursive positions |
-| template | **Doable now** | node IR via bare recursive positions |
+| scscm    | **Doable now** | `SExpr` via by-value `Fix` |
+| regex    | **Doable now** | `ReF a = Lit c \| Alt a a \| Concat a a \| Star a` |
+| template | **Doable now** | node IR + container children via `Vec`/`Map` |
 
-Any individual node that needs a `(list a)`/`(map str a)` child (a
-variadic/keyed node) is blocked until the `defdata` field limitation is
-lifted; restructure such nodes as right-nested binary cons (`Concat a a`)
-to stay within what works, or wait on the compiler fix.
-
-P4 `match-fix` sugar is still unlanded but is explicitly ergonomics-only;
-U5 ships with a verbose `cata` first (confirmed — the verbose form works).
+Suggested first landing: **regex** or **scscm** — smallest ASTs, children
+mostly in bare recursive positions, so the residual ascriptions are
+minimal. Ship the verbose `cata` first; P4 `match-fix` sugar is a later
+ergonomics pass.
 
 ---
 
-## turmeric report to file (from a turmeric-rooted session)
+## Status of the turmeric report
 
-This session is rooted in `turmeric-spices` and cannot write to
-`rjungemann/turmeric`. The following should be filed under
-`docs/reported/` there:
-
-**`defdata` constructor fields reject applied type constructors.** A sum
-constructor cannot carry a `(list a)`, `(map str a)`, `(Wrap a)`, or even a
-concrete `(list JsonNode)` field — only primitive keywords and bare type
-variables are accepted. This blocks (a) by-value typed `Fix`
-(`(Roll (f (Fix f)))`) and (b) any U5 AST node with container-typed
-children (the json `Arr`/`Obj` arms). Repro:
-
-    (defdata Nest [a] (N (Wrap a)))
-    ;; error: defdata: constructor field type must be a keyword like :int, :bool, :cstr
-
-Secondary, lower priority: single-param `defdata` reports kind `*` (so
-`(definstance Functor [SingleParamSum])` fails kind-check), while
-`defstruct`/`defopaque` single-param types report `* -> *`. Workaround is a
-phantom param + partial-app head; a fix would make defdata kind reporting
-consistent with the other type formers.
+The blocker filed on 2026-06-21 ("`defdata` constructor fields reject
+applied type constructors") is **RESOLVED by #483** and the secondary
+single-param kind issue is resolved too. No turmeric report is outstanding.
+The four residual edges above are annotation-level and do not warrant a
+report unless a U5 spice PR finds one of them load-bearing.
 </content>
-</invoke>
