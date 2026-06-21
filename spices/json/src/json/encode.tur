@@ -428,15 +428,22 @@
       (ok (some (ok-val (:: (decode doc val) (Result A cstr))))))))
 
 ;; NOTE: `Decode [Cons]` (JSON array -> list, the mirror of `Encode [Cons]`) is
-;; deferred on a remaining compiler gap. The element decode dispatches fine, but
-;; building the list -- a self-recursive constrained `defn` returning `(Cons A)`
-;; that conses each decoded element with `tcons-of` -- miscompiles: the result
-;; comes back as a length-1 list with a garbage head (the self-recursive
-;; `(Cons A)` carrier-return / construction collapses in the constrained
-;; generic). A second issue blocks doing it as a typeclass instance: a `(Cons A)`
-;; coerces to `:int` in the `(Result a cstr)` result type, so the return-type
-;; dispatch that selects every other Decode instance cannot tell `(Cons A)` from
-;; `int`. Filed as a follow-up report.
+;; deferred on remaining compiler gaps. The per-element decode dispatches fine;
+;; the array-walk that builds the `(Cons A)` is what miscompiles. Pinned down:
+;;   1. A constrained generic `defn` that calls *another* constrained generic
+;;      `defn` emits a call to the unspecialized base clone (`f(...)` not
+;;      `f__spec__...`), so the element type collapses to the int64 carrier --
+;;      a one-`defn` self-recursive walk works in isolation, but the moment a
+;;      public `decode-list` wraps it the list comes back length-1 with a
+;;      garbage head.
+;;   2. `tcons-of` in the constrained-recursive walk lowers with a head-arg ABI
+;;      mismatch (`Cons__int *` passed where the spec wants `int64_t`); the walk
+;;      is UB -- some phrasings return the right list, others segfault.
+;;   3. Selecting it as a `Decode [Cons]` *instance* is independently blocked:
+;;      a `(Cons A)` coerces to `:int` in `(Result a cstr)`, so the return-type
+;;      dispatch can't tell `(Cons A)` from `int` (and it also breaks inferring
+;;      `A` through a `(Result (Cons A) cstr)` ascription).
+;; Filed as a follow-up report.
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry
