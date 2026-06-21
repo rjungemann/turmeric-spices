@@ -3,7 +3,7 @@ title: Track C U5 (HKT recursion for ASTs) — feasibility after recent turmeric
 category: Spice-uplift feasibility analysis
 status: UNBLOCKED — defdata applied-field blocker fixed by turmeric #483 (+#482); U5 AST targets are now doable. json target remains moot (yyjson-backed). Minor annotation-level edges remain.
 reported-by: turmeric-spices Claude (Track C, branch claude/track-c-u5-turmeric-2miu28)
-verified-on: turmeric 0.22.0, main @ 99cc8b3 (post #483 "Allow applied type constructors in defdata constructor fields", #482 by-value parametric struct fields), built from source (build-release)
+verified-on: turmeric 0.22.0, main @ 99cc8b3 (post #483 applied-type defdata fields, #482 by-value parametric struct fields); prototype + generic-cata re-verified @ 97dcd86 (post #487 / gap G6 generic-cata carrier fix), built from source (build-release)
 ---
 
 # Track C U5 — can it be done after the recent turmeric fixes?
@@ -133,25 +133,26 @@ bindings). It ships:
 - `ReF a` sum functor + `Functor [ReF]` instance,
 - a by-value fixed point `Re = Roll (ReF Re)` (enabled by #483),
 - a generic `re-cata` (cata-via-`fmap`),
-- folds `re-size` / `re-nullable?` / `re->str` and a backtracking
-  `re-matches?`.
+- value folds `re-size` / `re-nullable?` / `re->str`, each a plain F-algebra
+  over the single `re-cata`, plus a backtracking `re-matches?`.
 
-**14/14 tests green** against from-source `tur` @ `99cc8b3`.
+**14/14 tests green** against from-source `tur` @ `97dcd86`.
 
-Two things the prototype surfaced:
+Updated 2026-06-21 (post #487): the generic-`cata` miscompile this prototype
+first surfaced was tracked as gap **G6** and is now **fixed** — `re-cata` runs
+correctly at int / bool / cstr carriers, so all three value folds go through it
+(no more direct-recursion fallback). The closure-capture gap that also blocked
+the matcher was fixed alongside G6. Verified directly: `(= 4 (re-cata size-alg
+e))` → true; `re-cata null-alg (Alt L Empty)` → true; `re-cata str-alg` →
+`((a|b))*c`; returned-closure-capturing-closures → correct.
 
-1. The generic `re-cata` (the U5 ideal — every fold is one F-algebra) **type
-   checks but miscompiles at runtime**: boxed/mis-typed results at `int`/`bool`
-   carriers (so `(= 6 (re-cata size-alg e))` is false) and a **segfault at the
-   `cstr` carrier** (mis-cast `fmap` closure thunk). Filed as a turmeric report
-   (see below). The shipped folds therefore use direct structural recursion —
-   the same algebras, inlined — which is correct and fast.
-2. The matcher must be direct recursion too: the pure-cata form pre-builds
-   child matchers and captures them in a returned closure, which mis-emits the
-   captured binding in C (closure-capture codegen gap, W3-adjacent).
-
-So U5 on regex is **done and green today** via direct structural folds; the
-generic-`cata` ergonomics wait on the codegen fix below.
+**One narrow edge remains** (matcher only): `re-cata` does not yet thread a
+**function-typed carrier** `B`. The "NFA is one cata" form uses a matcher
+closure `(fn [k s] bool)` as the carrier; that type-checks but `(re-cata
+match-alg e)` comes back as `int` (`error: expression in call head has type
+int, which is not callable`). So `re-matches?` stays direct structural
+recursion. This is the next thing to file if the function-carrier cata is
+wanted.
 
 ---
 
@@ -160,13 +161,16 @@ generic-`cata` ergonomics wait on the codegen fix below.
 - Blocker filed 2026-06-21 ("`defdata` constructor fields reject applied type
   constructors") — **RESOLVED by #483**; secondary single-param kind issue
   resolved too.
-- **NEW, outstanding:** generic catamorphism via `Functor` `fmap` miscompiles
-  at runtime (boxed `int`/`bool` results; `cstr`-carrier segfault from a
-  mis-cast closure thunk). Repro in the regex prototype; to be filed under
-  turmeric `docs/reported/hkt-fmap-cata-carrier-miscompile.md` from a
-  turmeric-rooted session.
-- Lower priority: closure-capture codegen gap when a returned closure captures
-  `let`-bound folded closures (blocks the pure-cata matcher; W3-adjacent).
+- Generic catamorphism via `Functor` `fmap` miscompile (boxed `int`/`bool`
+  results; `cstr`-carrier segfault) — **RESOLVED**: tracked as gap G6, fixed by
+  #487 (spec-selection by result type + per-carrier cloning of the recursive
+  `fmap` closure). Report archived at
+  `rjungemann/turmeric:docs/archive/hkt-fmap-cata-carrier-miscompile.md`.
+- The closure-capture codegen gap (returned closure capturing `let`-bound
+  folded closures) — **RESOLVED** alongside G6.
+- **NEW, narrow:** `re-cata` does not thread a function-typed carrier `B` (see
+  the matcher note above). Not yet filed; only matters for the closure-carrier
+  "NFA is one cata" form, which has a clean direct-recursion alternative.
 
 The layer `(:: ...)` and `vec-get` ascriptions remain annotation-level and do
 not warrant a report.
