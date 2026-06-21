@@ -123,11 +123,50 @@ ergonomics pass.
 
 ---
 
-## Status of the turmeric report
+## Prototype landed: `regex/tree` (U5 proof-of-concept)
 
-The blocker filed on 2026-06-21 ("`defdata` constructor fields reject
-applied type constructors") is **RESOLVED by #483** and the secondary
-single-param kind issue is resolved too. No turmeric report is outstanding.
-The four residual edges above are annotation-level and do not warrant a
-report unless a U5 spice PR finds one of them load-bearing.
-</content>
+`spices/regex/src/regex/tree.tur` + `spices/regex/tests/tree_test.tur` are a
+working U5 prototype (regex is PCRE2-backed with no Turmeric IR, so this is a
+new self-contained recursion-schemes surface, not a refactor of the
+bindings). It ships:
+
+- `ReF a` sum functor + `Functor [ReF]` instance,
+- a by-value fixed point `Re = Roll (ReF Re)` (enabled by #483),
+- a generic `re-cata` (cata-via-`fmap`),
+- folds `re-size` / `re-nullable?` / `re->str` and a backtracking
+  `re-matches?`.
+
+**14/14 tests green** against from-source `tur` @ `99cc8b3`.
+
+Two things the prototype surfaced:
+
+1. The generic `re-cata` (the U5 ideal — every fold is one F-algebra) **type
+   checks but miscompiles at runtime**: boxed/mis-typed results at `int`/`bool`
+   carriers (so `(= 6 (re-cata size-alg e))` is false) and a **segfault at the
+   `cstr` carrier** (mis-cast `fmap` closure thunk). Filed as a turmeric report
+   (see below). The shipped folds therefore use direct structural recursion —
+   the same algebras, inlined — which is correct and fast.
+2. The matcher must be direct recursion too: the pure-cata form pre-builds
+   child matchers and captures them in a returned closure, which mis-emits the
+   captured binding in C (closure-capture codegen gap, W3-adjacent).
+
+So U5 on regex is **done and green today** via direct structural folds; the
+generic-`cata` ergonomics wait on the codegen fix below.
+
+---
+
+## Status of the turmeric reports
+
+- Blocker filed 2026-06-21 ("`defdata` constructor fields reject applied type
+  constructors") — **RESOLVED by #483**; secondary single-param kind issue
+  resolved too.
+- **NEW, outstanding:** generic catamorphism via `Functor` `fmap` miscompiles
+  at runtime (boxed `int`/`bool` results; `cstr`-carrier segfault from a
+  mis-cast closure thunk). Repro in the regex prototype; to be filed under
+  turmeric `docs/reported/hkt-fmap-cata-carrier-miscompile.md` from a
+  turmeric-rooted session.
+- Lower priority: closure-capture codegen gap when a returned closure captures
+  `let`-bound folded closures (blocks the pure-cata matcher; W3-adjacent).
+
+The layer `(:: ...)` and `vec-get` ascriptions remain annotation-level and do
+not warrant a report.
