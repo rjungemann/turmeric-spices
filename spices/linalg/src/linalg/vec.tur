@@ -50,16 +50,14 @@
 (defn la-vec-wrap [d : (Vec float)] : lavec
   (let [n (vec-len d)] (make-struct lavec n d)))
 
-;;; Private: recursive push helper for the la-vec-of macro.
-(defmacro __lvpush [d & xs]
-  (if (empty? xs)
-    d
-    (list do (list vec-push! d (first xs)) (list __lvpush d ~@(rest xs)))))
-
 ;;; la-vec-of -- build a lavec from a literal list of float elements.
 ;;;   (la-vec-of 1.0 2.0 3.0)  ; => length-3 vector
+;;; Lowers through the stdlib `(vec-of ...)` float-literal builder (turmeric
+;;; main #473 made `vec-of`/`list` element-type-polymorphic). This retired the
+;;; hand-rolled `__lvpush` push-loop macro that existed only because a float
+;;; `(Vec float)` literal could not be spelled before.
 (defmacro la-vec-of [& xs]
-  `(la-vec-wrap (let [d (:: (vec-new) (Vec float))] (__lvpush d ~@xs) d)))
+  `(la-vec-wrap (:: (vec-of ~@xs) (Vec float))))
 
 ;;; la-vec-len -- number of elements.
 (defn la-vec-len [^borrow v : lavec] : int (.len v))

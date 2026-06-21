@@ -41,17 +41,13 @@
 (defn mat-wrap [rows : int  cols : int  d : (Vec float)] : mat
   (make-struct mat rows cols d))
 
-;;; Private: recursive push helper for the mat-of macro.
-(defmacro __mpush [d & xs]
-  (if (empty? xs)
-    d
-    (list do (list vec-push! d (first xs)) (list __mpush d ~@(rest xs)))))
-
 ;;; mat-of -- build a rows x cols matrix from row-major float literals.
 ;;;   (mat-of 2 2  1.0 2.0  3.0 4.0)
+;;; Lowers through the stdlib `(vec-of ...)` float-literal builder (turmeric
+;;; main #473), retiring the hand-rolled `__mpush` push-loop that existed only
+;;; because a `(Vec float)` literal could not be spelled before.
 (defmacro mat-of [rows cols & xs]
-  `(mat-wrap ~rows ~cols
-     (let [d (:: (vec-new) (Vec float))] (__mpush d ~@xs) d)))
+  `(mat-wrap ~rows ~cols (:: (vec-of ~@xs) (Vec float))))
 
 ;;; mat-rows / mat-cols -- shape accessors.
 (defn mat-rows [^borrow m : mat] : int (.rows m))
