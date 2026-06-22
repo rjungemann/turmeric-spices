@@ -1,16 +1,16 @@
 ;; Decode [(Option A)]: JSON null -> none, else decode A wrapped in some.
-;; Plus nested-container *encode* (Vec of Option), unblocked by turmeric
-;; #492 (by-value-struct Result) and #493 (nested element dispatch).
-;;
-;; NOTE: nested *decode* of a by-value-struct element -- decoding into a
-;; (Vec (Option int)) -- still hits the Vec-of-by-value-struct push path and
-;; is not exercised here; scalar Option decode and nested Option *encode* are.
+;; Plus nested containers (Vec of Option) round-tripping end-to-end, unblocked
+;; by turmeric #492 (by-value-struct Result), #493 (nested element dispatch),
+;; and #495 (by-value-struct element into a generic loop's (Vec A)).
 ;;
 ;; Expected:
 ;;   7
 ;;   none
 ;;   decode int: not an integer
 ;;   [5,null]
+;;   2
+;;   5
+;;   none
 
 (defmodule decode_option_test (export)
 (import json/encode :refer [derive-json])
@@ -44,4 +44,17 @@
     (vec-push! v (:: (some 5) (Option int)))
     (vec-push! v (:: (none) (Option int)))
     (println (encode v)))
+
+  ;; nested decode: [5,null] -> (Vec (Option int))
+  (let [d (unsafe (json-parse-doc "[5,null]"))
+        r (:: (decode d (unsafe (json-doc-root d))) (Result (Vec (Option int)) cstr))]
+    (if (.is-ok r)
+      (let [v  (ok-val r)
+            e0 (:: (vec-get v 0) (Option int))
+            e1 (:: (vec-get v 1) (Option int))]
+        (println (vec-len v))
+        (if (.is-some e0) (println (:: (.value e0) :int)) (println "none"))
+        (if (.is-some e1) (println "some?!") (println "none")))
+      (println "ERR"))
+    (unsafe (json-doc-free d)))
   0))
