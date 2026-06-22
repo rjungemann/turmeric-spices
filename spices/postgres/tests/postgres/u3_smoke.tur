@@ -1,0 +1,45 @@
+;; tests/postgres/u3_smoke.tur -- U3 row-typed result surface (postgres/typed).
+;;
+;; This test stays row-*polymorphic*: it wraps a raw Rows as a `TRows`
+;; newtype and reads its handle back through the typed accessor without
+;; ever naming a concrete `#row{...}` shape. That keeps the type-level
+;; shape exercised without `-Xdata-literals` (mirroring
+;; sqlite/tests/u3_smoke.tur and frame/tests/frame/typed_test.tur).
+;;
+;; The compile-time schema-mismatch guarantee -- a `TRows` of one column
+;; row being rejected where another is expected (TUR-E0001) -- is the U3
+;; "negative fixture" deliverable, validated by hand on a concrete
+;; `#row{...}` literal under `-Xdata-literals` (see
+;; tests/errors/postgres-trows-row-mismatch.tur); the harness for running
+;; compile-fail fixtures inline is plan P5 and is not yet landed.
+;;
+;; The underlying postgres/row functions are NOT invoked here -- doing so
+;; would need libpq + a live PGresult. We only round-trip the int handle
+;; through the typed wrapper to prove the phantom-row newtype elaborates
+;; and erases at codegen.
+
+(defmodule postgres/tests/u3-smoke
+  (import postgres/row   :refer [Rows])
+  (import postgres/typed :refer [TRows trows-of trows-handle]))
+
+;; Mint an opaque Rows from a raw int (no libpq needed).
+(defn __mk-rows [h : int] : Rows ```c return (int64_t)h; ```)
+
+;; Row-polymorphic round-trip: any TRows shape's underlying int handle
+;; survives a wrap + unwrap. The smallest end-to-end check that the
+;; phantom-row newtype erases at codegen.
+(defn round-trip [^&cols] [r : (TRows cols)] : int
+  (trows-handle r))
+
+(defn tap [idx : int name : cstr ok : bool] #{Unsafe} : int
+  ```c
+  printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+                            (long long)idx, (const char *)name);
+  return ok ? 0 : 1;
+  ```)
+
+(defn main [] : int
+  (let [r  (__mk-rows 42)
+        tr (trows-of r)
+        h  (round-trip tr)]
+    (unsafe (tap 1 "TRows round-trip preserves the handle" (= h 42)))))
