@@ -1,0 +1,45 @@
+;; sqlite/tests/u3_smoke.tur -- U3 row-typed Stmt surface (sqlite/typed).
+;;
+;; This test stays row-*polymorphic*: it wraps a raw Stmt as a `TStmt`
+;; newtype and reads its handle back through the typed delegating
+;; accessors without ever naming a concrete `#row{...}` shape. That
+;; keeps the suite runnable under the default `tur test` (no
+;; `-Xdata-literals` needed, mirroring frame/tests/frame/typed_test.tur).
+;;
+;; The compile-time schema-mismatch guarantee -- a `TStmt` of one
+;; bind/column row being rejected where another is expected (TUR-E0001)
+;; -- is the U3 "negative fixture" deliverable, validated by hand on a
+;; concrete `#row{...}` literal under `-Xdata-literals`; the harness for
+;; running compile-fail fixtures inline is plan §P5 and is not yet
+;; landed.
+;;
+;; The underlying sqlite/stmt and sqlite/row functions are NOT actually
+;; invoked here -- this test would otherwise need libsqlite3 + an open
+;; db. We only round-trip the int handle through the typed wrapper to
+;; prove the type-level shape elaborates and runs.
+
+(defmodule sqlite/tests/u3-smoke
+  (import sqlite/db    :refer [Stmt])
+  (import sqlite/typed :refer [TStmt tstmt-of tstmt-handle]))
+
+;; Mint an opaque Stmt from a raw int (no libsqlite3 needed).
+(defn __mk-stmt [h : int] : Stmt ```c return (int64_t)h; ```)
+
+;; Row-polymorphic round-trip: any TStmt shape's underlying int handle
+;; survives a wrap + unwrap. This is the smallest possible end-to-end
+;; check that the phantom-row newtype erases at codegen.
+(defn round-trip [^&params ^&cols] [s : (TStmt params cols)] : int
+  (tstmt-handle s))
+
+(defn tap [idx : int name : cstr ok : bool] #{Unsafe} : int
+  ```c
+  printf("%s %lld - %s\n", ok ? "ok" : "not ok",
+                            (long long)idx, (const char *)name);
+  return ok ? 0 : 1;
+  ```)
+
+(defn main [] : int
+  (let [s  (__mk-stmt 42)
+        ts (tstmt-of s)
+        h  (round-trip ts)]
+    (unsafe (tap 1 "TStmt round-trip preserves the handle" (= h 42)))))
