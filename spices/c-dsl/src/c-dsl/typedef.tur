@@ -4,7 +4,7 @@
   (export c-field c-defstruct c-defunion c-defenum c-typedef)
 
   (import c-dsl/codegen :refer [c-sprintf1 c-sprintf2 c-join])
-  (import c-dsl/types   :refer [c-type])
+  (import c-dsl/types   :refer [c-type CField])
 
 ;;; c-field -- format a single struct/union field declaration.
 ;;;
@@ -19,9 +19,16 @@
 ;;;   (c-field "x" ":int")    ; => "int32_t x;"
 ;;;   (c-field "name" ":cstr") ; => "char* name;"
 ;;;
-;;; Since: P1
-(defn c-field [name : cstr type : cstr] : cstr
-  (c-sprintf2 "%s %s;" (c-type type) name))
+;; Wrap a formatted cstr as a CField. The newtype is layout-equal to its
+;; underlying :int (which is how cstrs lower), so this is a no-op at runtime.
+(defn __cfield-of [s : cstr] : CField
+  ```c
+  return (int64_t)(intptr_t)s;
+  ```)
+
+;;; Since: P1 (return type tightened to CField in U6)
+(defn c-field [name : cstr type : cstr] : CField
+  (__cfield-of (c-sprintf2 "%s %s;" (c-type type) name)))
 
 ;;; c-defstruct -- emit a typedef struct definition.
 ;;;
@@ -37,8 +44,10 @@
 ;;;     (cons (c-field "x" ":int") (cons (c-field "y" ":int") 0)))
 ;;;   ; => "typedef struct {\n    int32_t x;\n    int32_t y;\n} Point;"
 ;;;
-;;; Since: P1
-(defn c-defstruct [name : cstr fields : int] : cstr
+;; Fixed-arity inline-C impl. The variadic public wrapper below forwards
+;; its rest cons-list as `fields`. (Variadic bodies cannot contain inline-C
+;; per CLAUDE.md; the inline-C must live in a fixed-arity helper.)
+(defn __c-defstruct-impl [name : cstr fields : int] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -70,6 +79,12 @@
   return out;
   ```)
 
+;;; Since: P1 (variadic typed in U6)
+;;; Example (U6):
+;;;   (c-defstruct "Point" (c-field "x" ":int") (c-field "y" ":int"))
+(defn c-defstruct [name : cstr & fields : CField] : cstr
+  (__c-defstruct-impl name fields))
+
 ;;; c-defunion -- emit a typedef union definition.
 ;;;
 ;;; Parameters:
@@ -83,8 +98,7 @@
 ;;;   (c-defunion "Value"
 ;;;     (cons (c-field "i" ":int") (cons (c-field "f" ":float") 0)))
 ;;;
-;;; Since: P1
-(defn c-defunion [name : cstr fields : int] : cstr
+(defn __c-defunion-impl [name : cstr fields : int] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -114,6 +128,10 @@
   *p++ = ';'; *p = '\0';
   return out;
   ```)
+
+;;; Since: P1 (variadic typed in U6)
+(defn c-defunion [name : cstr & fields : CField] : cstr
+  (__c-defunion-impl name fields))
 
 ;;; c-defenum -- emit a typedef enum definition.
 ;;;

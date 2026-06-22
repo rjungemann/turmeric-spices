@@ -5,7 +5,7 @@
 
   (import c-dsl/codegen :refer [c-cat2 c-cat3 c-cat4 c-sprintf1 c-sprintf2
                                  c-sprintf3 c-sprintf4 c-join c-indent])
-  (import c-dsl/types   :refer [c-type])
+  (import c-dsl/types   :refer [c-type CParam])
 
 ;;; c-param -- format a single function parameter declaration.
 ;;;
@@ -20,9 +20,15 @@
 ;;;   (c-param "x" ":int")    ; => "int32_t x"
 ;;;   (c-param "s" ":cstr")   ; => "char* s"
 ;;;
-;;; Since: P1
-(defn c-param [name : cstr type : cstr] : cstr
-  (c-sprintf2 "%s %s" (c-type type) name))
+;; Wrap a formatted cstr as a CParam newtype (no-op at runtime).
+(defn __cparam-of [s : cstr] : CParam
+  ```c
+  return (int64_t)(intptr_t)s;
+  ```)
+
+;;; Since: P1 (return type tightened to CParam in U6)
+(defn c-param [name : cstr type : cstr] : CParam
+  (__cparam-of (c-sprintf2 "%s %s" (c-type type) name)))
 
 ;;; __c-defn-impl -- build a function definition with an optional prefix.
 ;;; prefix: "" for normal, "static " for static, "static inline " for inline.
@@ -101,8 +107,12 @@
 ;;;     (c-return (c-binop "*" "x" "x")))
 ;;;   ; => "int32_t square(int32_t x) {\n    return (x * x);\n}"
 ;;;
-;;; Since: P1
-(defn c-defn [name : cstr params : int ret : cstr body : cstr] : cstr
+;;; Since: P1 (variadic typed in U6)
+;;; Example (U6):
+;;;   (c-defn "square" ":int" "return x*x;" (c-param "x" ":int"))
+;;; Param order: name, ret, body, & params -- params trail because they are
+;;; variadic; the runtime body still appears positionally before them.
+(defn c-defn [name : cstr ret : cstr body : cstr & params : CParam] : cstr
   (__c-defn-impl "" name params (c-type ret) body))
 
 ;;; c-defn-static -- emit a static C function definition.
@@ -114,7 +124,7 @@
 ;;;   body   -- function body string
 ;;;
 ;;; Since: P1
-(defn c-defn-static [name : cstr params : int ret : cstr body : cstr] : cstr
+(defn c-defn-static [name : cstr ret : cstr body : cstr & params : CParam] : cstr
   (__c-defn-impl "static " name params (c-type ret) body))
 
 ;;; c-defn-inline -- emit a static inline C function definition.
@@ -126,7 +136,7 @@
 ;;;   body   -- function body string
 ;;;
 ;;; Since: P1
-(defn c-defn-inline [name : cstr params : int ret : cstr body : cstr] : cstr
+(defn c-defn-inline [name : cstr ret : cstr body : cstr & params : CParam] : cstr
   (__c-defn-impl "static inline " name params (c-type ret) body))
 
 ;;; c-call -- emit a C function call expression.

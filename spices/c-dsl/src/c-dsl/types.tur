@@ -1,9 +1,26 @@
 ;; c-dsl/types.tur -- Turmeric type keyword to C type string mapping.
 
 (defmodule c-dsl/types
-  (export c-type c-ptr-type c-arr-type c-fn-type c-const-type c-volatile-type)
+  (export c-type c-ptr-type c-arr-type c-fn-type c-const-type c-volatile-type
+          CField CParam cfield->cstr cparam->cstr)
 
   (import c-dsl/codegen :refer [c-cat2 c-cat3 c-join c-int->str])
+
+  ;;; CField -- a typed field declaration string emitted by `c-field`.
+  ;;; The runtime representation is the same `char *` the old `c-field`
+  ;;; returned, but it is wrapped in a defopaque newtype so the typed
+  ;;; variadic builders (`c-defstruct`/`c-defunion`) reject anything that
+  ;;; was not produced by `c-field`. (U6 -- Track C / typed variadic builders.)
+  (defopaque CField :int)
+
+  ;;; CParam -- a typed function-parameter declaration string emitted by
+  ;;; `c-param`. Same opaque-wrapping rationale as `CField`, for the
+  ;;; `c-defn`/`c-defn-static`/`c-defn-inline` variadic builders.
+  (defopaque CParam :int)
+
+  ;;; cfield->cstr / cparam->cstr -- unwrap the underlying formatted cstr.
+  (defn cfield->cstr [f : CField] : cstr ```c return (const char *)(intptr_t)f; ```)
+  (defn cparam->cstr [p : CParam] : cstr ```c return (const char *)(intptr_t)p; ```)
 
 ;;; c-type -- map a Turmeric type keyword string to a C99 type string.
 ;;;
