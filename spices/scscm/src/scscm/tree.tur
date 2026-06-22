@@ -1,0 +1,192 @@
+;; scscm/tree.tur -- a pure-Turmeric S-expression AST as `Fix SxF`, with one
+;; generic catamorphism (`sx-cata`) that the value folds are expressed through.
+;;
+;; This is the Track C **U5** ("HKT recursion for ASTs") surface for the scscm
+;; spice. It is intentionally *independent* of the C-backed parser in
+;; `scscm/parser.tur`: that module hand-rolls an `ASTNode` tree behind :int
+;; handles with twelve kind codes and a per-kind accessor each
+;; (`ast-kind` / `ast-symbol-name` / `ast-number-value` / `ast-list-len` /
+;; `ast-list-get` / ...), and every pass over it is open-coded against those
+;; accessors -- exactly the "recursive AST hand-rolled with N accessor
+;; functions per node kind" the U5 rubric targets. Rather than rewrite the
+;; live compiler pipeline, U5 here is a new, self-contained recursion-schemes
+;; surface (the same shape `regex/tree.tur` ships), proving the AST collapses
+;; to one functor + one `cata` with the folds as plain F-algebras.
+;;
+;; The representation is the classic Lisp one: every S-expression is either an
+;; atom (nil / bool / number / string / symbol) or a `cons` pair, so proper
+;; lists are nested conses ending in nil. That keeps every recursive child in a
+;; fixed-arity by-value position (`ConsF a a`), mirroring regex's `AltF a a` /
+;; `CatF a a` -- no variadic `(List a)` child, so the functor and `fmap` stay
+;; a single uniform `match`.
+;;
+;; What it demonstrates (all enabled by turmeric #483 "applied type
+;; constructors in defdata constructor fields", generic-cata codegen fixed by
+;; #487 / gap G6, layer refinement post #489..#497):
+;;   * a sum functor `SxF a` whose recursive children sit in by-value
+;;     positions (`ConsF a a`),
+;;   * a by-value fixed point `Sx = Roll (SxF Sx)` (no :int carrier),
+;;   * a `Functor [SxF]` instance and a generic `sx-cata` (cata-via-`fmap`),
+;;   * value folds (`sx-size`, `sx-depth`, `sx->sexp`) expressed as plain
+;;     F-algebras over the single `sx-cata` driver -- no per-node scaffolding,
+;;     at int and cstr carriers.
+;;
+;; The one printer that does NOT go through `sx-cata` is `sx->pretty`: a pure
+;; catamorphism over `cstr` cannot distinguish a proper list `(a b c)` from a
+;; dotted chain `(a . (b . (c . ())))`, because by the time the algebra sees a
+;; `ConsF` node its cdr has already collapsed to a finished string -- the
+;; structure that says "this tail is itself a list" is gone. So idiomatic
+;; proper-list printing stays direct structural recursion over the tree (the
+;; same way `regex/tree.tur`'s matcher stays structural). The cata-based
+;; `sx->sexp` still serializes every value -- it just emits the fully-explicit
+;; dotted form, which is the honest thing a structure-blind fold can produce.
+;;
+;; Since: U5
+
+(defmodule scscm/tree
+  (export SxF Sx
+          sx-nil sx-bool sx-num sx-str sx-sym sx-cons
+          sx-list1 sx-list2 sx-list3
+          sx-cata sx-size sx-depth sx->sexp sx->pretty)
+
+  ;; --- one layer of an S-expression ---------------------------------------
+  ;; `:copy` so an immutable AST value can be folded more than once (the nodes
+  ;; are heap pointers into an immutable tree; copying the handle is sound),
+  ;; matching regex/tree's `ReF`.
+  (defdata SxF :copy [a]
+    (NilF)          ;; ()  -- empty list / nil
+    (BoolF :bool)   ;; #t / #f
+    (NumF :float)   ;; numeric literal
+    (StrF :cstr)    ;; "string" literal
+    (SymF :cstr)    ;; a symbol
+    (ConsF a a))    ;; a cons pair (car . cdr); lists are nested conses
+
+  ;; --- by-value fixed point:  Sx ~= SxF Sx --------------------------------
+  ;; The monomorphic inlining of `Fix SxF`. Needs #483 to carry the applied
+  ;; `(SxF Sx)` field by value.
+  (defdata Sx :copy (Roll (SxF Sx)))
+
+  ;; --- Functor: map over the recursive (car / cdr) positions --------------
+  (definstance Functor [SxF]
+    (fmap [c g]
+      (match c
+        (NilF)      (NilF)
+        (BoolF b)   (BoolF b)
+        (NumF n)    (NumF n)
+        (StrF s)    (StrF s)
+        (SymF s)    (SymF s)
+        (ConsF a d) (ConsF (g a) (g d)))))
+
+  ;; unwrap one layer, recovering the recursive element type. As in regex/tree,
+  ;; matching `(Roll l)` refines `l`'s recursion slot directly post #489..#497
+  ;; (no `(:: l (SxF Sx))` ascription needed).
+  (defn unroll-sx [e : Sx] : (SxF Sx)
+    (match e (Roll l) l))
+
+  ;; --- the generic catamorphism (the U5 ideal) ----------------------------
+  ;; cata alg = alg . fmap (cata alg) . unroll
+  ;; Polymorphic in the carrier B, so a fold is *just* an F-algebra
+  ;; `(SxF B) -> B` handed to this single driver -- no per-node scaffolding.
+  ;; The `(:: ... (SxF B))` ascription pins `fmap`'s result type, exactly as
+  ;; regex/tree's `re-cata` does.
+  (defn sx-cata [B] [alg : (fn [(SxF B)] B) e : Sx] : B
+    (alg (:: (fmap (unroll-sx e) (fn [c : Sx] : B (sx-cata alg c))) (SxF B))))
+
+  ;; --- smart constructors -------------------------------------------------
+  (defn sx-nil  []              : Sx (Roll (NilF)))
+  (defn sx-bool [b : bool]      : Sx (Roll (BoolF b)))
+  (defn sx-num  [n : float]     : Sx (Roll (NumF n)))
+  (defn sx-str  [s : cstr]      : Sx (Roll (StrF s)))
+  (defn sx-sym  [s : cstr]      : Sx (Roll (SymF s)))
+  (defn sx-cons [a : Sx d : Sx] : Sx (Roll (ConsF a d)))
+  ;; proper-list builders (nested conses ending in nil)
+  (defn sx-list1 [a : Sx]               : Sx (sx-cons a (sx-nil)))
+  (defn sx-list2 [a : Sx b : Sx]        : Sx (sx-cons a (sx-cons b (sx-nil))))
+  (defn sx-list3 [a : Sx b : Sx c : Sx] : Sx (sx-cons a (sx-cons b (sx-cons c (sx-nil)))))
+
+  ;; --- C helpers for the cstr folds ---------------------------------------
+  (defn cat2 [a : cstr b : cstr] : cstr
+    ```c
+    size_t la = strlen((const char *)a), lb = strlen((const char *)b);
+    char *o = malloc(la + lb + 1);
+    memcpy(o, (const char *)a, la);
+    memcpy(o + la, (const char *)b, lb);
+    o[la + lb] = '\0';
+    return o;
+    ```)
+  ;; format a number the way a Scheme reader would accept it (%g: 440.0 ->
+  ;; "440", 0.5 -> "0.5").
+  (defn num->cstr [n : float] : cstr
+    ```c
+    char *o = malloc(32);
+    snprintf(o, 32, "%g", (double)n);
+    return o;
+    ```)
+  ;; wrap a string-literal payload in double quotes (no inner escaping -- the
+  ;; folds here are a demonstration surface, not a full reader/printer).
+  (defn quote-str [s : cstr] : cstr (cat2 (cat2 "\"" s) "\""))
+  (defn imax [a : int b : int] : int (if (> a b) a b))
+
+  ;; --- value folds, each an F-algebra over the single sx-cata -------------
+
+  ;; node count (every atom and every cons counts 1)
+  (defn size-alg [l : (SxF int)] : int
+    (match l
+      (NilF)      1
+      (BoolF b)   1
+      (NumF n)    1
+      (StrF s)    1
+      (SymF s)    1
+      (ConsF a d) (+ 1 (+ a d))))
+  (defn sx-size [e : Sx] : int (sx-cata size-alg e))
+
+  ;; structural depth (atoms = 1; a cons is 1 + the deeper of car / cdr)
+  (defn depth-alg [l : (SxF int)] : int
+    (match l
+      (NilF)      1
+      (BoolF b)   1
+      (NumF n)    1
+      (StrF s)    1
+      (SymF s)    1
+      (ConsF a d) (+ 1 (imax a d))))
+  (defn sx-depth [e : Sx] : int (sx-cata depth-alg e))
+
+  ;; serialize to fully-explicit dotted-pair form via the generic cata. A
+  ;; structure-blind fold cannot tell a list tail from an atom tail, so it
+  ;; always emits the dotted spelling, e.g. (+ 1 2) -> "(+ . (1 . (2 . ())))".
+  (defn sexp-alg [l : (SxF cstr)] : cstr
+    (match l
+      (NilF)      "()"
+      (BoolF b)   (if b "#t" "#f")
+      (NumF n)    (num->cstr n)
+      (StrF s)    (quote-str s)
+      (SymF s)    s
+      (ConsF a d) (cat2 (cat2 (cat2 (cat2 "(" a) " . ") d) ")")))
+  (defn sx->sexp [e : Sx] : cstr (sx-cata sexp-alg e))
+
+  ;; --- idiomatic proper-list printer (direct structural recursion) --------
+  ;; Mutually recursive with `pretty-tail`: `sx->pretty` renders one datum;
+  ;; `pretty-tail` renders the rest of a cdr-chain, choosing " x" (still a
+  ;; list) vs " . x" (improper/atom tail). This is the pass that needs the
+  ;; structure `sx-cata` erases, so -- like regex/tree's matcher -- it stays
+  ;; outside the cata.
+  (defn sx->pretty [e : Sx] : cstr
+    (match (unroll-sx e)
+      (NilF)      "()"
+      (BoolF b)   (if b "#t" "#f")
+      (NumF n)    (num->cstr n)
+      (StrF s)    (quote-str s)
+      (SymF s)    s
+      (ConsF a d) (cat2 (cat2 "(" (cat2 (sx->pretty a) (pretty-tail d))) ")")))
+
+  (defn pretty-tail [e : Sx] : cstr
+    (match (unroll-sx e)
+      (NilF)      ""                                  ;; proper list ends here
+      (ConsF a d) (cat2 (cat2 " " (sx->pretty a)) (pretty-tail d))
+      ;; an atom in cdr position -> improper tail, print " . atom"
+      (BoolF b)   (cat2 " . " (sx->pretty e))
+      (NumF n)    (cat2 " . " (sx->pretty e))
+      (StrF s)    (cat2 " . " (sx->pretty e))
+      (SymF s)    (cat2 " . " (sx->pretty e))))
+
+) ;; end defmodule scscm/tree
