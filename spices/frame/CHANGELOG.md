@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `frame/typed` -- a row-typed `Frame` newtype (Track C / phase U3). `Frame`
+  carries its column-set as a phantom kind-`[*]` row argument over the raw
+  `:int` frame handle, so a function pinned to a concrete schema
+  (`(Frame #row{id : int  name : cstr})`) rejects a frame with any other
+  column-set row at the elaborator (TUR-E0001) instead of missing a lookup at
+  runtime. The row erases at codegen; the newtype's carrier is `:int`, so
+  coercions stay free. `frame-typed` / `frame-handle` wrap and unwrap; typed
+  delegates (`tframe-nrows`, `tcol-int32-at`, `tcol-utf8-at`, ...) thread the
+  row through the existing untyped API. Naming a concrete `#row{...}` at a
+  call site requires `-Xdata-literals`; the module's own definitions are
+  row-polymorphic and need no flag.
+
 ## 0.2.0
 
 ### Breaking changes

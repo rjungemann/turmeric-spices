@@ -21,8 +21,7 @@
 ;;       r))
 
 (defmodule json/decode
-  (export json-parse-doc json-doc-free json-doc-root json-obj-get
-          json-arr? json-null? json-arr-len json-arr-get)
+  (export json-parse-doc json-doc-free json-doc-root json-obj-get)
 
 ;; -----------------------------------------------------------------------------
 ;; Doc + value handles.
@@ -86,41 +85,6 @@
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
   if (!v || !key) return (int64_t)0;
   return (int64_t)(intptr_t)yyjson_obj_get(v, (const char *)key);
-  ```)
-
-;;; json-arr? -- true if the value at `val` is a JSON array.
-(defn json-arr? [val : int] #{Unsafe} : bool
-  ```c
-  #include <yyjson.h>
-  yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  return v != NULL && yyjson_is_arr(v);
-  ```)
-
-;;; json-null? -- true if the value at `val` is JSON `null` (or a null handle,
-;;; i.e. a missing field). Used by `Decode [(Option A)]` to map null -> none.
-(defn json-null? [val : int] #{Unsafe} : bool
-  ```c
-  #include <yyjson.h>
-  yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  return v == NULL || yyjson_is_null(v);
-  ```)
-
-;;; json-arr-len -- number of elements in the array at `val` (0 if not an array).
-(defn json-arr-len [val : int] #{Unsafe} : int
-  ```c
-  #include <yyjson.h>
-  yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  return (int64_t)yyjson_arr_size(v);
-  ```)
-
-;;; json-arr-get -- the i-th element handle of the array at `val`, or 0 if `val`
-;;; is not an array or `i` is out of range. Like all value handles, it is
-;;; borrowed from the owning doc and dangles after `json-doc-free`.
-(defn json-arr-get [val : int  i : int] #{Unsafe} : int
-  ```c
-  #include <yyjson.h>
-  yyjson_val *v = (yyjson_val *)(intptr_t)val;
-  return (int64_t)(intptr_t)yyjson_arr_get(v, (size_t)i);
   ```)
 
 ) ;; end defmodule json/decode

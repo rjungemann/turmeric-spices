@@ -186,20 +186,63 @@
     (set! (.m32 t) (.m23 m)) (set! (.m33 t) (.m33 m))
     t))
 
-;;; mat4-inv -- inverse of a mat4. NOT YET PORTED to v0.21.0 typed structs.
+;;; mat4-inv -- inverse of a mat4. Panics if the matrix is singular.
 ;;;
-;;; The previous implementation computed cofactors by calling `vec3-cross`
-;;; (a 3-vector op) and `vec4-dot` (a 4-vector op) on the SAME column values.
-;;; That only type-checked under the old untyped `:int`-pointer model, where a
-;;; "vec3" and a "vec4" were both just an int handle and the 4th lane was read
-;;; or ignored ad hoc. Under typed `:copy` structs the two ops have distinct,
-;;; non-interchangeable types, so the old body cannot be ported mechanically --
-;;; it needs a type-correct reimplementation (explicit adjugate, or Gaussian
-;;; elimination) landed together with a numerical round-trip test. Until then
-;;; this panics rather than ship unvalidated linear algebra.
-;;; TODO(linalg-u4): reimplement type-correctly with a test.
+;;; Type-correct adjugate method: every algebraic op in this module treats the
+;;; field `m{i}{j}` as the standard (row i, col j) entry (see `mat4-mul`, whose
+;;; body is `C[i][j] = sum_k A[i][k]*B[k][j]` over these fields), so inversion is
+;;; purely structural over the same indexing. We expand the determinant by 2x2
+;;; complementary minors -- `s0..s5` from the top two rows, `c0..c5` from the
+;;; bottom two -- then the adjugate entries reuse those minors. No `vec3`/`vec4`
+;;; ops are involved, so there is no vec3/vec4 type confusion. `mat4-mul` of the
+;;; result with the input round-trips to identity (verified in tests/small.tur).
 (defn mat4-inv [m : mat4] : mat4
-  (panic "mat4-inv: not yet ported to v0.21.0 typed structs (see TODO)"))
+  (let [a00 (.m00 m)  a01 (.m01 m)  a02 (.m02 m)  a03 (.m03 m)
+        a10 (.m10 m)  a11 (.m11 m)  a12 (.m12 m)  a13 (.m13 m)
+        a20 (.m20 m)  a21 (.m21 m)  a22 (.m22 m)  a23 (.m23 m)
+        a30 (.m30 m)  a31 (.m31 m)  a32 (.m32 m)  a33 (.m33 m)
+        ;; 2x2 minors of the top two rows (cols p<q)
+        s0 (- (* a00 a11) (* a01 a10))
+        s1 (- (* a00 a12) (* a02 a10))
+        s2 (- (* a00 a13) (* a03 a10))
+        s3 (- (* a01 a12) (* a02 a11))
+        s4 (- (* a01 a13) (* a03 a11))
+        s5 (- (* a02 a13) (* a03 a12))
+        ;; 2x2 minors of the bottom two rows (cols p<q)
+        c0 (- (* a20 a31) (* a21 a30))
+        c1 (- (* a20 a32) (* a22 a30))
+        c2 (- (* a20 a33) (* a23 a30))
+        c3 (- (* a21 a32) (* a22 a31))
+        c4 (- (* a21 a33) (* a23 a31))
+        c5 (- (* a22 a33) (* a23 a32))
+        ;; determinant via Laplace expansion by complementary minors
+        det (+ (- (+ (- (* s0 c5) (* s1 c4)) (* s2 c3)) (* s4 c1))
+               (+ (* s3 c2) (* s5 c0)))]
+    (when (< (if (< det 0.0) (- 0.0 det) det) 1e-12)
+      (panic "mat4-inv: matrix is singular (determinant ~0)"))
+    (let [id (/ 1.0 det)
+          ;; adjugate entries (cofactor matrix, transposed)
+          b00 (+ (- (* a11 c5) (* a12 c4)) (* a13 c3))
+          b01 (- (- (* a02 c4) (* a01 c5)) (* a03 c3))
+          b02 (+ (- (* a31 s5) (* a32 s4)) (* a33 s3))
+          b03 (- (- (* a22 s4) (* a21 s5)) (* a23 s3))
+          b10 (- (- (* a12 c2) (* a10 c5)) (* a13 c1))
+          b11 (+ (- (* a00 c5) (* a02 c2)) (* a03 c1))
+          b12 (- (- (* a32 s2) (* a30 s5)) (* a33 s1))
+          b13 (+ (- (* a20 s5) (* a22 s2)) (* a23 s1))
+          b20 (+ (- (* a10 c4) (* a11 c2)) (* a13 c0))
+          b21 (- (- (* a01 c2) (* a00 c4)) (* a03 c0))
+          b22 (+ (- (* a30 s4) (* a31 s2)) (* a33 s0))
+          b23 (- (- (* a21 s2) (* a20 s4)) (* a23 s0))
+          b30 (- (- (* a11 c1) (* a10 c3)) (* a12 c0))
+          b31 (+ (- (* a00 c3) (* a01 c1)) (* a02 c0))
+          b32 (- (- (* a31 s1) (* a30 s3)) (* a32 s0))
+          b33 (+ (- (* a20 s3) (* a21 s1)) (* a22 s0))]
+      (make-struct mat4
+        (* b00 id) (* b01 id) (* b02 id) (* b03 id)
+        (* b10 id) (* b11 id) (* b12 id) (* b13 id)
+        (* b20 id) (* b21 id) (* b22 id) (* b23 id)
+        (* b30 id) (* b31 id) (* b32 id) (* b33 id)))))
 
 ;;; vec3->vec4 -- promote a vec3 to vec4 with w=1.0 -- Returns: vec4
 (defn vec3->vec4 [v : vec3] : vec4

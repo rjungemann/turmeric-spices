@@ -13,21 +13,8 @@
           mat-mul-vec mat-transpose mat-trace mat-norm-fro mat-norm-max
           mat-square? mat-approx-eq? la-vec-outer)
 
-  (import linalg/vec :refer [lavec la-vec-new la-vec-len la-vec-get la-vec-set!])
-
-;; Math helpers via libm. turmeric links `-lm` unconditionally since main
-;; #471, so this pure spice can call `sqrt`/`fabs` directly -- the prior
-;; libm-free Newton-Raphson / branch fallbacks are retired.
-(defn la-sqrt [x : float] : float
-  ```c
-  #include <math.h>
-  return x <= 0.0 ? 0.0 : sqrt(x);
-  ```)
-(defn la-fabs [x : float] : float
-  ```c
-  #include <math.h>
-  return fabs(x);
-  ```)
+  (import linalg/vec :refer [lavec la-vec-new la-vec-len la-vec-get la-vec-set!
+                             sqrt fabs])
 
 ;;; mat -- a row-major rows x cols float64 matrix over a heap (Vec float).
 (defstruct mat [rows : int  cols : int  data : (Vec float)])
@@ -54,17 +41,13 @@
 (defn mat-wrap [rows : int  cols : int  d : (Vec float)] : mat
   (make-struct mat rows cols d))
 
-;;; Private: recursive push helper for the mat-of macro.
-(defmacro __mpush [d & xs]
-  (if (empty? xs)
-    d
-    (list do (list vec-push! d (first xs)) (list __mpush d ~@(rest xs)))))
-
 ;;; mat-of -- build a rows x cols matrix from row-major float literals.
 ;;;   (mat-of 2 2  1.0 2.0  3.0 4.0)
+;;; Lowers through the stdlib `(vec-of ...)` float-literal builder (turmeric
+;;; main #473), retiring the hand-rolled `__mpush` push-loop that existed only
+;;; because a `(Vec float)` literal could not be spelled before.
 (defmacro mat-of [rows cols & xs]
-  `(mat-wrap ~rows ~cols
-     (let [d (:: (vec-new) (Vec float))] (__mpush d ~@xs) d)))
+  `(mat-wrap ~rows ~cols (:: (vec-of ~@xs) (Vec float))))
 
 ;;; mat-rows / mat-cols -- shape accessors.
 (defn mat-rows [^borrow m : mat] : int (.rows m))
@@ -292,7 +275,8 @@
     (panic "mat-trace: matrix must be square"))
   (let [n (.rows m)]
     (letrec [go (fn [i : int  acc : float] : float
-                  (if (>= i n) acc
+                  (if (>= i n)
+                    acc
                     (go (+ i 1) (+ acc (mat-get m i i)))))]
       (go 0 0.0))))
 
@@ -300,17 +284,19 @@
 (defn mat-norm-fro [^borrow m : mat] : float
   (let [n (* (.rows m) (.cols m))]
     (letrec [go (fn [i : int  acc : float] : float
-                  (if (>= i n) acc
+                  (if (>= i n)
+                    acc
                     (let [x (:: (vec-get (.data m) i) :float)]
                       (go (+ i 1) (+ acc (* x x))))))]
-      (la-sqrt (go 0 0.0)))))
+      (sqrt (go 0 0.0)))))
 
 ;;; mat-norm-max -- maximum absolute element.
 (defn mat-norm-max [^borrow m : mat] : float
   (let [n (* (.rows m) (.cols m))]
     (letrec [go (fn [i : int  acc : float] : float
-                  (if (>= i n) acc
-                    (let [a (la-fabs (:: (vec-get (.data m) i) :float))]
+                  (if (>= i n)
+                    acc
+                    (let [a (fabs (:: (vec-get (.data m) i) :float))]
                       (go (+ i 1) (if (> a acc) a acc)))))]
       (go 0 0.0))))
 
@@ -326,8 +312,8 @@
       (letrec [go (fn [i : int] : int
                     (if (>= i n)
                       1
-                      (if (> (la-fabs (- (:: (vec-get (.data a) i) :float)
-                                         (:: (vec-get (.data b) i) :float))) tol)
+                      (if (> (fabs (- (:: (vec-get (.data a) i) :float)
+                                      (:: (vec-get (.data b) i) :float))) tol)
                         0
                         (go (+ i 1)))))]
         (go 0)))))
