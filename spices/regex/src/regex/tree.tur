@@ -1,0 +1,168 @@
+;; regex/tree.tur -- a pure-Turmeric regex AST as `Fix ReF`, with one generic
+;; catamorphism (`re-cata`) that every fold is expressed through.
+;;
+;; This is the Track C **U5** ("HKT recursion for ASTs") prototype for the
+;; regex spice. It is intentionally *independent* of the PCRE2-backed engine
+;; in `regex/regex.tur`: that module is C bindings with no Turmeric-level
+;; recursive IR to collapse, so U5 here is a new, self-contained
+;; recursion-schemes surface rather than a refactor of the bindings.
+;;
+;; What it demonstrates (all enabled by turmeric #483 "applied type
+;; constructors in defdata constructor fields", with the generic-cata codegen
+;; fixed by #487 / gap G6):
+;;   * a sum functor `ReF a` whose recursive children sit in by-value
+;;     positions (`AltF a a`, `StarF a`),
+;;   * a by-value fixed point `Re = Roll (ReF Re)` (no `:int` carrier),
+;;   * a `Functor [ReF]` instance and a generic `re-cata` (cata-via-`fmap`),
+;;   * value folds (`re-size`, `re-nullable?`, `re->str`) expressed as plain
+;;     F-algebras over the single `re-cata` driver -- no per-node scaffolding,
+;;     working at int / bool / cstr carriers,
+;;   * a backtracking matcher (`re-matches?`).
+;;
+;; STATUS: the generic `re-cata` now compiles and runs correctly at every
+;; value carrier (int/bool/cstr), so the value folds go through it. The one
+;; remaining edge is the matcher: its carrier is a *function* type
+;; (`(fn [k s] bool)`), and `re-cata` does not yet thread a function-typed
+;; carrier `B` (the result comes back as `int` and is not callable), so the
+;; matcher is written as direct structural recursion. The required layer
+;; `(:: ...)` ascriptions and this function-carrier note are documented in
+;; docs/u5-hkt-ast-feasibility-2026-06-21.md.
+
+(defmodule regex/tree
+  (export ReF Re
+          r-empty r-lit r-alt r-cat r-star r-plus r-opt
+          re-cata re-size re-nullable? re->str re-matches?)
+
+  ;; --- one layer of a regex AST -------------------------------------------
+  ;; `:copy` so an immutable AST value can be folded more than once (the
+  ;; nodes are heap pointers into an immutable tree; copying the handle is
+  ;; sound).
+  (defdata ReF :copy [a]
+    (EmptyF)        ;; matches the empty string
+    (LitF :cstr)    ;; a literal token (a single character, as a 1-char cstr)
+    (AltF a a)      ;; alternation:    r | s
+    (CatF a a)      ;; concatenation:  r s
+    (StarF a))      ;; Kleene star:    r*
+
+  ;; --- by-value fixed point:  Re ~= ReF Re --------------------------------
+  ;; The monomorphic inlining of `Fix ReF`. Needs #483 to carry the applied
+  ;; `(ReF Re)` field by value.
+  (defdata Re :copy (Roll (ReF Re)))
+
+  ;; --- Functor: map over the recursive positions --------------------------
+  (definstance Functor [ReF]
+    (fmap [c g]
+      (match c
+        (EmptyF)    (EmptyF)
+        (LitF s)    (LitF s)
+        (AltF x y)  (AltF (g x) (g y))
+        (CatF x y)  (CatF (g x) (g y))
+        (StarF x)   (StarF (g x)))))
+
+  ;; unwrap one layer, recovering the recursive element type. The ascription
+  ;; is required: matching `(Roll l)` does not yet refine `l`'s recursion slot.
+  (defn unroll-re [e : Re] : (ReF Re)
+    (match e (Roll l) (:: l (ReF Re))))
+
+  ;; --- the generic catamorphism (the U5 ideal) ----------------------------
+  ;; cata alg = alg . fmap (cata alg) . unroll
+  ;; Polymorphic in the carrier B, so a fold is *just* an F-algebra
+  ;; `(ReF B) -> B` handed to this single driver -- no per-node scaffolding.
+  ;; The `(:: ... (ReF B))` ascription pins `fmap`'s result type. Correct at
+  ;; every value carrier (int/bool/cstr) since #487 (gap G6).
+  (defn re-cata [B] [alg : (fn [(ReF B)] B) e : Re] : B
+    (alg (:: (fmap (unroll-re e) (fn [c : Re] : B (re-cata alg c))) (ReF B))))
+
+  ;; --- smart constructors -------------------------------------------------
+  (defn r-empty []                       : Re (Roll (EmptyF)))
+  (defn r-lit   [s : cstr]               : Re (Roll (LitF s)))
+  (defn r-alt   [x : Re y : Re]          : Re (Roll (AltF x y)))
+  (defn r-cat   [x : Re y : Re]          : Re (Roll (CatF x y)))
+  (defn r-star  [x : Re]                 : Re (Roll (StarF x)))
+  ;; derived: r+ = rr*  ;  r? = r|ε
+  (defn r-plus  [x : Re]                 : Re (Roll (CatF x (Roll (StarF x)))))
+  (defn r-opt   [x : Re]                 : Re (Roll (AltF x (Roll (EmptyF)))))
+
+  ;; --- value folds, each an F-algebra over the single re-cata -------------
+
+  ;; node count
+  (defn size-alg [l : (ReF int)] : int
+    (match l
+      (EmptyF)   1
+      (LitF s)   1
+      (AltF x y) (+ 1 (+ x y))
+      (CatF x y) (+ 1 (+ x y))
+      (StarF x)  (+ 1 x)))
+  (defn re-size [e : Re] : int (re-cata size-alg e))
+
+  ;; does the regex match the empty string?
+  (defn null-alg [l : (ReF bool)] : bool
+    (match l
+      (EmptyF)   true
+      (LitF s)   false
+      (AltF x y) (or x y)
+      (CatF x y) (and x y)
+      (StarF x)  true))
+  (defn re-nullable? [e : Re] : bool (re-cata null-alg e))
+
+  ;; pretty-print back to regex syntax
+  (defn cat2 [a : cstr b : cstr] : cstr
+    ```c
+    size_t la = strlen((const char *)a), lb = strlen((const char *)b);
+    char *o = malloc(la + lb + 1);
+    memcpy(o, (const char *)a, la);
+    memcpy(o + la, (const char *)b, lb);
+    o[la + lb] = '\0';
+    return o;
+    ```)
+  (defn str-alg [l : (ReF cstr)] : cstr
+    (match l
+      (EmptyF)   ""
+      (LitF s)   s
+      (AltF x y) (cat2 (cat2 (cat2 (cat2 "(" x) "|") y) ")")
+      (CatF x y) (cat2 x y)
+      (StarF x)  (cat2 (cat2 "(" x) ")*")))
+  (defn re->str [e : Re] : cstr (re-cata str-alg e))
+
+  ;; --- a backtracking matcher ---------------------------------------------
+  ;; CPS: `m e k s` asks "does `e` match a prefix of `s` such that `k` accepts
+  ;; the leftover suffix?". The elegant form is a cata whose carrier is a
+  ;; matcher closure `(fn [k s] bool)` (the "NFA is one cata" shape). That
+  ;; type-checks but `re-cata` does not yet thread a *function-typed* carrier
+  ;; `B`: `(re-cata match-alg e)` comes back as `int` and is not callable. (The
+  ;; closure-capture gap that previously also blocked it was fixed alongside
+  ;; G6.) So the matcher is direct structural recursion over the same tree --
+  ;; still a fold, just not routed through `re-cata`. See the feasibility doc.
+
+  ;; consume one literal char off the front of `s`; return s+1, or null on miss
+  (defn lit-step [lit : cstr s : cstr] : cstr
+    ```c
+    const char *L = (const char *)lit, *S = (const char *)s;
+    if (L[0] != '\0' && S[0] == L[0]) return (char *)(S + 1);
+    return (char *)0;
+    ```)
+  (defn cstr-null? [s : cstr] : bool ```c return ((const char *)s) == 0; ```)
+  (defn cstr-empty? [s : cstr] : bool
+    ```c return ((const char *)s) != 0 && ((const char *)s)[0] == '\0'; ```)
+  (defn cstr-same? [a : cstr b : cstr] : bool
+    ```c return (const char *)a == (const char *)b; ```)
+
+  (defn m [e : Re k : (fn [cstr] bool) s : cstr] : bool
+    (match e
+      (Roll layer)
+        (let [l (:: layer (ReF Re))]
+          (match l
+            (EmptyF)   (k s)
+            (LitF c)   (let [s2 (lit-step c s)]
+                         (if (cstr-null? s2) false (k s2)))
+            (AltF x y) (or (m x k s) (m y k s))
+            (CatF x y) (m x (fn [s2 : cstr] : bool (m y k s2)) s)
+            (StarF x)  (or (k s)
+                           (m x (fn [s2 : cstr] : bool
+                                  (if (cstr-same? s2 s) false (m e k s2))) s))))))
+
+  ;; does `e` match the whole string `s`?
+  (defn re-matches? [e : Re s : cstr] : bool
+    (m e (fn [rest : cstr] : bool (cstr-empty? rest)) s))
+
+) ;; end defmodule regex/tree

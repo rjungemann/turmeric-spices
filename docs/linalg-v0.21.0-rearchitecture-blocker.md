@@ -44,12 +44,17 @@ list-API one is already on the turmeric agent's list):
 2. **A `^mut` float accumulator captured by a `letrec` closure does not
    propagate its mutations back out** (captured by value), and **threading a
    float accumulator through the recursive self-call mis-carriers to 0**. Both
-   make pure-Turmeric float reductions return 0. Worked around with a
-   one-element heap `(Vec float)` accumulator cell (writes through the shared
-   pointer escape the closure) or by returning the verdict directly from the
-   loop; the numeric modules dodge it entirely by reducing in inline C.
+   made pure-Turmeric float reductions return 0. ~~Worked around with a
+   one-element heap `(Vec float)` accumulator cell.~~ **RETIRED 2026-06-21:**
+   turmeric main #469 fixed the self-recursive float accumulator collapsing to
+   the int carrier, so `la-vec-dot` / `la-vec-norm{,-1,-inf}` (vec.tur) and
+   `mat-trace` / `mat-norm-fro` / `mat-norm-max` (mat.tur) now thread a plain
+   `acc : float` through the `letrec` self-call. Verified: `tests/linalg.tur`
+   green (36/36) against from-source `tur` @ `97dcd86`.
 3. **No `-lm` for a cmake-dep-less spice**, so libm `sqrt`/`fabs` won't link.
-   Worked around with libm-free inline-C `la-sqrt` (Newton) / `la-fabs`.
+   ~~Worked around with libm-free inline-C `la-sqrt` (Newton) / `la-fabs`.~~
+   **RETIRED 2026-06-21:** turmeric main #471 links `-lm` unconditionally, so
+   `la-sqrt`/`la-fabs` (vec.tur + mat.tur) now call libm `sqrt`/`fabs` directly.
 4. **List API is half-present** (`cons` builtin survives; `car`/`cdr`/`null?`/
    `length` are gone; `(list ...)`/`tcons` are int-only so float lists can't be
    built). The cons-list `*-from-list` constructors were replaced with variadic
