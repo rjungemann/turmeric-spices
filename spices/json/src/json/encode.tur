@@ -19,7 +19,15 @@
           __json-chain __json-obj-build __json-tag
           __decode-field __decode-fields __decode-make-struct
           __sum-fnames __sum-vchain __sum-enc-arms
-          __sum-dfields __sum-dec-arms)
+          __sum-dfields __sum-dec-arms
+          ;; U3 object-shape validating decoder (accumulating errors).
+          ;; (DecodeChecked is a class -- like Encode/Decode it resolves
+          ;; globally and is intentionally NOT in the export list.)
+          DecodeErrors derive-decoder __derive-checks
+          __errs-new __errs-count __errs-free
+          __check-int __check-cstr __check-bool __check-float
+          decode-errors-count decode-error-path decode-error-expected
+          decode-error-got decode-errors-free)
 
 (import json/decode :refer [json-obj-get])
 
@@ -806,5 +814,247 @@
        (encode [__self] (match __self ~@(__sum-enc-arms ~ctors))))
      (definstance Decode [~type-name]
        (decode [doc val] (:: (ok (__sum-dec-arms ~ctors)) (Result ~type-name cstr))))))
+
+;; ===========================================================================
+;; U3 -- object-shape validating decoder (Track C / U3 target 5).
+;;
+;; The `Decode` typeclass above fails fast and, through `__decode-field`, takes
+;; `ok-val` of a failed field decode -- so a missing key or wrong-typed value
+;; silently yields a garbage field rather than an error. This section adds the
+;; row/object-shape decoder the U3 plan calls for: it checks every declared
+;; field of an object against its expected JSON type, ACCUMULATES all
+;; violations (it does not stop at the first), and returns
+;; `(Result T DecodeErrors)` -- `err` carrying every per-field failure with its
+;; key path, expected type, and the type actually seen.
+;;
+;; The primitive vocabulary (int / string / bool / float) and the
+;; "accumulate all failures with field paths" model mirror `stdlib/schema.tur`
+;; in spirit (a spice cannot extend stdlib, so this is a self-contained
+;; reimplementation of just the kernel U3 needs). Nested-object field paths
+;; (dot-separated) and array-element validation are follow-ups; v1 validates a
+;; flat object of primitive fields, which is the "rejecting missing keys at the
+;; boundary" deliverable.
+;; ===========================================================================
+
+;;; DecodeErrors -- opaque handle to an accumulated list of decode violations.
+;;; Returned in the `err` slot of a checked decode; inspect with
+;;; `decode-errors-count` + `decode-error-path/expected/got`, then release with
+;;; `decode-errors-free`.
+(defopaque DecodeErrors :int)
+
+;; Growable error buffer: each entry is {path, expected, got}, all owned cstrs.
+(defn __errs-new [] #{Unsafe} : int
+  ```c
+  struct __jderr  { char *path; char *expected; char *got; };
+  struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
+  struct __jderrs *e = malloc(sizeof(*e));
+  e->count = 0; e->cap = 0; e->items = NULL;
+  return (int64_t)(intptr_t)e;
+  ```)
+
+(defn __errs-push [errs : int path : cstr expected : cstr got : cstr] #{Unsafe} : nil
+  ```c
+  struct __jderr  { char *path; char *expected; char *got; };
+  struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
+  struct __jderrs *e = (void *)(intptr_t)errs;
+  if (e->count >= e->cap) {
+    e->cap = e->cap ? e->cap * 2 : 4;
+    e->items = realloc(e->items, (size_t)e->cap * sizeof(struct __jderr));
+  }
+  e->items[e->count].path     = strdup((const char *)path);
+  e->items[e->count].expected = strdup((const char *)expected);
+  e->items[e->count].got      = strdup((const char *)got);
+  e->count++;
+  ```)
+
+(defn __errs-count [errs : int] #{Unsafe} : int
+  ```c
+  struct __jderr  { char *path; char *expected; char *got; };
+  struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
+  struct __jderrs *e = (void *)(intptr_t)errs;
+  return (int)e->count;
+  ```)
+
+(defn __errs-path [errs : int i : int] #{Unsafe} : cstr
+  ```c
+  struct __jderr  { char *path; char *expected; char *got; };
+  struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
+  struct __jderrs *e = (void *)(intptr_t)errs;
+  return (i >= 0 && i < e->count) ? e->items[i].path : (char *)"";
+  ```)
+
+(defn __errs-expected [errs : int i : int] #{Unsafe} : cstr
+  ```c
+  struct __jderr  { char *path; char *expected; char *got; };
+  struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
+  struct __jderrs *e = (void *)(intptr_t)errs;
+  return (i >= 0 && i < e->count) ? e->items[i].expected : (char *)"";
+  ```)
+
+(defn __errs-got [errs : int i : int] #{Unsafe} : cstr
+  ```c
+  struct __jderr  { char *path; char *expected; char *got; };
+  struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
+  struct __jderrs *e = (void *)(intptr_t)errs;
+  return (i >= 0 && i < e->count) ? e->items[i].got : (char *)"";
+  ```)
+
+(defn __errs-free [errs : int] #{Unsafe} : nil
+  ```c
+  struct __jderr  { char *path; char *expected; char *got; };
+  struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
+  struct __jderrs *e = (void *)(intptr_t)errs;
+  if (!e) return;
+  for (int64_t i = 0; i < e->count; i++) {
+    free(e->items[i].path); free(e->items[i].expected); free(e->items[i].got);
+  }
+  if (e->items) free(e->items);
+  free(e);
+  ```)
+
+;; Name the JSON type actually present at a value handle (or "missing" for an
+;; absent field), for the `got` slot of an error -- vocabulary aligned with
+;; stdlib/schema.tur (string / int / float / bool / null).
+(defn __jtype-name [val : int] #{Unsafe} : cstr
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  if (!v) return (char *)"missing";
+  if (yyjson_is_str(v))  return (char *)"string";
+  if (yyjson_is_bool(v)) return (char *)"bool";
+  if (yyjson_is_null(v)) return (char *)"null";
+  if (yyjson_is_int(v) || yyjson_is_uint(v) || yyjson_is_sint(v)) return (char *)"int";
+  if (yyjson_is_num(v))  return (char *)"float";
+  if (yyjson_is_obj(v))  return (char *)"object";
+  if (yyjson_is_arr(v))  return (char *)"array";
+  return (char *)"unknown";
+  ```)
+
+;; Primitive type predicates over a value handle (false for a 0/missing handle).
+(defn __jis-int? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return v && (yyjson_is_int(v) || yyjson_is_uint(v) || yyjson_is_sint(v));
+  ```)
+(defn __jis-str? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return v && yyjson_is_str(v);
+  ```)
+(defn __jis-bool? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return v && yyjson_is_bool(v);
+  ```)
+;; floats accept any JSON number (int widens to double), matching Decode [float].
+(defn __jis-num? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return v && yyjson_is_num(v);
+  ```)
+
+;; Per-type field checks: look up `key` in the object `objval`, and if the slot
+;; is missing or the wrong type, append a {key, expected, got} violation to the
+;; accumulator. Each accepts the raw :int error handle (the macro threads it).
+(defn __check-int [errs : int doc : int objval : int key : cstr] : nil
+  (let [v (unsafe (json-obj-get doc objval key))]
+    (if (unsafe (__jis-int? v))
+      nil
+      (unsafe (__errs-push errs key "int" (__jtype-name v))))))
+
+(defn __check-cstr [errs : int doc : int objval : int key : cstr] : nil
+  (let [v (unsafe (json-obj-get doc objval key))]
+    (if (unsafe (__jis-str? v))
+      nil
+      (unsafe (__errs-push errs key "string" (__jtype-name v))))))
+
+(defn __check-bool [errs : int doc : int objval : int key : cstr] : nil
+  (let [v (unsafe (json-obj-get doc objval key))]
+    (if (unsafe (__jis-bool? v))
+      nil
+      (unsafe (__errs-push errs key "bool" (__jtype-name v))))))
+
+(defn __check-float [errs : int doc : int objval : int key : cstr] : nil
+  (let [v (unsafe (json-obj-get doc objval key))]
+    (if (unsafe (__jis-num? v))
+      nil
+      (unsafe (__errs-push errs key "float" (__jtype-name v))))))
+
+;;; DecodeErrors reporting surface.
+;;; decode-errors-count -- number of accumulated violations.
+(defn decode-errors-count [e : DecodeErrors] : int
+  (unsafe (__errs-count (:: e :int))))
+;;; decode-error-path -- the object key of the i-th violation.
+(defn decode-error-path [e : DecodeErrors i : int] : cstr
+  (unsafe (__errs-path (:: e :int) i)))
+;;; decode-error-expected -- the expected JSON type of the i-th violation.
+(defn decode-error-expected [e : DecodeErrors i : int] : cstr
+  (unsafe (__errs-expected (:: e :int) i)))
+;;; decode-error-got -- the JSON type actually seen for the i-th violation.
+(defn decode-error-got [e : DecodeErrors i : int] : cstr
+  (unsafe (__errs-got (:: e :int) i)))
+;;; decode-errors-free -- release the accumulator and its owned strings.
+(defn decode-errors-free [e : DecodeErrors] : nil
+  (unsafe (__errs-free (:: e :int))))
+
+;;; DecodeChecked -- typeclass for the accumulating object-shape decoder. Like
+;;; `Decode`, `a` appears only in the return type, so the instance is selected
+;;; from the ascribed result type:
+;;;   (:: (decode-checked doc val) (Result User DecodeErrors))
+;;; On success returns `(ok value)`; on any field violation returns
+;;; `(err errors)` carrying *all* violations (call decode-errors-count etc.).
+(defclass DecodeChecked [a] (decode-checked [doc : int  val : int] : (Result a DecodeErrors)))
+
+;; Recursive helper macro: expand the `(fname ftype)` field list into a `do`
+;; of per-field `(__check-<ftype> __errs doc val "fname")` calls. `ftype` must
+;; be a primitive (int / cstr / bool / float). Threads the let-bound `__errs`,
+;; method params `doc`/`val` -- the same non-hygienic capture `__json-chain`
+;; uses for `x`.
+(defmacro __derive-checks [fields]
+  (if (empty? fields)
+    `0
+    (let [fld   (first fields)
+          fname (first fld)
+          ftype (first (rest fld))
+          tail  (rest fields)]
+      `(do
+         (~(str->sym (str-append "__check-" (symbol-name ftype))) __errs doc val ~(symbol-name fname))
+         (__derive-checks ~tail)))))
+
+;;; derive-decoder -- emit a `DecodeChecked` instance for a `defstruct` of
+;;; primitive fields. Validates every declared field against its expected JSON
+;;; type, accumulating all violations; on success builds the struct (reusing
+;;; the typed per-field `Decode` instances via `__decode-make-struct`).
+;;;
+;;; Syntax mirrors `derive-json`:
+;;;   (derive-decoder T (f1 t1) (f2 t2) ...)        ;; ti in {int cstr bool float}
+;;;
+;;; Example:
+;;;   (defstruct Person [name : cstr  age : int])
+;;;   (derive-decoder Person (name cstr) (age int))
+;;;   ;; (:: (decode-checked doc root) (Result Person DecodeErrors))
+;;;   ;;   {"name":"al","age":30}   => (ok <Person>)
+;;;   ;;   {"name":123}             => (err <2 violations: name/string/int, age/int/missing>)
+;;;
+;;; Limitations (v1): primitive fields only (nested objects / arrays are a
+;;; follow-up), field paths are the bare key (no dot-nesting yet), and the
+;;; field cap follows `__decode-make-struct` (<=5). For richer shapes, hand-write
+;;; the DecodeChecked instance.
+(defmacro derive-decoder [type-name & fields]
+  `(definstance DecodeChecked [~type-name]
+     (decode-checked [doc val]
+       (let [__errs (unsafe (__errs-new))]
+         (do
+           (__derive-checks ~fields)
+           (if (= 0 (unsafe (__errs-count __errs)))
+             (do (unsafe (__errs-free __errs))
+                 (:: (ok (__decode-make-struct ~type-name ~fields))
+                     (Result ~type-name DecodeErrors)))
+             (:: (err (:: __errs DecodeErrors))
+                 (Result ~type-name DecodeErrors))))))))
 
 ) ;; end defmodule json/encode

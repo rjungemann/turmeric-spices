@@ -1,0 +1,24 @@
+;; U4 negative: an (AudioBuf n c) also carries its channel count in the type,
+;; so audiobuf-mix -- sharing the size variable `c` across both operands --
+;; rejects a channel-count mismatch at compile time. Mixing a mono block into
+;; a stereo one is a type error, not a runtime interleave bug.
+;;
+;;   tur check tests/errors/audiobuf-channel-mismatch.tur
+;;   => error [TUR-E0260]: sized type mismatch: function 'audiobuf-mix' shares
+;;      size variable 'c' across parameters, but argument 1 has size 2 while
+;;      argument 2 has size 1
+;;
+;; Same shape as the frame-count fixture; this one clashes the second index,
+;; exercising the multi-index cross-parameter unification (turmeric main #476).
+;; Lives outside the flat `tur test tests` run so it does not break CI.
+
+(load "stdlib/sized.tur")
+
+(defmodule audiobuf_channel_mismatch_test
+  (import rtaudio/buffer :refer [AudioBuf audiobuf-silence audiobuf-mix]))
+
+(defn stereo [] : (AudioBuf (Static 256) (Static 2)) (audiobuf-silence 256 2))
+(defn mono   [] : (AudioBuf (Static 256) (Static 1)) (audiobuf-silence 256 1))
+
+(defn bad-mix [] : (AudioBuf (Static 256) (Static 2))
+  (audiobuf-mix (stereo) (mono)))   ;; ERROR TUR-E0260: channels 2 vs 1

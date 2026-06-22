@@ -1,0 +1,25 @@
+;; U4 negative: an (AudioBuf n c) carries its frame count in the type, so
+;; audiobuf-mix -- which shares the size variable `n` across both operands --
+;; rejects a frame-count mismatch at compile time. No runtime shape check, no
+;; silently-truncated mix: a 256-frame callback block cannot be mixed with a
+;; 512-frame one.
+;;
+;;   tur check tests/errors/audiobuf-frame-mismatch.tur
+;;   => error [TUR-E0260]: sized type mismatch: function 'audiobuf-mix' shares
+;;      size variable 'n' across parameters, but argument 1 has size 256 while
+;;      argument 2 has size 512
+;;
+;; The check is always on (it does not need -Xsized-types). Like the
+;; linalg/sized error fixtures this lives outside the flat `tur test tests`
+;; run, so it documents the guarantee without breaking CI.
+
+(load "stdlib/sized.tur")
+
+(defmodule audiobuf_frame_mismatch_test
+  (import rtaudio/buffer :refer [AudioBuf audiobuf-silence audiobuf-mix]))
+
+(defn block-256 [] : (AudioBuf (Static 256) (Static 2)) (audiobuf-silence 256 2))
+(defn block-512 [] : (AudioBuf (Static 512) (Static 2)) (audiobuf-silence 512 2))
+
+(defn bad-mix [] : (AudioBuf (Static 256) (Static 2))
+  (audiobuf-mix (block-256) (block-512)))   ;; ERROR TUR-E0260: frames 256 vs 512

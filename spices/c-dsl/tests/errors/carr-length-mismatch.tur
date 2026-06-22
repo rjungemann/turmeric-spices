@@ -1,0 +1,26 @@
+;; U4 negative: a (CArr n) carries its length in the type, so c-arr-copy-stmt
+;; -- which shares the size variable `n` across both operands -- rejects a
+;; length mismatch at compile time. No runtime length check, no memcpy that
+;; reads past the shorter array: an 8-element array cannot be copied to a
+;; 16-element one.
+;;
+;;   tur check tests/errors/carr-length-mismatch.tur
+;;   => error [TUR-E0260]: sized type mismatch: function 'c-arr-copy-stmt'
+;;      shares size variable 'n' across parameters, but argument 1 has size 16
+;;      while argument 2 has size 8
+;;
+;; The check is always on (it does not need -Xsized-types). Like the
+;; linalg/sized, rtaudio/buffer, and raylib/image error fixtures this lives
+;; outside the flat `tur test tests` run, so it documents the guarantee without
+;; breaking CI.
+
+(load "stdlib/sized.tur")
+
+(defmodule carr_length_mismatch_test
+  (import c-dsl/sized :refer [CArr c-array c-arr-copy-stmt]))
+
+(defn big   [] : (CArr (Static 16)) (c-array "big" 16))
+(defn small [] : (CArr (Static 8))  (c-array "small" 8))
+
+(defn bad-copy [] : cstr
+  (c-arr-copy-stmt (big) (small)))   ;; ERROR TUR-E0260: length 16 vs 8
