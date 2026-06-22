@@ -1,0 +1,171 @@
+;; template/tree.tur -- a pure-Turmeric template AST as `Fix TplF`, with one
+;; generic catamorphism (`tpl-cata`) that every fold is expressed through.
+;;
+;; This is the Track C **U5** ("HKT recursion for ASTs") surface for the
+;; template spice. It is intentionally *independent* of the C-backed parser in
+;; `template/parse.tur`: that module hand-rolls a `__tt_node` tree (five tag
+;; codes -- Literal / Emit / If / For / Let -- with `name` / `value` /
+;; `then_body` / `else_body` / `next` fields) behind :int handles, and both
+;; `render-ast` and `nodes-free` walk it open-coded with an explicit C frame
+;; stack. That is exactly the "recursive AST hand-rolled with N accessor
+;; functions per node kind, at least one pass open-coded" the U5 rubric
+;; targets. Rather than rewrite the live render pipeline, U5 here is a new,
+;; self-contained recursion-schemes surface (the same shape `regex/tree.tur`
+;; and `scscm/tree.tur` ship), proving the AST collapses to one functor + one
+;; `cata` with the folds as plain F-algebras.
+;;
+;; A template is a *sequence* of nodes, and the block nodes (If / For / Let)
+;; contain nested sub-sequences. The Fix encoding folds both axes into one
+;; functor: every node carries its continuation (the next sibling) as a
+;; recursive `a` position, just like its bodies -- so a flat run of literals
+;; is `LitF "a" (LitF "b" (EndF))`, and a block is one constructor whose body
+;; *and* tail are recursive children. This is the standard "a statement list
+;; is a Fix" encoding and keeps every recursive child in a fixed-arity
+;; by-value position (max three in `IfF`), mirroring regex's `AltF a a`.
+;;
+;; What it demonstrates (all enabled by turmeric #483 "applied type
+;; constructors in defdata constructor fields", generic-cata codegen fixed by
+;; #487 / gap G6, layer refinement post #489..#497):
+;;   * a sum functor `TplF a` whose recursive children (bodies + sibling
+;;     tail) sit in by-value positions,
+;;   * a by-value fixed point `Tpl = Roll (TplF Tpl)` (no :int carrier),
+;;   * a `Functor [TplF]` instance and a generic `tpl-cata` (cata-via-`fmap`),
+;;   * folds (`tpl-size`, `tpl-directives`, `tpl-depth`, `tpl->str`) expressed
+;;     as plain F-algebras over the single `tpl-cata` driver -- no per-node
+;;     scaffolding, at int and cstr carriers.
+;;
+;; Unlike scscm's list printer, `tpl->str` *stays* a clean catamorphism: the
+;; functor keeps body slots and the sibling-tail slot in distinct fields, so
+;; the algebra never has to recover erased structure -- it knows a `then` from
+;; a `rest`. The one normalization it makes is that an `IfF` always prints its
+;; `<% else %>` clause (an absent else is the empty sequence `EndF`), so the
+;; printed form is canonical; round-tripping a canonical template is exact.
+;;
+;; Since: U5
+
+(defmodule template/tree
+  (export TplF Tpl
+          tpl-end tpl-lit tpl-emit tpl-if tpl-for tpl-let
+          tpl-cata tpl-size tpl-directives tpl-depth tpl->str)
+
+  ;; --- one layer of a template AST ----------------------------------------
+  ;; `:copy` so an immutable AST value can be folded more than once (the nodes
+  ;; are heap pointers into an immutable tree; copying the handle is sound),
+  ;; matching regex/tree's `ReF` and scscm/tree's `SxF`.
+  (defdata TplF :copy [a]
+    (EndF)                 ;; end of a node sequence (nil)
+    (LitF :cstr a)         ;; literal text, then the rest of the sequence
+    (EmitF :cstr a)        ;; <%= name %>, then rest
+    (IfF :cstr a a a)      ;; <% if name %> then-body <% else %> else-body, then rest
+    (ForF :cstr :cstr a a) ;; <% for [var coll] %> body <% end %>, then rest
+    (LetF :cstr :cstr a a))  ;; <% let [var value] %> body <% end %>, then rest
+
+  ;; --- by-value fixed point:  Tpl ~= TplF Tpl -----------------------------
+  ;; The monomorphic inlining of `Fix TplF`. Needs #483 to carry the applied
+  ;; `(TplF Tpl)` field by value.
+  (defdata Tpl :copy (Roll (TplF Tpl)))
+
+  ;; --- Functor: map over every recursive (body / tail) position -----------
+  (definstance Functor [TplF]
+    (fmap [c g]
+      (match c
+        (EndF)              (EndF)
+        (LitF t rest)       (LitF t (g rest))
+        (EmitF nm rest)     (EmitF nm (g rest))
+        (IfF nm th el rest) (IfF nm (g th) (g el) (g rest))
+        (ForF v coll b rest)  (ForF v coll (g b) (g rest))
+        (LetF v val b rest)   (LetF v val (g b) (g rest)))))
+
+  ;; unwrap one layer, recovering the recursive element type. As in regex/tree
+  ;; and scscm/tree, matching `(Roll l)` refines `l`'s recursion slot directly
+  ;; post #489..#497 (no `(:: l (TplF Tpl))` ascription needed).
+  (defn unroll-tpl [e : Tpl] : (TplF Tpl)
+    (match e (Roll l) l))
+
+  ;; --- the generic catamorphism (the U5 ideal) ----------------------------
+  ;; cata alg = alg . fmap (cata alg) . unroll
+  ;; Polymorphic in the carrier B, so a fold is *just* an F-algebra
+  ;; `(TplF B) -> B` handed to this single driver -- no per-node scaffolding.
+  (defn tpl-cata [B] [alg : (fn [(TplF B)] B) e : Tpl] : B
+    (alg (:: (fmap (unroll-tpl e) (fn [c : Tpl] : B (tpl-cata alg c))) (TplF B))))
+
+  ;; --- smart constructors -------------------------------------------------
+  (defn tpl-end  []                              : Tpl (Roll (EndF)))
+  (defn tpl-lit  [t : cstr rest : Tpl]           : Tpl (Roll (LitF t rest)))
+  (defn tpl-emit [nm : cstr rest : Tpl]          : Tpl (Roll (EmitF nm rest)))
+  (defn tpl-if   [nm : cstr th : Tpl el : Tpl rest : Tpl] : Tpl (Roll (IfF nm th el rest)))
+  (defn tpl-for  [v : cstr coll : cstr b : Tpl rest : Tpl] : Tpl (Roll (ForF v coll b rest)))
+  (defn tpl-let  [v : cstr val : cstr b : Tpl rest : Tpl] : Tpl (Roll (LetF v val b rest)))
+
+  ;; --- C helpers for the cstr fold ----------------------------------------
+  (defn cat2 [a : cstr b : cstr] : cstr
+    ```c
+    size_t la = strlen((const char *)a), lb = strlen((const char *)b);
+    char *o = malloc(la + lb + 1);
+    memcpy(o, (const char *)a, la);
+    memcpy(o + la, (const char *)b, lb);
+    o[la + lb] = '\0';
+    return o;
+    ```)
+  ;; variadic-ish concat sugar built from cat2 (kept simple; folds are a
+  ;; demonstration surface, not a perf-critical printer).
+  (defn cat3 [a : cstr b : cstr c : cstr] : cstr (cat2 (cat2 a b) c))
+  (defn cat5 [a : cstr b : cstr c : cstr d : cstr e : cstr] : cstr
+    (cat2 (cat2 (cat2 (cat2 a b) c) d) e))
+  (defn imax [a : int b : int] : int (if (> a b) a b))
+
+  ;; --- value folds, each an F-algebra over the single tpl-cata ------------
+
+  ;; total content-node count (End terminators are not counted)
+  (defn size-alg [l : (TplF int)] : int
+    (match l
+      (EndF)              0
+      (LitF t rest)       (+ 1 rest)
+      (EmitF nm rest)     (+ 1 rest)
+      (IfF nm th el rest) (+ 1 (+ th (+ el rest)))
+      (ForF v coll b rest)  (+ 1 (+ b rest))
+      (LetF v val b rest)   (+ 1 (+ b rest))))
+  (defn tpl-size [e : Tpl] : int (tpl-cata size-alg e))
+
+  ;; count just the dynamic directives (Emit / If / For / Let); literals and
+  ;; End contribute nothing -- a quick "how templated is this?" metric.
+  (defn dir-alg [l : (TplF int)] : int
+    (match l
+      (EndF)              0
+      (LitF t rest)       rest
+      (EmitF nm rest)     (+ 1 rest)
+      (IfF nm th el rest) (+ 1 (+ th (+ el rest)))
+      (ForF v coll b rest)  (+ 1 (+ b rest))
+      (LetF v val b rest)   (+ 1 (+ b rest))))
+  (defn tpl-directives [e : Tpl] : int (tpl-cata dir-alg e))
+
+  ;; block-nesting depth. The functor keeps body slots distinct from the
+  ;; sibling-tail slot, so the algebra adds +1 only on the body axis: a block
+  ;; is `1 + deepest body`, taken against whatever the rest of the sequence
+  ;; reaches. Literals/emits pass the tail depth through.
+  (defn depth-alg [l : (TplF int)] : int
+    (match l
+      (EndF)              0
+      (LitF t rest)       rest
+      (EmitF nm rest)     rest
+      (IfF nm th el rest) (imax (+ 1 (imax th el)) rest)
+      (ForF v coll b rest)  (imax (+ 1 b) rest)
+      (LetF v val b rest)   (imax (+ 1 b) rest)))
+  (defn tpl-depth [e : Tpl] : int (tpl-cata depth-alg e))
+
+  ;; round-trip back to template source via the generic cata. Because body and
+  ;; tail slots are distinct fields, the algebra reconstructs the source
+  ;; directly -- no erased structure to recover. An `IfF` always prints its
+  ;; `<% else %>` clause (canonical form; an absent else is the empty `EndF`,
+  ;; which prints as nothing between `<% else %>` and `<% end %>`).
+  (defn str-alg [l : (TplF cstr)] : cstr
+    (match l
+      (EndF)              ""
+      (LitF t rest)       (cat2 t rest)
+      (EmitF nm rest)     (cat3 (cat3 "<%= " nm " %>") rest "")
+      (IfF nm th el rest) (cat2 (cat5 (cat3 "<% if " nm " %>") th "<% else %>" el "<% end %>") rest)
+      (ForF v coll b rest)  (cat2 (cat5 "<% for [" (cat3 v " " coll) "] %>" b "<% end %>") rest)
+      (LetF v val b rest)   (cat2 (cat5 "<% let [" (cat3 v " " val) "] %>" b "<% end %>") rest)))
+  (defn tpl->str [e : Tpl] : cstr (tpl-cata str-alg e))
+
+) ;; end defmodule template/tree
