@@ -21,7 +21,7 @@
           __sum-fnames __sum-vchain __sum-enc-arms
           __sum-dfields __sum-dec-arms)
 
-(import json/decode :refer [json-obj-get json-arr? json-arr-len json-arr-get])
+(import json/decode :refer [json-obj-get json-arr? json-null? json-arr-len json-arr-get])
 
 ;;; Encode -- typeclass for serializing a Turmeric value to a JSON
 ;;; fragment.  The fragment is a self-contained JSON value (number,
@@ -138,15 +138,10 @@
 ;; `__vec-encode` with an explicit `(:: e A)` ascription, so it dispatches on
 ;; the concrete element type per ABI specialization (turmeric #490/#491) rather
 ;; than collapsing to one representative instance. Works for scalar element
-;; types (int/bool/cstr/float) and `defstruct` / `derive-json` element types --
-;; arrays of objects included.
-;;
-;; LIMITATION: a *container-typed* element (e.g. `(Vec (Option int))` or
-;; `(Vec (Vec int))`) erases to the int64 carrier and matches more than one
-;; container instance, so nesting two containers currently raises
-;; `TUR_E0020` ambiguous-dispatch. Wrap the inner container in a named newtype
-;; with its own Encode instance until dictionary-passing covers container
-;; elements. (Reported separately.)
+;; types (int/bool/cstr/float), `defstruct` / `derive-json` element types
+;; (arrays of objects), and nested containers (`(Vec (Option int))`,
+;; `(Vec (Vec int))`) since #493 resolved struct-headed applied-instance
+;; element dispatch.
 ;; ---------------------------------------------------------------------------
 
 ;; Runtime helper: walk a cons-list of already-encoded element fragments and
@@ -406,13 +401,23 @@
         (:: (err (err-val r)) (Result (Vec A) cstr))))))
 
 ;;; Decode [(Vec A)] -- a JSON array; each element via its own Decode instance.
-;;; Non-array input is an err. (Option/Map containers are blocked on a
-;;; by-value-struct-Result codegen gap -- reported separately.)
+;;; Non-array input is an err.
 (definstance Decode [Vec] [(Decode A)]
   (decode [doc val]
     (if (unsafe (json-arr? val))
       (__decode-vec doc val 0 (unsafe (json-arr-len val)) (:: (vec-new) (Vec A)))
       (:: (err "decode Vec: not a JSON array") (Result (Vec A) cstr)))))
+
+;;; Decode [(Option A)] -- JSON `null` (or a missing field) decodes to `none`;
+;;; any other value decodes via A's own Decode instance, wrapped in `some`.
+(definstance Decode [Option] [(Decode A)]
+  (decode [doc val]
+    (if (unsafe (json-null? val))
+      (:: (ok (none)) (Result (Option A) cstr))
+      (let [r (:: (decode doc val) (Result A cstr))]
+        (if (.is-ok r)
+          (:: (ok (some (ok-val r))) (Result (Option A) cstr))
+          (:: (err (err-val r)) (Result (Option A) cstr)))))))
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry

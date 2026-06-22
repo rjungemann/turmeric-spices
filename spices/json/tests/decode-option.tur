@@ -1,0 +1,47 @@
+;; Decode [(Option A)]: JSON null -> none, else decode A wrapped in some.
+;; Plus nested-container *encode* (Vec of Option), unblocked by turmeric
+;; #492 (by-value-struct Result) and #493 (nested element dispatch).
+;;
+;; NOTE: nested *decode* of a by-value-struct element -- decoding into a
+;; (Vec (Option int)) -- still hits the Vec-of-by-value-struct push path and
+;; is not exercised here; scalar Option decode and nested Option *encode* are.
+;;
+;; Expected:
+;;   7
+;;   none
+;;   decode int: not an integer
+;;   [5,null]
+
+(defmodule decode_option_test (export)
+(import json/encode :refer [derive-json])
+(import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+
+(defn main [] : int
+  ;; "7" -> some 7
+  (let [d (unsafe (json-parse-doc "7"))
+        r (:: (decode d (unsafe (json-doc-root d))) (Result (Option int) cstr))]
+    (if (.is-ok r)
+      (if (.is-some (ok-val r)) (println (:: (.value (ok-val r)) :int)) (println "none"))
+      (println "ERR"))
+    (unsafe (json-doc-free d)))
+
+  ;; "null" -> none
+  (let [d (unsafe (json-parse-doc "null"))
+        r (:: (decode d (unsafe (json-doc-root d))) (Result (Option int) cstr))]
+    (if (.is-ok r)
+      (if (.is-some (ok-val r)) (println "some?!") (println "none"))
+      (println "ERR"))
+    (unsafe (json-doc-free d)))
+
+  ;; bad inner value -> err threads out of the some branch
+  (let [d (unsafe (json-parse-doc "\"x\""))
+        r (:: (decode d (unsafe (json-doc-root d))) (Result (Option int) cstr))]
+    (if (.is-ok r) (println "unexpected-ok") (println (err-val r)))
+    (unsafe (json-doc-free d)))
+
+  ;; nested encode: (Vec (Option int)) -> [5,null]
+  (let [v (:: (vec-new) (Vec (Option int)))]
+    (vec-push! v (:: (some 5) (Option int)))
+    (vec-push! v (:: (none) (Option int)))
+    (println (encode v)))
+  0))

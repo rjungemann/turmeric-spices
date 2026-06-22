@@ -22,7 +22,7 @@
 
 (defmodule json/decode
   (export json-parse-doc json-doc-free json-doc-root json-obj-get
-          json-arr? json-arr-len json-arr-get)
+          json-arr? json-null? json-arr-len json-arr-get)
 
 ;; -----------------------------------------------------------------------------
 ;; Doc + value handles.
@@ -94,6 +94,15 @@
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
   return v != NULL && yyjson_is_arr(v);
+  ```)
+
+;;; json-null? -- true if the value at `val` is JSON `null` (or a null handle,
+;;; i.e. a missing field). Used by `Decode [(Option A)]` to map null -> none.
+(defn json-null? [val : int] #{Unsafe} : bool
+  ```c
+  #include <yyjson.h>
+  yyjson_val *v = (yyjson_val *)(intptr_t)val;
+  return v == NULL || yyjson_is_null(v);
   ```)
 
 ;;; json-arr-len -- number of elements in the array at `val` (0 if not an array).
