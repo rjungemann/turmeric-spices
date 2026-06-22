@@ -16,6 +16,7 @@
           derive-json-opaque derive-json-opaque-encode derive-json-opaque-decode
           derive-json-sum derive-json-sum-encode derive-json-sum-decode
           __json-chain __json-obj-build __json-tag
+          __json-arr-build __json-null __vec-encode
           __decode-field __decode-fields __decode-make-struct
           __sum-fnames __sum-vchain __sum-enc-arms
           __sum-dfields __sum-dec-arms)
@@ -129,6 +130,81 @@
   memcpy(buf, tmp, n + 1);
   return buf;
   ```))
+
+;; ---------------------------------------------------------------------------
+;; Container instances: Encode for (Vec a) and (Option a), given (Encode a).
+;;
+;; The element method call goes through the top-level generic helper
+;; `__vec-encode` with an explicit `(:: e A)` ascription, so it dispatches on
+;; the concrete element type per ABI specialization (turmeric #490/#491) rather
+;; than collapsing to one representative instance. Works for scalar element
+;; types (int/bool/cstr/float) and `defstruct` / `derive-json` element types --
+;; arrays of objects included.
+;;
+;; LIMITATION: a *container-typed* element (e.g. `(Vec (Option int))` or
+;; `(Vec (Vec int))`) erases to the int64 carrier and matches more than one
+;; container instance, so nesting two containers currently raises
+;; `TUR_E0020` ambiguous-dispatch. Wrap the inner container in a named newtype
+;; with its own Encode instance until dictionary-passing covers container
+;; elements. (Reported separately.)
+;; ---------------------------------------------------------------------------
+
+;; Runtime helper: walk a cons-list of already-encoded element fragments and
+;; emit `[v1,v2,...]`. Frees every fragment buffer it consumes (each
+;; `(encode ...)` returns malloc'd memory). Mirrors `__json-obj-build`.
+(defn __json-arr-build [lst : int] #{Unsafe} : cstr
+  ```c
+  typedef struct __c { int64_t head; int64_t tail; } cons_t;
+  cons_t *p = (cons_t *)(intptr_t)lst;
+  size_t total = 2; /* [ ] */
+  for (cons_t *q = p; q; q = (cons_t *)(intptr_t)q->tail) {
+    const char *v = (const char *)(intptr_t)q->head;
+    total += (v ? strlen(v) : 4 /* null */) + 1 /* , */;
+  }
+  char *out = (char *)malloc(total + 1);
+  size_t w = 0;
+  out[w++] = '[';
+  int written = 0;
+  for (cons_t *q = p; q; q = (cons_t *)(intptr_t)q->tail) {
+    const char *v = (const char *)(intptr_t)q->head;
+    if (written++) out[w++] = ',';
+    if (v) {
+      size_t vn = strlen(v);
+      memcpy(out + w, v, vn);
+      w += vn;
+      free((void *)v);
+    } else {
+      memcpy(out + w, "null", 4);
+      w += 4;
+    }
+  }
+  out[w++] = ']';
+  out[w] = '\0';
+  return out;
+  ```)
+
+;; Runtime helper: a fresh malloc'd JSON `null` fragment (for none / NULL).
+(defn __json-null [] #{Unsafe} : cstr
+  ```c char *b = (char *)malloc(5); memcpy(b, "null", 5); return b; ```)
+
+;; Generic helper: encode each element of a (Vec A) into a cons-list of
+;; fragments, in order. The `(:: (vec-get v i) A)` ascription pins element
+;; dispatch to A's own Encode instance (per ABI specialization).
+(defn __vec-encode [A] [(Encode A)] [v : (Vec A)  i : int  n : int] : int
+  (if (>= i n)
+    0
+    (cons (encode (:: (vec-get v i) A)) (__vec-encode v (+ i 1) n))))
+
+;;; Encode [(Vec A)] -- a JSON array; each element via its own Encode instance.
+(definstance Encode [Vec] [(Encode A)]
+  (encode [x]
+    (let [v (:: x (Vec A))]
+      (unsafe (__json-arr-build (__vec-encode v 0 (vec-len v)))))))
+
+;;; Encode [(Option A)] -- `some x` encodes as `x`; `none` encodes as JSON `null`.
+(definstance Encode [(Option A)] [(Encode A)]
+  (encode [x]
+    (if (.is-some x) (encode (.value x)) (unsafe (__json-null)))))
 
 ;; ---------------------------------------------------------------------------
 ;; derive-json: emit an Encode instance for a defstruct product type. Lives
