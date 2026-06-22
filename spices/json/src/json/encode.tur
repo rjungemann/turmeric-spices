@@ -17,11 +17,11 @@
           derive-json-sum derive-json-sum-encode derive-json-sum-decode
           __json-chain __json-obj-build __json-tag
           __json-arr-build __json-null __vec-encode
-          __decode-field __decode-fields __decode-make-struct
+          __decode-field __decode-fields __decode-make-struct __decode-vec
           __sum-fnames __sum-vchain __sum-enc-arms
           __sum-dfields __sum-dec-arms)
 
-(import json/decode :refer [json-obj-get])
+(import json/decode :refer [json-obj-get json-arr? json-arr-len json-arr-get])
 
 ;;; Encode -- typeclass for serializing a Turmeric value to a JSON
 ;;; fragment.  The fragment is a self-contained JSON value (number,
@@ -390,6 +390,29 @@
   memcpy(&bits, &d, sizeof(bits));
   return tur_box_ok(bits);
   ```))
+
+;; Generic Result-threaded decode of a JSON array into a (Vec A): element i is
+;; decoded via A's own Decode instance (return-directed `(:: ... (Result A
+;; cstr))`), pushed into `acc`, and the loop short-circuits on the first
+;; element error. Pairs with `Encode [(Vec A)]`. Mirrors the
+;; `Encode`-side `__vec-encode` helper.
+(defn __decode-vec [A] [(Decode A)]
+  [doc : int  val : int  i : int  n : int  acc : (Vec A)] : (Result (Vec A) cstr)
+  (if (>= i n)
+    (:: (ok acc) (Result (Vec A) cstr))
+    (let [r (:: (decode doc (unsafe (json-arr-get val i))) (Result A cstr))]
+      (if (.is-ok r)
+        (do (vec-push! acc (ok-val r)) (__decode-vec doc val (+ i 1) n acc))
+        (:: (err (err-val r)) (Result (Vec A) cstr))))))
+
+;;; Decode [(Vec A)] -- a JSON array; each element via its own Decode instance.
+;;; Non-array input is an err. (Option/Map containers are blocked on a
+;;; by-value-struct-Result codegen gap -- reported separately.)
+(definstance Decode [Vec] [(Decode A)]
+  (decode [doc val]
+    (if (unsafe (json-arr? val))
+      (__decode-vec doc val 0 (unsafe (json-arr-len val)) (:: (vec-new) (Vec A)))
+      (:: (err "decode Vec: not a JSON array") (Result (Vec A) cstr)))))
 
 ;; Recursive helper for derive-json's Decode side: turn the field list
 ;; into a chain of positional arguments to `make-struct`. Each entry
