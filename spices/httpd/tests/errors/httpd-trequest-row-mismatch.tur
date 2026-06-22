@@ -1,0 +1,34 @@
+;; U3 negative: a row-typed TRequest of one header shape cannot be passed
+;; where another header shape is expected. The phantom `headers` row makes
+;; two requests with different header sets distinct types.
+;;
+;;   tur check -Xdata-literals tests/errors/httpd-trequest-row-mismatch.tur
+;;   => error [TUR-E0001]: type mismatch
+;;        expected (TRequest #row{authorization : cstr})
+;;        got      (TRequest #row{accept : cstr})
+;;
+;; This is the U3 "negative fixture" deliverable for httpd -- the row check
+;; is the guarantee, not the runtime behavior. Requires `-Xdata-literals`
+;; for the concrete `#row{...}` literals (the httpd/typed module itself is
+;; row-polymorphic and needs no flag). Compile-fail fixture; the inline
+;; compile-fail harness is plan P5. Lives under tests/errors/ so the
+;; non-recursive `tur test tests` run skips it.
+(defmodule httpd_trequest_row_mismatch_test
+  (export)
+(import httpd/types :refer [Request])
+(import httpd/typed :refer [TRequest treq-of treq-header])
+
+;; Mint a raw Request without the framework so the fixture elaborates
+;; standalone (Request is defopaque :int).
+(defn __mk-req [h : int] : Request (:: h Request))
+
+;; Pinned to a request that statically carries an Authorization header.
+(defn require-auth [r : (TRequest #row{authorization : cstr})] : (Result cstr cstr)
+  (treq-header r "Authorization"))
+
+(defn misuse [] : (Result cstr cstr)
+  ;; A request whose header row is {accept} -- wrong shape for require-auth.
+  (let [req  (__mk-req 0)
+        treq (:: (treq-of req) (TRequest #row{accept : cstr}))]
+    (require-auth treq)))   ;; ERROR TUR-E0001: header-row mismatch
+) ;; end

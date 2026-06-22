@@ -1,0 +1,174 @@
+;;; httpd/typed -- U3 row-typed Request / Response surface (Track C, phase U3).
+;;;
+;;; A parsed `Request` (and a built `Response`) is the same opaque :int
+;;; handle no matter what headers it carries: headers are looked up by name
+;;; at runtime (`req-header` returns a `Result` because the header may be
+;;; absent), so handing a request to code that assumes a different header
+;;; set -- an auth handler that reads `Authorization`, a content negotiator
+;;; that reads `Accept` -- is only "checked" at runtime, by the lookup
+;;; returning `err`. In practice a route already knows statically which
+;;; headers it requires.
+;;;
+;;; `TRequest` / `TResponse` are phantom row-typed newtypes over the raw
+;;; :int handle: the header set rides along as a kind-`[*]` row argument
+;;; `headers` (the same machinery ECS's `Query` value, `frame/typed`,
+;;; `sqlite/typed`'s `TStmt`, and `postgres/typed`'s `TRows` use). A
+;;; function pinned to a concrete header row -- e.g.
+;;;
+;;;   (defn require-auth
+;;;     [r : (TRequest #row{authorization : cstr})] : (Result cstr cstr)
+;;;     (treq-header r "Authorization"))
+;;;
+;;; -- rejects a `TRequest` carrying any other header row at the
+;;; elaborator (TUR-E0001), not at runtime when the lookup quietly misses.
+;;; The row erases at codegen; a `TRequest` / `TResponse` value carries
+;;; only the underlying :int handle. Coercions stay free.
+;;;
+;;; Unlike sqlite's `Stmt` / postgres's `Rows`, httpd's `Request` and
+;;; `Response` are plain `defopaque :int` (NOT `:linear`), so there is no
+;;; linear gate to bypass: the wrapper coerces handle <-> int with plain
+;;; `(:: x :int)` / `(:: x Request)` ascription rather than an inline-C
+;;; shim. The mutating response builders (`tresp-with-header` /
+;;; `tresp-with-body` / `tresp-with-status`) return the same `TResponse`
+;;; so the phantom row threads through a `->` chain unchanged.
+;;;
+;;; Writing a concrete row literal (`#row{...}`) at a call site requires
+;;; the consumer to enable `-Xdata-literals`, exactly as ECS's typed
+;;; `Query` does. The definitions in this module are all row-polymorphic,
+;;; so the module itself type-checks without the flag; only call sites
+;;; that name a specific shape need it.
+;;;
+;;; Per the U3 plan's P0 decision, the term-level `(k in r)` membership
+;;; predicate is deferred: `treq-header` accepts the header name as a
+;;; `cstr` and remains polymorphic in the row, still returning a `Result`
+;;; (the header may be absent at runtime). The type-level win here is
+;;; whole-shape: two requests/responses with different header rows are
+;;; distinct types. A `with-header` that *extends* the phantom row
+;;; (`headers -> (cons-row k headers)`) is row-extension and stays a
+;;; follow-up alongside the shared U3 `derive-decoder`.
+;;;
+;;; Open follow-ups (NOT in this slice, mirroring sqlite/postgres typed):
+;;; - **Row-extending builders.** `tresp-with-header` keeps the row fixed;
+;;;   tracking added headers in the phantom needs row extension.
+;;; - **Typed header values.** Values stay `cstr`; a typed-value newtype
+;;;   per header (e.g. `ContentLength : int`) is a separate follow-up.
+;;; - **Row-derived decoder.** The shared U3 `derive-decoder` (a sibling
+;;;   of P2a `derive-json` that walks the row to emit a validating decoder
+;;;   returning `Result<T, Vec<DecodeError>>`) is future work across the
+;;;   U3 backends; this whole-shape phantom is the prerequisite.
+;;;
+;;; Since: U3
+
+(defmodule httpd/typed
+  (export TRequest TResponse
+          treq-of treq-handle
+          treq-method treq-path treq-query treq-body treq-header
+          tresp-of tresp-handle
+          tresp-with-header tresp-with-body tresp-with-status
+          tfree-response)
+
+  (import httpd/types    :refer [Request Response])
+  (import httpd/request  :refer [req-method req-path req-query req-body req-header])
+  (import httpd/response :refer [with-header with-body with-status free-response])
+
+;;; TRequest -- a phantom row-typed handle on a parsed HTTP request,
+;;; parameterised by its header row `headers`. The row is erased at
+;;; codegen; at runtime a `TRequest` carries only the underlying :int
+;;; Request handle.
+;;; Since: U3
+(defstruct TRequest [^&headers] (handle :int))
+
+;;; TResponse -- a phantom row-typed handle on an HTTP response,
+;;; parameterised by its header row `headers`. The row is erased at
+;;; codegen; at runtime a `TResponse` carries only the underlying :int
+;;; Response handle.
+;;; Since: U3
+(defstruct TResponse [^&headers] (handle :int))
+
+;; --- Request side --------------------------------------------------------
+
+;;; treq-of -- wrap an opaque `Request` as a row-typed `TRequest`. The
+;;; header row is inferred from the result type, so ascribe at the call
+;;; site:
+;;;
+;;;   (:: (treq-of req) (TRequest #row{authorization : cstr}))
+;;;
+;;; `Request` is non-linear, so this is a free re-tag of the handle.
+;;; Since: U3
+(defn treq-of [^&headers] [r : Request] : (TRequest headers)
+  (make-struct TRequest (:: r :int)))
+
+;;; treq-handle -- unwrap a row-typed TRequest back to its opaque
+;;; `Request` handle. Row-polymorphic. Since: U3
+(defn treq-handle [^&headers] [r : (TRequest headers)] : Request
+  (:: (.handle r) Request))
+
+;;; treq-method -- HTTP method ("GET", "POST", ...). Polymorphic over the
+;;; header row (the U3 P0 decision: header membership is runtime-checked;
+;;; the type-level win is whole-shape distinctness). Since: U3
+(defn treq-method [^&headers] [r : (TRequest headers)] : cstr
+  (req-method (treq-handle r)))
+
+;;; treq-path -- request-target path (no query string). Since: U3
+(defn treq-path [^&headers] [r : (TRequest headers)] : cstr
+  (req-path (treq-handle r)))
+
+;;; treq-query -- raw query string after '?', or "". Since: U3
+(defn treq-query [^&headers] [r : (TRequest headers)] : cstr
+  (req-query (treq-handle r)))
+
+;;; treq-body -- request body bytes, or "". Since: U3
+(defn treq-body [^&headers] [r : (TRequest headers)] : cstr
+  (req-body (treq-handle r)))
+
+;;; treq-header -- look up a request header by name (case-insensitive).
+;;; Returns `(Result cstr cstr)`: `ok` value if present, `err` otherwise
+;;; (membership stays runtime-checked per the U3 P0 decision). Since: U3
+(defn treq-header [^&headers] [r : (TRequest headers)  name : cstr] : (Result cstr cstr)
+  (req-header (treq-handle r) name))
+
+;; --- Response side -------------------------------------------------------
+
+;;; tresp-of -- wrap an opaque `Response` as a row-typed `TResponse`. The
+;;; header row is inferred from the result type, so ascribe at the call
+;;; site:
+;;;
+;;;   (:: (tresp-of (resp-ok "text/plain" "hi"))
+;;;       (TResponse #row{content-type : cstr}))
+;;;
+;;; `Response` is non-linear, so this is a free re-tag of the handle.
+;;; Since: U3
+(defn tresp-of [^&headers] [r : Response] : (TResponse headers)
+  (make-struct TResponse (:: r :int)))
+
+;;; tresp-handle -- unwrap a row-typed TResponse back to its opaque
+;;; `Response` handle. Row-polymorphic. Since: U3
+(defn tresp-handle [^&headers] [r : (TResponse headers)] : Response
+  (:: (.handle r) Response))
+
+;;; tresp-with-header -- append a header (mutates the underlying Response
+;;; in place) and return the same `TResponse` so the phantom row threads
+;;; through a `->` chain unchanged. The row is NOT extended -- tracking
+;;; added headers in the phantom is the row-extension follow-up. Since: U3
+(defn tresp-with-header [^&headers]
+                        [r : (TResponse headers)  key : cstr  val : cstr] : (TResponse headers)
+  (do (with-header (tresp-handle r) key val) r))
+
+;;; tresp-with-body -- replace the response body (mutates in place);
+;;; returns the same `TResponse`. Since: U3
+(defn tresp-with-body [^&headers]
+                      [r : (TResponse headers)  body : cstr] : (TResponse headers)
+  (do (with-body (tresp-handle r) body) r))
+
+;;; tresp-with-status -- replace the response status (mutates in place);
+;;; returns the same `TResponse`. Since: U3
+(defn tresp-with-status [^&headers]
+                        [r : (TResponse headers)  status : int] : (TResponse headers)
+  (do (with-status (tresp-handle r) status) r))
+
+;;; tfree-response -- release the underlying Response and all owned
+;;; storage. Since: U3
+(defn tfree-response [^&headers] [r : (TResponse headers)] : void
+  (free-response (tresp-handle r)))
+
+) ;; end defmodule httpd/typed
