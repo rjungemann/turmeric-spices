@@ -4,7 +4,7 @@
   (export c-field c-defstruct c-defunion c-defenum c-typedef)
 
   (import c-dsl/codegen :refer [c-sprintf1 c-sprintf2 c-join])
-  (import c-dsl/types   :refer [c-type CField])
+  (import c-dsl/types   :refer [c-type CField CEnumVariant])
 
 ;;; c-field -- format a single struct/union field declaration.
 ;;;
@@ -146,8 +146,7 @@
 ;;;   (c-defenum "Color" (cons "RED" (cons "GREEN" (cons "BLUE" 0))))
 ;;;   ; => "typedef enum {\n    RED,\n    GREEN,\n    BLUE\n} Color;"
 ;;;
-;;; Since: P1
-(defn c-defenum [name : cstr variants : int] : cstr
+(defn __c-defenum-impl [name : cstr variants : int] : cstr
   ```c
   #include <string.h>
   #include <stdlib.h>
@@ -183,6 +182,14 @@
   *p++ = ';'; *p = '\0';
   return out;
   ```)
+
+;;; Since: P1 (variadic typed in U6 extension)
+;;; Example (U6):
+;;;   (c-defenum "Color" (c-enum-variant "RED")
+;;;                      (c-enum-variant "GREEN")
+;;;                      (c-enum-variant "BLUE"))
+(defn c-defenum [name : cstr & variants : CEnumVariant] : cstr
+  (__c-defenum-impl name variants))
 
 ;;; c-typedef -- emit a typedef alias declaration.
 ;;;

@@ -9,7 +9,8 @@
                                   c-binop c-unop c-ternary c-case c-default-case
                                   c-switch])
   (import c-dsl/fns      :refer [c-param c-defn c-call c-declare])
-  (import c-dsl/types    :refer [cfield->cstr cparam->cstr])
+  (import c-dsl/types    :refer [cfield->cstr cparam->cstr
+                                  c-enum-variant c-type-ref])
   (import c-dsl/mem      :refer [c-addr c-deref c-index c-cast
                                   c-malloc c-free c-sizeof c-null
                                   c-ptr-add])
@@ -163,7 +164,7 @@
   (describe "c-declare"
     (it "emits forward declaration"
       (assert-true
-        (cstr= (c-declare ":int" "add" (cons "int32_t" (cons "int32_t" 0)))
+        (cstr= (c-declare ":int" "add" (c-type-ref "int32_t") (c-type-ref "int32_t"))
                "int32_t add(int32_t, int32_t);"))))
 
   ;; --- mem ---
@@ -260,7 +261,9 @@
   (describe "c-defenum"
     (it "emits typedef enum"
       (assert-true
-        (cstr= (c-defenum "Color" (cons "RED" (cons "GREEN" (cons "BLUE" 0))))
+        (cstr= (c-defenum "Color" (c-enum-variant "RED")
+                                  (c-enum-variant "GREEN")
+                                  (c-enum-variant "BLUE"))
                "typedef enum {\n    RED,\n    GREEN,\n    BLUE\n} Color;"))))
 
   (describe "c-typedef"

@@ -2,7 +2,9 @@
 
 (defmodule c-dsl/types
   (export c-type c-ptr-type c-arr-type c-fn-type c-const-type c-volatile-type
-          CField CParam cfield->cstr cparam->cstr)
+          CField CParam CEnumVariant CTypeRef
+          cfield->cstr cparam->cstr cenum-variant->cstr ctype-ref->cstr
+          c-enum-variant c-type-ref)
 
   (import c-dsl/codegen :refer [c-cat2 c-cat3 c-join c-int->str])
 
@@ -18,9 +20,42 @@
   ;;; `c-defn`/`c-defn-static`/`c-defn-inline` variadic builders.
   (defopaque CParam :int)
 
+  ;;; CEnumVariant -- a typed enum-variant name passed to `c-defenum`. The
+  ;;; runtime representation is the variant's name string; the newtype
+  ;;; merely keeps the variadic rest of `c-defenum` from accepting an
+  ;;; arbitrary cstr (e.g. a `c-field` result or a typo'd literal).
+  (defopaque CEnumVariant :int)
+
+  ;;; CTypeRef -- a typed C type-name string passed to `c-declare` /
+  ;;; `c-extern`. Same opaque-wrap rationale; constructed via `c-type-ref`
+  ;;; (which routes through `c-type` to keep keyword -> C-type mapping
+  ;;; consistent).
+  (defopaque CTypeRef :int)
+
   ;;; cfield->cstr / cparam->cstr -- unwrap the underlying formatted cstr.
   (defn cfield->cstr [f : CField] : cstr ```c return (const char *)(intptr_t)f; ```)
   (defn cparam->cstr [p : CParam] : cstr ```c return (const char *)(intptr_t)p; ```)
+
+  ;;; cenum-variant->cstr / ctype-ref->cstr -- unwrap accessors.
+  (defn cenum-variant->cstr [v : CEnumVariant] : cstr ```c return (const char *)(intptr_t)v; ```)
+  (defn ctype-ref->cstr     [r : CTypeRef]     : cstr ```c return (const char *)(intptr_t)r; ```)
+
+  ;; Wrap a bare cstr as a CEnumVariant / CTypeRef (no-op at runtime).
+  (defn __cenum-variant-of [s : cstr] : CEnumVariant ```c return (int64_t)(intptr_t)s; ```)
+  (defn __ctype-ref-of     [s : cstr] : CTypeRef     ```c return (int64_t)(intptr_t)s; ```)
+
+  ;;; c-enum-variant -- wrap a variant name as a typed CEnumVariant.
+  ;;; The variant name is taken verbatim (caller is responsible for the
+  ;;; identifier syntax); the wrap is here purely so the variadic rest of
+  ;;; `c-defenum` can reject a stray cstr at the elaborator.
+  (defn c-enum-variant [name : cstr] : CEnumVariant
+    (__cenum-variant-of name))
+
+  ;;; c-type-ref -- wrap a C type string as a CTypeRef. Pass either a
+  ;;; bare C type ("int32_t") or the result of `(c-type ...)` for
+  ;;; turmeric-keyword lowering.
+  (defn c-type-ref [t : cstr] : CTypeRef
+    (__ctype-ref-of t))
 
 ;;; c-type -- map a Turmeric type keyword string to a C99 type string.
 ;;;
