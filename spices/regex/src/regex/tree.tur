@@ -20,13 +20,18 @@
 ;;   * a backtracking matcher (`re-matches?`).
 ;;
 ;; STATUS: the generic `re-cata` now compiles and runs correctly at every
-;; value carrier (int/bool/cstr), so the value folds go through it. The one
-;; remaining edge is the matcher: its carrier is a *function* type
-;; (`(fn [k s] bool)`), and `re-cata` does not yet thread a function-typed
-;; carrier `B` (the result comes back as `int` and is not callable), so the
-;; matcher is written as direct structural recursion. The required layer
-;; `(:: ...)` ascriptions and this function-carrier note are documented in
-;; docs/u5-hkt-ast-feasibility-2026-06-21.md.
+;; value carrier (int/bool/cstr), so the value folds go through it. The layer
+;; ascriptions the value folds used to need are gone too -- matching `(Roll l)`
+;; now refines `l` directly (verified against turmeric main, post #489..#497).
+;; The one remaining edge is the matcher: its carrier is a *function whose own
+;; first argument is a function* -- `B = (fn [(fn [cstr] bool) cstr] bool)`.
+;; turmeric #489 made scalar-argument function carriers (`(fn [int] int)`,
+;; `(fn [int int] int)`) fold + run, but a carrier with a function-typed
+;; argument still mis-lowers that argument as a thin `int64_t` at the
+;; carrier-result application site and segfaults at runtime. So the matcher
+;; stays direct structural recursion. Full analysis + minimal repro:
+;; docs/u5-regex-matcher-cata-blocker-2026-06-22.md (feasibility history in
+;; docs/u5-hkt-ast-feasibility-2026-06-21.md).
 
 (defmodule regex/tree
   (export ReF Re
@@ -59,10 +64,12 @@
         (CatF x y)  (CatF (g x) (g y))
         (StarF x)   (StarF (g x)))))
 
-  ;; unwrap one layer, recovering the recursive element type. The ascription
-  ;; is required: matching `(Roll l)` does not yet refine `l`'s recursion slot.
+  ;; unwrap one layer, recovering the recursive element type. Matching
+  ;; `(Roll l)` now refines `l`'s recursion slot directly -- the `(:: l (ReF
+  ;; Re))` ascription this used to need was retired once turmeric main learned
+  ;; to refine the layer's recursive type var (verified post #489..#497).
   (defn unroll-re [e : Re] : (ReF Re)
-    (match e (Roll l) (:: l (ReF Re))))
+    (match e (Roll l) l))
 
   ;; --- the generic catamorphism (the U5 ideal) ----------------------------
   ;; cata alg = alg . fmap (cata alg) . unroll
@@ -127,12 +134,21 @@
   ;; --- a backtracking matcher ---------------------------------------------
   ;; CPS: `m e k s` asks "does `e` match a prefix of `s` such that `k` accepts
   ;; the leftover suffix?". The elegant form is a cata whose carrier is a
-  ;; matcher closure `(fn [k s] bool)` (the "NFA is one cata" shape). That
-  ;; type-checks but `re-cata` does not yet thread a *function-typed* carrier
-  ;; `B`: `(re-cata match-alg e)` comes back as `int` and is not callable. (The
-  ;; closure-capture gap that previously also blocked it was fixed alongside
-  ;; G6.) So the matcher is direct structural recursion over the same tree --
-  ;; still a fold, just not routed through `re-cata`. See the feasibility doc.
+  ;; matcher closure `(fn [k s] bool)` (the "NFA is one cata" shape).
+  ;;
+  ;; STATUS (verified against turmeric main built from source, post #489..#497):
+  ;; the function-typed-carrier cata now WORKS for carriers whose arguments are
+  ;; scalars -- `B = (fn [int] int)` (turmeric #489) and `B = (fn [int int]
+  ;; int)` both fold + run. But the matcher carrier is `B = (fn [(fn [cstr]
+  ;; bool) cstr] bool)`: its *first argument is itself a function* (the
+  ;; continuation `k`). That case still mis-lowers -- at the carrier-result
+  ;; application site the fn-typed argument is passed thin (cast to `int64_t`)
+  ;; instead of as a fat closure box, so `(re-cata match-alg e)` segfaults at
+  ;; runtime (it now type-checks AND compiles -- the old "comes back as int,
+  ;; not callable" blocker is gone). Minimal repro + analysis in
+  ;; docs/u5-regex-matcher-cata-blocker-2026-06-22.md. Until that fix lands the
+  ;; matcher stays direct structural recursion over the same tree -- still a
+  ;; fold, just not routed through `re-cata`.
 
   ;; consume one literal char off the front of `s`; return s+1, or null on miss
   (defn lit-step [lit : cstr s : cstr] : cstr
@@ -150,7 +166,7 @@
   (defn m [e : Re k : (fn [cstr] bool) s : cstr] : bool
     (match e
       (Roll layer)
-        (let [l (:: layer (ReF Re))]
+        (let [l layer]
           (match l
             (EmptyF)   (k s)
             (LitF c)   (let [s2 (lit-step c s)]
