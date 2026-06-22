@@ -1,0 +1,203 @@
+;;; raylib/image -- statically-sized CPU pixel buffers (Track C / U4).
+;;;
+;;; `(Image w h)` is a CPU-side RGBA8 pixel buffer `w` pixels wide by `h` high
+;;; (pixel at column `x`, row `y` lives at `pixels[y*w + x]`, packed
+;;; 0xRRGGBBAA). The width `w` and height `h` are carried in the type as
+;;; phantom `Size` indices (SZ6/SZ8), so the sampler reads/writes and the
+;;; image-combining ops are pinned to a statically known resolution: a
+;;; function written for a 64x64 sprite sheet rejects a 32x32 image at the
+;;; call site, and `image-overlay` -- which shares `w` and `h` across both
+;;; operands -- rejects compositing two differently-sized images at compile
+;;; time (TUR-E0260) rather than blitting past the end of a row.
+;;;
+;;; The cross-parameter check is always on; it does not need the experimental
+;;; `-Xsized-types` flag. Like rtaudio/buffer's `(AudioBuf n c)` this is a
+;;; two-index sized opaque (the audio analogue), relying on the multi-index
+;;; opaque cross-parameter unification unblocked by turmeric main #476.
+;;;
+;;; This is a self-contained CPU pixel surface -- it does *not* call into the
+;;; raylib native library (no `<raylib.h>`), so it type-checks and runs without
+;;; a GPU/display. It complements raylib's GPU-side `Texture2D` the way
+;;; `linalg/sized` complements the dynamic `linalg/vec`: reach for a sized
+;;; `Image` when you generate/process pixels on the CPU at a statically known
+;;; resolution and want the elaborator to police the dimensions.
+;;;
+;;; Representation: the carrier is an `:int` handle to a heap struct
+;;; (`{int64_t width; int64_t height; uint32_t *pixels}`). The size indices are
+;;; phantom -- erased in codegen -- so a sized image is exactly as cheap as the
+;;; raw pixel array, and `(:: img :int)` hands the same pointer to an
+;;; UpdateTexture / image-export path unchanged.
+;;;
+;;; `stdlib/sized.tur` (the `Size` / `Static` type) must be loaded for the
+;;; `(Image (Static 64) (Static 64))` annotations callers write; this module
+;;; loads it.
+
+(load "stdlib/sized.tur")
+
+(defmodule raylib/image
+  (export Image
+          rgba rgba-r rgba-g rgba-b rgba-a
+          image-blank image-filled image-free image-width image-height
+          image-get image-set! image-overlay image-scale-rgb)
+
+  ;; (Image w h) -- phantom-indexed handle to a row-major RGBA8 pixel buffer.
+  (defopaque Image [w h] :int)
+
+  ;; ===== packed-RGBA helpers (plain int; not size-typed) =====
+
+  ;;; rgba -- pack four 0..255 channel values into a 0xRRGGBBAA pixel.
+  (defn rgba [r : int g : int b : int a : int] : int
+    ```c
+    return ((int64_t)((r & 0xFF) << 24) | ((g & 0xFF) << 16) |
+            ((b & 0xFF) << 8) | (a & 0xFF));
+    ```)
+  ;;; rgba-r / -g / -b / -a -- extract a channel (0..255) from a packed pixel.
+  (defn rgba-r [px : int] : int ```c return (int64_t)((px >> 24) & 0xFF); ```)
+  (defn rgba-g [px : int] : int ```c return (int64_t)((px >> 16) & 0xFF); ```)
+  (defn rgba-b [px : int] : int ```c return (int64_t)((px >> 8)  & 0xFF); ```)
+  (defn rgba-a [px : int] : int ```c return (int64_t)(px & 0xFF); ```)
+
+  ;; ===== raw int-carried implementation (private) =====
+
+  (defn __img-new-raw [width : int height : int fill : int] #{Unsafe} : int
+    ```c
+    struct { int64_t width; int64_t height; uint32_t *pixels; } *b = malloc(sizeof(*b));
+    int64_t npix = width * height;
+    b->width  = width;
+    b->height = height;
+    b->pixels = npix > 0 ? (uint32_t *)malloc((size_t)npix * sizeof(uint32_t)) : NULL;
+    for (int64_t i = 0; i < npix; i++) b->pixels[i] = (uint32_t)fill;
+    return (int64_t)(intptr_t)b;
+    ```)
+
+  (defn __img-free-raw [b : int] #{Unsafe} : nil
+    ```c
+    struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b;
+    if (v->pixels) free(v->pixels);
+    free(v);
+    ```)
+
+  (defn __img-width-raw [b : int] #{Unsafe} : int
+    ```c struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b; return (int)v->width; ```)
+
+  (defn __img-height-raw [b : int] #{Unsafe} : int
+    ```c struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b; return (int)v->height; ```)
+
+  (defn __img-get-raw [b : int x : int y : int] #{Unsafe} : int
+    ```c
+    struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b;
+    if (x < 0 || x >= v->width || y < 0 || y >= v->height) {
+      fprintf(stderr, "image-get: pixel (%lld,%lld) out of bounds (%lldx%lld)\n",
+              (long long)x, (long long)y, (long long)v->width, (long long)v->height);
+      exit(1);
+    }
+    return (int64_t)v->pixels[y * v->width + x];
+    ```)
+
+  (defn __img-set-raw [b : int x : int y : int px : int] #{Unsafe} : nil
+    ```c
+    struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b;
+    if (x < 0 || x >= v->width || y < 0 || y >= v->height) {
+      fprintf(stderr, "image-set!: pixel (%lld,%lld) out of bounds (%lldx%lld)\n",
+              (long long)x, (long long)y, (long long)v->width, (long long)v->height);
+      exit(1);
+    }
+    v->pixels[y * v->width + x] = (uint32_t)px;
+    ```)
+
+  ;; composite `over` onto a copy of `base`: a pixel from `over` with non-zero
+  ;; alpha replaces the base pixel, else the base shows through. Runtime shape
+  ;; guard (belt-and-suspenders; static sizes are already proven equal here).
+  (defn __img-overlay-raw [a : int b : int] #{Unsafe} : int
+    ```c
+    struct I { int64_t width; int64_t height; uint32_t *pixels; };
+    struct I *base = (void *)(intptr_t)a;
+    struct I *over = (void *)(intptr_t)b;
+    if (base->width != over->width || base->height != over->height) {
+      fprintf(stderr, "image-overlay: shape mismatch %lldx%lld vs %lldx%lld\n",
+              (long long)base->width, (long long)base->height,
+              (long long)over->width, (long long)over->height);
+      exit(1);
+    }
+    struct I *o = malloc(sizeof(*o));
+    int64_t npix = base->width * base->height;
+    o->width = base->width; o->height = base->height;
+    o->pixels = npix > 0 ? (uint32_t *)malloc((size_t)npix * sizeof(uint32_t)) : NULL;
+    for (int64_t i = 0; i < npix; i++) {
+      uint32_t ov = over->pixels[i];
+      o->pixels[i] = (ov & 0xFFu) != 0 ? ov : base->pixels[i];
+    }
+    return (int64_t)(intptr_t)o;
+    ```)
+
+  ;; multiply the R/G/B channels by `f` (alpha preserved), clamped to 0..255.
+  (defn __img-scale-rgb-raw [b : int f : float] #{Unsafe} : int
+    ```c
+    struct I { int64_t width; int64_t height; uint32_t *pixels; };
+    struct I *x = (void *)(intptr_t)b;
+    struct I *o = malloc(sizeof(*o));
+    int64_t npix = x->width * x->height;
+    o->width = x->width; o->height = x->height;
+    o->pixels = npix > 0 ? (uint32_t *)malloc((size_t)npix * sizeof(uint32_t)) : NULL;
+    for (int64_t i = 0; i < npix; i++) {
+      uint32_t p = x->pixels[i];
+      int r = (int)((double)((p >> 24) & 0xFF) * f);
+      int g = (int)((double)((p >> 16) & 0xFF) * f);
+      int bl = (int)((double)((p >> 8)  & 0xFF) * f);
+      int a = (int)(p & 0xFF);
+      if (r > 255) r = 255;
+      if (r < 0) r = 0;
+      if (g > 255) g = 255;
+      if (g < 0) g = 0;
+      if (bl > 255) bl = 255;
+      if (bl < 0) bl = 0;
+      o->pixels[i] = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)bl << 8) | (uint32_t)a;
+    }
+    return (int64_t)(intptr_t)o;
+    ```)
+
+  ;; ===== public phantom-typed surface =====
+
+  ;;; image-blank -- a fresh `width` x `height` fully-transparent image (all
+  ;;; pixels 0). The static resolution is pinned by the caller's annotation:
+  ;;;   (defn sprite [] : (Image (Static 64) (Static 64)) (image-blank 64 64))
+  (defn image-blank [w h] [width : int height : int] : (Image w h)
+    (:: (unsafe (__img-new-raw width height 0)) :Image))
+
+  ;;; image-filled -- a fresh `width` x `height` image with every pixel set to
+  ;;; the packed RGBA value `fill`.
+  (defn image-filled [w h] [width : int height : int fill : int] : (Image w h)
+    (:: (unsafe (__img-new-raw width height fill)) :Image))
+
+  ;;; image-free -- free an image and its backing pixels.
+  (defn image-free [w h] [img : (Image w h)] : nil
+    (unsafe (__img-free-raw (:: img :int))))
+
+  ;;; image-width -- runtime width (equals the static `w`).
+  (defn image-width [w h] [img : (Image w h)] : int
+    (unsafe (__img-width-raw (:: img :int))))
+
+  ;;; image-height -- runtime height (equals the static `h`).
+  (defn image-height [w h] [img : (Image w h)] : int
+    (unsafe (__img-height-raw (:: img :int))))
+
+  ;;; image-get -- bounds-checked packed-RGBA pixel sampler at (x, y).
+  (defn image-get [w h] [img : (Image w h) x : int y : int] : int
+    (unsafe (__img-get-raw (:: img :int) x y)))
+
+  ;;; image-set! -- bounds-checked packed-RGBA pixel write at (x, y).
+  (defn image-set! [w h] [img : (Image w h) x : int y : int px : int] : nil
+    (unsafe (__img-set-raw (:: img :int) x y px)))
+
+  ;;; image-overlay -- composite `over` onto `base` (over's opaque pixels win);
+  ;;; both operands share shape (w, h), so a resolution mismatch is a
+  ;;; compile-time TUR-E0260. Returns a fresh image.
+  (defn image-overlay [w h] [base : (Image w h) over : (Image w h)] : (Image w h)
+    (:: (unsafe (__img-overlay-raw (:: base :int) (:: over :int))) :Image))
+
+  ;;; image-scale-rgb -- multiply the R/G/B channels of every pixel by `f`
+  ;;; (alpha preserved, clamped to 0..255); returns a fresh image.
+  (defn image-scale-rgb [w h] [img : (Image w h) f : float] : (Image w h)
+    (:: (unsafe (__img-scale-rgb-raw (:: img :int) f)) :Image))
+
+) ;; end defmodule raylib/image
