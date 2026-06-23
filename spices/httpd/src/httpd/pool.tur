@@ -1,116 +1,143 @@
 ;;; httpd/pool -- bounded worker pool used by httpd/server.
 ;;;
-;;; A pool is a Mutex<RingBuffer<fd>> guarded by two condition variables
-;;; (not-empty / not-full).  Workers block on not-empty while idle; the
-;;; listener thread enqueues fds and blocks on not-full when the queue
-;;; is saturated, giving cooperative back-pressure rather than dropping
-;;; connections.
+;;; This is now a thin adapter over the generic `tur-thread-pool` spice.
+;;; The thread-pool owns the mutex + condition-variable + ring-buffer
+;;; machinery and speaks raw `ptr<void>` work items; httpd/pool adds the
+;;; HTTP-specific bits:
 ;;;
-;;; Pool workers dispatch each accepted connection through httpd/server's
-;;; srv-worker-loop, so per-connection servicing logic (parse, handle,
-;;; serialize, write, close) stays in one place.
+;;;   * a wrapper handle (`struct __httpd_pool`) that remembers the
+;;;     thread-pool plus the request handler, so pool-enqueue can pack a
+;;;     per-connection work item;
+;;;   * a `__httpd_warg { client_fd, handler }` work item packed BEFORE
+;;;     submit (vs. the old design that reused the pool's internal fd slot
+;;;     after dequeue -- one extra malloc/free per accepted connection);
+;;;   * a non-static dispatch callback that unpacks the work item via
+;;;     httpd/server's srv-worker-loop trampoline (which reads the socket,
+;;;     calls the user handler, writes the response, closes the socket, and
+;;;     frees the warg).
 ;;;
-;;; Public API:
+;;; The public API (pool-new, pool-enqueue, pool-stop) is unchanged from the
+;;; caller's perspective, so httpd/server requires no changes.
 ;;;
-;;;   pool-new      -- spawn the workers and allocate the ring buffer.
-;;;   pool-enqueue  -- hand a client fd off to the pool.
-;;;   pool-stop     -- drain queued fds, join every worker, free the pool.
+;;; Internal wrapper layout (duplicated verbatim in every inline-C block):
 ;;;
-;;; Since: H7
-;; The pool worker dispatches each connection by constructing a
-;; __httpd_warg and calling httpd/server's srv-worker-loop directly via
-;; extern decl -- the per-connection servicing logic stays in one place.
-;;
-;; Internal struct layout (duplicated verbatim in every inline-C block):
-;;
-;;   struct __httpd_pool {
-;;     pthread_mutex_t mu;
-;;     pthread_cond_t  not_empty;
-;;     pthread_cond_t  not_full;
-;;     int            *fds;
-;;     int             cap;
-;;     int             head;
-;;     int             tail;
-;;     int             count;
-;;     int             stop;
-;;     void           *handler;
-;;     pthread_t      *workers;
-;;     int             nworkers;
-;;   };
+;;;   struct __httpd_pool { void *tp; void *handler; };
+;;;   struct __httpd_warg { int client_fd; void *handler; };
+;;;
+;;; Since: H7 (delegating to tur-thread-pool since TP1)
 
 (defmodule httpd/pool
   (export pool-new pool-enqueue pool-stop)
 
-;; file-scope-c-block: pthread.h / unistd.h contain static inline function
-;; definitions (e.g. __DARWIN_FD_ISSET in _fd_def.h on macOS 14+) that are
-;; not legal inside a function body.  Hoist all POSIX headers and the shared
-;; struct layout here so every defn below can reference them without
-;; re-including at block scope.
+  (import thread-pool/pool :as tp)
+
+;; file-scope-c-block: POSIX headers contain static inline definitions that
+;; are not legal inside a function body, so hoist them (and the shared struct
+;; layout + the non-static dispatch callback) here.
 ```c
 #include <stdlib.h>
 #include <unistd.h>
-#include <pthread.h>
 
-struct __httpd_pool {
-  pthread_mutex_t mu;
-  pthread_cond_t  not_empty;
-  pthread_cond_t  not_full;
-  int            *fds;
-  int             cap;
-  int             head;
-  int             tail;
-  int             count;
-  int             stop;
-  void           *handler;
-  pthread_t      *workers;
-  int             nworkers;
-};
-
+struct __httpd_pool { void *tp; void *handler; };
 struct __httpd_warg { int client_fd; void *handler; };
+
+/* Non-static dispatch callback handed to thread-pool's pool-new.  Each
+   dequeued work item is a __httpd_warg; forward it to httpd/server's
+   srv-worker-loop trampoline, which services the connection and frees the
+   warg.  Must be external (non-static): its address is taken in
+   pool-dispatch-ptr and handed to pool-new in a separate translation unit,
+   where constant-propagation may turn it into a direct symbol reference. */
+void httpd_pool_dispatch(void *item) {
+  extern void *httpd__server__srv_worker_loop_trampoline(void *);
+  httpd__server__srv_worker_loop_trampoline(item);
+}
 ```
 
 ;; =============================================================================
-;; Worker entry -- one long-lived thread per pool slot.
+;; Internal helpers (wrapper handle + work-item plumbing).
 ;; =============================================================================
 
-(defn pool-worker-loop [arg : ptr<void>] : ptr<void>
+;; pool-dispatch-ptr -- address of the httpd_pool_dispatch callback.
+(defn pool-dispatch-ptr [] : ptr<void>
   ```c
-  /* Call the non-static trampoline exposed by httpd/server. */
-  extern void *httpd__server__srv_worker_loop_trampoline(void *);
+  extern void httpd_pool_dispatch(void *);
+  return (void *)httpd_pool_dispatch;
+  ```)
 
-  struct __httpd_pool *p = (struct __httpd_pool *)arg;
-  for (;;) {
-    pthread_mutex_lock(&p->mu);
-    while (p->count == 0 && !p->stop) {
-      pthread_cond_wait(&p->not_empty, &p->mu);
-    }
-    if (p->count == 0 && p->stop) {
-      pthread_mutex_unlock(&p->mu);
-      break;
-    }
-    int fd = p->fds[p->head];
-    p->head = (p->head + 1) % p->cap;
-    p->count--;
-    pthread_cond_signal(&p->not_full);
-    void *handler = p->handler;
-    pthread_mutex_unlock(&p->mu);
+;; tp-new / tp-stop -- thread-pool/pool entry points reached via inline-C
+;; extern.  thread-pool also names its functions pool-new / pool-stop, which
+;; collide with this module's public defns of the same name, so the qualified
+;; `tp/...` call resolves to the local definition.  pool-submit has no local
+;; namesake and is called as `tp/pool-submit` (see pool-enqueue) -- that
+;; reference is what anchors the thread-pool module in the build graph.
+(defn tp-new [size : int callback : ptr<void>] : ptr<void>
+  ```c
+  extern void *thread_hypool__pool__pool_hynew(int64_t, void *);
+  return (void *)thread_hypool__pool__pool_hynew((int64_t)size, callback);
+  ```)
 
-    struct __httpd_warg *wa = (struct __httpd_warg *)malloc(sizeof(*wa));
-    if (!wa) {
-      close(fd);
-      continue;
-    }
-    wa->client_fd = fd;
-    wa->handler   = handler;
-    /* srv-worker-loop reads from the socket, calls the user handler,
-       writes the response, closes the socket, and frees wa.            */
-    httpd__server__srv_worker_loop_trampoline(wa);
-  }
+(defn tp-stop [tpool : ptr<void>] : void
+  ```c
+  extern void thread_hypool__pool__pool_hystop(void *);
+  thread_hypool__pool__pool_hystop(tpool);
+  ```)
+
+;; null-ptr / is-null? -- NULL handle construction and test.
+(defn null-ptr [] : ptr<void>
+  ```c
   return NULL;
   ```)
 
+(defn is-null? [p : ptr<void>] : bool
+  ```c
+  return p == NULL;
+  ```)
+
+;; wrap-alloc -- allocate the wrapper handle, remembering the handler.
+;; tp is filled in later by wrap-set-tp once thread-pool's pool-new succeeds.
+(defn wrap-alloc [handler : (c-fn [int] int)] : ptr<void>
+  ```c
+  struct __httpd_pool *p = (struct __httpd_pool *)calloc(1, sizeof(*p));
+  if (!p) return NULL;
+  p->tp      = NULL;
+  p->handler = (void *)handler;
+  return (void *)p;
+  ```)
+
+(defn wrap-set-tp [pool : ptr<void> tp : ptr<void>] : void
+  ```c
+  ((struct __httpd_pool *)pool)->tp = tp;
+  ```)
+
+(defn wrap-tp [pool : ptr<void>] : ptr<void>
+  ```c
+  return ((struct __httpd_pool *)pool)->tp;
+  ```)
+
+;; wrap-make-warg -- pack a __httpd_warg { client_fd, handler } work item.
+;; Returns NULL on allocation failure (caller closes the fd).
+(defn wrap-make-warg [pool : ptr<void> client-fd : int] : ptr<void>
+  ```c
+  struct __httpd_pool *p = (struct __httpd_pool *)pool;
+  struct __httpd_warg *wa = (struct __httpd_warg *)malloc(sizeof(*wa));
+  if (!wa) return NULL;
+  wa->client_fd = (int)client_fd;
+  wa->handler   = p->handler;
+  return (void *)wa;
+  ```)
+
+(defn wrap-free [pool : ptr<void>] : void
+  ```c
+  free(pool);
+  ```)
+
+(defn close-fd [client-fd : int] : void
+  ```c
+  close((int)client_fd);
+  ```)
+
 ;; =============================================================================
-;; Public API
+;; Public API (unchanged signatures; delegates to thread-pool/pool).
 ;; =============================================================================
 
 ;;; pool-new -- allocate a bounded worker pool and spawn `size` threads.
@@ -118,81 +145,31 @@ struct __httpd_warg { int client_fd; void *handler; };
 ;;; Parameters:
 ;;;   size    -- desired number of worker threads (clamped to >= 1).
 ;;;   handler -- (c-fn [int] int) request handler; same contract as
-;;;              server-start's handler argument (forwarded verbatim
-;;;              to srv-worker-loop on every dequeued connection).
+;;;              server-start's handler argument (forwarded verbatim to
+;;;              srv-worker-loop on every dequeued connection).
 ;;;
 ;;; Returns:
-;;;   :ptr<void> -- opaque pool handle, or NULL if allocation or any
-;;;                 thread creation failed before at least one worker
-;;;                 was running.
+;;;   :ptr<void> -- opaque pool handle, or NULL if allocation or thread
+;;;                 creation failed.
 ;;;
 ;;; Example:
 ;;;   (def pool (pool-new 8 my-handler))
 ;;;
 ;;; Since: H7
 (defn pool-new [size : int handler : (c-fn [int] int)] : ptr<void>
-  ```c
-  extern void *httpd__pool__pool_hyworker_hyloop(void *);
-
-  int n = (int)size;
-  if (n < 1) n = 1;
-  int cap = (n * 4 > 64) ? (n * 4) : 64;
-
-  struct __httpd_pool *p = (struct __httpd_pool *)calloc(1, sizeof(*p));
-  if (!p) return NULL;
-  if (pthread_mutex_init(&p->mu, NULL) != 0) { free(p); return NULL; }
-  if (pthread_cond_init(&p->not_empty, NULL) != 0) {
-    pthread_mutex_destroy(&p->mu); free(p); return NULL;
-  }
-  if (pthread_cond_init(&p->not_full, NULL) != 0) {
-    pthread_cond_destroy(&p->not_empty);
-    pthread_mutex_destroy(&p->mu); free(p); return NULL;
-  }
-  p->fds = (int *)malloc(sizeof(int) * (size_t)cap);
-  if (!p->fds) {
-    pthread_cond_destroy(&p->not_full);
-    pthread_cond_destroy(&p->not_empty);
-    pthread_mutex_destroy(&p->mu);
-    free(p);
-    return NULL;
-  }
-  p->cap      = cap;
-  p->handler  = (void *)handler;
-  p->workers  = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)n);
-  if (!p->workers) {
-    free(p->fds);
-    pthread_cond_destroy(&p->not_full);
-    pthread_cond_destroy(&p->not_empty);
-    pthread_mutex_destroy(&p->mu);
-    free(p);
-    return NULL;
-  }
-  int spawned = 0;
-  for (int i = 0; i < n; i++) {
-    if (pthread_create(&p->workers[i], NULL,
-                       httpd__pool__pool_hyworker_hyloop, p) != 0) {
-      break;
-    }
-    spawned++;
-  }
-  if (spawned == 0) {
-    free(p->workers);
-    free(p->fds);
-    pthread_cond_destroy(&p->not_full);
-    pthread_cond_destroy(&p->not_empty);
-    pthread_mutex_destroy(&p->mu);
-    free(p);
-    return NULL;
-  }
-  p->nworkers = spawned;
-  return (void *)p;
-  ```)
+  (let [p (wrap-alloc handler)]
+    (if (is-null? p)
+      p
+      (let [tpool (tp-new size (pool-dispatch-ptr))]
+        (if (is-null? tpool)
+          (do (wrap-free p) (null-ptr))
+          (do (wrap-set-tp p tpool) p))))))
 
 ;;; pool-enqueue -- hand a client fd off to the pool's worker queue.
 ;;;
 ;;; Blocks if the ring buffer is full (back-pressure on the caller --
-;;; typically the listener thread).  Closes the fd immediately and
-;;; returns if the pool is already shutting down.
+;;; typically the listener thread).  Closes the fd immediately and returns if
+;;; the pool is NULL or the work item cannot be allocated.
 ;;;
 ;;; Parameters:
 ;;;   pool      -- :ptr<void> pool handle (NULL closes the fd and returns).
@@ -205,32 +182,20 @@ struct __httpd_warg { int client_fd; void *handler; };
 ;;;
 ;;; Since: H7
 (defn pool-enqueue [pool : ptr<void> client-fd : int] : void
-  ```c
-  if (!pool) { close((int)client_fd); return; }
-  struct __httpd_pool *p = (struct __httpd_pool *)pool;
-  pthread_mutex_lock(&p->mu);
-  while (p->count == p->cap && !p->stop) {
-    pthread_cond_wait(&p->not_full, &p->mu);
-  }
-  if (p->stop) {
-    pthread_mutex_unlock(&p->mu);
-    close((int)client_fd);
-    return;
-  }
-  p->fds[p->tail] = (int)client_fd;
-  p->tail = (p->tail + 1) % p->cap;
-  p->count++;
-  pthread_cond_signal(&p->not_empty);
-  pthread_mutex_unlock(&p->mu);
-  ```)
+  (if (is-null? pool)
+    (close-fd client-fd)
+    (let [warg (wrap-make-warg pool client-fd)]
+      (if (is-null? warg)
+        (close-fd client-fd)
+        (tp/pool-submit (wrap-tp pool) warg)))))
 
-;;; pool-stop -- signal shutdown, let workers drain queued connections,
-;;; then join every worker and free the pool.
+;;; pool-stop -- signal shutdown, let workers drain queued connections, then
+;;; join every worker and free the pool.
 ;;;
 ;;; After this returns, all worker threads have exited and the pool's
-;;; resources have been freed.  Calling pool-enqueue on the same handle
-;;; after pool-stop is a use-after-free; callers (server-stop) must join
-;;; the listener thread before invoking pool-stop.
+;;; resources have been freed.  Calling pool-enqueue on the same handle after
+;;; pool-stop is a use-after-free; callers (server-stop) must join the
+;;; listener thread before invoking pool-stop.
 ;;;
 ;;; Parameters:
 ;;;   pool -- :ptr<void> pool handle (NULL is a no-op).
@@ -242,31 +207,9 @@ struct __httpd_warg { int client_fd; void *handler; };
 ;;;
 ;;; Since: H7
 (defn pool-stop [pool : ptr<void>] : void
-  ```c
-  if (!pool) return;
-  struct __httpd_pool *p = (struct __httpd_pool *)pool;
-  pthread_mutex_lock(&p->mu);
-  p->stop = 1;
-  pthread_cond_broadcast(&p->not_empty);
-  pthread_cond_broadcast(&p->not_full);
-  pthread_mutex_unlock(&p->mu);
-  for (int i = 0; i < p->nworkers; i++) {
-    pthread_join(p->workers[i], NULL);
-  }
-  /* Defensive drain: workers should have processed every queued fd
-     before exiting, but if any survived (e.g. pool was stopped before
-     workers ever ran) close them rather than leak the descriptors. */
-  while (p->count > 0) {
-    close(p->fds[p->head]);
-    p->head = (p->head + 1) % p->cap;
-    p->count--;
-  }
-  free(p->workers);
-  free(p->fds);
-  pthread_cond_destroy(&p->not_full);
-  pthread_cond_destroy(&p->not_empty);
-  pthread_mutex_destroy(&p->mu);
-  free(p);
-  ```)
+  (when (not (is-null? pool))
+    (do
+      (tp-stop (wrap-tp pool))
+      (wrap-free pool))))
 
 ) ;; end defmodule httpd/pool
