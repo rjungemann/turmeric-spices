@@ -1,0 +1,443 @@
+;; tests/tls_echo_test.tur -- WS4 live wss:// echo round-trip (self-contained).
+;;
+;; The TLS counterpart of echo_test.tur. It exercises the whole encrypted stack
+;; in one process: an httpd TLS listener started via httpd/tls's
+;; server-start-tls-conn, whose two-arg handler calls ws-upgrade (which lifts
+;; the TLS connection to a WebSocket session over the same mbedTLS stream) and
+;; echoes every text frame back. The client is a minimal raw mbedTLS WebSocket
+;; peer implemented inline here -- it cannot be the ws-client spice, because both
+;; ws-client and ws-server define `WsConn` / `WsFrame` opaques and so cannot be
+;; loaded into the same program.
+;;
+;; A self-signed cert + key (CN=localhost, ~100y expiry) is embedded below and
+;; written to temp files at startup; the inline client connects with
+;; MBEDTLS_SSL_VERIFY_NONE so the throwaway cert is accepted. The client sends
+;; MASKED frames (client->server, RFC 6455 5.3) and expects UNMASKED echoes
+;; (server->client, 5.1), all inside TLS -- a passing echo confirms the TLS
+;; handshake, the Sec-WebSocket-Accept handshake over TLS, and both framing
+;; directions over the encrypted transport. This is a flat tests/*.tur so CI's
+;; `tur test tests` picks it up.
+
+(defmodule ws-server/tests/tls-echo
+  (import httpd/types    :refer [Conn Request])
+  (import httpd/tls      :refer [server-start-tls-conn server-stop-tls])
+  (import httpd/response :refer [resp-ok bad-request])
+  (import ws-server/server
+    :refer [WsConn ws-upgrade
+            ws-server-recv ws-server-send ws-server-close
+            ws-set-server-timeout
+            ws-frame-text ws-text? ws-binary? ws-closed? ws-error? ws-timeout?])
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-true])
+  (import test/runner :refer [run-all])
+
+;; ---------------------------------------------------------------------------
+;; file-scope C: embedded throwaway cert/key + a tiny raw mbedTLS WebSocket
+;; client used to drive the server over TLS.
+;; ---------------------------------------------------------------------------
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/net_sockets.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+/* __tur_autolink__: -lmbedtls -lmbedx509 -lmbedcrypto */
+
+static const char WSS_CERT_PEM[] =
+  "-----BEGIN CERTIFICATE-----\n"
+  "MIIDCzCCAfOgAwIBAgIUF1wUK8ZAxr5VcjT8iokkj5QFi0IwDQYJKoZIhvcNAQEL\n"
+  "BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI2MDYyMzA2MTMyN1oYDzIxMjYw\n"
+  "NTMwMDYxMzI3WjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEB\n"
+  "AQUAA4IBDwAwggEKAoIBAQDIs3Z6Kr1TKN4WYwFK+1OEfb8hGx3kcSCIKuWD6xpa\n"
+  "rSd7/5ppnJhrEiY74/uf2gU7TH7jii2xruaKf0fFiVSlR/eSZdvgSVUtNFAGxepP\n"
+  "uPO/CB3Y8eAwuVBDOtEB3OGa+emPsE73SOmVXsbzUhi8AZ8eGL1C/gD/fe7pOldY\n"
+  "g72YRC1hXDPzxJSj3EDi5isTSZbkTnEUxjYI0pSbDDrs7XqZWcnYPVSHHJH7a5RJ\n"
+  "jWLhGCpcYYzXbzp0956nfjwL4bG77YONBzau+5Hfpmf2nU8x45KNKbYqtZFYaP0P\n"
+  "6E2gBmKy5YIsuj/blvwpO9XFV5jJBdM7KSPewDdkQq0nAgMBAAGjUzBRMB0GA1Ud\n"
+  "DgQWBBTWW+aJsXyCaj4dRrbO5dgqmqX7BTAfBgNVHSMEGDAWgBTWW+aJsXyCaj4d\n"
+  "RrbO5dgqmqX7BTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBD\n"
+  "XksE4yQihJ4uuRcsep0MKvCb5tyrPn2ttNgsjlsG4DJ71u+sXCVKYUU6O324Rn0z\n"
+  "stfDF6RUKjg0jEdJfZiw914gV/973HBmlpq13SG0JOdmo1WOWq0VWC3zZDj4Fw7z\n"
+  "8nWOBA6KTSXzPmr0V798cCZkvKeCjyoPsbJFbjyY8xU+iR7rSfi6tSzjUoV/2gNd\n"
+  "HZSVVqrWq3ZVfw8vsXRONYtC1wUFevhoVgSGyQ7owalEGUv/TUChCLk3M0T7p5/s\n"
+  "J3zMdcm76yIiLSloCWRL0AOpUIZ0mWqxXahmy0hRUZwVcC3/5gSc0KqawEBAC389\n"
+  "9a8S1zGm/INaVYpiulSV\n"
+  "-----END CERTIFICATE-----\n";
+
+static const char WSS_KEY_PEM[] =
+  "-----BEGIN PRIVATE KEY-----\n"
+  "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDIs3Z6Kr1TKN4W\n"
+  "YwFK+1OEfb8hGx3kcSCIKuWD6xparSd7/5ppnJhrEiY74/uf2gU7TH7jii2xruaK\n"
+  "f0fFiVSlR/eSZdvgSVUtNFAGxepPuPO/CB3Y8eAwuVBDOtEB3OGa+emPsE73SOmV\n"
+  "XsbzUhi8AZ8eGL1C/gD/fe7pOldYg72YRC1hXDPzxJSj3EDi5isTSZbkTnEUxjYI\n"
+  "0pSbDDrs7XqZWcnYPVSHHJH7a5RJjWLhGCpcYYzXbzp0956nfjwL4bG77YONBzau\n"
+  "+5Hfpmf2nU8x45KNKbYqtZFYaP0P6E2gBmKy5YIsuj/blvwpO9XFV5jJBdM7KSPe\n"
+  "wDdkQq0nAgMBAAECggEAJaY0xXobBeyWrNBpv60h36rPHeC+XMoz9hdF8tc5nGT7\n"
+  "ETHDv6gWl49SCM4dt8DoVlVlQD39kGVk7foudonqjQ7RDG97LbnT9qTnlj2uVMI3\n"
+  "R1C4eKf3DGzW96Wi65yJ3c6f18qVJaJR3ylmXOK7rRkIxlaRum13tnXjSXEeTYYk\n"
+  "BtesHVwULqDVZrmpKqtQIQWkIeQJOAuKE8RRhgMnYzfr1tiILo/VmePi/id1pPb4\n"
+  "zNHvdukUfV9hqRHa3ntTBloxjU8Oa4ENEdVGGG6sLR5/0eMZSkl6diZRhDZftBq1\n"
+  "spO2TBwWhirvYrL5Ecxw1QSQU6KDEKBo5mP07QPWoQKBgQDqAD53oupSIRyhf32F\n"
+  "Gad4NfVNQZAEawsZ1RDIiumk3a4yj4wXTp91jH4qMubTgga4zy/zpT1kvTkMoGY9\n"
+  "+8oT9NFpVJrBrD9d7q2PkdJ/149VOe4vo3IqXYkcN8jC4xTBM0bO53MG6FAOUKo+\n"
+  "o3ObZfuknxmeAte3H4k2Dy1xiQKBgQDbkcgYV0hpc0PKK9gihU9MiFV4qgdITdfi\n"
+  "nqeoctKjQPIWtot1VhmOpiEIFEOKAXF4o9y2oqPQrWR33j1rfeOEzTMEknTJvM8q\n"
+  "HBYJrnkQOybchD7zcEKhFym3QDIzCyrikHOYoSBiJjDbF66RMd/+tF83QHo/u5km\n"
+  "TmszyZftLwKBgHtcgZIkqw99MVDam1ut+KHhIF8IL1qE7CdEMkLnKOGnlIxHLP2k\n"
+  "j2AzHtg0WYgrxktrvsXd2Q3gy9CiRwRqV1BKApRa6/MqUYW9rHZB1A1doMy3a6Bl\n"
+  "tGwtP3lG12oWuPxZgfzV+8gqdPn3AKlhFjNYgl95GNI6gWqjD30WZ0ixAoGAAu9T\n"
+  "6V9hTGeKBG3JmcyGXtODsPU027aOqCzOuOWwAxafJcaS3qKj/NAjqOP8cx/J0H8A\n"
+  "OEC8R9HJggCqeYFZRTEo+WqrvPaVHk75zG9Ulu7zegcagE6D1Xtlx1lIUn5XuGeN\n"
+  "5ABjWmyAQq1yW+Z6xADNNQPbnnZ3eZeavzp2mWkCgYEAohE5DqUAo9Lw7dj84DQc\n"
+  "clKrNrbn9jgspwpJ/a6BkrKKdiT8qJB3laaaxZaQeKa1hBb1JRhiReE9iAjysf2w\n"
+  "sT5ayPO9Z7+0i/nU5BKtNgrUH2X291gmFBQrI6ytAiAqWLGDvnHVdak4obcDtC1V\n"
+  "glxq/244HDWisxcT0cgumgE=\n"
+  "-----END PRIVATE KEY-----\n";
+
+/* Write the embedded PEM blobs to `cert` / `key`. Returns 0 ok, -1 on error. */
+static int wssc__write_certs(const char *cert, const char *key) {
+  FILE *fc = fopen(cert, "wb");
+  if (!fc) return -1;
+  if (fwrite(WSS_CERT_PEM, 1, sizeof(WSS_CERT_PEM) - 1, fc) != sizeof(WSS_CERT_PEM) - 1) {
+    fclose(fc); return -1;
+  }
+  fclose(fc);
+  FILE *fk = fopen(key, "wb");
+  if (!fk) return -1;
+  if (fwrite(WSS_KEY_PEM, 1, sizeof(WSS_KEY_PEM) - 1, fk) != sizeof(WSS_KEY_PEM) - 1) {
+    fclose(fk); return -1;
+  }
+  fclose(fk);
+  return 0;
+}
+
+/* A TLS WebSocket client session: mbedTLS stack over a connected TCP socket. */
+typedef struct {
+  mbedtls_net_context      net;
+  mbedtls_entropy_context  entropy;
+  mbedtls_ctr_drbg_context ctr_drbg;
+  mbedtls_ssl_context      ssl;
+  mbedtls_ssl_config       conf;
+} wssc_t;
+
+static void wssc__free(wssc_t *c);
+static wssc_t *wssc__connect_raw(int port);
+
+/* Read exactly n bytes over TLS; 1 ok, else 0. */
+static int wssc__recv_n(wssc_t *c, unsigned char *b, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    int r = mbedtls_ssl_read(&c->ssl, b + off, n - off);
+    if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+    if (r <= 0) return 0;
+    off += (size_t)r;
+  }
+  return 1;
+}
+
+/* Write all n bytes over TLS; 0 ok, -1 error. */
+static int wssc__send_all(wssc_t *c, const unsigned char *b, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    int s = mbedtls_ssl_write(&c->ssl, b + off, n - off);
+    if (s == MBEDTLS_ERR_SSL_WANT_READ || s == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+    if (s <= 0) return -1;
+    off += (size_t)s;
+  }
+  return 0;
+}
+
+/* TLS-connect to 127.0.0.1:port (VERIFY_NONE) and drive the handshake to
+   completion. Returns a malloc'd wssc_t* ready for ssl read/write, or 0. */
+static wssc_t *wssc__connect_raw(int port) {
+  wssc_t *c = (wssc_t *)calloc(1, sizeof(*c));
+  if (!c) return NULL;
+  mbedtls_net_init(&c->net);
+  mbedtls_ssl_init(&c->ssl);
+  mbedtls_ssl_config_init(&c->conf);
+  mbedtls_entropy_init(&c->entropy);
+  mbedtls_ctr_drbg_init(&c->ctr_drbg);
+
+  const char *pers = "tur-wss-test-client";
+  if (mbedtls_ctr_drbg_seed(&c->ctr_drbg, mbedtls_entropy_func, &c->entropy,
+                            (const unsigned char *)pers, strlen(pers)) != 0) goto fail;
+
+  char portstr[16];
+  snprintf(portstr, sizeof(portstr), "%d", port);
+  if (mbedtls_net_connect(&c->net, "127.0.0.1", portstr,
+                          MBEDTLS_NET_PROTO_TCP) != 0) goto fail;
+
+  if (mbedtls_ssl_config_defaults(&c->conf, MBEDTLS_SSL_IS_CLIENT,
+                                  MBEDTLS_SSL_TRANSPORT_STREAM,
+                                  MBEDTLS_SSL_PRESET_DEFAULT) != 0) goto fail;
+  mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_NONE);
+  mbedtls_ssl_conf_rng(&c->conf, mbedtls_ctr_drbg_random, &c->ctr_drbg);
+  if (mbedtls_ssl_setup(&c->ssl, &c->conf) != 0) goto fail;
+  mbedtls_ssl_set_hostname(&c->ssl, "localhost");
+  mbedtls_ssl_set_bio(&c->ssl, &c->net, mbedtls_net_send, mbedtls_net_recv, NULL);
+
+  int rc;
+  while ((rc = mbedtls_ssl_handshake(&c->ssl)) != 0) {
+    if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) goto fail;
+  }
+  return c;
+
+fail:
+  mbedtls_ssl_free(&c->ssl);
+  mbedtls_ssl_config_free(&c->conf);
+  mbedtls_ctr_drbg_free(&c->ctr_drbg);
+  mbedtls_entropy_free(&c->entropy);
+  mbedtls_net_free(&c->net);
+  free(c);
+  return NULL;
+}
+
+/* TLS-connect, then perform the WebSocket client handshake on /ws. Returns a
+   handle, or 0. The fixed key's accept is "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+   (RFC 6455 4.2.2). */
+static wssc_t *wssc__connect(int port) {
+  wssc_t *c = wssc__connect_raw(port);
+  if (!c) return NULL;
+
+  const char *req =
+    "GET /ws HTTP/1.1\r\n"
+    "Host: localhost\r\n"
+    "Upgrade: websocket\r\n"
+    "Connection: Upgrade\r\n"
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+    "Sec-WebSocket-Version: 13\r\n"
+    "\r\n";
+  if (wssc__send_all(c, (const unsigned char *)req, strlen(req)) != 0) goto fail;
+
+  char buf[2048]; size_t n = 0;
+  while (n < sizeof(buf) - 1) {
+    unsigned char ch;
+    if (wssc__recv_n(c, &ch, 1) != 1) goto fail;
+    buf[n++] = (char)ch;
+    if (n >= 4 && buf[n-4]=='\r' && buf[n-3]=='\n' && buf[n-2]=='\r' && buf[n-1]=='\n')
+      break;
+  }
+  buf[n] = '\0';
+  if (!strstr(buf, " 101 ")) goto fail;
+  if (!strstr(buf, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")) goto fail;
+  return c;
+
+fail:
+  mbedtls_ssl_free(&c->ssl);
+  mbedtls_ssl_config_free(&c->conf);
+  mbedtls_ctr_drbg_free(&c->ctr_drbg);
+  mbedtls_entropy_free(&c->entropy);
+  mbedtls_net_free(&c->net);
+  free(c);
+  return NULL;
+}
+
+/* TLS-connect and send a plain (non-upgrade) HTTP request, returning the
+   response's status code (or 0 on error). Exercises httpd/tls's non-upgraded
+   path: request read + handler + serialize + TLS write + close, all over TLS. */
+static int wssc__http_status(int port, const char *path) {
+  wssc_t *c = wssc__connect_raw(port);
+  if (!c) return 0;
+  char req[256];
+  int rn = snprintf(req, sizeof(req),
+    "GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n", path);
+  if (wssc__send_all(c, (const unsigned char *)req, (size_t)rn) != 0) {
+    wssc__free(c); return 0;
+  }
+  char buf[256]; size_t n = 0;
+  while (n < sizeof(buf) - 1) {
+    unsigned char ch;
+    if (wssc__recv_n(c, &ch, 1) != 1) break;
+    buf[n++] = (char)ch;
+    if (ch == '\n') break;                           /* end of status line */
+  }
+  buf[n] = '\0';
+  int status = 0;
+  /* "HTTP/1.1 NNN ..." -> parse NNN. */
+  const char *sp = strchr(buf, ' ');
+  if (sp) status = (int)strtol(sp + 1, NULL, 10);
+  wssc__free(c);
+  return status;
+}
+
+static void wssc__free(wssc_t *c) {
+  if (!c) return;
+  mbedtls_ssl_close_notify(&c->ssl);
+  mbedtls_ssl_free(&c->ssl);
+  mbedtls_ssl_config_free(&c->conf);
+  mbedtls_ctr_drbg_free(&c->ctr_drbg);
+  mbedtls_entropy_free(&c->entropy);
+  mbedtls_net_free(&c->net);
+  free(c);
+}
+
+/* Send one masked text frame over TLS. Returns 0 ok, -1 error. */
+static int wssc__send_text(wssc_t *c, const char *msg) {
+  size_t len = strlen(msg);
+  unsigned char hdr[14]; size_t hl = 0;
+  hdr[hl++] = 0x81;                                  /* FIN + text */
+  unsigned char mask[4] = { 0x12, 0x34, 0x56, 0x78 };
+  if (len < 126) {
+    hdr[hl++] = (unsigned char)(0x80 | len);
+  } else if (len <= 0xffff) {
+    hdr[hl++] = 0x80 | 126;
+    hdr[hl++] = (unsigned char)((len >> 8) & 0xff);
+    hdr[hl++] = (unsigned char)(len & 0xff);
+  } else {
+    hdr[hl++] = 0x80 | 127;
+    for (int i = 7; i >= 0; i--) hdr[hl++] = (unsigned char)((len >> (8*i)) & 0xff);
+  }
+  memcpy(hdr + hl, mask, 4); hl += 4;
+  if (wssc__send_all(c, hdr, hl) != 0) return -1;
+  unsigned char *m = (unsigned char *)malloc(len ? len : 1);
+  for (size_t i = 0; i < len; i++) m[i] = (unsigned char)(msg[i] ^ mask[i & 3]);
+  int rc = (len > 0 && wssc__send_all(c, m, len) != 0) ? -1 : 0;
+  free(m);
+  return rc;
+}
+
+/* Read one (unmasked) frame over TLS, return payload as a malloc'd
+   NUL-terminated string (caller frees). Returns NULL on error. */
+static char *wssc__recv_text(wssc_t *c) {
+  unsigned char h2[2];
+  if (wssc__recv_n(c, h2, 2) != 1) return NULL;
+  uint64_t len = h2[1] & 0x7f;
+  if (len == 126) {
+    unsigned char e[2];
+    if (wssc__recv_n(c, e, 2) != 1) return NULL;
+    len = ((uint64_t)e[0] << 8) | e[1];
+  } else if (len == 127) {
+    unsigned char e[8];
+    if (wssc__recv_n(c, e, 8) != 1) return NULL;
+    len = 0;
+    for (int i = 0; i < 8; i++) len = (len << 8) | e[i];
+  }
+  if (h2[1] & 0x80) return NULL;                     /* server frames must be unmasked */
+  char *buf = (char *)malloc((size_t)len + 1);
+  if (!buf) return NULL;
+  if (len > 0 && wssc__recv_n(c, (unsigned char *)buf, (size_t)len) != 1) {
+    free(buf); return NULL;
+  }
+  buf[len] = '\0';
+  return buf;
+}
+```
+
+  ;; ---------------------------------------------------------------------
+  ;; Cert provisioning + client driver helpers (thin wrappers over the C).
+  ;; ---------------------------------------------------------------------
+
+  (defn write-test-certs [cert : cstr key : cstr] : int
+    ```c return (int64_t)wssc__write_certs((const char *)cert, (const char *)key); ```)
+
+  (defn wsc-connect [port : int] : int
+    ```c return (int64_t)(intptr_t)wssc__connect((int)port); ```)
+
+  (defn wsc-close [h : int] : void
+    ```c wssc__free((wssc_t *)(intptr_t)h); ```)
+
+  ;; Send `msg` over TLS, read the echo, and report whether it came back
+  ;; byte-identical.
+  (defn wsc-echoes? [h : int msg : cstr] : bool
+    ```c
+    wssc_t *c = (wssc_t *)(intptr_t)h;
+    if (c == 0) return 0;
+    if (wssc__send_text(c, (const char *)msg) != 0) return 0;
+    char *got = wssc__recv_text(c);
+    if (!got) return 0;
+    int ok = strcmp(got, (const char *)msg) == 0;
+    free(got);
+    return ok;
+    ```)
+
+  ;; Plain HTTPS GET over the TLS listener -> response status code. Drives the
+  ;; non-upgraded httpd/tls path (TLS request read + serialize + TLS write).
+  (defn wsc-http-status [port : int path : cstr] : int
+    ```c return (int64_t)wssc__http_status((int)port, (const char *)path); ```)
+
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; Server side: echo every data frame until the client closes (or the
+  ;; receive idle-timeout fires, as a safety valve so a stuck worker exits).
+  ;; ---------------------------------------------------------------------
+
+  (defn ws-echo-loop [ws : WsConn] : void
+    (let [f (ws-server-recv ws)]
+      (if (or (ws-closed? f) (ws-error? f) (ws-timeout? f))
+        (ws-server-close ws)
+        (do
+          (when (or (ws-text? f) (ws-binary? f))
+            (ws-server-send ws (ws-frame-text f)))
+          (ws-echo-loop ws)))))
+
+  ;; Two-arg httpd handler: upgrade /ws over TLS, otherwise 400.
+  (defn ws-echo-handler [conn : int req : int] : int
+    (let [c (:: conn Conn)
+          r (:: req Request)]
+      (if (= (ws-upgrade c r
+               (fn [ws : WsConn] : void
+                 (do (ws-set-server-timeout ws 5000)
+                     (ws-echo-loop ws)))) 1)
+        (:: (resp-ok "text/plain" "") :int)
+        (:: (bad-request "not a websocket request") :int))))
+
+  ;; ---------------------------------------------------------------------
+  ;; Test driver
+  ;; ---------------------------------------------------------------------
+
+  (defn main [] : int
+    (let [cert "/tmp/tur-wss-test-cert.pem"
+          key  "/tmp/tur-wss-test-key.pem"
+          wrote (write-test-certs cert key)]
+      (if (not (= wrote 0))
+        (do
+          (describe "ws-server wss echo -- cert provisioning"
+            (it "writes the embedded test cert + key" (assert-true false)))
+          (run-all))
+        (let [srv (server-start-tls-conn 18790 cert key ws-echo-handler)]
+          (do
+            (unsafe (sleep-ms 200))
+
+            (describe "ws-server wss echo -- server-start-tls-conn + ws-upgrade over TLS"
+
+              (it "TLS handshake + WS handshake succeed (101 + RFC 6455 accept)"
+                (let [h (wsc-connect 18790)
+                      ok (not (= h 0))]
+                  (do (wsc-close h) (assert-true ok))))
+
+              (it "echoes five text messages over one TLS connection"
+                (let [h (wsc-connect 18790)]
+                  (if (= h 0)
+                    (assert-true false)
+                    (let [r (and (wsc-echoes? h "message one")
+                                 (wsc-echoes? h "message two")
+                                 (wsc-echoes? h "message three")
+                                 (wsc-echoes? h "message four")
+                                 (wsc-echoes? h "message five"))]
+                      (do (wsc-close h) (assert-true r))))))
+
+              (it "echoes a payload past 125 bytes (16-bit length path) over TLS"
+                (let [h (wsc-connect 18790)]
+                  (if (= h 0)
+                    (assert-true false)
+                    (let [r (wsc-echoes? h
+                              "the quick brown fox jumps over the lazy dog, and then the quick brown fox jumps over the lazy dog again, for a total well past one hundred and twenty five bytes")]
+                      (do (wsc-close h) (assert-true r))))))
+
+              (it "serves a normal HTTPS response on the non-upgrade path (400)"
+                (assert-true (= (wsc-http-status 18790 "/not-ws") 400))))
+
+            (server-stop-tls srv)
+            (run-all)))))
+    0)
+
+) ;; end defmodule ws-server/tests/tls-echo
