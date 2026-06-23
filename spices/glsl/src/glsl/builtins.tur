@@ -5,14 +5,14 @@
 ;;   (import glsl/builtins :refer [dot cross normalize ...])
 
 (defmodule glsl/builtins
-  (export dot cross normalize length distance
+  (export glsl-dot cross normalize glsl-length distance
           mix clamp smoothstep step reflect refract
           texture texture-lod swizzle
           vec2 vec3 vec4
           mat2 mat3 mat4
           sin cos tan asin acos atan atan2
           sqrt pow exp log exp2 log2
-          abs min max sign
+          abs glsl-min glsl-max sign
           floor ceil fract mod
           dFdx dFdy fwidth
           transpose inverse determinant
@@ -132,10 +132,13 @@
 ;;;   "dot(a, b)"
 ;;;
 ;;; Example:
-;;;   (dot "normal" "lightDir")  ; => "dot(normal, lightDir)"
+;;;   (glsl-dot "normal" "lightDir")  ; => "dot(normal, lightDir)"
 ;;;
-;;; Since: v0.1.0
-(defn dot [a : cstr b : cstr] : cstr
+;;; Renamed from `dot` (0.3.0): the bare name shadows the auto-loaded stdlib
+;;; `dot` macro, which takes precedence at call sites and fails to expand.
+;;;
+;;; Since: v0.1.0 (renamed to glsl-dot in 0.3.0)
+(defn glsl-dot [a : cstr b : cstr] : cstr
   (__call2 "dot" a b))
 
 ;;; cross -- cross product.
@@ -162,7 +165,7 @@
 (defn normalize [v : cstr] : cstr
   (__call1 "normalize" v))
 
-;;; length -- magnitude of a vector.
+;;; glsl-length -- magnitude of a vector.
 ;;;
 ;;; Parameters:
 ;;;   v -- vector expression string
@@ -170,8 +173,11 @@
 ;;; Returns:
 ;;;   "length(v)"
 ;;;
-;;; Since: v0.1.0
-(defn length [v : cstr] : cstr
+;;; Renamed from `length` (v0.2.0): the bare name now collides with the
+;;; auto-loaded stdlib `tur/list` `length`, which the compiler rejects.
+;;;
+;;; Since: v0.1.0 (renamed to glsl-length in 0.3.0)
+(defn glsl-length [v : cstr] : cstr
   (__call1 "length" v))
 
 ;;; distance -- distance between two points.
@@ -367,11 +373,13 @@
 ;;; abs -- absolute value.
 (defn abs [x : cstr] : cstr (__call1 "abs" x))
 
-;;; min -- minimum of two values.
-(defn min [x : cstr y : cstr] : cstr (__call2 "min" x y))
+;;; glsl-min -- minimum of two values. Renamed from `min` (0.3.0): the bare
+;;; name is shadowed by the auto-loaded stdlib `min` macro at call sites.
+(defn glsl-min [x : cstr y : cstr] : cstr (__call2 "min" x y))
 
-;;; max -- maximum of two values.
-(defn max [x : cstr y : cstr] : cstr (__call2 "max" x y))
+;;; glsl-max -- maximum of two values. Renamed from `max` (0.3.0): the bare
+;;; name is shadowed by the auto-loaded stdlib `max` macro at call sites.
+(defn glsl-max [x : cstr y : cstr] : cstr (__call2 "max" x y))
 
 ;;; sign -- sign of a value (-1, 0, or 1).
 (defn sign [x : cstr] : cstr (__call1 "sign" x))

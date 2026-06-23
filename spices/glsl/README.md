@@ -51,6 +51,33 @@ println $
       glsl-set!("FragColor" "vec4(1.0, 0.5, 0.2, 1.0)")
 ```
 
+## Fix-encoded IR (`glsl/ir`)
+
+Alongside the flat string-template builders, `glsl/ir` offers a recursive IR
+encoded as `Fix GNodeF` with a single catamorphism. Build a `GNode` tree with
+the `ge-*` (expression, including the glsl-specific `ge-swizzle`) and `gs-*`
+(statement) smart constructors, then fold it with `node->c` to render GLSL
+source -- byte-identical to the equivalent builder calls -- or `node-size` to
+count nodes. Every fold goes through one generic `node-cata` driver, so adding a
+new traversal is just a new F-algebra with no per-node scaffolding.
+
+```turmeric
+(import glsl/ir :refer [ge-var ge-binop ge-swizzle gs-return node->c])
+
+;; return (a + b).xyz;
+(node->c (gs-return (ge-swizzle (ge-binop "+" (ge-var "a") (ge-var "b")) ":xyz")))
+;; => "return (a + b).xyz;"
+```
+
+The flat builders remain the stable public surface; the IR is an additive,
+self-contained recursion-schemes layer. See the module header in
+`src/glsl/ir.tur` for the design rationale (notably why it uses one functor
+rather than two, carried over from the c-dsl prototype's memo).
+
+> **0.3.0 note:** the `length`, `dot`, `min`, and `max` builtins were renamed
+> to `glsl-length`, `glsl-dot`, `glsl-min`, and `glsl-max` to avoid collisions
+> with auto-loaded stdlib names. The emitted GLSL is unchanged.
+
 ## See also
 
 - [API reference](api/)
