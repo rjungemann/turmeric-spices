@@ -28,11 +28,11 @@
   (import httpd/response    :refer [not-found with-header])
   (import tourist/static    :refer [static-item? static-route-fs-root static-serve])
   (import tourist/routing   :refer [subapp-item? subapp-call])
-  (import httpd/server      :refer [server-start])
+  (import httpd/server      :refer [server-start server-start-conn])
   (import httpd/request     :refer [req-method req-path])
-  (import httpd/types       :refer [Request])
+  (import httpd/types       :refer [Request Conn])
   (import tourist/types     :refer [Ctx Captures Item ItemList Pattern])
-  (export tourist)
+  (export tourist tourist-conn tourist-request-conn)
 
 ;; -- Cons list helpers ------------------------------------------------------
 
@@ -407,5 +407,82 @@
         routes    (__tourist-list-rev (__tourist-collect-routes    items-l empty) empty)]
     (__tourist-state-set mws after-mws routes)
     (server-start port (__tourist-handler-ptr))))
+
+;; -- Conn-aware entry point (TOUR-V0) --------------------------------------
+;;
+;; tourist's default `tourist` runs on httpd's single-arg `server-start`, whose
+;; handler only sees a Request -- there is no Conn to hand to a WebSocket
+;; upgrade. `tourist-conn` is an additive variant that runs on the two-arg
+;; `server-start-conn`: it stashes the per-request Conn in a thread-local slot
+;; (one worker thread owns a request end to end) and then runs the exact same
+;; middleware + dispatch pipeline. A route handler -- e.g. tourist-ws's
+;; ws-route! -- recovers the Conn with `tourist-request-conn` and calls
+;; ws-upgrade. The "hijack" itself needs no special tourist signal: ws-upgrade
+;; marks the Conn upgraded, so httpd's worker skips its serialize/write/close
+;; and does not double-close the socket the WebSocket handler now owns.
+;;
+;; This is deliberately additive -- the existing `tourist` / `server-start`
+;; path is untouched -- so it does not disturb non-WebSocket apps.
+
+;;; __tourist-conn-cell -- thread-local current-request Conn slot.
+;;;
+;;; mode 0 reads the slot; mode != 0 writes `v` first. The slot is `__thread`
+;;; so each httpd worker thread keeps its own current Conn for the request it
+;;; is serving.
+(defn __tourist-conn-cell [mode : int v : int] : int
+  ```c
+  static __thread int64_t cur = 0;
+  if (mode != 0) cur = (int64_t)v;
+  return cur;
+  ```)
+
+;;; tourist-request-conn -- the httpd Conn for the in-flight request.
+;;;
+;;; Valid only inside a handler dispatched by `tourist-conn`; returns 0 under
+;;; the plain `tourist` entry point (no Conn is available there). WebSocket
+;;; route handlers pass this to ws-upgrade.
+;;;
+;;; Since: TOUR-V0
+(defn tourist-request-conn [] : Conn
+  (:: (__tourist-conn-cell 0 0) :Conn))
+
+;;; __tourist-handler-conn -- two-arg handler: record the Conn, then dispatch.
+(defn __tourist-handler-conn [conn : int req : int] : int
+  (do
+    (__tourist-conn-cell 1 conn)
+    (__tourist-handler req)))
+
+;;; __tourist-handler-conn-ptr -- __tourist-handler-conn as a (c-fn [int int] int).
+(defn __tourist-handler-conn-ptr [] : (c-fn [int int] int)
+  ```c
+  extern int64_t tourist__app___un_untourist_hyhandler_hyconn(int64_t, int64_t);
+  return tourist__app___un_untourist_hyhandler_hyconn;
+  ```)
+
+;;; tourist-conn -- like `tourist`, but on httpd's Conn-aware listener.
+;;;
+;;; Use this instead of `tourist` when any route needs the underlying
+;;; connection -- in particular tourist-ws's ws-route!. Routes and middleware
+;;; are collected and dispatched exactly as for `tourist`; the only difference
+;;; is that the per-request Conn is available via tourist-request-conn.
+;;;
+;;; Parameters:
+;;;   port  -- TCP port to bind on.
+;;;   items -- mix of Route and Middleware handles from the DSL constructors
+;;;            (including ws-route! from tourist-ws).
+;;;
+;;; Returns:
+;;;   :ptr<void> -- server handle; pass to server-stop when done, or NULL on
+;;;                 bind/pool failure.
+;;;
+;;; Since: TOUR-V0
+(defn tourist-conn [port : int & items : int] : ptr<void>
+  (let [empty     (:: 0 :ItemList)
+        items-l   (:: items :ItemList)
+        mws       (__tourist-list-rev (__tourist-collect-mws       items-l empty) empty)
+        after-mws (__tourist-collect-after-mws items-l empty)
+        routes    (__tourist-list-rev (__tourist-collect-routes    items-l empty) empty)]
+    (__tourist-state-set mws after-mws routes)
+    (server-start-conn port (__tourist-handler-conn-ptr))))
 
 ) ;; end defmodule tourist/app

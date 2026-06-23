@@ -4,6 +4,10 @@
   :description "RFC 6455 WebSocket client (ws:// and wss://) for Turmeric"
   :license     "MIT"
   :spices #{
+    ;; ws-core owns the shared protocol types (WsConn, WsFrame), the frame
+    ;; predicates, and ws-accept-key (NAME-V0). Declared as a :path dep so the
+    ;; canonical types resolve for editor/LSP and release builds.
+    "ws-core" #{:path "../ws-core"}
     ;; Workspace-local test framework, used only by tests/. Declared as a
     ;; :path dep so `tur test tests` resolves test/suite + test/assert +
     ;; test/runner from the sibling spice without a fetch or lockfile entry.
@@ -23,13 +27,12 @@
                          :ENABLE_TESTING    "OFF"
                          :ENABLE_PROGRAMS   "OFF"}}
   }
+  ;; WsConn, WsFrame, the frame predicates, and ws-accept-key are exported by
+  ;; ws-core (NAME-V0); consumers import them from there. ws-client exports only
+  ;; the client-side behaviour.
   :exports #{
-    "ws-client/client" ["WsConn" "WsFrame"
-                        "ws-connect" "ws-conn-null?" "ws-last-error"
+    "ws-client/client" ["ws-connect" "ws-connect-with-ca" "ws-connect-insecure"
+                        "ws-conn-null?" "ws-last-error"
                         "ws-send" "ws-send-bytes" "ws-recv"
-                        "ws-close" "ws-free" "ws-set-timeout"
-                        "ws-accept-key"
-                        "ws-frame-kind" "ws-frame-data" "ws-frame-len" "ws-frame-text"
-                        "ws-text?" "ws-binary?" "ws-ping?" "ws-pong?"
-                        "ws-closed?" "ws-timeout?" "ws-error?"]
+                        "ws-close" "ws-free" "ws-set-timeout"]
   })

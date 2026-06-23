@@ -15,9 +15,40 @@ include path the spice still builds and `ws://` works, while a `wss://` connect
 returns a null handle whose `ws-last-error` explains how to enable TLS. This is
 the same optional-TLS pattern `tur-http` uses.
 
+The connection handle `WsConn`, the frame view `WsFrame`, the frame predicates,
+and `ws-accept-key` come from the shared [`ws-core`](../ws-core) spice
+(NAME-V0), so `ws-client` and `ws-server` speak one set of types -- import
+those names from `ws-core`. `ws-client` exports only the client-side behaviour
+(`ws-connect` and friends).
+
 It is a blocking, single-threaded client -- ideal for chat bots, market-data
 feeds, dev-tools bridges, and echo tests. See *Non-goals* below for what it
 deliberately leaves out.
+
+### TLS certificate verification
+
+`wss://` connections **verify the server certificate by default** (TLS-V0).
+There are three entry points, so the trust policy is fixed at the call site and
+an unsafe configuration cannot leak in by accident:
+
+```turmeric no-check
+;; Default: verify against the system CA store + check the hostname.
+(ws-connect "wss://api.example.com/socket")
+
+;; Verify against a private/self-signed CA bundle (e.g. an internal dev CA).
+(ws-connect-with-ca "wss://localhost:8443/socket" "/path/to/dev-ca.pem")
+
+;; Skip verification entirely. UNSAFE -- development against self-signed
+;; servers only; never ship this.
+(ws-connect-insecure "wss://localhost:8443/socket")
+```
+
+The system CA store is discovered at `/etc/ssl/certs/ca-certificates.crt`
+(Debian/Ubuntu/Alpine), falling back to `/etc/pki/tls/certs/ca-bundle.crt`
+(Fedora/RHEL). When no bundle is found, `ws-connect` fails with a message
+pointing at `ws-connect-with-ca`. Verification failures (untrusted, expired, or
+hostname-mismatched certs) return a null handle; read `ws-last-error` for the
+reason.
 
 ## Install
 
@@ -55,7 +86,9 @@ for `ws://`. For `wss://`, run `tur fetch` once to build mbedTLS.
 
 | Function | Signature | Purpose |
 |---|---|---|
-| `ws-connect` | `(cstr) -> WsConn` | Open a `ws://`/`wss://` connection. Null handle on failure. |
+| `ws-connect` | `(cstr) -> WsConn` | Open a `ws://`/`wss://` connection; `wss://` verifies against the system CA store. Null handle on failure. |
+| `ws-connect-with-ca` | `(cstr cstr) -> WsConn` | Like `ws-connect`, verifying `wss://` against a custom CA bundle file. |
+| `ws-connect-insecure` | `(cstr) -> WsConn` | Like `ws-connect` but skips `wss://` certificate verification (**unsafe**, dev only). |
 | `ws-conn-null?` | `(WsConn) -> bool` | Test the failure sentinel from `ws-connect`. |
 | `ws-last-error` | `() -> cstr` | Reason for the most recent failure (static storage). |
 | `ws-send` | `(WsConn cstr) -> int` | Send a UTF-8 text frame (masked). |
@@ -64,23 +97,26 @@ for `ws://`. For `wss://`, run `tur fetch` once to build mbedTLS.
 | `ws-close` | `(WsConn) -> void` | Closing handshake, then close the socket. |
 | `ws-free` | `(WsConn) -> void` | Release all resources (fd + memory + TLS). |
 | `ws-set-timeout` | `(WsConn int) -> void` | Set receive timeout in ms (0 = block forever). |
-| `ws-accept-key` | `(cstr) -> cstr` | Compute `Sec-WebSocket-Accept` for a key (handshake crypto). |
+
+`WsConn` is defined in [`ws-core`](../ws-core); `ws-accept-key` and the frame
+accessors / predicates below also live there (NAME-V0) -- import them from
+`ws-core`.
 
 ### Reading a frame
 
-`ws-recv` returns an opaque `WsFrame` handle -- a **view into the connection's
-internal reassembly buffer**, valid only until the next `ws-recv` or `ws-free`.
-Copy the payload if you need it longer.
+`ws-recv` returns an opaque `WsFrame` handle (from `ws-core/frame`) -- a **view
+into the connection's internal reassembly buffer**, valid only until the next
+`ws-recv` or `ws-free`. Copy the payload if you need it longer.
 
-| Accessor | Returns |
+| Accessor (`ws-core/frame`) | Returns |
 |---|---|
 | `ws-frame-kind` | `int` -- `1` text, `2` binary, `8` close, `9` ping, `10` pong, `-1` timeout, `-2` error |
 | `ws-frame-data` | `ptr<void>` -- payload pointer |
 | `ws-frame-len` | `int` -- payload length |
 | `ws-frame-text` | `cstr` -- payload as a NUL-terminated string |
 
-Predicates: `ws-text?`, `ws-binary?`, `ws-ping?`, `ws-pong?`, `ws-closed?`,
-`ws-timeout?`, `ws-error?`.
+Predicates (`ws-core/frame`): `ws-text?`, `ws-binary?`, `ws-ping?`, `ws-pong?`,
+`ws-closed?`, `ws-timeout?`, `ws-error?`.
 
 `ws-recv` reassembles fragmented messages, answers Ping frames with a Pong
 automatically (then surfaces the Ping), and surfaces Pong and Close frames.

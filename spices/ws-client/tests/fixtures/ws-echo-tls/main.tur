@@ -1,16 +1,29 @@
-;; tests/fixtures/ws-echo-tls/main.tur -- WC2 live wss:// round-trip.
+;; tests/fixtures/ws-echo-tls/main.tur -- WC2 / TLS-V0 live wss:// round-trip
+;; plus certificate-verification checks.
 ;;
 ;; Driven by run.sh, which generates a self-signed cert, starts the shared
-;; echo server in TLS mode on WS_ECHO_PORT, and runs this program. It connects
-;; over wss://, echoes a text message, and closes. Certificate verification is
-;; disabled client-side (MBEDTLS_SSL_VERIFY_NONE), matching tur-http. Exit 0
-;; iff the assertion passes. Requires the spice to be built with mbedTLS.
+;; echo server in TLS mode on WS_ECHO_PORT, and runs this program. It exercises
+;; all three TLS-V0 connect entry points against the self-signed server:
+;;
+;;   1. ws-connect-with-ca with the server's own cert as the CA bundle --
+;;      verification SUCCEEDS (the cert chains to a trusted anchor) and the
+;;      echo round-trip runs.
+;;   2. ws-connect (default, system CA store) -- verification FAILS, because a
+;;      throwaway self-signed cert is not in the system store. This is the
+;;      heart of TLS-V0: the default rejects untrusted certificates instead of
+;;      silently accepting them.
+;;   3. ws-connect-insecure -- verification is skipped, so the connect
+;;      SUCCEEDS even against the untrusted cert (the explicit dev opt-out).
+;;
+;; Exit 0 iff all three assertions pass. Requires the spice to be built with
+;; mbedTLS. Not run by CI's `tur test`.
 
 (defmodule ws-client/fixtures/echo-tls
   (import ws-client/client
-    :refer [ws-connect ws-conn-null? ws-last-error
-            ws-send ws-recv ws-close ws-free
-            ws-frame-text ws-text?])
+    :refer [ws-connect ws-connect-with-ca ws-connect-insecure
+            ws-conn-null? ws-last-error
+            ws-send ws-recv ws-close ws-free])
+  (import ws-core/frame :refer [ws-frame-text ws-text?])
 
   (defn echo-uri [] : cstr
     ```c
@@ -20,6 +33,15 @@
     const char *p = getenv("WS_ECHO_PORT");
     snprintf(uri, sizeof(uri), "wss://127.0.0.1:%s/echo", p ? p : "0");
     return uri;
+    ```)
+
+  ;; Path to the server's self-signed cert, reused as the trust anchor for the
+  ;; verified-connect case. run.sh exports WS_TLS_CERT.
+  (defn ca-path [] : cstr
+    ```c
+    #include <stdlib.h>
+    const char *p = getenv("WS_TLS_CERT");
+    return (char *)(p ? p : "");
     ```)
 
   (defn cstr-eq? [a : cstr b : cstr] : bool
@@ -35,20 +57,42 @@
     return ok ? 0 : 1;
     ```)
 
-  (defn main [] : int
+  ;; Verified round-trip: connect with the server's cert as the CA bundle,
+  ;; echo a message, and confirm it comes back over the encrypted link.
+  (defn check-verified [] : int
+    (let [c (ws-connect-with-ca (echo-uri) (ca-path))]
+      (if (ws-conn-null? c)
+        (do (println "# verified connect failed:") (println (ws-last-error))
+            (tap 1 "wss text frame echoes back over verified TLS" false))
+        (let [_  (ws-send c "secure hello")
+              f1 (ws-recv c)
+              ok (and (ws-text? f1) (cstr-eq? "secure hello" (ws-frame-text f1)))]
+          (ws-close c)
+          (ws-free c)
+          (tap 1 "wss text frame echoes back over verified TLS" ok)))))
+
+  ;; Negative test: the default verified connect must REJECT the untrusted
+  ;; self-signed cert (it is not in the system store).
+  (defn check-rejects-untrusted [] : int
     (let [c (ws-connect (echo-uri))]
       (if (ws-conn-null? c)
-        (do (println "Bail out! wss connect failed:") (println (ws-last-error)) 1)
-        (do
-          (println "1..1")
-          (let [_  (ws-send c "secure hello")
-                f1 (ws-recv c)
-                r1 (tap 1 "wss text frame echoes back over TLS"
-                        (and (ws-text? f1)
-                             (cstr-eq? "secure hello" (ws-frame-text f1))))]
-            (do
-              (ws-close c)
-              (ws-free c)
-              (if (= r1 0)
-                (do (println "# ws-echo-tls assertion passed.") 0)
-                1))))))))
+        (tap 2 "default ws-connect rejects the untrusted self-signed cert" true)
+        (do (ws-close c) (ws-free c)
+            (tap 2 "default ws-connect rejects the untrusted self-signed cert" false)))))
+
+  ;; The explicit opt-out still connects to the untrusted server.
+  (defn check-insecure [] : int
+    (let [c (ws-connect-insecure (echo-uri))]
+      (if (ws-conn-null? c)
+        (tap 3 "ws-connect-insecure connects without verification" false)
+        (do (ws-close c) (ws-free c)
+            (tap 3 "ws-connect-insecure connects without verification" true)))))
+
+  (defn main [] : int
+    (println "1..3")
+    (let [r1 (check-verified)
+          r2 (check-rejects-untrusted)
+          r3 (check-insecure)]
+      (if (and (= r1 0) (= r2 0) (= r3 0))
+        (do (println "# ws-echo-tls TLS-V0 verification assertions passed.") 0)
+        1))))

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# tests/fixtures/ws-echo-tls/run.sh -- WC2 live wss:// smoke runner.
+# tests/fixtures/ws-echo-tls/run.sh -- WC2 / TLS-V0 live wss:// smoke runner.
 #
 # Generates a throwaway self-signed cert, starts the shared echo server in TLS
 # mode on an ephemeral port (WS_ECHO_PORT), compiles main.tur with auto-spice
-# discovery, and runs it over wss://. Requires the spice to be built with
-# mbedTLS (so `tur fetch` must have run); without it ws-connect returns a null
-# handle and the program bails. Not run by CI's `tur test`.
+# discovery, and runs it over wss://. main.tur exercises all three TLS-V0
+# connect entry points: ws-connect-with-ca (verifying against the cert, which
+# is its own CA), ws-connect (default system store -- must reject the
+# self-signed cert), and ws-connect-insecure (opt-out). WS_TLS_CERT is the CA
+# bundle for the verified case. Requires the spice to be built with mbedTLS (so
+# `tur fetch` must have run); without it ws-connect returns a null handle and
+# the program bails. Not run by CI's `tur test`.
 #
 # Usage: tests/fixtures/ws-echo-tls/run.sh [path/to/tur]
 set -euo pipefail

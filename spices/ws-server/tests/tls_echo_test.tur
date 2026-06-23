@@ -5,9 +5,9 @@
 ;; server-start-tls-conn, whose two-arg handler calls ws-upgrade (which lifts
 ;; the TLS connection to a WebSocket session over the same mbedTLS stream) and
 ;; echoes every text frame back. The client is a minimal raw mbedTLS WebSocket
-;; peer implemented inline here -- it cannot be the ws-client spice, because both
-;; ws-client and ws-server define `WsConn` / `WsFrame` opaques and so cannot be
-;; loaded into the same program.
+;; peer implemented inline here, keeping this flat test self-contained in a
+;; single process. (Since NAME-V0 ws-client and ws-server share one `WsConn` /
+;; `WsFrame` from ws-core, so loading both into one program is possible now.)
 ;;
 ;; A self-signed cert + key (CN=localhost, ~100y expiry) is embedded below and
 ;; written to temp files at startup; the inline client connects with
@@ -23,10 +23,12 @@
   (import httpd/tls      :refer [server-start-tls-conn server-stop-tls])
   (import httpd/response :refer [resp-ok bad-request])
   (import ws-server/server
-    :refer [WsConn ws-upgrade
+    :refer [ws-upgrade
             ws-server-recv ws-server-send ws-server-close
-            ws-set-server-timeout
-            ws-frame-text ws-text? ws-binary? ws-closed? ws-error? ws-timeout?])
+            ws-set-server-timeout])
+  (import ws-core/conn  :refer [WsConn])
+  (import ws-core/frame :refer [ws-frame-text ws-text? ws-binary?
+                                ws-closed? ws-error? ws-timeout?])
   (import test/suite  :refer [describe it])
   (import test/assert :refer [assert-true])
   (import test/runner :refer [run-all])
@@ -383,10 +385,10 @@ static char *wssc__recv_text(wssc_t *c) {
   (defn ws-echo-handler [conn : int req : int] : int
     (let [c (:: conn Conn)
           r (:: req Request)]
-      (if (= (ws-upgrade c r
-               (fn [ws : WsConn] : void
-                 (do (ws-set-server-timeout ws 5000)
-                     (ws-echo-loop ws)))) 1)
+      (if (ok? (ws-upgrade c r
+                 (fn [ws : WsConn] : void
+                   (do (ws-set-server-timeout ws 5000)
+                       (ws-echo-loop ws)))))
         (:: (resp-ok "text/plain" "") :int)
         (:: (bad-request "not a websocket request") :int))))
 

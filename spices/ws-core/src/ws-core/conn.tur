@@ -1,0 +1,37 @@
+;; ws-core/conn.tur -- the canonical WebSocket connection handle type.
+;;
+;; NAME-V0: both ws-client and ws-server used to export their own identically
+;; named `WsConn` opaque, so an application could not import both at once
+;; without an `:as` alias (the type names collided). ws-core hoists the
+;; protocol-level types into one place: `WsConn` is defined here, and both
+;; spices -- plus downstream consumers -- import it from ws-core. There is now
+;; a single `WsConn` type in the program, so the two sides compose cleanly.
+;;
+;; Note on the deviation from the plan's wording: the planning doc describes
+;; ws-client/ws-server "re-exporting" WsConn. Turmeric modules can only export
+;; symbols they define (a module that `(export WsConn)` for an imported WsConn
+;; is rejected), so the canonical type is imported from `ws-core/conn`
+;; directly rather than re-exported through each spice. The end result is the
+;; same: one `WsConn`, importable without aliasing.
+;;
+;; `WsConn` stays an opaque `:int`. The underlying C struct still differs by
+;; side -- ws-client points it at its client `ws_conn_t`, ws-server at its
+;; `ws_srv_conn_t` -- but that is an implementation detail behind the handle,
+;; exactly as before. Each spice's own operations know which struct their
+;; handles wrap.
+
+(defmodule ws-core/conn
+  (export WsConn)
+
+;;; WsConn -- opaque handle to an open WebSocket connection.
+;;;
+;;; The canonical connection-handle type shared by ws-client and ws-server
+;;; (NAME-V0). Stored as int64_t under the hood (a pointer to the producing
+;;; spice's internal connection struct). A null handle (0) is the failure
+;;; sentinel used by the constructors (ws-connect / ws-upgrade); test it with
+;;; the producing spice's null predicate.
+;;;
+;;; Since: NAME-V0
+(defopaque WsConn :int)
+
+) ;; end defmodule ws-core/conn

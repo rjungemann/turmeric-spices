@@ -9,11 +9,12 @@
 ;; the background and kills it when the client driver (client.tur, which uses
 ;; the ws-client spice) is done.
 ;;
-;; This runs as a SEPARATE process from the ws-client driver on purpose: both
-;; ws-server and ws-client define `WsConn` / `WsFrame` opaques, so they cannot
-;; be loaded into the same program. It is the broadcast counterpart of the echo
-;; fixture next door, and the cross-process (real ws-client <-> ws-server)
-;; complement to the self-contained tests/broadcast_test.tur.
+;; This runs as a SEPARATE process from the ws-client driver to exercise the
+;; real socket path end to end. (Since NAME-V0 both spices share one `WsConn` /
+;; `WsFrame` from ws-core, so single-process is possible now; the split is kept
+;; on purpose.) It is the broadcast counterpart of the echo fixture next door,
+;; and the cross-process (real ws-client <-> ws-server) complement to the
+;; self-contained tests/broadcast_test.tur.
 ;;
 ;; stdlib/mutex.tur backs the hub lock; stdlib/vec.tur is auto-loaded.
 (load "stdlib/mutex.tur")
@@ -24,9 +25,11 @@
   (import httpd/request  :refer [req-path])
   (import httpd/response :refer [resp-ok bad-request not-found])
   (import ws-server/server
-    :refer [WsConn ws-upgrade ws-server-recv ws-server-send ws-server-close
-            ws-set-server-timeout
-            ws-frame-text ws-text? ws-binary? ws-closed? ws-error? ws-timeout?])
+    :refer [ws-upgrade ws-server-recv ws-server-send ws-server-close
+            ws-set-server-timeout])
+  (import ws-core/conn  :refer [WsConn])
+  (import ws-core/frame :refer [ws-frame-text ws-text? ws-binary?
+                                ws-closed? ws-error? ws-timeout?])
 
   (defn port [] : int
     ```c
@@ -107,13 +110,13 @@
     (let [c (:: conn Conn)
           r (:: req Request)]
       (if (cstr-eq? (req-path r) "/ws")
-        (if (= (ws-upgrade c r
-                 (fn [ws : WsConn] : void
-                   (do (ws-set-server-timeout ws 10000)
-                       (hub-register! ws)
-                       (broadcast-loop ws)
-                       (hub-unregister! ws)
-                       (ws-server-close ws)))) 1)
+        (if (ok? (ws-upgrade c r
+                   (fn [ws : WsConn] : void
+                     (do (ws-set-server-timeout ws 10000)
+                         (hub-register! ws)
+                         (broadcast-loop ws)
+                         (hub-unregister! ws)
+                         (ws-server-close ws)))))
           (:: (resp-ok "text/plain" "") :int)
           (:: (bad-request "not a websocket request") :int))
         (:: (not-found "") :int))))
