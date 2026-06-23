@@ -1,0 +1,236 @@
+;; tests/fragmented_test.tur -- FRAG-V0 outbound fragmentation (server side).
+;;
+;; The handler echoes the client's text message back via ws-server-send-fragmented
+;; with frame-size = 16, forcing a long payload to ride multiple frames. The raw
+;; socket client below counts how many frames it observes and asserts:
+;;
+;;   * the reassembled payload matches what was sent;
+;;   * more than one frame was actually read (so we know fragmentation happened);
+;;   * the FIRST frame has the binary opcode (0x2) with FIN=0;
+;;   * intermediate frames are continuation (0x0) with FIN=0;
+;;   * the LAST frame is continuation (0x0) with FIN=1.
+
+(defmodule ws-server/tests/fragmented
+  (import httpd/types    :refer [Conn Request])
+  (import httpd/server   :refer [server-start-conn server-stop])
+  (import httpd/response :refer [resp-ok bad-request])
+  (import ws-server/server
+    :refer [ws-upgrade
+            ws-server-recv ws-server-send-fragmented ws-server-close
+            ws-set-server-timeout])
+  (import ws-core/conn  :refer [WsConn])
+  (import ws-core/frame :refer [ws-frame-text ws-frame-len ws-text? ws-binary?
+                                ws-closed? ws-error? ws-timeout?])
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-true])
+  (import test/runner :refer [run-all])
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static int frg__recv_n(int fd, unsigned char *b, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    long r = (long)recv(fd, b + off, n - off, 0);
+    if (r <= 0) return 0;
+    off += (size_t)r;
+  }
+  return 1;
+}
+
+static int frg__connect(int port) {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return -1;
+  struct sockaddr_in a; memset(&a, 0, sizeof(a));
+  a.sin_family = AF_INET;
+  a.sin_port   = htons((uint16_t)port);
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) { close(fd); return -1; }
+  const char *req =
+    "GET /ws HTTP/1.1\r\n"
+    "Host: 127.0.0.1\r\n"
+    "Upgrade: websocket\r\n"
+    "Connection: Upgrade\r\n"
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+    "Sec-WebSocket-Version: 13\r\n"
+    "\r\n";
+  if (send(fd, req, strlen(req), 0) < 0) { close(fd); return -1; }
+  char buf[2048]; size_t n = 0;
+  while (n < sizeof(buf) - 1) {
+    unsigned char ch;
+    if (frg__recv_n(fd, &ch, 1) != 1) { close(fd); return -1; }
+    buf[n++] = (char)ch;
+    if (n >= 4 && buf[n-4]=='\r' && buf[n-3]=='\n' && buf[n-2]=='\r' && buf[n-1]=='\n')
+      break;
+  }
+  buf[n] = '\0';
+  if (!strstr(buf, " 101 ")) { close(fd); return -1; }
+  return fd;
+}
+
+/* Send one masked text frame (the client trigger). */
+static int frg__send_text(int fd, const char *msg) {
+  size_t len = strlen(msg);
+  unsigned char hdr[14]; size_t hl = 0;
+  hdr[hl++] = 0x81;
+  unsigned char mask[4] = { 0x11, 0x22, 0x33, 0x44 };
+  if (len < 126) hdr[hl++] = (unsigned char)(0x80 | len);
+  else if (len <= 0xffff) {
+    hdr[hl++] = 0x80 | 126;
+    hdr[hl++] = (unsigned char)((len >> 8) & 0xff);
+    hdr[hl++] = (unsigned char)(len & 0xff);
+  } else {
+    hdr[hl++] = 0x80 | 127;
+    for (int i = 7; i >= 0; i--) hdr[hl++] = (unsigned char)((len >> (8*i)) & 0xff);
+  }
+  memcpy(hdr + hl, mask, 4); hl += 4;
+  if (send(fd, hdr, hl, 0) < 0) return -1;
+  unsigned char *m = (unsigned char *)malloc(len ? len : 1);
+  for (size_t i = 0; i < len; i++) m[i] = (unsigned char)(msg[i] ^ mask[i & 3]);
+  int rc = (len > 0 && send(fd, m, len, 0) < 0) ? -1 : 0;
+  free(m);
+  return rc;
+}
+
+/* Read raw frames until FIN=1, concatenating payloads. Stashes per-frame
+   metadata into out_meta[] (capacity max_frames; one entry per frame read):
+   each entry is a 16-bit pair (fin_flag << 8) | opcode. Returns frame count
+   on success, -1 on error. Writes the reassembled payload to *out_payload
+   (caller frees) and its length to *out_len. */
+static int frg__recv_all(int fd, char **out_payload, size_t *out_len,
+                         int *out_meta, int max_frames) {
+  size_t cap = 256, used = 0;
+  char *buf = (char *)malloc(cap);
+  if (!buf) return -1;
+  int frames = 0;
+  for (;;) {
+    if (frames >= max_frames) { free(buf); return -1; }
+    unsigned char h2[2];
+    if (frg__recv_n(fd, h2, 2) != 1) { free(buf); return -1; }
+    int fin = (h2[0] & 0x80) ? 1 : 0;
+    int op  = h2[0] & 0x0f;
+    uint64_t len = h2[1] & 0x7f;
+    if (len == 126) {
+      unsigned char e[2];
+      if (frg__recv_n(fd, e, 2) != 1) { free(buf); return -1; }
+      len = ((uint64_t)e[0] << 8) | e[1];
+    } else if (len == 127) {
+      unsigned char e[8];
+      if (frg__recv_n(fd, e, 8) != 1) { free(buf); return -1; }
+      len = 0;
+      for (int i = 0; i < 8; i++) len = (len << 8) | e[i];
+    }
+    if (h2[1] & 0x80) { free(buf); return -1; }    /* server frames unmasked */
+    if (used + (size_t)len + 1 > cap) {
+      while (used + (size_t)len + 1 > cap) cap *= 2;
+      char *nb = (char *)realloc(buf, cap);
+      if (!nb) { free(buf); return -1; }
+      buf = nb;
+    }
+    if (len > 0 && frg__recv_n(fd, (unsigned char *)(buf + used), (size_t)len) != 1) {
+      free(buf); return -1;
+    }
+    used += (size_t)len;
+    out_meta[frames++] = (fin << 8) | op;
+    if (fin) break;
+  }
+  buf[used] = '\0';
+  *out_payload = buf;
+  *out_len = used;
+  return frames;
+}
+```
+
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  (defn fc-connect [port : int] : int
+    ```c return (int64_t)frg__connect((int)port); ```)
+
+  (defn fc-close [fd : int] : void
+    ```c if ((int)fd >= 0) close((int)fd); ```)
+
+  (defn fc-send-text [fd : int msg : cstr] : int
+    ```c return (int64_t)frg__send_text((int)fd, (const char *)msg); ```)
+
+  ;; Drive one round-trip; assert the server fragmented the response.
+  ;; Returns 1 when every fragmentation invariant holds, 0 otherwise.
+  (defn fc-round-trip-ok? [fd : int expected : cstr] : bool
+    ```c
+    int meta[256];
+    char *payload = NULL;
+    size_t plen = 0;
+    int n = frg__recv_all((int)fd, &payload, &plen, meta, 256);
+    if (n <= 0) { if (payload) free(payload); return 0; }
+    int ok = 1;
+    size_t elen = strlen((const char *)expected);
+    if (plen != elen || memcmp(payload, (const char *)expected, plen) != 0) ok = 0;
+    if (n < 2) ok = 0;                              /* must actually fragment */
+    if (ok) {
+      int first = meta[0];
+      if ((first & 0xff) != 0x2) ok = 0;            /* opcode = binary on first */
+      if ((first >> 8) & 1)      ok = 0;            /* FIN must be 0 on first */
+      for (int i = 1; i < n - 1; i++) {
+        if ((meta[i] & 0xff) != 0x0) { ok = 0; break; }      /* continuation */
+        if (((meta[i] >> 8) & 1) != 0) { ok = 0; break; }    /* FIN=0 mid    */
+      }
+      int last = meta[n - 1];
+      if ((last & 0xff) != 0x0)       ok = 0;       /* continuation last */
+      if (((last >> 8) & 1) != 1)     ok = 0;       /* FIN=1 last        */
+    }
+    free(payload);
+    return ok;
+    ```)
+
+  ;; Server handler: read one inbound message, send it back fragmented at 16
+  ;; bytes per frame, then close.
+  (defn ws-frag-loop [ws : WsConn] : void
+    (let [f (ws-server-recv ws)]
+      (if (or (ws-closed? f) (ws-error? f) (ws-timeout? f))
+        (ws-server-close ws)
+        (do
+          (ws-server-send-fragmented ws
+                                     (:: (ws-frame-text f) :ptr<void>)
+                                     (ws-frame-len f)
+                                     16)
+          (ws-server-close ws)))))
+
+  (defn ws-frag-handler [conn : int req : int] : int
+    (let [c (:: conn Conn)
+          r (:: req Request)]
+      (if (ok? (ws-upgrade c r
+                 (fn [ws : WsConn] : void
+                   (do (ws-set-server-timeout ws 5000)
+                       (ws-frag-loop ws)))))
+        (:: (resp-ok "text/plain" "") :int)
+        (:: (bad-request "not a websocket request") :int))))
+
+  (defn main [] : int
+    (let [srv (server-start-conn 18753 ws-frag-handler)]
+      (do
+        (unsafe (sleep-ms 100))
+
+        (describe "ws-server FRAG-V0 -- ws-server-send-fragmented (16 B frames)"
+
+          (it "splits a 120 B payload into multiple frames with correct FIN+opcodes"
+            (let [fd (fc-connect 18753)]
+              (if (< fd 0)
+                (assert-true false)
+                (let [;; 120-byte ASCII payload; at frame-size 16 -> 8 frames.
+                      m "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRST"
+                      _ (fc-send-text fd m)
+                      ok (fc-round-trip-ok? fd m)]
+                  (do (fc-close fd) (assert-true ok)))))))
+
+        (server-stop srv)
+        (run-all)))
+    0))

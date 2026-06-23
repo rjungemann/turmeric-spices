@@ -51,8 +51,10 @@
                                 ws-text? ws-binary? ws-ping? ws-pong?
                                 ws-closed? ws-timeout? ws-error?])
   (export ws-connect ws-connect-with-ca ws-connect-insecure
+          ws-connect-with-subprotocols
+          ws-subprotocol
           ws-conn-null? ws-last-error
-          ws-send ws-send-bytes ws-recv
+          ws-send ws-send-bytes ws-send-fragmented ws-recv
           ws-close ws-free ws-set-timeout)
 
 ;; ---------------------------------------------------------------------------
@@ -145,6 +147,7 @@ typedef struct {
   size_t         rcap;
   size_t         rlen;
   ws_frame_t     frame;   /* view returned by ws-recv; points into rbuf */
+  char           subproto[128]; /* SUB-V0: server-selected subprotocol; "" if none */
 } ws_conn_t;
 
 /* last-error scratch, surfaced via ws-last-error. */
@@ -306,12 +309,13 @@ static int ws__recv_n(ws_conn_t *c, unsigned char *buf, size_t n) {
 }
 
 /* --- framing ------------------------------------------------------------- */
-/* Send one masked frame. Returns bytes handed to the transport, or -1. */
-static long ws__send_frame(ws_conn_t *c, int opcode,
-                           const unsigned char *payload, size_t len) {
+/* Send one masked frame with caller-controlled FIN bit. Returns bytes handed to
+   the transport, or -1. The single-frame ws__send_frame is the FIN=1 shortcut. */
+static long ws__send_frame_fin(ws_conn_t *c, int fin, int opcode,
+                               const unsigned char *payload, size_t len) {
   unsigned char hdr[14];
   size_t hl = 0;
-  hdr[hl++] = (unsigned char)(0x80 | (opcode & 0x0f));   /* FIN + opcode */
+  hdr[hl++] = (unsigned char)(((fin ? 0x80 : 0)) | (opcode & 0x0f));
   if (len < 126) {
     hdr[hl++] = (unsigned char)(0x80 | len);
   } else if (len <= 0xffff) {
@@ -339,6 +343,12 @@ static long ws__send_frame(ws_conn_t *c, int opcode,
     off += take;
   }
   return (long)(hl + len);
+}
+
+/* FIN=1 single-frame shortcut. */
+static long ws__send_frame(ws_conn_t *c, int opcode,
+                           const unsigned char *payload, size_t len) {
+  return ws__send_frame_fin(c, 1, opcode, payload, len);
 }
 
 /* Read one frame. On success mallocs *payload (caller frees) and reports
@@ -411,24 +421,68 @@ static int ws__connect_plain(const char *host, const char *port) {
   return fd;
 }
 
-/* Perform the RFC 6455 4 client handshake over an already-connected conn. */
+/* SUB-V0: case-insensitive header lookup against the handshake response head.
+   Returns 0 on miss; on hit writes up to (out_cap-1) bytes of the trimmed value
+   into out and returns 1. */
+static int ws__resp_header(const char *resp, const char *name,
+                           char *out, size_t out_cap) {
+  size_t nlen = strlen(name);
+  const char *p = resp;
+  while (*p) {
+    const char *eol = strstr(p, "\r\n");
+    if (!eol) break;
+    if ((size_t)(eol - p) > nlen + 1
+        && strncasecmp(p, name, nlen) == 0
+        && p[nlen] == ':') {
+      const char *v = p + nlen + 1;
+      while (v < eol && (*v == ' ' || *v == '\t')) v++;
+      size_t vl = (size_t)(eol - v);
+      while (vl && (v[vl-1] == ' ' || v[vl-1] == '\t')) vl--;
+      if (vl >= out_cap) vl = out_cap - 1;
+      memcpy(out, v, vl);
+      out[vl] = '\0';
+      return 1;
+    }
+    p = eol + 2;
+  }
+  return 0;
+}
+
+/* Perform the RFC 6455 4 client handshake over an already-connected conn.
+   When `offered` is a non-empty comma-separated list, advertise it in
+   Sec-WebSocket-Protocol; on success the server-selected protocol (if any) is
+   parsed from the 101 response into c->subproto. */
 static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
-                         const char *path) {
+                         const char *path, const char *offered) {
   unsigned char nonce[16];
   ws__rand_bytes(nonce, 16);
   char key[32];
   ws__b64(nonce, 16, key);
 
-  char req[1024];
-  int n = snprintf(req, sizeof(req),
-    "GET %s HTTP/1.1\r\n"
-    "Host: %s:%s\r\n"
-    "Upgrade: websocket\r\n"
-    "Connection: Upgrade\r\n"
-    "Sec-WebSocket-Key: %s\r\n"
-    "Sec-WebSocket-Version: 13\r\n"
-    "\r\n",
-    path, host, port, key);
+  char req[2048];
+  int n;
+  if (offered && offered[0] != '\0') {
+    n = snprintf(req, sizeof(req),
+      "GET %s HTTP/1.1\r\n"
+      "Host: %s:%s\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: %s\r\n"
+      "Sec-WebSocket-Version: 13\r\n"
+      "Sec-WebSocket-Protocol: %s\r\n"
+      "\r\n",
+      path, host, port, key, offered);
+  } else {
+    n = snprintf(req, sizeof(req),
+      "GET %s HTTP/1.1\r\n"
+      "Host: %s:%s\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: %s\r\n"
+      "Sec-WebSocket-Version: 13\r\n"
+      "\r\n",
+      path, host, port, key);
+  }
   if (ws__send_all(c, (const unsigned char *)req, (size_t)n) < 0) {
     ws__set_err("handshake: failed to send upgrade request");
     return -1;
@@ -460,6 +514,11 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
     ws__set_err("handshake: Sec-WebSocket-Accept mismatch");
     return -1;
   }
+  /* SUB-V0: capture the server-selected subprotocol, if any. Empty string when
+     the server did not echo Sec-WebSocket-Protocol. */
+  c->subproto[0] = '\0';
+  ws__resp_header(resp, "Sec-WebSocket-Protocol",
+                  c->subproto, sizeof(c->subproto));
   return 0;
 }
 ```
@@ -482,7 +541,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
 ;;; default (insecure=0) installs the trust anchors and enables
 ;;; MBEDTLS_SSL_VERIFY_REQUIRED so an invalid or untrusted certificate aborts
 ;;; the connect. Private: the three public entry points below fix the policy.
-(defn ws-connect-impl [uri : cstr insecure : int capath : cstr] : WsConn
+(defn ws-connect-impl [uri : cstr insecure : int capath : cstr offered : cstr] : WsConn
   ```c
   const char *raw = (const char *)uri;
   int use_tls;
@@ -588,7 +647,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
     c->fd = fd;
   }
 
-  if (ws__handshake(c, host, port, path) != 0) {
+  if (ws__handshake(c, host, port, path, (const char *)offered) != 0) {
   #ifdef __TUR_WS_TLS
     if (c->is_tls) {
       ws_tls_t *t = (ws_tls_t *)c->tls;
@@ -628,7 +687,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
 ;;;
 ;;; Since: WC1 (verified-by-default since TLS-V0)
 (defn ws-connect [uri : cstr] : WsConn
-  (ws-connect-impl uri 0 ""))
+  (ws-connect-impl uri 0 "" ""))
 
 ;;; ws-connect-with-ca -- open a wss:// connection verifying against a custom
 ;;; CA bundle.
@@ -651,7 +710,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
 ;;;
 ;;; Since: TLS-V0
 (defn ws-connect-with-ca [uri : cstr ca-path : cstr] : WsConn
-  (ws-connect-impl uri 0 ca-path))
+  (ws-connect-impl uri 0 ca-path ""))
 
 ;;; ws-connect-insecure -- open a wss:// connection WITHOUT verifying the
 ;;; server certificate.
@@ -671,7 +730,51 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
 ;;;
 ;;; Since: TLS-V0
 (defn ws-connect-insecure [uri : cstr] : WsConn
-  (ws-connect-impl uri 1 ""))
+  (ws-connect-impl uri 1 "" ""))
+
+;;; ws-connect-with-subprotocols -- open a verified WebSocket connection that
+;;; advertises one or more application subprotocols (SUB-V0, RFC 6455 1.9).
+;;;
+;;; The `offered` list is sent verbatim as the Sec-WebSocket-Protocol request
+;;; header (a comma-separated list, e.g. "json.v1, msgpack.v1"). Servers pick at
+;;; most one and echo it back; query the negotiated value with ws-subprotocol.
+;;; A server that does not echo the header means "no subprotocol" -- the link
+;;; is still open, ws-subprotocol returns "", and it is the caller's choice
+;;; whether to keep talking or close.
+;;;
+;;; Parameters:
+;;;   uri     -- a ws:// or wss:// URI string.
+;;;   offered -- comma-separated subprotocol list (RFC 6455 1.9 token list).
+;;;
+;;; Returns:
+;;;   A WsConn handle on success; null on failure (read ws-last-error). TLS uses
+;;;   the system CA store, exactly like ws-connect.
+;;;
+;;; Example:
+;;;   (let [c (ws-connect-with-subprotocols "wss://api.example.com/feed"
+;;;                                          "json.v1, msgpack.v1")]
+;;;     (when (not (ws-conn-null? c))
+;;;       (println (ws-subprotocol c))))   ; e.g. "json.v1"
+;;;
+;;; Since: SUB-V0
+(defn ws-connect-with-subprotocols [uri : cstr offered : cstr] : WsConn
+  (ws-connect-impl uri 0 "" offered))
+
+;;; ws-subprotocol -- the application subprotocol the server selected during the
+;;; handshake (SUB-V0).
+;;;
+;;; Returns the value echoed in the server's Sec-WebSocket-Protocol response
+;;; header, or "" when the server did not select a subprotocol (the client did
+;;; not offer one, or the server chose to ignore the offers). Returns static
+;;; storage tied to the WsConn; do not free.
+;;;
+;;; Since: SUB-V0
+(defn ws-subprotocol [conn : WsConn] : cstr
+  ```c
+  if (conn == 0) return (char *)"";
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  return c->subproto;
+  ```)
 
 ;;; ws-conn-null? -- true if `conn` is the failure sentinel from ws-connect.
 ;;; Since: WC1
@@ -725,6 +828,56 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
   if (conn == 0) return -1;
   ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
   return ws__send_frame(c, 0x2, (const unsigned char *)ptr, (size_t)len);
+  ```)
+
+;;; ws-send-fragmented -- send a binary message split across multiple frames
+;;; (FRAG-V0, RFC 6455 5.4).
+;;;
+;;; The payload is sent as a sequence of frames each at most `frame-size` bytes,
+;;; with FIN=0 on every frame except the last. The first frame carries the
+;;; binary opcode (0x2); the rest carry continuation (0x0). For payloads that
+;;; fit in a single frame (len <= frame-size, or frame-size <= 0) this is
+;;; equivalent to ws-send-bytes. The receive side reassembles automatically.
+;;;
+;;; Parameters:
+;;;   conn       -- WsConn handle.
+;;;   ptr        -- payload buffer.
+;;;   len        -- byte length of the payload.
+;;;   frame-size -- max bytes per outbound frame (a value <= 0 sends one frame).
+;;;
+;;; Returns:
+;;;   Total bytes handed to the transport, or negative on error.
+;;;
+;;; Example:
+;;;   (ws-send-fragmented c big-buf 1048576 16384)   ; 1 MiB across 16 KiB frames
+;;;
+;;; Since: FRAG-V0
+(defn ws-send-fragmented [conn : WsConn ptr : ptr<void> len : int frame-size : int] : int
+  ```c
+  if (conn == 0) return -1;
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  const unsigned char *p = (const unsigned char *)ptr;
+  size_t total = (size_t)len;
+  size_t chunk = frame_size > 0 ? (size_t)frame_size : total;
+  if (chunk == 0) chunk = total ? total : 1;
+  if (total <= chunk) {
+    return ws__send_frame(c, 0x2, p, total);
+  }
+  long sent = 0;
+  size_t off = 0;
+  int first = 1;
+  while (off < total) {
+    size_t take = total - off;
+    if (take > chunk) take = chunk;
+    int fin    = (off + take >= total) ? 1 : 0;
+    int opcode = first ? 0x2 : 0x0;
+    long r = ws__send_frame_fin(c, fin, opcode, p + off, take);
+    if (r < 0) return -1;
+    sent += r;
+    off  += take;
+    first = 0;
+  }
+  return (int64_t)sent;
   ```)
 
 ;;; ws-recv -- receive the next WebSocket message.

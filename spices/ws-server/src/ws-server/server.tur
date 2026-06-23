@@ -45,9 +45,11 @@
                                 ws-text? ws-binary? ws-ping? ws-pong?
                                 ws-closed? ws-timeout? ws-error?])
   (export ws-upgrade ws-upgrade-or-zero
+          ws-upgrade-with-subprotocols
+          ws-server-subprotocol
           UpgradeError UpgradeMissingHeader UpgradeBadVersion
           UpgradeUnsupportedProto UpgradeWriteFailed
-          ws-server-send ws-server-send-bytes
+          ws-server-send ws-server-send-bytes ws-server-send-fragmented
           ws-server-recv ws-server-close
           ws-set-server-timeout)
 
@@ -109,6 +111,7 @@ typedef struct {
   size_t         rcap;
   size_t         rlen;
   ws_frame_t     frame;   /* view returned by ws-server-recv; points into rbuf */
+  char           subproto[128]; /* SUB-V0: selected subprotocol; "" when none */
 } ws_srv_conn_t;
 
 /* --- base64 (encode only) ------------------------------------------------ */
@@ -247,12 +250,13 @@ static int wss__recv_n(ws_srv_conn_t *c, unsigned char *buf, size_t n) {
 }
 
 /* --- framing ------------------------------------------------------------- */
-/* Send one UNMASKED frame (server->client). Returns bytes sent, or -1. */
-static long wss__send_frame(ws_srv_conn_t *c, int opcode,
-                            const unsigned char *payload, size_t len) {
+/* Send one UNMASKED frame (server->client) with caller-controlled FIN bit.
+   The all-in-one wss__send_frame is the FIN=1 shortcut. */
+static long wss__send_frame_fin(ws_srv_conn_t *c, int fin, int opcode,
+                                const unsigned char *payload, size_t len) {
   unsigned char hdr[10];
   size_t hl = 0;
-  hdr[hl++] = (unsigned char)(0x80 | (opcode & 0x0f));   /* FIN + opcode */
+  hdr[hl++] = (unsigned char)(((fin ? 0x80 : 0)) | (opcode & 0x0f));
   if (len < 126) {
     hdr[hl++] = (unsigned char)len;                      /* no mask bit */
   } else if (len <= 0xffff) {
@@ -267,6 +271,50 @@ static long wss__send_frame(ws_srv_conn_t *c, int opcode,
   if (wss__send_all(c, hdr, hl) < 0) return -1;
   if (len > 0 && wss__send_all(c, payload, len) < 0) return -1;
   return (long)(hl + len);
+}
+
+/* FIN=1 single-frame shortcut. */
+static long wss__send_frame(ws_srv_conn_t *c, int opcode,
+                            const unsigned char *payload, size_t len) {
+  return wss__send_frame_fin(c, 1, opcode, payload, len);
+}
+
+/* SUB-V0: intersect a client `Sec-WebSocket-Protocol:` token list with the
+   server-side accepted list. Both are comma-separated; whitespace and case are
+   tolerated. Writes the first match into `out` and returns 1; returns 0 on no
+   intersection. Either side empty yields no match. */
+static int wss__pick_subproto(const char *offered, const char *accepted,
+                              char *out, size_t out_cap) {
+  if (!offered || !*offered || !accepted || !*accepted) { if (out_cap) out[0] = '\0'; return 0; }
+  const char *o = offered;
+  while (*o) {
+    while (*o == ' ' || *o == '\t' || *o == ',') o++;
+    const char *oend = o;
+    while (*oend && *oend != ',') oend++;
+    const char *otrim = oend;
+    while (otrim > o && (otrim[-1] == ' ' || otrim[-1] == '\t')) otrim--;
+    size_t olen = (size_t)(otrim - o);
+    if (olen > 0) {
+      const char *a = accepted;
+      while (*a) {
+        while (*a == ' ' || *a == '\t' || *a == ',') a++;
+        const char *aend = a;
+        while (*aend && *aend != ',') aend++;
+        const char *atrim = aend;
+        while (atrim > a && (atrim[-1] == ' ' || atrim[-1] == '\t')) atrim--;
+        size_t alen = (size_t)(atrim - a);
+        if (alen == olen && strncasecmp(a, o, olen) == 0) {
+          if (olen >= out_cap) olen = out_cap - 1;
+          memcpy(out, o, olen); out[olen] = '\0';
+          return 1;
+        }
+        a = (*aend == ',') ? aend + 1 : aend;
+      }
+    }
+    o = (*oend == ',') ? oend + 1 : oend;
+  }
+  if (out_cap) out[0] = '\0';
+  return 0;
 }
 
 /* Read one frame; client->server frames are masked, so unmask on read. On
@@ -355,22 +403,60 @@ static int wss__rbuf_append(ws_srv_conn_t *c, const unsigned char *p, size_t n) 
   ```)
 
 ;; Compute Sec-WebSocket-Accept for `key` and write the 101 Switching Protocols
-;; response over the WsConn's transport. Returns 1 on success, 0 on failure.
-(defn wss-write-handshake [ws : WsConn key : cstr] : int
+;; response over the WsConn's transport. When `proto` is a non-empty string it
+;; is echoed back as the selected Sec-WebSocket-Protocol (SUB-V0). Returns 1
+;; on success, 0 on failure.
+(defn wss-write-handshake-proto [ws : WsConn key : cstr proto : cstr] : int
   ```c
   if (ws == 0) return 0;
   ws_srv_conn_t *c = (ws_srv_conn_t *)(intptr_t)ws;
   char accept[64];
   wss__accept((const char *)key, accept);
-  char resp[256];
-  int n = snprintf(resp, sizeof(resp),
-    "HTTP/1.1 101 Switching Protocols\r\n"
-    "Upgrade: websocket\r\n"
-    "Connection: Upgrade\r\n"
-    "Sec-WebSocket-Accept: %s\r\n"
-    "\r\n",
-    accept);
+  char resp[512];
+  int n;
+  const char *p = (const char *)proto;
+  if (p && p[0] != '\0') {
+    n = snprintf(resp, sizeof(resp),
+      "HTTP/1.1 101 Switching Protocols\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Accept: %s\r\n"
+      "Sec-WebSocket-Protocol: %s\r\n"
+      "\r\n",
+      accept, p);
+  } else {
+    n = snprintf(resp, sizeof(resp),
+      "HTTP/1.1 101 Switching Protocols\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Accept: %s\r\n"
+      "\r\n",
+      accept);
+  }
   return wss__send_all(c, (const unsigned char *)resp, (size_t)n) < 0 ? 0 : 1;
+  ```)
+
+(defn wss-write-handshake [ws : WsConn key : cstr] : int
+  (wss-write-handshake-proto ws key ""))
+
+;; SUB-V0: intersect the client offer with the server-side accepted list, write
+;; the picked subprotocol into the WsConn's slot (or "" when no intersection),
+;; and return 1 when a pick was made / 0 when not. An empty offer trivially
+;; returns 0 with subproto cleared (caller treats absent header as "no proto").
+(defn wss-negotiate-subproto [ws : WsConn offered : cstr accepted : cstr] : int
+  ```c
+  if (ws == 0) return 0;
+  ws_srv_conn_t *c = (ws_srv_conn_t *)(intptr_t)ws;
+  return wss__pick_subproto((const char *)offered, (const char *)accepted,
+                            c->subproto, sizeof(c->subproto));
+  ```)
+
+;; SUB-V0: read back the negotiated subprotocol slot from a server WsConn.
+(defn wss-read-subproto [ws : WsConn] : cstr
+  ```c
+  if (ws == 0) return (char *)"";
+  ws_srv_conn_t *c = (ws_srv_conn_t *)(intptr_t)ws;
+  return c->subproto;
   ```)
 
 ;; Release only the WsConn wrapper struct, leaving the fd and tls_conn_t alone.
@@ -440,6 +526,13 @@ static int wss__rbuf_append(ws_srv_conn_t *c, const unsigned char *p, size_t n) 
 (defn wss-req-version [req : Request] : int
   (let [v (req-header req "Sec-WebSocket-Version")]
     (if (ok? v) (wss-atoi (ok-val v)) 0)))
+
+;; True when `s` is the empty string (or null). Used to distinguish "client did
+;; not offer any subprotocol" from "client offered, but none matched."
+(defn wss-cstr-empty? [s : cstr] : bool
+  ```c
+  return s == 0 || ((const char *)s)[0] == '\0';
+  ```)
 
 ;;; ws-upgrade -- upgrade an httpd connection to a WebSocket session.
 ;;;
@@ -526,6 +619,79 @@ static int wss__rbuf_append(ws_srv_conn_t *c, const unsigned char *p, size_t n) 
 (defn ws-upgrade-or-zero [conn : Conn req : Request ^fat handler : (fn [WsConn] void)] : int
   (if (ok? (ws-upgrade conn req handler)) 1 0))
 
+;;; ws-upgrade-with-subprotocols -- upgrade with application subprotocol
+;;; negotiation (SUB-V0, RFC 6455 1.9).
+;;;
+;;; Performs the same validation as ws-upgrade, plus:
+;;;   * Reads the client's Sec-WebSocket-Protocol offer.
+;;;   * Intersects it with `accepted` (a comma-separated list of supported
+;;;     subprotocols, e.g. "json.v1, msgpack.v1") -- the first offered token
+;;;     that appears in `accepted` wins.
+;;;   * Echoes the selected subprotocol back in the 101 response.
+;;;
+;;; When the client offered subprotocols but none intersect with `accepted` the
+;;; upgrade fails with UpgradeUnsupportedProto carrying the offered list. When
+;;; the client offered nothing the upgrade succeeds with no subprotocol
+;;; selected; query ws-server-subprotocol from the handler to inspect.
+;;;
+;;; Parameters:
+;;;   conn     -- httpd Conn handle.
+;;;   req      -- httpd Request.
+;;;   accepted -- comma-separated list of supported subprotocols.
+;;;   handler  -- (fn [WsConn] void), invoked after a successful upgrade.
+;;;
+;;; Returns:
+;;;   (Result bool UpgradeError) -- ok(true) on a successful upgrade and handler
+;;;   run; err(UpgradeError) otherwise.
+;;;
+;;; Since: SUB-V0
+(defn ws-upgrade-with-subprotocols
+  [conn : Conn req : Request accepted : cstr ^fat handler : (fn [WsConn] void)]
+  : (Result bool UpgradeError)
+  (let [up  (req-header req "Upgrade")
+        kr  (req-header req "Sec-WebSocket-Key")
+        spr (req-header req "Sec-WebSocket-Protocol")
+        ver (wss-req-version req)]
+    (cond
+      (not (ok? up))
+        (:: (err (UpgradeMissingHeader "Upgrade")) (Result bool UpgradeError))
+      (not (wss-header-websocket? (ok-val up)))
+        (:: (err (UpgradeUnsupportedProto (ok-val up))) (Result bool UpgradeError))
+      (and (not= ver 0) (not= ver 13))
+        (:: (err (UpgradeBadVersion ver)) (Result bool UpgradeError))
+      (not (ok? kr))
+        (:: (err (UpgradeMissingHeader "Sec-WebSocket-Key")) (Result bool UpgradeError))
+      :else
+        (let [offered (if (ok? spr) (ok-val spr) "")
+              ws      (wss-wrap (conn-fd conn) (conn-tls conn))]
+          (if (= (:: ws :int) 0)
+            (:: (err (UpgradeWriteFailed)) (Result bool UpgradeError))
+            ;; Negotiate. If the client offered something and nothing matched,
+            ;; reject; otherwise (no offer, or a successful pick) proceed.
+            (let [picked (wss-negotiate-subproto ws offered accepted)]
+              (if (and (not= picked 1) (not (wss-cstr-empty? offered)))
+                (do (wss-free-wrapper ws)
+                    (:: (err (UpgradeUnsupportedProto offered)) (Result bool UpgradeError)))
+                (if (= (wss-write-handshake-proto ws (ok-val kr) (wss-read-subproto ws)) 0)
+                  (do (wss-free-wrapper ws)
+                      (:: (err (UpgradeWriteFailed)) (Result bool UpgradeError)))
+                  (do
+                    (conn-mark-upgraded! conn)
+                    (handler ws)
+                    (wss-free ws)
+                    (ok true))))))))))
+
+;;; ws-server-subprotocol -- the application subprotocol selected during the
+;;; upgrade handshake (SUB-V0).
+;;;
+;;; Returns "" when the upgrade did not negotiate one (ws-upgrade was used
+;;; instead of ws-upgrade-with-subprotocols, or no intersection was offered).
+;;; Static storage tied to the WsConn; do not free.
+;;;
+;;; Since: SUB-V0
+(defn ws-server-subprotocol [ws : WsConn] : cstr
+  (wss-read-subproto ws))
+
 ;;; ws-server-send -- send a UTF-8 text frame to the client (unmasked).
 ;;;
 ;;; Parameters:
@@ -560,6 +726,53 @@ static int wss__rbuf_append(ws_srv_conn_t *c, const unsigned char *p, size_t n) 
   if (ws == 0) return -1;
   ws_srv_conn_t *c = (ws_srv_conn_t *)(intptr_t)ws;
   return wss__send_frame(c, 0x2, (const unsigned char *)ptr, (size_t)len);
+  ```)
+
+;;; ws-server-send-fragmented -- send a binary message split across multiple
+;;; frames (FRAG-V0, RFC 6455 5.4).
+;;;
+;;; The payload is sent as a sequence of frames each at most `frame-size` bytes,
+;;; with FIN=0 on every frame except the last. The first frame carries the
+;;; binary opcode (0x2); the rest carry continuation (0x0). For payloads that
+;;; fit in a single frame this is equivalent to ws-server-send-bytes. The peer
+;;; reassembles automatically.
+;;;
+;;; Parameters:
+;;;   ws         -- server WsConn handle.
+;;;   ptr        -- payload buffer.
+;;;   len        -- byte length of the payload.
+;;;   frame-size -- max bytes per outbound frame (a value <= 0 sends one frame).
+;;;
+;;; Returns:
+;;;   Total bytes handed to the transport, or negative on error.
+;;;
+;;; Since: FRAG-V0
+(defn ws-server-send-fragmented [ws : WsConn ptr : ptr<void> len : int frame-size : int] : int
+  ```c
+  if (ws == 0) return -1;
+  ws_srv_conn_t *c = (ws_srv_conn_t *)(intptr_t)ws;
+  const unsigned char *p = (const unsigned char *)ptr;
+  size_t total = (size_t)len;
+  size_t chunk = frame_size > 0 ? (size_t)frame_size : total;
+  if (chunk == 0) chunk = total ? total : 1;
+  if (total <= chunk) {
+    return wss__send_frame(c, 0x2, p, total);
+  }
+  long sent = 0;
+  size_t off = 0;
+  int first = 1;
+  while (off < total) {
+    size_t take = total - off;
+    if (take > chunk) take = chunk;
+    int fin    = (off + take >= total) ? 1 : 0;
+    int opcode = first ? 0x2 : 0x0;
+    long r = wss__send_frame_fin(c, fin, opcode, p + off, take);
+    if (r < 0) return -1;
+    sent += r;
+    off  += take;
+    first = 0;
+  }
+  return (int64_t)sent;
   ```)
 
 ;;; ws-server-recv -- receive the next message from the client.

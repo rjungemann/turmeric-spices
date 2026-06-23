@@ -1,0 +1,170 @@
+;; tests/subproto_test.tur -- SUB-V0 end-to-end subprotocol negotiation.
+;;
+;; Spins up an httpd server whose handler calls ws-upgrade-with-subprotocols
+;; with accepted = "msgpack.v1, json.v1", drives it from an inline-C raw socket
+;; client that varies the Sec-WebSocket-Protocol header, and asserts:
+;;
+;;   * matching offer ("json.v1, msgpack.v1") -> 101 with the first overlap
+;;     ("msgpack.v1", since the client lists it second but it's the first
+;;     server-accepted token that matches; SUB-V0 picks first-from-client-offer
+;;     so we offer in the order we want to see picked).
+;;   * non-matching offer ("xml.v1") -> the upgrade fails with
+;;     UpgradeUnsupportedProto (the server's bad-request handler returns 400).
+;;   * absent header -> upgrade succeeds with no subprotocol echoed back.
+;;
+;; The fixed Sec-WebSocket-Key is dGhlIHNhbXBsZSBub25jZQ== whose Accept value
+;; is s3pPLMBiTxaQ9kYGzzhZRbK+xOo= (RFC 6455 4.2.2 vector).
+
+(defmodule ws-server/tests/subproto
+  (import httpd/types    :refer [Conn Request])
+  (import httpd/server   :refer [server-start-conn server-stop])
+  (import httpd/response :refer [resp-ok bad-request])
+  (import ws-server/server
+    :refer [ws-upgrade-with-subprotocols ws-server-subprotocol ws-server-close])
+  (import ws-core/conn  :refer [WsConn])
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-true])
+  (import test/runner :refer [run-all])
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static int sub__recv_n(int fd, unsigned char *b, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    long r = (long)recv(fd, b + off, n - off, 0);
+    if (r <= 0) return 0;
+    off += (size_t)r;
+  }
+  return 1;
+}
+
+/* Returns malloc'd response head (caller frees), or NULL on error. */
+static char *sub__handshake(int port, const char *offered) {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return NULL;
+  struct sockaddr_in a; memset(&a, 0, sizeof(a));
+  a.sin_family = AF_INET;
+  a.sin_port   = htons((uint16_t)port);
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) { close(fd); return NULL; }
+  char req[1024];
+  int n;
+  if (offered && offered[0]) {
+    n = snprintf(req, sizeof(req),
+      "GET /ws HTTP/1.1\r\n"
+      "Host: 127.0.0.1\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+      "Sec-WebSocket-Version: 13\r\n"
+      "Sec-WebSocket-Protocol: %s\r\n"
+      "\r\n", offered);
+  } else {
+    n = snprintf(req, sizeof(req),
+      "GET /ws HTTP/1.1\r\n"
+      "Host: 127.0.0.1\r\n"
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+      "Sec-WebSocket-Version: 13\r\n"
+      "\r\n");
+  }
+  if (send(fd, req, (size_t)n, 0) < 0) { close(fd); return NULL; }
+  char *buf = (char *)malloc(4096);
+  if (!buf) { close(fd); return NULL; }
+  size_t rl = 0;
+  while (rl < 4095) {
+    unsigned char ch;
+    if (sub__recv_n(fd, &ch, 1) != 1) break;
+    buf[rl++] = (char)ch;
+    if (rl >= 4 && buf[rl-4]=='\r' && buf[rl-3]=='\n'
+                && buf[rl-2]=='\r' && buf[rl-1]=='\n') break;
+  }
+  buf[rl] = '\0';
+  close(fd);
+  return buf;
+}
+```
+
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  ;; Drive a handshake and return the response head as a NUL-terminated string
+  ;; (a fresh malloc; the test holds onto it via assertions only).
+  (defn do-handshake [port : int offered : cstr] : cstr
+    ```c
+    return sub__handshake((int)port, (const char *)offered);
+    ```)
+
+  (defn contains? [hay : cstr needle : cstr] : bool
+    ```c
+    return hay && needle && strstr((const char *)hay, (const char *)needle) != NULL;
+    ```)
+
+  (defn free-cstr [s : cstr] #{Unsafe} : void
+    ```c
+    if (s) free((void *)s);
+    ```)
+
+  ;; Server side: a no-op handler that just closes after upgrade. We never
+  ;; reach the data path -- only the handshake matters for SUB-V0.
+  (defn ws-noop [ws : WsConn] : void
+    (ws-server-close ws))
+
+  (defn ws-sub-handler [conn : int req : int] : int
+    (let [c (:: conn Conn)
+          r (:: req Request)]
+      (if (ok? (ws-upgrade-with-subprotocols c r "msgpack.v1, json.v1" ws-noop))
+        (:: (resp-ok "text/plain" "") :int)
+        (:: (bad-request "no acceptable subprotocol") :int))))
+
+  (defn main [] : int
+    (let [srv (server-start-conn 18752 ws-sub-handler)]
+      (do
+        (unsafe (sleep-ms 100))
+
+        (describe "ws-server SUB-V0 -- Sec-WebSocket-Protocol negotiation"
+
+          (it "picks the first client-offered token that intersects accepted"
+            (let [resp (do-handshake 18752 "msgpack.v1, json.v1")
+                  ok   (and (contains? resp " 101 ")
+                            (contains? resp "Sec-WebSocket-Protocol: msgpack.v1"))]
+              (do (unsafe (free-cstr resp))
+                  (assert-true ok))))
+
+          (it "still picks when only the second client token matches"
+            (let [resp (do-handshake 18752 "binary.v9, json.v1")
+                  ok   (and (contains? resp " 101 ")
+                            (contains? resp "Sec-WebSocket-Protocol: json.v1"))]
+              (do (unsafe (free-cstr resp))
+                  (assert-true ok))))
+
+          (it "rejects when no offered subprotocol intersects accepted"
+            (let [resp (do-handshake 18752 "xml.v1, soap.v1")
+                  ;; The server's bad-request handler returns a 4xx, so the
+                  ;; head should NOT be 101.
+                  ok   (not (contains? resp " 101 "))]
+              (do (unsafe (free-cstr resp))
+                  (assert-true ok))))
+
+          (it "upgrades cleanly when the client offers no subprotocol"
+            (let [resp (do-handshake 18752 "")
+                  ;; 101 succeeded and no Sec-WebSocket-Protocol header echoed.
+                  ok   (and (contains? resp " 101 ")
+                            (not (contains? resp "Sec-WebSocket-Protocol:")))]
+              (do (unsafe (free-cstr resp))
+                  (assert-true ok)))))
+
+        (server-stop srv)
+        (run-all)))
+    0))
