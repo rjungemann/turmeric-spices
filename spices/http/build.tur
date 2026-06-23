@@ -19,16 +19,12 @@
                :options #{:BUILD_SHARED_LIBS    "OFF"
                          :ENABLE_TESTING       "OFF"
                          :ENABLE_PROGRAMS      "OFF"}}
-    ;; json's Encode/Decode instances emit inline-C that #include <yyjson.h>
-    ;; and link libyyjson. A workspace-sibling's native deps are not
-    ;; propagated, so http re-declares yyjson itself for the typed client
-    ;; codecs (response-decode / json-request) -- same pattern httpd uses.
-    "yyjson" #{:url "https://github.com/ibireme/yyjson"
-              :ref "0.10.0"
-              :targets ["yyjson"]
-              :options #{:BUILD_SHARED_LIBS "OFF"
-                        :YYJSON_BUILD_TESTS "OFF"
-                        :YYJSON_BUILD_FUZZER "OFF"}}
+    ;; yyjson (json's native lib) is no longer re-declared here: json's
+    ;; Encode/Decode inline-C still #includes <yyjson.h> for the typed client
+    ;; codecs (response-decode / json-request), but the compiler now collects
+    ;; :cmake-deps transitively across declared :spices, so yyjson comes in via
+    ;; the json dep above. mbedtls stays -- it is http's own TLS backend, not a
+    ;; transitive dep.
   }
   :exports #{
     "http/client"   ["http-get" "http-post" "http-put" "http-delete" "http-request"]

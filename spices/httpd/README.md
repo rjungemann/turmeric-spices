@@ -106,9 +106,11 @@ typeclasses, so a JSON endpoint needs no inline-C body parsing:
         (json-ok (make-struct EchoResp (.msg r) (str-len (.msg r))))))))
 ```
 
-These build on the json codec surface, so `httpd` re-declares `yyjson` in its
-`build.tur` `:cmake-deps` (a workspace-sibling's native deps are not
-propagated -- the same pattern `ecs-raylib` uses to re-declare `raylib`).
+These build on the json codec surface. `httpd` does not declare `yyjson` in its
+own `:cmake-deps`: the compiler collects `:cmake-deps` transitively across the
+declared `:spices` (and workspace siblings), so `yyjson` is inherited from the
+`json` dependency. (Likewise `mbedTLS` is inherited from the optional `tls`
+dependency.)
 
 ## TLS (HTTPS / `wss://`)
 

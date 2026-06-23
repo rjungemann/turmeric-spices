@@ -77,11 +77,13 @@ struct rather than a hand-walked document:
       (when (ok? u) (println (.name (ok-val u)))))))
 ```
 
-These build on json's codec surface, so `http` declares `yyjson` in its
-`build.tur` `:cmake-deps` (a workspace-sibling's native deps are not
-propagated -- the same pattern `httpd` and `ecs-raylib` use). yyjson, which
-was previously optional (only `response-json` used it, stubbing out when
-absent), is now a first-class dependency of the typed codec path.
+These build on json's codec surface. `http` no longer re-declares `yyjson` in
+its own `:cmake-deps`: the compiler collects `:cmake-deps` transitively across
+the declared `:spices` (and workspace siblings), so `yyjson` is inherited from
+the `json` dependency. (`http`'s `:cmake-deps` still pins `mbedTLS` directly --
+that is its own TLS backend, not a transitive dep.) yyjson, which was
+previously optional (only `response-json` used it, stubbing out when absent),
+is now a first-class part of the typed codec path.
 
 ## See also
 
