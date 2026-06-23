@@ -1,0 +1,230 @@
+;;; session/file-store -- filesystem-backed session store.
+;;;
+;;; Each session is one JSON file, <dir>/<id>.json, holding an envelope:
+;;;
+;;;   {"expires_at":1717200000,"data":{"user_id":"42","csrf":"abc"}}
+;;;
+;;; Writes are atomic: the file is written to <path>.tmp and renamed over
+;;; <path> (rename is atomic within a filesystem on POSIX). Loads check the
+;;; envelope's expires_at and evict (unlink) an expired file lazily. Sessions
+;;; survive process restarts; the store is single-machine only.
+;;;
+;;; The store reads and writes the session map through the shared __sessmap
+;;; layout owned by session/data, so no cross-module marshalling is needed.
+;;; Because the store only ever parses files it wrote itself, the JSON reader
+;;; is a small tolerant scanner rather than a general JSON parser.
+;;;
+;;; Session IDs are 64-char hex (see session/id) so they are always safe path
+;;; components; the store does not sanitise `id` beyond that expectation.
+;;;
+;;; Requires a POSIX filesystem (atomic rename over an existing file).
+;;;
+;;; Since: v0.1.0
+
+(defmodule session/file-store
+  (import session/store :refer [Store store-new])
+  (export file-store-new)
+
+;;; file-load -- read <dir>/<id>.json into a SessMap, or 0 (miss/expired).
+(defn file-load [state : int id : cstr] : int
+  ```c
+  #include <stdlib.h>
+  #include <stdio.h>
+  #include <string.h>
+  #include <time.h>
+  struct __sessmap { char **keys; char **vals; int count; int cap; };
+
+  const char *dir = (const char *)state;
+  const char *sid = (const char *)id;
+
+  size_t plen = strlen(dir) + strlen(sid) + 8;
+  char *path = malloc(plen);
+  snprintf(path, plen, "%s/%s.json", dir, sid);
+
+  FILE *f = fopen(path, "rb");
+  if (!f) { free(path); return 0; }
+  fseek(f, 0, SEEK_END);
+  long sz = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (sz < 0) { fclose(f); free(path); return 0; }
+  char *buf = malloc((size_t)sz + 1);
+  size_t got = fread(buf, 1, (size_t)sz, f);
+  fclose(f);
+  buf[got] = '\0';
+
+  /* expires_at */
+  long long expires = 0;
+  const char *ek = strstr(buf, "\"expires_at\"");
+  if (ek) {
+    const char *c = strchr(ek, ':');
+    if (c) expires = atoll(c + 1);
+  }
+  if (expires != 0 && (long long)time(NULL) >= expires) {
+    /* expired: evict and miss */
+    free(buf); remove(path); free(path);
+    return 0;
+  }
+  free(path);
+
+  /* data object: scan "key":"value" pairs between the data {...}. */
+  struct __sessmap *m = malloc(sizeof(*m));
+  m->cap = 4; m->count = 0;
+  m->keys = malloc(sizeof(char *) * (size_t)m->cap);
+  m->vals = malloc(sizeof(char *) * (size_t)m->cap);
+
+  const char *d = strstr(buf, "\"data\"");
+  const char *p = d ? strchr(d, '{') : NULL;
+  if (p) {
+    p++; /* past '{' */
+    while (*p) {
+      /* find opening quote of a key */
+      while (*p && *p != '"' && *p != '}') p++;
+      if (*p != '"') break; /* end of object or malformed */
+      p++;
+      /* read key (with unescape) */
+      char *kbuf = malloc((size_t)sz + 1); size_t ki = 0;
+      while (*p && *p != '"') {
+        if (*p == '\\' && p[1]) { p++; kbuf[ki++] = (*p=='n')?'\n':(*p=='t')?'\t':*p; }
+        else kbuf[ki++] = *p;
+        p++;
+      }
+      kbuf[ki] = '\0';
+      if (*p == '"') p++;
+      while (*p && *p != ':') p++;
+      if (*p == ':') p++;
+      while (*p && *p != '"') p++;
+      if (*p != '"') { free(kbuf); break; }
+      p++;
+      char *vbuf = malloc((size_t)sz + 1); size_t vi = 0;
+      while (*p && *p != '"') {
+        if (*p == '\\' && p[1]) { p++; vbuf[vi++] = (*p=='n')?'\n':(*p=='t')?'\t':*p; }
+        else vbuf[vi++] = *p;
+        p++;
+      }
+      vbuf[vi] = '\0';
+      if (*p == '"') p++;
+
+      if (m->count >= m->cap) {
+        m->cap *= 2;
+        m->keys = realloc(m->keys, sizeof(char *) * (size_t)m->cap);
+        m->vals = realloc(m->vals, sizeof(char *) * (size_t)m->cap);
+      }
+      m->keys[m->count] = realloc(kbuf, strlen(kbuf) + 1);
+      m->vals[m->count] = realloc(vbuf, strlen(vbuf) + 1);
+      m->count++;
+
+      while (*p && *p != ',' && *p != '}') p++;
+      if (*p == ',') { p++; continue; }
+      break;
+    }
+  }
+  free(buf);
+  return (int64_t)(intptr_t)m;
+  ```)
+
+;;; file-save -- serialise a SessMap to <dir>/<id>.json (atomic rename).
+(defn file-save [state : int id : cstr map : int ttl : int] : int
+  ```c
+  #include <stdlib.h>
+  #include <stdio.h>
+  #include <string.h>
+  #include <time.h>
+  struct __sessmap { char **keys; char **vals; int count; int cap; };
+
+  const char *dir = (const char *)state;
+  const char *sid = (const char *)id;
+  struct __sessmap *m = (struct __sessmap *)(intptr_t)map;
+  long long expires = (ttl > 0) ? ((long long)time(NULL) + ttl) : 0;
+
+  /* Build the JSON body into a growable buffer. */
+  size_t cap = 256, len = 0;
+  char *out = malloc(cap);
+  #define APP(s) do { const char *_s=(s); size_t _n=strlen(_s); \
+      while (len+_n+2 > cap) { cap*=2; out=realloc(out,cap); } \
+      memcpy(out+len,_s,_n); len+=_n; out[len]='\0'; } while(0)
+  #define APPC(ch) do { if (len+2>cap){cap*=2;out=realloc(out,cap);} out[len++]=(ch); out[len]='\0'; } while(0)
+
+  char num[32];
+  snprintf(num, sizeof(num), "%lld", expires);
+  APP("{\"expires_at\":"); APP(num); APP(",\"data\":{");
+  for (int i = 0; i < m->count; i++) {
+    if (i) APPC(',');
+    /* escape + emit key then value */
+    for (int pass = 0; pass < 2; pass++) {
+      const char *str = pass == 0 ? m->keys[i] : m->vals[i];
+      APPC('"');
+      for (const char *q = str; *q; q++) {
+        unsigned char ch = (unsigned char)*q;
+        if (ch == '"' || ch == '\\') { APPC('\\'); APPC((char)ch); }
+        else if (ch == '\n') { APPC('\\'); APPC('n'); }
+        else if (ch == '\t') { APPC('\\'); APPC('t'); }
+        else if (ch < 0x20) { /* drop other control chars */ }
+        else APPC((char)ch);
+      }
+      APPC('"');
+      if (pass == 0) APPC(':');
+    }
+  }
+  APP("}}");
+  #undef APP
+  #undef APPC
+
+  size_t plen = strlen(dir) + strlen(sid) + 16;
+  char *path = malloc(plen);
+  char *tmp  = malloc(plen);
+  snprintf(path, plen, "%s/%s.json", dir, sid);
+  snprintf(tmp,  plen, "%s/%s.tmp",  dir, sid);
+
+  FILE *f = fopen(tmp, "wb");
+  if (f) {
+    fwrite(out, 1, len, f);
+    fclose(f);
+    rename(tmp, path);
+  }
+  free(out); free(path); free(tmp);
+  return 0;
+  ```)
+
+;;; file-del -- unlink <dir>/<id>.json.
+(defn file-del [state : int id : cstr] : int
+  ```c
+  #include <stdlib.h>
+  #include <stdio.h>
+  #include <string.h>
+  const char *dir = (const char *)state;
+  const char *sid = (const char *)id;
+  size_t plen = strlen(dir) + strlen(sid) + 8;
+  char *path = malloc(plen);
+  snprintf(path, plen, "%s/%s.json", dir, sid);
+  remove(path);
+  free(path);
+  return 0;
+  ```)
+
+;;; __dir-state -- duplicate dir into an owned C string + ensure it exists.
+(defn __dir-state [dir : cstr] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <sys/stat.h>
+  const char *d = (const char *)dir;
+  mkdir(d, 0700); /* best-effort; ignore EEXIST */
+  return (int64_t)(intptr_t)strdup(d);
+  ```)
+
+;;; file-store-new -- create a filesystem-backed session Store.
+;;;
+;;; Parameters:
+;;;   dir -- directory for session files; created (mode 0700) if absent.
+;;;
+;;; Returns:
+;;;   Store -- a vtable bound to `dir`.
+;;;
+;;; Example:
+;;;   (let [store (file-store-new "/var/lib/myapp/sessions")] ...)
+;;;
+;;; Since: v0.1.0
+(defn file-store-new [dir : cstr] : Store
+  (store-new file-load file-save file-del (__dir-state dir)))
+
+) ;; end defmodule session/file-store

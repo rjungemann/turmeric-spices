@@ -1,0 +1,168 @@
+;;; session/state -- process-global store + cookie config for the middleware.
+;;;
+;;; tourist registers middleware as a bare C-ABI function pointer with no
+;;; captured environment, so the session middleware cannot close over the store
+;;; and config passed to session-mw. Instead session-mw writes them into this
+;;; process-global singleton before the server starts; the lazy loader
+;;; (session/ctx) and the response flush (session/mw) read them back on every
+;;; request. This mirrors tourist/app's own dispatch-state singleton.
+;;;
+;;; Set-once-before-serve, then read-only from worker threads: aligned int64
+;;; reads are race-free on the supported platforms, exactly as tourist/app
+;;; documents for its dispatch state.
+;;;
+;;; The cookie config is flattened into a heap C struct (string fields copied)
+;;; because the public SessionConfig is a by-value aggregate that cannot be
+;;; stored in an int64 slot.
+;;;
+;;; Since: v0.1.0
+
+(defmodule session/state
+  (import session/store :refer [Store])
+  (export session-set-store! session-get-store
+          session-set-config! session-config-ptr
+          cfg-cookie-name cfg-path cfg-domain cfg-max-age
+          cfg-secure? cfg-http-only? cfg-same-site cfg-rolling?)
+
+;; struct __sess_cfg {
+;;   char *cookie_name; char *path; char *domain; char *same_site;
+;;   int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling;
+;; };
+
+;;; __reg -- the two-slot singleton (store handle + config pointer).
+(defn __reg [op : int v : int] : int
+  ```c
+  static int64_t store = 0;
+  static int64_t cfg   = 0;
+  switch (op) {
+    case 0: return store;
+    case 1: store = v; return 0;
+    case 2: return cfg;
+    case 3: cfg = v; return 0;
+  }
+  return 0;
+  ```)
+
+;;; session-set-store! -- install the active store (called by session-mw).
+;;;
+;;; Since: v0.1.0
+(defn session-set-store! [s : Store] : void
+  (__discard (__reg 1 (:: s :int))))
+
+;;; session-get-store -- the active store.
+;;;
+;;; Since: v0.1.0
+(defn session-get-store [] : Store
+  (:: (__reg 0 0) :Store))
+
+(defn __discard [x : int] : void
+  ```c
+  (void)x;
+  ```)
+
+;;; __cfg-new -- allocate the heap config struct, copying string fields.
+(defn __cfg-new [cookie-name : cstr path : cstr domain : cstr same-site : cstr
+                 max-age : int secure? : int http-only? : int rolling? : int] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __sess_cfg {
+    char *cookie_name; char *path; char *domain; char *same_site;
+    int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling;
+  };
+  struct __sess_cfg *c = malloc(sizeof(*c));
+  c->cookie_name = strdup((const char *)cookie_name);
+  c->path        = strdup((const char *)path);
+  c->domain      = strdup((const char *)domain);
+  c->same_site   = strdup((const char *)same_site);
+  c->max_age     = max_age;
+  c->secure      = secure_qu;
+  c->http_only   = http_only_qu;
+  c->rolling     = rolling_qu;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;;; session-set-config! -- install the cookie/TTL config (called by session-mw).
+;;;
+;;; Takes the flattened SessionConfig fields; session/mw destructures the
+;;; public struct and forwards the primitives here.
+;;;
+;;; Since: v0.1.0
+(defn session-set-config! [cookie-name : cstr path : cstr domain : cstr
+                           same-site : cstr max-age : int secure? : int
+                           http-only? : int rolling? : int] : void
+  (__discard (__reg 3 (__cfg-new cookie-name path domain same-site
+                                 max-age secure? http-only? rolling?))))
+
+;;; session-config-ptr -- raw pointer to the active config struct (0 if unset).
+;;;
+;;; Since: v0.1.0
+(defn session-config-ptr [] : int (__reg 2 0))
+
+;; -- config field accessors (operate on session-config-ptr) ----------------
+
+;;; cfg-cookie-name -- configured cookie name.
+(defn cfg-cookie-name [p : int] : cstr
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return (const char *)((struct __sess_cfg *)(intptr_t)p)->cookie_name;
+  ```)
+
+;;; cfg-path -- configured cookie Path.
+(defn cfg-path [p : int] : cstr
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return (const char *)((struct __sess_cfg *)(intptr_t)p)->path;
+  ```)
+
+;;; cfg-domain -- configured cookie Domain ("" if none).
+(defn cfg-domain [p : int] : cstr
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return (const char *)((struct __sess_cfg *)(intptr_t)p)->domain;
+  ```)
+
+;;; cfg-same-site -- configured SameSite value.
+(defn cfg-same-site [p : int] : cstr
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return (const char *)((struct __sess_cfg *)(intptr_t)p)->same_site;
+  ```)
+
+;;; cfg-max-age -- configured Max-Age / TTL in seconds.
+(defn cfg-max-age [p : int] : int
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return ((struct __sess_cfg *)(intptr_t)p)->max_age;
+  ```)
+
+;;; cfg-secure? -- 1 if the Secure attribute is configured.
+(defn cfg-secure? [p : int] : int
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return ((struct __sess_cfg *)(intptr_t)p)->secure;
+  ```)
+
+;;; cfg-http-only? -- 1 if the HttpOnly attribute is configured.
+(defn cfg-http-only? [p : int] : int
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return ((struct __sess_cfg *)(intptr_t)p)->http_only;
+  ```)
+
+;;; cfg-rolling? -- 1 if rolling (sliding-window) sessions are configured.
+(defn cfg-rolling? [p : int] : int
+  ```c
+  struct __sess_cfg { char *cookie_name; char *path; char *domain; char *same_site;
+                      int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling; };
+  return ((struct __sess_cfg *)(intptr_t)p)->rolling;
+  ```)
+
+) ;; end defmodule session/state
