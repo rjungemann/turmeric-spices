@@ -2,7 +2,7 @@
 (defmodule glsl/tests/shaders
   (import glsl/shaders  :refer [glsl-input glsl-output glsl-uniform
                                  glsl-vertex-shader glsl-fragment-shader])
-  (import glsl/builtins :refer [dot cross normalize length mix clamp
+  (import glsl/builtins :refer [glsl-dot cross normalize glsl-length mix clamp
                                  vec2 vec3 vec4 swizzle texture
                                  sin cos sqrt pow abs
                                  dFdx dFdy glsl-call])
@@ -26,6 +26,11 @@
     #include <string.h>
     return strstr(haystack, needle) != NULL;
     ```)
+
+  ;; describe/it register a test only when executed at runtime, so the suites
+  ;; live inside `main` (like sized_test), not at top-level module scope.
+  (defn main [] : int
+   (do
 
   (describe "glsl/shaders -- declaration builders"
 
@@ -117,8 +122,8 @@
     (it "vec4 builds constructor"
       (assert-true (cstr= (vec4 "pos" "1.0" "0.0" "0.0") "vec4(pos, 1.0, 0.0, 0.0)")))
 
-    (it "dot builds dot product call"
-      (assert-true (cstr= (dot "normal" "lightDir") "dot(normal, lightDir)")))
+    (it "glsl-dot builds dot product call"
+      (assert-true (cstr= (glsl-dot "normal" "lightDir") "dot(normal, lightDir)")))
 
     (it "cross builds cross product call"
       (assert-true (cstr= (cross "a" "b") "cross(a, b)")))
@@ -126,8 +131,8 @@
     (it "normalize builds normalize call"
       (assert-true (cstr= (normalize "v") "normalize(v)")))
 
-    (it "length builds length call"
-      (assert-true (cstr= (length "v") "length(v)")))
+    (it "glsl-length builds length call"
+      (assert-true (cstr= (glsl-length "v") "length(v)")))
 
     (it "mix builds mix call"
       (assert-true (cstr= (mix "a" "b" "0.5") "mix(a, b, 0.5)")))
@@ -199,7 +204,5 @@
     (it "gamma-correct source uses invGamma"
       (assert-true (cstr-contains (gamma-correct) "invGamma"))))
 
-
-  (defn main [] : int
     (run-all)
-    0))
+    0)))

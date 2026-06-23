@@ -1,0 +1,182 @@
+;; glsl/ir.tur -- a Fix-encoded IR for glsl, with one generic catamorphism
+;; (`node-cata`) that every fold -- pretty-print, node count -- is expressed
+;; through.
+;;
+;; This is Target 2 of the U5 "Fix-encoded IR uplift" plan (turmeric
+;; `docs/upcoming/v1/u5-c-dsl-glsl-fix-encoded-ir-plan.md`), ported from the
+;; c-dsl prototype (`spices/c-dsl/src/c-dsl/ir.tur`) using its "would
+;; generalize" memo. The carryover is near-total: glsl, like c-dsl, is a flat
+;; collection of cstr string-template builders (`glsl-binop`, `glsl-if`, ...)
+;; with no recursive IR to collapse, so this is a new, self-contained
+;; recursion-schemes surface rather than a refactor.
+;;
+;; ## What carried over from c-dsl (the memo in action)
+;;
+;;   * One functor, not two. The plan leans toward separate expression and
+;;     statement functors with a `(GExpr)`-shaped slot embedding one in the
+;;     other; on turmeric v0.23.1 that concrete-type field loses its type
+;;     through a parameterized fold and is rejected once any algebra matches
+;;     it (full analysis in the c-dsl module header). So this uses one
+;;     `GNodeF a` mega-functor over a tagged union of expr/stmt nodes, with
+;;     every recursive child in a by-value `a` position -- the regex-proven
+;;     shape. Expr/stmt well-formedness lives in the smart-constructor API
+;;     (`ge-*` vs `gs-*`), not the carrier type.
+;;   * Byte-identity by delegation. Each algebra clause calls the *same* glsl
+;;     builder the flat surface uses, so `node->c` reproduces existing output
+;;     character-for-character. Plain `cstr` carrier; no precedence threading
+;;     (the builders already fully parenthesize binops).
+;;
+;; ## What is glsl-specific (the plan's glsl notes)
+;;
+;;   * A swizzle node (`GSwizzleF a :cstr`) -- the plan's "one node carrying
+;;     the swizzle string, not four constructors per set". The component set
+;;     (`.xyz` / `.rgba` / `.stpq`) is a property of the source vector, not the
+;;     AST, so it rides as an opaque cstr and is rendered by the existing
+;;     `swizzle` builder.
+;;   * A `for` node whose init/cond/step are raw cstr clauses (matching
+;;     `glsl-for`, which takes pre-built clause strings) with only the body in
+;;     a recursive position.
+;;   * No goto / switch-fallthrough nodes -- glsl's statement category is
+;;     slimmer than c-dsl's, as the plan notes.
+;;
+;; Sampler types and layout qualifiers belong in a *type* grammar (a separate
+;; `GlslTypeF` paralleling this functor), which the plan scopes to a later
+;; pass; they are out of scope here.
+
+(defmodule glsl/ir
+  (export GNodeF GNode
+          ;; expression smart constructors
+          ge-raw ge-var ge-lit ge-binop ge-swizzle
+          ;; statement smart constructors
+          gs-raw gs-expr gs-set gs-return gs-discard gs-inc gs-dec
+          gs-if gs-if-only gs-for gs-seq
+          ;; catamorphism driver + folds
+          node-cata node->c node-size)
+
+  (import glsl/codegen  :refer [glsl-cat2 glsl-cat3])
+  (import glsl/core     :refer [glsl-binop glsl-set! glsl-return glsl-discard
+                                 glsl-inc! glsl-dec! glsl-if glsl-if-only
+                                 glsl-for])
+  (import glsl/builtins :refer [swizzle])
+
+  ;; --- one layer of a glsl AST --------------------------------------------
+  ;; A single tagged union over expressions and statements. `:copy` so an
+  ;; immutable AST value can be folded more than once. Every recursive child
+  ;; sits in a by-value `a` position; leaf data rides as `:cstr`.
+  (defdata GNodeF :copy [a]
+    ;; --- expression nodes ---
+    (GRawF     :cstr)     ;; verbatim leaf: identifier, literal, pre-rendered call
+    (GBinF     :cstr a a) ;; (lhs op rhs)        -- op is the operator cstr
+    (GSwizzleF a :cstr)   ;; v.components        -- glsl-specific (components cstr)
+    ;; --- statement nodes ---
+    (GRawSF    :cstr)     ;; verbatim statement (escape hatch / leaf)
+    (GExprSF   a)         ;; <expr>;
+    (GSetSF    a a)       ;; <lhs> = <rhs>;
+    (GReturnSF a)         ;; return <expr>;
+    (GDiscardF)           ;; discard;
+    (GIncSF    a)         ;; <expr>++;
+    (GDecSF    a)         ;; <expr>--;
+    (GIfSF     a a a)     ;; if (c) { then } else { else }
+    (GIfOnlySF a a)       ;; if (c) { then }
+    (GForSF    :cstr :cstr :cstr a) ;; for (init; cond; step) { body }
+    (GSeqSF    a a))      ;; two statements joined by a newline
+
+  ;; --- by-value fixed point:  GNode ~= GNodeF GNode -----------------------
+  (defdata GNode :copy (Roll (GNodeF GNode)))
+
+  ;; --- Functor: map over the recursive positions --------------------------
+  (definstance Functor [GNodeF]
+    (fmap [c g]
+      (match c
+        (GRawF s)          (GRawF s)
+        (GBinF op a b)     (GBinF op (g a) (g b))
+        (GSwizzleF a comp) (GSwizzleF (g a) comp)
+        (GRawSF s)         (GRawSF s)
+        (GExprSF a)        (GExprSF (g a))
+        (GSetSF a b)       (GSetSF (g a) (g b))
+        (GReturnSF a)      (GReturnSF (g a))
+        (GDiscardF)        (GDiscardF)
+        (GIncSF a)         (GIncSF (g a))
+        (GDecSF a)         (GDecSF (g a))
+        (GIfSF a b d)      (GIfSF (g a) (g b) (g d))
+        (GIfOnlySF a b)    (GIfOnlySF (g a) (g b))
+        (GForSF i c s b)   (GForSF i c s (g b))
+        (GSeqSF a b)       (GSeqSF (g a) (g b)))))
+
+  ;; unwrap one layer, recovering the recursive element type.
+  (defn unroll-node [n : GNode] : (GNodeF GNode) (match n (Roll l) l))
+
+  ;; --- the generic catamorphism (the U5 ideal) ----------------------------
+  ;; cata alg = alg . fmap (cata alg) . unroll. Polymorphic in the carrier B,
+  ;; so a fold is just an F-algebra `(GNodeF B) -> B` handed to this driver.
+  (defn node-cata [B] [alg : (fn [(GNodeF B)] B) n : GNode] : B
+    (alg (:: (fmap (unroll-node n) (fn [c : GNode] : B (node-cata alg c))) (GNodeF B))))
+
+  ;; --- expression smart constructors --------------------------------------
+  (defn ge-raw     [s : cstr]                      : GNode (Roll (GRawF s)))
+  (defn ge-var     [name : cstr]                   : GNode (Roll (GRawF name)))
+  (defn ge-lit     [s : cstr]                      : GNode (Roll (GRawF s)))
+  (defn ge-binop   [op : cstr a : GNode b : GNode] : GNode (Roll (GBinF op a b)))
+  ;; components is a swizzle keyword like ":rgb" / ":xy"; the leading colon is
+  ;; stripped by the `swizzle` builder at fold time.
+  (defn ge-swizzle [a : GNode components : cstr]   : GNode (Roll (GSwizzleF a components)))
+
+  ;; --- statement smart constructors ---------------------------------------
+  (defn gs-raw     [s : cstr]                      : GNode (Roll (GRawSF s)))
+  (defn gs-expr    [e : GNode]                     : GNode (Roll (GExprSF e)))
+  (defn gs-set     [lhs : GNode rhs : GNode]       : GNode (Roll (GSetSF lhs rhs)))
+  (defn gs-return  [e : GNode]                     : GNode (Roll (GReturnSF e)))
+  (defn gs-discard []                              : GNode (Roll (GDiscardF)))
+  (defn gs-inc     [e : GNode]                     : GNode (Roll (GIncSF e)))
+  (defn gs-dec     [e : GNode]                     : GNode (Roll (GDecSF e)))
+  (defn gs-if      [c : GNode t : GNode e : GNode] : GNode (Roll (GIfSF c t e)))
+  (defn gs-if-only [c : GNode t : GNode]           : GNode (Roll (GIfOnlySF c t)))
+  ;; init/cond/step are raw GLSL clause strings, matching glsl-for.
+  (defn gs-for     [init : cstr cond : cstr step : cstr b : GNode] : GNode
+    (Roll (GForSF init cond step b)))
+  (defn gs-seq     [a : GNode b : GNode]           : GNode (Roll (GSeqSF a b)))
+
+  ;; --- pretty-print algebra -----------------------------------------------
+  ;; Each clause delegates to the same glsl builder the flat surface uses, so
+  ;; output is byte-identical to the pre-IR builders.
+  (defn node->c-alg [l : (GNodeF cstr)] : cstr
+    (match l
+      ;; expressions
+      (GRawF s)          s
+      (GBinF op a b)     (glsl-binop op a b)
+      (GSwizzleF a comp) (swizzle a comp)
+      ;; statements
+      (GRawSF s)         s
+      (GExprSF e)        (glsl-cat2 e ";")
+      (GSetSF a b)       (glsl-set! a b)
+      (GReturnSF e)      (glsl-return e)
+      (GDiscardF)        (glsl-discard)
+      (GIncSF e)         (glsl-inc! e)
+      (GDecSF e)         (glsl-dec! e)
+      (GIfSF c t e)      (glsl-if c t e)
+      (GIfOnlySF c t)    (glsl-if-only c t)
+      (GForSF i c s b)   (glsl-for i c s b)
+      (GSeqSF a b)       (glsl-cat3 a "\n" b)))
+  (defn node->c [n : GNode] : cstr (node-cata node->c-alg n))
+
+  ;; --- a second fold, to show the driver is generic over the carrier ------
+  ;; node count -- an int-carrier F-algebra over the same node-cata driver.
+  (defn node-size-alg [l : (GNodeF int)] : int
+    (match l
+      (GRawF s)          1
+      (GBinF op a b)     (+ 1 (+ a b))
+      (GSwizzleF a comp) (+ 1 a)
+      (GRawSF s)         1
+      (GExprSF e)        (+ 1 e)
+      (GSetSF a b)       (+ 1 (+ a b))
+      (GReturnSF e)      (+ 1 e)
+      (GDiscardF)        1
+      (GIncSF e)         (+ 1 e)
+      (GDecSF e)         (+ 1 e)
+      (GIfSF a b d)      (+ 1 (+ a (+ b d)))
+      (GIfOnlySF a b)    (+ 1 (+ a b))
+      (GForSF i c s b)   (+ 1 b)
+      (GSeqSF a b)       (+ a b)))
+  (defn node-size [n : GNode] : int (node-cata node-size-alg n))
+
+) ;; end defmodule glsl/ir
