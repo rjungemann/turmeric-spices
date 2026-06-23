@@ -141,7 +141,7 @@ void * httpd__tls__tls_listener_loop_trampoline(void *arg) {
 ;; the same CRLF-CRLF + Content-Length framing as httpd/server's plaintext
 ;; srv-recv-request. `tls` is a tls_conn_t* handle (from tls-wrap-fd). Returns a
 ;; handle to { char *bytes; int len; }, or 0 on read/handshake error.
-(defn htls-recv-request [tls : int] : int
+(defn htls-recv-request [^borrow tls : TlsConn] : int
   ```c
   httpd_tls_conn_t *cn = (httpd_tls_conn_t *)(intptr_t)tls;
   if (cn == 0) return 0;
@@ -228,7 +228,7 @@ void * httpd__tls__tls_listener_loop_trampoline(void *arg) {
 
 ;; Encrypt and send all `len` bytes from `buf` over the TLS stream. Returns 0 on
 ;; success, -1 on error. `tls` is a tls_conn_t* handle.
-(defn htls-write-all [tls : int buf : cstr len : int] : int
+(defn htls-write-all [^borrow tls : TlsConn buf : cstr len : int] : int
   ```c
   httpd_tls_conn_t *cn = (httpd_tls_conn_t *)(intptr_t)tls;
   if (cn == 0) return -1;
@@ -302,24 +302,29 @@ void * httpd__tls__tls_listener_loop_trampoline(void *arg) {
         (do (tls-free tc) (htls-close-fd fd))
         (if (not (= (tls-handshake tc) 0))
           (do (tls-shutdown tc) (tls-free tc) (htls-close-fd fd))
-          (let [raw (htls-recv-request (:: tc :int))]
+          (let [raw (htls-recv-request tc)]
             (if (= raw 0)
               (do (tls-shutdown tc) (tls-free tc) (htls-close-fd fd))
               (let [req (parse-request (htls-raw-bytes raw) (htls-raw-len raw))]
                 (if (= req 0)
                   (do (htls-raw-free raw)
                       (tls-shutdown tc) (tls-free tc) (htls-close-fd fd))
-                  (let [conn (conn-new-tls fd (:: tc :int))
+                  (let [conn (conn-new-tls fd tc)
                         resp (:: (htls-call-handler-conn handler (:: conn :int) req) :Response)]
                     (if (conn-upgraded? conn)
                       ;; The upgrade handler now owns the tls_conn_t and the fd;
-                      ;; do not shut down / free / close them here.
-                      (do (free-response resp)
-                          (free-request (:: req :Request))
-                          (htls-raw-free raw)
-                          (conn-free conn))
+                      ;; do not shut down / free / close them here.  Consume the
+                      ;; linear `tc` binding (discarded via `let _`) so the
+                      ;; linear-check sees a consume on both branches; the conn
+                      ;; struct retains the aliased pointer, which the upgrade
+                      ;; handler reads back via `conn-tls`.
+                      (let [_ (unsafe (:: tc :int))]
+                        (free-response resp)
+                        (free-request (:: req :Request))
+                        (htls-raw-free raw)
+                        (conn-free conn))
                       (let [wbuf (serialize-response resp)]
-                        (htls-write-all (:: tc :int) (wbuf-bytes wbuf) (wbuf-len wbuf))
+                        (htls-write-all tc (wbuf-bytes wbuf) (wbuf-len wbuf))
                         (free-wbuf wbuf)
                         (free-response resp)
                         (free-request (:: req :Request))

@@ -29,6 +29,7 @@
 
 (defmodule httpd/conn
   (import httpd/types :refer [Conn])
+  (import tls/conn    :refer [TlsConn])
   (export conn-new conn-new-tls conn-fd conn-tls
           conn-mark-upgraded! conn-upgraded? conn-free)
 
@@ -80,7 +81,7 @@ struct __httpd_conn { int fd; int upgraded; void *tls; };
 ;;;   :Conn -- a fresh handle (free with conn-free), or 0 on allocation failure.
 ;;;
 ;;; Since: WS4
-(defn conn-new-tls [fd : int tls : int] : Conn
+(defn conn-new-tls [fd : int ^borrow tls : TlsConn] : Conn
   ```c
   struct __httpd_conn *c = (struct __httpd_conn *)malloc(sizeof(*c));
   if (!c) return 0;
