@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `c-dsl/ir`: a Fix-encoded IR for c-dsl, with one generic catamorphism
+  (`node-cata`) that every fold is expressed through. The pretty-printer
+  (`node->c`) is a single `cstr`-carrier F-algebra over that driver -- no
+  per-node scaffolding -- and reproduces the existing flat builders'
+  (`c-binop`, `c-if`, ...) output byte-for-byte. A second `int`-carrier fold
+  (`node-size`) shares the same driver. Smart constructors `ce-*` (expressions)
+  and `cs-*` (statements) build `CNode` trees. This is the U5 "Fix-encoded IR
+  uplift" surface (turmeric plan
+  `docs/upcoming/v1/u5-c-dsl-glsl-fix-encoded-ir-plan.md`); the existing flat
+  builders are unchanged and remain the public surface.
+
 ## 0.2.0
 
 ### Breaking changes
