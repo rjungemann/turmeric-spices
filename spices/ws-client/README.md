@@ -19,6 +19,31 @@ It is a blocking, single-threaded client -- ideal for chat bots, market-data
 feeds, dev-tools bridges, and echo tests. See *Non-goals* below for what it
 deliberately leaves out.
 
+### TLS certificate verification
+
+`wss://` connections **verify the server certificate by default** (TLS-V0).
+There are three entry points, so the trust policy is fixed at the call site and
+an unsafe configuration cannot leak in by accident:
+
+```turmeric no-check
+;; Default: verify against the system CA store + check the hostname.
+(ws-connect "wss://api.example.com/socket")
+
+;; Verify against a private/self-signed CA bundle (e.g. an internal dev CA).
+(ws-connect-with-ca "wss://localhost:8443/socket" "/path/to/dev-ca.pem")
+
+;; Skip verification entirely. UNSAFE -- development against self-signed
+;; servers only; never ship this.
+(ws-connect-insecure "wss://localhost:8443/socket")
+```
+
+The system CA store is discovered at `/etc/ssl/certs/ca-certificates.crt`
+(Debian/Ubuntu/Alpine), falling back to `/etc/pki/tls/certs/ca-bundle.crt`
+(Fedora/RHEL). When no bundle is found, `ws-connect` fails with a message
+pointing at `ws-connect-with-ca`. Verification failures (untrusted, expired, or
+hostname-mismatched certs) return a null handle; read `ws-last-error` for the
+reason.
+
 ## Install
 
 ```turmeric no-check
@@ -55,7 +80,9 @@ for `ws://`. For `wss://`, run `tur fetch` once to build mbedTLS.
 
 | Function | Signature | Purpose |
 |---|---|---|
-| `ws-connect` | `(cstr) -> WsConn` | Open a `ws://`/`wss://` connection. Null handle on failure. |
+| `ws-connect` | `(cstr) -> WsConn` | Open a `ws://`/`wss://` connection; `wss://` verifies against the system CA store. Null handle on failure. |
+| `ws-connect-with-ca` | `(cstr cstr) -> WsConn` | Like `ws-connect`, verifying `wss://` against a custom CA bundle file. |
+| `ws-connect-insecure` | `(cstr) -> WsConn` | Like `ws-connect` but skips `wss://` certificate verification (**unsafe**, dev only). |
 | `ws-conn-null?` | `(WsConn) -> bool` | Test the failure sentinel from `ws-connect`. |
 | `ws-last-error` | `() -> cstr` | Reason for the most recent failure (static storage). |
 | `ws-send` | `(WsConn cstr) -> int` | Send a UTF-8 text frame (masked). |

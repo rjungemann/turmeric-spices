@@ -8,6 +8,18 @@
 ;; ws:// works; a wss:// connect returns a null handle whose error message
 ;; (see ws-last-error) tells the caller to rebuild with mbedTLS available.
 ;;
+;; TLS-V0 (verified TLS): wss:// verifies the server certificate by default.
+;; Three connect entry points fix the trust policy at the call site so an
+;; unsafe configuration cannot be reached by accident:
+;;
+;;   * ws-connect           -- verify against the system CA store (default).
+;;   * ws-connect-with-ca   -- verify against a caller-supplied CA bundle.
+;;   * ws-connect-insecure  -- skip verification (development opt-out, unsafe).
+;;
+;; All three share ws-connect-impl, which installs the trust anchors and
+;; MBEDTLS_SSL_VERIFY_REQUIRED (plus the existing mbedtls_ssl_set_hostname
+;; hostname check) unless the explicit insecure path was taken.
+;;
 ;; Design notes vs. docs/upcoming/v1/websocket-client-plan.md:
 ;;
 ;;   * The plan sketches `ws-recv` returning a `(defstruct WsFrame ...)` by
@@ -31,7 +43,8 @@
 
 (defmodule ws-client/client
   (export WsConn WsFrame
-          ws-connect ws-conn-null? ws-last-error
+          ws-connect ws-connect-with-ca ws-connect-insecure
+          ws-conn-null? ws-last-error
           ws-send ws-send-bytes ws-recv
           ws-close ws-free ws-set-timeout
           ws-accept-key
@@ -71,6 +84,7 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
+#include <mbedtls/x509_crt.h>
 #endif
 
 /* WsFrame kinds. The data opcodes match the wire opcodes; the synthetic
@@ -92,7 +106,31 @@ typedef struct {
   mbedtls_ctr_drbg_context ctr_drbg;
   mbedtls_ssl_context      ssl;
   mbedtls_ssl_config       conf;
+  mbedtls_x509_crt         cacert;   /* trust anchors for verified wss:// */
 } ws_tls_t;
+
+/* TLS-V0: load trust anchors for certificate verification. When `capath` is a
+   non-empty string it is parsed as a PEM/DER CA bundle file; otherwise the
+   platform's system CA store is tried in turn. Returns 0 on success (at least
+   one cert parsed), non-zero when no usable trust anchor was found -- the
+   caller then aborts the connect rather than silently downgrading to an
+   unverified session. */
+static int ws__load_ca(mbedtls_x509_crt *ca, const char *capath) {
+  if (capath && capath[0] != '\0') {
+    /* parse_file returns >0 when some certs in the bundle failed to parse but
+       at least one succeeded; only a negative return means total failure. */
+    return mbedtls_x509_crt_parse_file(ca, capath) < 0 ? -1 : 0;
+  }
+  static const char *sys_paths[] = {
+    "/etc/ssl/certs/ca-certificates.crt",   /* Debian/Ubuntu/Alpine */
+    "/etc/pki/tls/certs/ca-bundle.crt",      /* Fedora/RHEL/CentOS */
+    NULL
+  };
+  for (int i = 0; sys_paths[i]; i++) {
+    if (mbedtls_x509_crt_parse_file(ca, sys_paths[i]) >= 0) return 0;
+  }
+  return -1;
+}
 #endif
 
 typedef struct {
@@ -442,22 +480,21 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
 ;;; Since: WC1
 (defopaque WsFrame :int)
 
-;;; ws-connect -- open a WebSocket connection to uri.
+;;; ws-connect-impl -- internal core driving every connect entry point.
 ;;;
 ;;; Parameters:
-;;;   uri -- a ws:// or wss:// URI string (e.g. "ws://localhost:9000/feed").
+;;;   uri      -- a ws:// or wss:// URI string.
+;;;   insecure -- when non-zero, skip TLS certificate verification (the
+;;;               historic, unsafe behaviour; reachable only via
+;;;               ws-connect-insecure).
+;;;   capath   -- a CA bundle file path for verification, or "" to use the
+;;;               platform's system trust store.
 ;;;
-;;; Returns:
-;;;   A WsConn handle on success; a null handle on failure (test with
-;;;   ws-conn-null?, then read ws-last-error). wss:// requires the spice to
-;;;   have been built with mbedTLS available.
-;;;
-;;; Example:
-;;;   (let [c (ws-connect "ws://localhost:9000/feed")]
-;;;     (when (not (ws-conn-null? c)) (ws-send c "hi") (ws-free c)))
-;;;
-;;; Since: WC1
-(defn ws-connect [uri : cstr] : WsConn
+;;; ws:// connections ignore `insecure` / `capath` entirely. For wss:// the
+;;; default (insecure=0) installs the trust anchors and enables
+;;; MBEDTLS_SSL_VERIFY_REQUIRED so an invalid or untrusted certificate aborts
+;;; the connect. Private: the three public entry points below fix the policy.
+(defn ws-connect-impl [uri : cstr insecure : int capath : cstr] : WsConn
   ```c
   const char *raw = (const char *)uri;
   int use_tls;
@@ -499,6 +536,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
     mbedtls_ssl_config_init(&t->conf);
     mbedtls_entropy_init(&t->entropy);
     mbedtls_ctr_drbg_init(&t->ctr_drbg);
+    mbedtls_x509_crt_init(&t->cacert);
     const char *pers = "tur_ws_client";
     mbedtls_ctr_drbg_seed(&t->ctr_drbg, mbedtls_entropy_func, &t->entropy,
                           (const unsigned char *)pers, strlen(pers));
@@ -507,13 +545,34 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
                                   MBEDTLS_NET_PROTO_TCP)) != 0) {
       char e[128]; mbedtls_strerror(rc, e, sizeof(e));
       ws__set_err(e);
+      mbedtls_x509_crt_free(&t->cacert);
       mbedtls_net_free(&t->net); free(t); free(c);
       return 0;
     }
     mbedtls_ssl_config_defaults(&t->conf, MBEDTLS_SSL_IS_CLIENT,
                                 MBEDTLS_SSL_TRANSPORT_STREAM,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
-    mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_NONE);
+    if (insecure) {
+      /* Explicit, documented opt-out (ws-connect-insecure). */
+      mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_NONE);
+    } else {
+      /* TLS-V0: verify the server certificate against a trust store. Loading
+         the anchors before the handshake means an untrusted or expired cert
+         (or a hostname mismatch, via mbedtls_ssl_set_hostname below) aborts
+         mbedtls_ssl_handshake rather than yielding a silently-unsafe link. */
+      if (ws__load_ca(&t->cacert, (const char *)capath) != 0) {
+        ws__set_err((const char *)capath && ((const char *)capath)[0]
+                      ? "ws-connect: failed to load CA bundle from the given path"
+                      : "ws-connect: no system CA bundle found; pass a bundle to ws-connect-with-ca");
+        mbedtls_x509_crt_free(&t->cacert);
+        mbedtls_ssl_config_free(&t->conf);
+        mbedtls_ctr_drbg_free(&t->ctr_drbg); mbedtls_entropy_free(&t->entropy);
+        mbedtls_net_free(&t->net); free(t); free(c);
+        return 0;
+      }
+      mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+      mbedtls_ssl_conf_ca_chain(&t->conf, &t->cacert, NULL);
+    }
     mbedtls_ssl_conf_rng(&t->conf, mbedtls_ctr_drbg_random, &t->ctr_drbg);
     mbedtls_ssl_setup(&t->ssl, &t->conf);
     mbedtls_ssl_set_hostname(&t->ssl, host);
@@ -523,6 +582,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
         char e[128]; mbedtls_strerror(rc, e, sizeof(e));
         ws__set_err(e);
         mbedtls_ssl_free(&t->ssl); mbedtls_ssl_config_free(&t->conf);
+        mbedtls_x509_crt_free(&t->cacert);
         mbedtls_ctr_drbg_free(&t->ctr_drbg); mbedtls_entropy_free(&t->entropy);
         mbedtls_net_free(&t->net); free(t); free(c);
         return 0;
@@ -545,6 +605,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
     if (c->is_tls) {
       ws_tls_t *t = (ws_tls_t *)c->tls;
       mbedtls_ssl_free(&t->ssl); mbedtls_ssl_config_free(&t->conf);
+      mbedtls_x509_crt_free(&t->cacert);
       mbedtls_ctr_drbg_free(&t->ctr_drbg); mbedtls_entropy_free(&t->entropy);
       mbedtls_net_free(&t->net); free(t); free(c);
       return 0;
@@ -556,6 +617,73 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
   }
   return (int64_t)(intptr_t)c;
   ```)
+
+;;; ws-connect -- open a WebSocket connection to uri with verified TLS.
+;;;
+;;; For wss:// the server certificate is verified against the platform's
+;;; system CA store and the hostname is checked; an untrusted, expired, or
+;;; mismatched certificate makes the connect fail (TLS-V0). ws:// is
+;;; unaffected. To trust a private CA use ws-connect-with-ca; to disable
+;;; verification entirely (development only) use ws-connect-insecure.
+;;;
+;;; Parameters:
+;;;   uri -- a ws:// or wss:// URI string (e.g. "ws://localhost:9000/feed").
+;;;
+;;; Returns:
+;;;   A WsConn handle on success; a null handle on failure (test with
+;;;   ws-conn-null?, then read ws-last-error). wss:// requires the spice to
+;;;   have been built with mbedTLS available.
+;;;
+;;; Example:
+;;;   (let [c (ws-connect "wss://example.com/feed")]
+;;;     (when (not (ws-conn-null? c)) (ws-send c "hi") (ws-free c)))
+;;;
+;;; Since: WC1 (verified-by-default since TLS-V0)
+(defn ws-connect [uri : cstr] : WsConn
+  (ws-connect-impl uri 0 ""))
+
+;;; ws-connect-with-ca -- open a wss:// connection verifying against a custom
+;;; CA bundle.
+;;;
+;;; Use this for servers presenting a certificate signed by a private or
+;;; self-signed authority (e.g. an internal dev CA): pass the path to a
+;;; PEM/DER bundle of trusted roots. Verification and hostname checking stay
+;;; on -- only the trust anchors change. For ws:// the CA path is ignored.
+;;;
+;;; Parameters:
+;;;   uri     -- a ws:// or wss:// URI string.
+;;;   ca-path -- filesystem path to a CA certificate bundle.
+;;;
+;;; Returns:
+;;;   A WsConn handle on success; a null handle on failure (test with
+;;;   ws-conn-null?, then read ws-last-error -- e.g. the bundle failed to load).
+;;;
+;;; Example:
+;;;   (ws-connect-with-ca "wss://localhost:8443/socket" "/path/to/dev-ca.pem")
+;;;
+;;; Since: TLS-V0
+(defn ws-connect-with-ca [uri : cstr ca-path : cstr] : WsConn
+  (ws-connect-impl uri 0 ca-path))
+
+;;; ws-connect-insecure -- open a wss:// connection WITHOUT verifying the
+;;; server certificate.
+;;;
+;;; UNSAFE: this restores the pre-TLS-V0 behaviour and accepts any
+;;; certificate, so the connection is exposed to man-in-the-middle attackers.
+;;; It exists only as an explicit, greppable opt-out for local development
+;;; against self-signed servers; never use it in production. Prefer
+;;; ws-connect-with-ca with the dev CA bundle instead.
+;;;
+;;; Parameters:
+;;;   uri -- a ws:// or wss:// URI string.
+;;;
+;;; Returns:
+;;;   A WsConn handle on success; a null handle on failure (test with
+;;;   ws-conn-null?, then read ws-last-error).
+;;;
+;;; Since: TLS-V0
+(defn ws-connect-insecure [uri : cstr] : WsConn
+  (ws-connect-impl uri 1 ""))
 
 ;;; ws-conn-null? -- true if `conn` is the failure sentinel from ws-connect.
 ;;; Since: WC1
@@ -720,6 +848,7 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
   if (c->is_tls && c->tls) {
     ws_tls_t *t = (ws_tls_t *)c->tls;
     mbedtls_ssl_free(&t->ssl); mbedtls_ssl_config_free(&t->conf);
+    mbedtls_x509_crt_free(&t->cacert);
     mbedtls_ctr_drbg_free(&t->ctr_drbg); mbedtls_entropy_free(&t->entropy);
     mbedtls_net_free(&t->net);            /* closes fd for the TLS path */
     free(t);
