@@ -27,7 +27,7 @@
 ;;; Since: H7 (delegating to tur-thread-pool since TP1)
 
 (defmodule httpd/pool
-  (export pool-new pool-enqueue pool-stop)
+  (export pool-new pool-new-conn pool-enqueue pool-stop)
 
   (import thread-pool/pool :as tp)
 
@@ -38,8 +38,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-struct __httpd_pool { void *tp; void *handler; };
-struct __httpd_warg { int client_fd; void *handler; };
+struct __httpd_pool { void *tp; void *handler; int conn_mode; };
+struct __httpd_warg { int client_fd; void *handler; int conn_mode; };
 
 /* Non-static dispatch callback handed to thread-pool's pool-new.  Each
    dequeued work item is a __httpd_warg; forward it to httpd/server's
@@ -99,8 +99,21 @@ void httpd_pool_dispatch(void *item) {
   ```c
   struct __httpd_pool *p = (struct __httpd_pool *)calloc(1, sizeof(*p));
   if (!p) return NULL;
-  p->tp      = NULL;
-  p->handler = (void *)handler;
+  p->tp        = NULL;
+  p->handler   = (void *)handler;
+  p->conn_mode = 0;
+  return (void *)p;
+  ```)
+
+;; wrap-alloc-conn -- like wrap-alloc but for a two-arg (Conn, Request)
+;; handler; sets conn_mode=1 so srv-worker-loop calls the two-arg path.
+(defn wrap-alloc-conn [handler : (c-fn [int int] int)] : ptr<void>
+  ```c
+  struct __httpd_pool *p = (struct __httpd_pool *)calloc(1, sizeof(*p));
+  if (!p) return NULL;
+  p->tp        = NULL;
+  p->handler   = (void *)handler;
+  p->conn_mode = 1;
   return (void *)p;
   ```)
 
@@ -123,6 +136,7 @@ void httpd_pool_dispatch(void *item) {
   if (!wa) return NULL;
   wa->client_fd = (int)client_fd;
   wa->handler   = p->handler;
+  wa->conn_mode = p->conn_mode;
   return (void *)wa;
   ```)
 
@@ -158,6 +172,29 @@ void httpd_pool_dispatch(void *item) {
 ;;; Since: H7
 (defn pool-new [size : int handler : (c-fn [int] int)] : ptr<void>
   (let [p (wrap-alloc handler)]
+    (if (is-null? p)
+      p
+      (let [tpool (tp-new size (pool-dispatch-ptr))]
+        (if (is-null? tpool)
+          (do (wrap-free p) (null-ptr))
+          (do (wrap-set-tp p tpool) p))))))
+
+;;; pool-new-conn -- like pool-new but for a two-arg (Conn, Request) handler.
+;;;
+;;; Every dequeued connection is dispatched through the same srv-worker-loop
+;;; trampoline, which sees conn_mode=1 in the work item and constructs a Conn
+;;; for the handler. Used by server-start-conn / server-start-pool-conn.
+;;;
+;;; Parameters:
+;;;   size    -- desired number of worker threads (clamped to >= 1).
+;;;   handler -- (c-fn [int int] int) (Conn, Request) -> Response handler.
+;;;
+;;; Returns:
+;;;   :ptr<void> -- opaque pool handle, or NULL on failure.
+;;;
+;;; Since: WS0
+(defn pool-new-conn [size : int handler : (c-fn [int int] int)] : ptr<void>
+  (let [p (wrap-alloc-conn handler)]
     (if (is-null? p)
       p
       (let [tpool (tp-new size (pool-dispatch-ptr))]

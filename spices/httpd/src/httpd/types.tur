@@ -9,7 +9,7 @@
 ;;; Since: H8
 
 (defmodule httpd/types
-  (export Request Response Wbuf)
+  (export Request Response Wbuf Conn)
 
 ;;; Request -- opaque handle to a parsed HTTP request.
 ;;;
@@ -31,5 +31,21 @@
 ;;; Returned by `serialize-response`. Read raw bytes via `wbuf-bytes` /
 ;;; `wbuf-len`, release with `free-wbuf`.
 (defopaque Wbuf :int)
+
+;;; Conn -- opaque handle to a live client connection inside a handler.
+;;;
+;;; Passed (alongside the `Request`) to handlers registered via
+;;; `server-start-conn` / `serve-conn`. Wraps the worker's client fd plus an
+;;; "upgraded" flag and a reserved TLS slot. A protocol-upgrade helper (e.g.
+;;; ws-server's `ws-upgrade`) reads the fd via `conn-fd`, writes its own
+;;; switch-protocols response, and calls `conn-mark-upgraded!` so the httpd
+;;; worker loop does not flush a second response or close the socket.
+;;;
+;;; Underlying layout is `struct __httpd_conn { int fd; int upgraded;
+;;; void *tls; }`. The handle is owned by the framework; handlers must not
+;;; free it. Accessors live in httpd/conn.
+;;;
+;;; Since: WS0
+(defopaque Conn :int)
 
 ) ;; end defmodule httpd/types

@@ -1,0 +1,146 @@
+;; tests/httpd/conn_test.tur -- WS0 Conn / server-start-conn fixture.
+;;
+;; Covers the two-arg handler path added for protocol upgrades, but WITHOUT
+;; upgrading: a (Conn, Request) -> Response handler that just returns a normal
+;; Response must be served exactly like the single-arg path (the worker loop
+;; serializes, writes, and closes as usual when conn-upgraded? is false).
+;;
+;; A second handler exercises the upgrade branch at the httpd layer in
+;; isolation (no WebSocket framing): it reads the raw fd via conn-fd, writes a
+;; sentinel byte string directly, calls conn-mark-upgraded!, and returns a
+;; placeholder Response. The worker must then NEITHER write that placeholder
+;; NOR close before our bytes are flushed -- the client should read exactly the
+;; sentinel and nothing else. This is the "no double-write / no double-close"
+;; guard the websocket-server-plan WS0 phase asks for.
+;;
+;; Raw sockets only (no http/client, so no json/yyjson dependency); this is a
+;; flat tests/*.tur that runs under `tur test tests`.
+
+(defmodule httpd/tests/conn
+  (import httpd/types    :refer [Conn Request])
+  (import httpd/server   :refer [server-start-conn server-stop])
+  (import httpd/conn     :refer [conn-fd conn-mark-upgraded!])
+  (import httpd/request  :refer [req-path])
+  (import httpd/response :refer [resp-ok])
+  (import test/suite     :refer [describe it])
+  (import test/assert    :refer [assert-true])
+  (import test/runner    :refer [run-all])
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+/* GET `path`, return the whole raw response in a malloc'd string (caller
+   frees), or NULL on error. */
+static char *conn__get(int port, const char *path) {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return NULL;
+  struct sockaddr_in a; memset(&a, 0, sizeof(a));
+  a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port);
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) { close(fd); return NULL; }
+  char req[256];
+  int n = snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: x\r\n\r\n", path);
+  if (send(fd, req, (size_t)n, 0) < 0) { close(fd); return NULL; }
+  size_t cap = 1024, len = 0;
+  char *buf = (char *)malloc(cap);
+  for (;;) {
+    if (len + 1 >= cap) { cap *= 2; buf = (char *)realloc(buf, cap); }
+    long r = (long)recv(fd, buf + len, cap - len - 1, 0);
+    if (r <= 0) break;
+    len += (size_t)r;
+  }
+  buf[len] = '\0';
+  close(fd);
+  return buf;
+}
+```
+
+  (defn http-status [port : int path : cstr] : int
+    ```c
+    char *resp = conn__get((int)port, (const char *)path);
+    if (!resp) return -1;
+    int status = 0;
+    sscanf(resp, "HTTP/1.1 %d", &status);
+    free(resp);
+    return (int64_t)status;
+    ```)
+
+  (defn http-has-body? [port : int path : cstr needle : cstr] : bool
+    ```c
+    char *resp = conn__get((int)port, (const char *)path);
+    if (!resp) return 0;
+    int ok = strstr(resp, (const char *)needle) != NULL;
+    free(resp);
+    return ok;
+    ```)
+
+  ;; Raw read of the whole response equals exactly `expect`?
+  (defn raw-response-eq? [port : int path : cstr expect : cstr] : bool
+    ```c
+    char *resp = conn__get((int)port, (const char *)path);
+    if (!resp) return 0;
+    int ok = strcmp(resp, (const char *)expect) == 0;
+    free(resp);
+    return ok;
+    ```)
+
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  ;; Write raw bytes straight to a fd, then close it -- mimicking an upgrade
+  ;; handler that has taken ownership of the socket.
+  (defn write-raw-close [fd : int s : cstr] : void
+    ```c
+    const char *p = (const char *)s;
+    (void)!write((int)fd, p, strlen(p));
+    close((int)fd);
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; Handlers
+  ;; ---------------------------------------------------------------------
+
+  ;; Non-upgrading two-arg handler: behave like an ordinary handler.
+  (defn plain-conn-handler [conn : int req : int] : int
+    (:: (resp-ok "text/plain" (req-path (:: req Request))) :int))
+
+  ;; Upgrading handler: take over the fd, write a sentinel, mark upgraded.
+  ;; The placeholder Response must be discarded by the worker.
+  (defn upgrade-conn-handler [conn : int req : int] : int
+    (let [c (:: conn Conn)]
+      (do
+        (write-raw-close (conn-fd c) "SENTINEL-RAW-BYTES")
+        (conn-mark-upgraded! c)
+        (:: (resp-ok "text/plain" "THIS-SHOULD-NOT-BE-SENT") :int))))
+
+  (defn main [] : int
+    (let [srv1 (server-start-conn 18771 plain-conn-handler)]
+      (do
+        (unsafe (sleep-ms 100))
+        (describe "httpd server-start-conn -- non-upgrading two-arg handler"
+          (it "returns 200 for a normal Response"
+            (assert-true (= 200 (http-status 18771 "/hello"))))
+          (it "serializes the handler's body normally"
+            (assert-true (http-has-body? 18771 "/hello" "/hello"))))
+        (server-stop srv1))
+
+      (let [srv2 (server-start-conn 18772 upgrade-conn-handler)]
+        (do
+          (unsafe (sleep-ms 100))
+          (describe "httpd server-start-conn -- upgraded handler owns the fd"
+            (it "client reads exactly the raw bytes (no placeholder, no extra)"
+              (assert-true (raw-response-eq? 18772 "/up" "SENTINEL-RAW-BYTES"))))
+          (server-stop srv2)))
+
+      (run-all))
+    0))

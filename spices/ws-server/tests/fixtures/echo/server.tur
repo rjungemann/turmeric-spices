@@ -1,0 +1,63 @@
+;; tests/fixtures/echo/server.tur -- live echo server driven by run.sh.
+;;
+;; Starts an httpd server (server-start-conn) whose /ws route upgrades to
+;; WebSocket and echoes every data frame. Binds the port named by WS_SRV_PORT
+;; and blocks forever; run.sh starts it in the background and kills it when the
+;; client driver (client.tur, which uses the ws-client spice) is done.
+;;
+;; This runs as a SEPARATE process from the ws-client driver on purpose: both
+;; ws-server and ws-client define `WsConn` / `WsFrame` opaques, so they cannot
+;; be loaded into the same program.
+
+(defmodule ws-server/fixtures/echo-server
+  (import httpd/types    :refer [Conn Request])
+  (import httpd/server   :refer [server-start-conn])
+  (import httpd/request  :refer [req-path])
+  (import httpd/response :refer [resp-ok bad-request not-found])
+  (import ws-server/server
+    :refer [WsConn ws-upgrade ws-server-recv ws-server-send ws-server-close
+            ws-set-server-timeout
+            ws-frame-text ws-text? ws-binary? ws-closed? ws-error? ws-timeout?])
+
+  (defn port [] : int
+    ```c
+    #include <stdlib.h>
+    const char *p = getenv("WS_SRV_PORT");
+    return (int64_t)(p ? atoi(p) : 0);
+    ```)
+
+  (defn block-forever [] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    for (;;) sleep(3600);
+    ```)
+
+  (defn cstr-eq? [a : cstr b : cstr] : bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  (defn echo-loop [ws : WsConn] : void
+    (let [f (ws-server-recv ws)]
+      (if (or (ws-closed? f) (ws-error? f) (ws-timeout? f))
+        (ws-server-close ws)
+        (do
+          (when (or (ws-text? f) (ws-binary? f))
+            (ws-server-send ws (ws-frame-text f)))
+          (echo-loop ws)))))
+
+  (defn handler [conn : int req : int] : int
+    (let [c (:: conn Conn)
+          r (:: req Request)]
+      (if (cstr-eq? (req-path r) "/ws")
+        (if (= (ws-upgrade c r
+                 (fn [ws : WsConn] : void
+                   (do (ws-set-server-timeout ws 10000) (echo-loop ws)))) 1)
+          (:: (resp-ok "text/plain" "") :int)
+          (:: (bad-request "not a websocket request") :int))
+        (:: (not-found "") :int))))
+
+  (defn main [] : int
+    (let [srv (server-start-conn (port) handler)]
+      (do (unsafe (block-forever)) 0))))

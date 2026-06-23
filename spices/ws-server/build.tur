@@ -1,0 +1,27 @@
+(defpackage tur-ws-server
+  :name        "tur-ws-server"
+  :version     "0.1.0"
+  :description "RFC 6455 WebSocket server upgrade for tur-httpd"
+  :license     "MIT"
+  :spices #{
+    ;; Workspace-local test framework, used only by tests/.
+    "test"  #{:path "../test"}
+    ;; httpd provides the Conn handle + conn-fd / conn-mark-upgraded! that
+    ;; ws-upgrade plugs into, plus the Request accessors and server entry
+    ;; points the echo fixture drives.
+    "httpd" #{:path "../httpd"}
+    ;; ws-client is a dev/test dep -- the echo fixture uses it to drive the
+    ;; server. ws-server itself does not depend on it at runtime.
+    "ws-client" #{:path "../ws-client" :optional true}
+  }
+  :exports #{
+    "ws-server/server" ["WsConn" "WsFrame"
+                        "ws-upgrade"
+                        "ws-server-send" "ws-server-send-bytes"
+                        "ws-server-recv" "ws-server-close"
+                        "ws-set-server-timeout"
+                        "ws-frame-kind" "ws-frame-data" "ws-frame-len"
+                        "ws-frame-text"
+                        "ws-text?" "ws-binary?" "ws-ping?" "ws-pong?"
+                        "ws-closed?" "ws-timeout?" "ws-error?"]
+  })
