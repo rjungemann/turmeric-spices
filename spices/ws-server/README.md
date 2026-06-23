@@ -151,7 +151,8 @@ pattern as `ws-client`), so when mbedTLS is absent the spice still builds and
 ## Non-goals (v0)
 
 - No broadcast / pub-sub hub built in -- it is a few lines of user code
-  (`Mutex<vec<WsConn>>` + a loop); see the guide.
+  (`Mutex<vec<WsConn>>` + a loop); see `tests/broadcast_test.tur` for a
+  worked example.
 - No per-message deflate (RFC 7692), no subprotocol negotiation, no HTTP/2.
 - Blocking receive only (no reactor-integrated async).
 
@@ -165,6 +166,13 @@ pattern as `ws-client`), so when mbedTLS is absent the spice still builds and
   spices define `WsConn` / `WsFrame`.
 - `tests/fixtures/echo/run.sh` -- live round-trip with the **`ws-client`**
   spice as the driver, run as a separate process to avoid that type clash.
+- `tests/broadcast_test.tur` -- flat broadcast fan-out test (run by CI via
+  `tur test tests`): a `Mutex<vec<WsConn>>` hub built from plain user code on
+  top of the spice surface. Three inline raw-socket clients connect, one sends
+  a single text frame, and three reader threads each verify they receive it --
+  exercising the fan-out to every registered connection under the hub lock.
+- `tests/fixtures/broadcast/run.sh` -- the same broadcast scenario driven by
+  three concurrent **`ws-client`** connections in a separate process.
 
 ## See also
 
