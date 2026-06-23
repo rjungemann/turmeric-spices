@@ -110,6 +110,26 @@ These build on the json codec surface, so `httpd` re-declares `yyjson` in its
 `build.tur` `:cmake-deps` (a workspace-sibling's native deps are not
 propagated -- the same pattern `ecs-raylib` uses to re-declare `raylib`).
 
+## TLS (HTTPS / `wss://`)
+
+The optional `httpd/tls` module adds a TLS-terminating listener,
+`server-start-tls-conn`, the encrypted counterpart of `server-start-conn`. It
+reuses the [`tur-tls`](../tls) spice for the cert/key + handshake and hands each
+two-arg handler a `Conn` whose `conn-tls` slot carries the per-connection TLS
+state -- which is exactly what `ws-server`'s `ws-upgrade` consumes to serve
+`wss://`.
+
+```turmeric no-check
+(import httpd/tls :refer [server-start-tls-conn server-stop-tls])
+
+(let [srv (server-start-tls-conn 8443 "cert.pem" "key.pem" handler)]
+  ;; ... handler is (fn [conn : Conn req : Request] : Response) ...
+  (server-stop-tls srv))
+```
+
+TLS is opt-in: only programs that import `httpd/tls` link mbedTLS. The plaintext
+`server-start*` path stays dependency-free.
+
 ## Status
 
 Early in development. See

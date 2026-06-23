@@ -20,6 +20,15 @@
                    :url    "https://github.com/rjungemann/turmeric-spices"
                    :ref    "v0.1.0"
                    :subdir "spices/thread-pool"}
+    ;; tls backs the optional httpd/tls listener (HTTPS / wss upgrades). It is
+    ;; optional: consumers that never import httpd/tls build and link without
+    ;; mbedTLS. The mbedtls cmake-dep below is what httpd/tls's inline-C and
+    ;; tls/conn compile against; plaintext httpd never references it.
+    "tls" #{:path   "../tls"
+           :url    "https://github.com/rjungemann/turmeric-spices"
+           :ref    "v0.1.0"
+           :subdir "spices/tls"
+           :optional true}
   }
   :cmake-deps #{
     ;; json's Encode/Decode instances emit inline-C that #include <yyjson.h>
@@ -33,14 +42,25 @@
               :options #{:BUILD_SHARED_LIBS "OFF"
                         :YYJSON_BUILD_TESTS "OFF"
                         :YYJSON_BUILD_FUZZER "OFF"}}
+    ;; mbedTLS backs the optional httpd/tls listener (and the tls/conn module it
+    ;; reuses). Same pin as tur-tls / tur-ws-client. Built by `tur fetch` so the
+    ;; httpd/tls inline-C resolves <mbedtls/ssl.h>; only linked when a consumer
+    ;; actually imports httpd/tls (which pulls tls/autolink's link flags).
+    "mbedtls" #{:url     "https://github.com/Mbed-TLS/mbedtls"
+               :ref     "v3.6.2"
+               :targets ["mbedtls" "mbedx509" "mbedcrypto"]
+               :options #{:BUILD_SHARED_LIBS "OFF"
+                         :ENABLE_TESTING    "OFF"
+                         :ENABLE_PROGRAMS   "OFF"}}
   }
   :exports #{
     "httpd/types"    ["Request" "Response" "Wbuf" "Conn"]
-    "httpd/conn"     ["conn-new" "conn-fd" "conn-mark-upgraded!"
-                      "conn-upgraded?" "conn-free"]
+    "httpd/conn"     ["conn-new" "conn-new-tls" "conn-fd" "conn-tls"
+                      "conn-mark-upgraded!" "conn-upgraded?" "conn-free"]
     "httpd/server"   ["server-start" "server-start-pool" "server-start-spawn"
                       "server-start-conn" "server-start-pool-conn"
                       "server-stop"]
+    "httpd/tls"      ["server-start-tls-conn" "server-stop-tls"]
     "httpd/request"  ["req-method" "req-path" "req-header" "req-body" "req-query"]
     "httpd/response" ["response" "resp-ok" "not-found" "bad-request"
                       "with-header" "with-body" "with-status"

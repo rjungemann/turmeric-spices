@@ -127,11 +127,29 @@ typeclass idiom), `serve-conn` bridges a `ConnHandler` instance to
 (def srv (serve-conn 8080 WsEcho))         ;; top-level form
 ```
 
+## `wss://` (TLS)
+
+Secure WebSocket is supported (plan phase WS4) by terminating TLS in httpd
+itself. Start the listener with httpd's TLS entry point instead of
+`server-start-conn` and everything else is identical -- `ws-upgrade` reads the
+per-connection TLS state off the `Conn` and runs the handshake and every frame
+over the encrypted stream:
+
+```turmeric no-check
+(import httpd/tls :refer [server-start-tls-conn server-stop-tls])
+
+(let [srv (server-start-tls-conn 8443 "cert.pem" "key.pem" handler)]
+  ;; ... handler calls (ws-upgrade conn req ...) exactly as for ws:// ...
+  (server-stop-tls srv))
+```
+
+TLS is gated at compile time on the mbedTLS headers (the same `__has_include`
+pattern as `ws-client`), so when mbedTLS is absent the spice still builds and
+`ws://` works; only `wss://` requires it. httpd terminates TLS via the
+[`tur-tls`](../tls) spice; see its `tools/gen-cert.sh` for a throwaway dev cert.
+
 ## Non-goals (v0)
 
-- **`wss://` (TLS).** httpd has no TLS listener yet; terminate TLS at a reverse
-  proxy in front of httpd, or use `ws-client` for outbound `wss://`. The `Conn`
-  struct reserves a `tls` slot for when httpd grows TLS.
 - No broadcast / pub-sub hub built in -- it is a few lines of user code
   (`Mutex<vec<WsConn>>` + a loop); see the guide.
 - No per-message deflate (RFC 7692), no subprotocol negotiation, no HTTP/2.
