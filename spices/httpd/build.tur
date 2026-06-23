@@ -22,7 +22,7 @@
                    :subdir "spices/thread-pool"}
     ;; tls backs the optional httpd/tls listener (HTTPS / wss upgrades). It is
     ;; optional: consumers that never import httpd/tls build and link without
-    ;; mbedTLS. The mbedtls cmake-dep below is what httpd/tls's inline-C and
+    ;; mbedTLS. tls's mbedtls :cmake-deps is what httpd/tls's inline-C and
     ;; tls/conn compile against; plaintext httpd never references it.
     "tls" #{:path   "../tls"
            :url    "https://github.com/rjungemann/turmeric-spices"
@@ -30,29 +30,14 @@
            :subdir "spices/tls"
            :optional true}
   }
-  :cmake-deps #{
-    ;; json's Encode/Decode instances emit inline-C that #include <yyjson.h>
-    ;; and link libyyjson. Workspace-sibling imports don't propagate a
-    ;; sibling's cmake-deps (each consumer re-declares the native lib it
-    ;; ends up linking -- same pattern as ecs-raylib re-declaring raylib),
-    ;; so httpd declares yyjson itself to satisfy the json codec helpers.
-    "yyjson" #{:url "https://github.com/ibireme/yyjson"
-              :ref "0.10.0"
-              :targets ["yyjson"]
-              :options #{:BUILD_SHARED_LIBS "OFF"
-                        :YYJSON_BUILD_TESTS "OFF"
-                        :YYJSON_BUILD_FUZZER "OFF"}}
-    ;; mbedTLS backs the optional httpd/tls listener (and the tls/conn module it
-    ;; reuses). Same pin as tur-tls / tur-ws-client. Built by `tur fetch` so the
-    ;; httpd/tls inline-C resolves <mbedtls/ssl.h>; only linked when a consumer
-    ;; actually imports httpd/tls (which pulls tls/autolink's link flags).
-    "mbedtls" #{:url     "https://github.com/Mbed-TLS/mbedtls"
-               :ref     "v3.6.2"
-               :targets ["mbedtls" "mbedx509" "mbedcrypto"]
-               :options #{:BUILD_SHARED_LIBS "OFF"
-                         :ENABLE_TESTING    "OFF"
-                         :ENABLE_PROGRAMS   "OFF"}}
-  }
+  ;; httpd declares no :cmake-deps of its own. The native libs it needs are
+  ;; inherited transitively from its declared :spices: yyjson (the json codec
+  ;; helpers' inline-C #includes <yyjson.h>) comes from the json dep, and
+  ;; mbedTLS (httpd/tls's inline-C + the tls/conn module it reuses) comes from
+  ;; the optional tls dep -- so mbedTLS is only fetched/linked when a consumer
+  ;; actually pulls tls in. The compiler now walks declared :spices (and
+  ;; workspace siblings) when collecting :cmake-deps, so re-declaring them here
+  ;; (the old ecs-raylib/raylib pattern) is no longer needed.
   :exports #{
     "httpd/types"    ["Request" "Response" "Wbuf" "Conn"]
     "httpd/conn"     ["conn-new" "conn-new-tls" "conn-fd" "conn-tls"

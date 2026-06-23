@@ -25,19 +25,13 @@
     ;; server. ws-server itself does not depend on it at runtime.
     "ws-client" #{:path "../ws-client" :optional true}
   }
-  :cmake-deps #{
-    ;; mbedTLS powers the wss:// frame I/O: when httpd hands ws-upgrade a TLS
-    ;; Conn, the server sends/receives frames via mbedtls_ssl_write/read. The
-    ;; ws-server module gates every mbedTLS reference on __has_include, so this
-    ;; is optional -- without it ws:// still builds and works. Same pin as
-    ;; tur-tls / tur-ws-client.
-    "mbedtls" #{:url     "https://github.com/Mbed-TLS/mbedtls"
-               :ref     "v3.6.2"
-               :targets ["mbedtls" "mbedx509" "mbedcrypto"]
-               :options #{:BUILD_SHARED_LIBS "OFF"
-                         :ENABLE_TESTING    "OFF"
-                         :ENABLE_PROGRAMS   "OFF"}}
-  }
+  ;; mbedTLS powers the wss:// frame I/O: when httpd hands ws-upgrade a TLS
+  ;; Conn, the server sends/receives frames via mbedtls_ssl_write/read. The
+  ;; ws-server module gates every mbedTLS reference on __has_include, so it
+  ;; stays optional -- without it ws:// still builds and works. We no longer
+  ;; re-declare mbedTLS here: it is the tls spice's own :cmake-deps and the
+  ;; compiler now collects :cmake-deps transitively across the declared :spices
+  ;; (tls above) and workspace siblings.
   :exports #{
     "ws-server/server" ["WsConn" "WsFrame"
                         "ws-upgrade"

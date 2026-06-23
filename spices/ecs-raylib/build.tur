@@ -17,13 +17,10 @@
               :subdir "spices/test"
               :optional true}
   }
-  :cmake-deps #{
-    "raylib" #{:url     "https://github.com/raysan5/raylib"
-              :ref     "5.5"
-              :options #{:BUILD_SHARED_LIBS "OFF"
-                        :BUILD_EXAMPLES   "OFF"
-                        :BUILD_GAMES      "OFF"}}
-  }
+  ;; raylib's native lib (the raylib :cmake-deps) is inherited transitively
+  ;; from the raylib spice declared above -- the compiler now walks declared
+  ;; :spices (and workspace siblings) when collecting :cmake-deps, so we no
+  ;; longer re-declare it here.
   :exports #{
     "ecs-raylib/components" ["Pos2" "Vel2" "Rot" "Radius"
                              "pos2-make" "pos2-x" "pos2-y" "pos2-add!"

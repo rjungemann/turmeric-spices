@@ -59,11 +59,17 @@ jobs:
         env:
           TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
         run: |
-          if grep -q ':cmake-deps' build.tur; then
+          # A spice's native libs can be declared directly (:cmake-deps) or
+          # inherited transitively from its dependencies (the compiler now walks
+          # declared :spices -- and workspace siblings -- when collecting
+          # :cmake-deps). Several spices (httpd, plot, ecs-raylib, ws-server)
+          # carry no :cmake-deps of their own but still need their deps' native
+          # libs fetched, so trigger fetch whenever EITHER section is present.
+          if grep -qE ':cmake-deps|:spices' build.tur; then
             "$GITHUB_WORKSPACE/turmeric/build/tur" fetch --update || \
               echo "::warning::fetch reported errors (often optional :spices entries); proceeding anyway"
           else
-            echo "no :cmake-deps declared"
+            echo "no :cmake-deps or :spices declared"
           fi
 
       - name: Type-check spice sources
