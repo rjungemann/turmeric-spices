@@ -54,9 +54,9 @@
     (let [c (:: conn Conn)
           r (:: req Request)]
       (if (cstr-eq? (req-path r) "/ws")
-        (if (= (ws-upgrade c r
-                 (fn [ws : WsConn] : void
-                   (do (ws-set-server-timeout ws 10000) (echo-loop ws)))) 1)
+        (if (ok? (ws-upgrade c r
+                   (fn [ws : WsConn] : void
+                     (do (ws-set-server-timeout ws 10000) (echo-loop ws)))))
           (:: (resp-ok "text/plain" "") :int)
           (:: (bad-request "not a websocket request") :int))
         (:: (not-found "") :int))))

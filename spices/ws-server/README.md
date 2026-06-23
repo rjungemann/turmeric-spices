@@ -64,7 +64,7 @@ A mixed REST + WebSocket server: `/health` answers over HTTP, `/ws` echoes.
     (resp-ok "text/plain" "ok")
 
     (and (= (req-method req) "GET") (= (req-path req) "/ws"))
-    (if (= (ws-upgrade conn req echo-loop) 1)
+    (if (ok? (ws-upgrade conn req echo-loop))
       (resp-ok "text/plain" "")              ;; placeholder; worker skips it
       (bad-request "not a websocket request"))
 
@@ -81,18 +81,46 @@ A mixed REST + WebSocket server: `/health` answers over HTTP, `/ws` echoes.
 
 | Function | Signature | Purpose |
 |---|---|---|
-| `ws-upgrade` | `(Conn Request fn) -> int` | Validate + perform the upgrade, then run the handler. `1` on success, `0` if not a WebSocket request. |
+| `ws-upgrade` | `(Conn Request (fn [WsConn] void)) -> (Result bool UpgradeError)` | Validate + perform the upgrade, then run the handler. `ok(true)` on success, `err(UpgradeError)` otherwise. |
+| `ws-upgrade-or-zero` | `(Conn Request (fn [WsConn] void)) -> int` | **Deprecated** (UPG-V0): the old `1`/`0` shape, for one-release migration. |
 | `ws-server-send` | `(WsConn cstr) -> int` | Send a UTF-8 text frame (unmasked). |
 | `ws-server-send-bytes` | `(WsConn ptr<void> int) -> int` | Send a binary frame (unmasked). |
 | `ws-server-recv` | `(WsConn) -> WsFrame` | Receive the next (reassembled) message. |
 | `ws-server-close` | `(WsConn) -> void` | Closing handshake, then close the socket. |
 | `ws-set-server-timeout` | `(WsConn int) -> void` | Set receive timeout in ms (0 = block forever). |
 
-`ws-upgrade`'s third argument is a `(fn [ws : WsConn] : void)` -- it is called
-once the upgrade succeeds and owns the connection until it returns. When
-`ws-upgrade` returns `1` the `Response` your httpd handler returns afterward is
-ignored: the connection has been upgraded and the worker skips its normal
-serialize/write/close step.
+### Upgrade result (UPG-V0)
+
+`ws-upgrade` returns a `(Result bool UpgradeError)` rather than a bare int, so a
+rejected handshake tells you *why*. `ok?` is true once the upgrade succeeded and
+your handler ran -- in which case the `Response` your httpd handler returns
+afterward is ignored (the connection has been hijacked and the worker skips its
+normal serialize/write/close step). On failure, match `(err-val r)` on:
+
+| `UpgradeError` variant | Meaning |
+|---|---|
+| `(UpgradeMissingHeader name)` | required header `name` (`"Upgrade"` / `"Sec-WebSocket-Key"`) absent |
+| `(UpgradeBadVersion requested)` | `Sec-WebSocket-Version` present but not `13` |
+| `(UpgradeUnsupportedProto offered)` | the `Upgrade` header did not name `websocket` |
+| `(UpgradeWriteFailed)` | the `101` handshake could not be written |
+
+```turmeric no-check
+(let [r (ws-upgrade conn req my-handler)]
+  (if (ok? r)
+    (resp-ok "text/plain" "")
+    (match (err-val r)
+      (UpgradeMissingHeader name)    (bad-request name)
+      (UpgradeBadVersion requested)  (bad-request "use Sec-WebSocket-Version: 13")
+      (UpgradeUnsupportedProto kind) (bad-request "not a websocket upgrade")
+      (UpgradeWriteFailed)           (bad-request "handshake write failed"))))
+```
+
+The handler argument is a `(fn [WsConn] void)`, called once the upgrade
+succeeds. (The plan sketched a `^linear WsConn` handler that takes over closing
+the socket; because `WsConn` is the shared, non-linear `ws-core` type used by
+`ws-client` too, `ws-upgrade` instead retains ownership and frees the
+connection after the handler returns -- a safe default. Migrating callers that
+still want the old shape can use `ws-upgrade-or-zero` for one release.)
 
 ### Reading a frame
 
@@ -100,15 +128,18 @@ serialize/write/close step.
 reassembly buffer**, valid only until the next `ws-server-recv`. Copy the
 payload if you need it longer.
 
-| Accessor | Returns |
+`WsConn` / `WsFrame` and the accessors / predicates below come from
+[`ws-core`](../ws-core) (NAME-V0) -- import them from there.
+
+| Accessor (`ws-core/frame`) | Returns |
 |---|---|
 | `ws-frame-kind` | `int` -- `1` text, `2` binary, `8` close, `9` ping, `10` pong, `-1` timeout, `-2` error |
 | `ws-frame-data` | `ptr<void>` -- payload pointer |
 | `ws-frame-len` | `int` -- payload length |
 | `ws-frame-text` | `cstr` -- payload as a NUL-terminated string |
 
-Predicates: `ws-text?`, `ws-binary?`, `ws-ping?`, `ws-pong?`, `ws-closed?`,
-`ws-timeout?`, `ws-error?`.
+Predicates (`ws-core/frame`): `ws-text?`, `ws-binary?`, `ws-ping?`, `ws-pong?`,
+`ws-closed?`, `ws-timeout?`, `ws-error?`.
 
 `ws-server-recv` reassembles fragmented messages and answers Ping frames with a
 Pong automatically (then surfaces the Ping); Pong and Close frames are surfaced
@@ -124,7 +155,7 @@ typeclass idiom), `serve-conn` bridges a `ConnHandler` instance to
 (defopaque WsEcho :int)
 (definstance ConnHandler [WsEcho]
   (respond-conn [self conn req]
-    (if (= (ws-upgrade conn req echo-loop) 1)
+    (if (ok? (ws-upgrade conn req echo-loop))
       (resp-ok "text/plain" "")
       (bad-request "not a websocket request"))))
 

@@ -44,7 +44,9 @@
                                 ws-frame-kind ws-frame-data ws-frame-len ws-frame-text
                                 ws-text? ws-binary? ws-ping? ws-pong?
                                 ws-closed? ws-timeout? ws-error?])
-  (export ws-upgrade
+  (export ws-upgrade ws-upgrade-or-zero
+          UpgradeError UpgradeMissingHeader UpgradeBadVersion
+          UpgradeUnsupportedProto UpgradeWriteFailed
           ws-server-send ws-server-send-bytes
           ws-server-recv ws-server-close
           ws-set-server-timeout)
@@ -402,58 +404,127 @@ static int wss__rbuf_append(ws_srv_conn_t *c, const unsigned char *p, size_t n) 
   free(c);
   ```)
 
+;;; UpgradeError -- why a ws-upgrade attempt did not produce a WebSocket
+;;; session (UPG-V0).
+;;;
+;;; ws-upgrade used to return a bare :int (1 upgraded / 0 not), which told the
+;;; caller nothing about *why* a request was rejected. It now returns a
+;;; `(Result bool UpgradeError)`: ok(true) on a successful upgrade, or
+;;; err(UpgradeError) describing the failure so the handler can answer with a
+;;; precise HTTP error. Match on the variants:
+;;;
+;;;   * UpgradeMissingHeader   -- a required header was absent; carries its name
+;;;                               ("Upgrade" or "Sec-WebSocket-Key").
+;;;   * UpgradeBadVersion      -- Sec-WebSocket-Version was present but not 13;
+;;;                               carries the requested version.
+;;;   * UpgradeUnsupportedProto -- the Upgrade header did not name "websocket";
+;;;                               carries the offered value.
+;;;   * UpgradeWriteFailed     -- the 101 handshake (or connection setup) could
+;;;                               not be written to the socket.
+;;;
+;;; Since: UPG-V0
+(defdata UpgradeError
+  (UpgradeMissingHeader :cstr)
+  (UpgradeBadVersion :int)
+  (UpgradeUnsupportedProto :cstr)
+  (UpgradeWriteFailed))
+
+;; Parse Sec-WebSocket-Version. Returns the integer version, or 0 when the
+;; header is absent (we stay lenient about omission; only a present-but-wrong
+;; version is rejected, matching what our own clients send).
+(defn wss-atoi [s : cstr] : int
+  ```c
+  return s ? (int64_t)atoi((const char *)s) : 0;
+  ```)
+
+(defn wss-req-version [req : Request] : int
+  (let [v (req-header req "Sec-WebSocket-Version")]
+    (if (ok? v) (wss-atoi (ok-val v)) 0)))
+
 ;;; ws-upgrade -- upgrade an httpd connection to a WebSocket session.
 ;;;
 ;;; Must be called from an httpd handler registered via server-start-conn /
 ;;; serve-conn (so the handler receives a Conn alongside the Request). Validates
-;;; the Upgrade + Sec-WebSocket-Key headers, writes "101 Switching Protocols"
-;;; directly to the socket, marks the Conn upgraded (so the httpd worker loop
-;;; does not flush a second response or close the fd), wraps the fd into a
-;;; WsConn, and invokes `handler` with it. The WsConn is released after the
-;;; handler returns.
+;;; the Upgrade + Sec-WebSocket-Key (+ Sec-WebSocket-Version) headers, writes
+;;; "101 Switching Protocols" directly to the socket, marks the Conn upgraded
+;;; (so the httpd worker loop does not flush a second response or close the fd),
+;;; wraps the fd into a WsConn, and invokes `handler` with it. The WsConn is
+;;; released after the handler returns.
 ;;;
 ;;; Parameters:
 ;;;   conn    -- httpd Conn handle (from the two-arg handler signature).
-;;;   req     -- httpd Request (read for the Upgrade / Sec-WebSocket-Key headers).
-;;;   handler -- (fn [ws : WsConn] : void), called after the upgrade succeeds.
+;;;   req     -- httpd Request (read for the Upgrade / Sec-WebSocket-Key /
+;;;              Sec-WebSocket-Version headers).
+;;;   handler -- (fn [WsConn] void), called after the upgrade succeeds. (The
+;;;              plan sketches a `^linear WsConn` handler that owns the close;
+;;;              WsConn is shared with ws-client as a non-linear ws-core type,
+;;;              so ws-upgrade keeps ownership and frees after the handler
+;;;              returns -- a safe default. See UPG-V0 notes in the README.)
 ;;;
 ;;; Returns:
-;;;   1 if the upgrade succeeded and the handler ran; 0 if the request was not
-;;;   a valid WebSocket Upgrade (the caller should then return a normal HTTP
-;;;   error Response). When 1 is returned the Response the handler returns is
-;;;   ignored -- the connection has been upgraded.
+;;;   (Result bool UpgradeError) -- ok(true) once the upgrade succeeded and the
+;;;   handler ran (the Response the handler returns is then ignored, the
+;;;   connection having been hijacked); err(UpgradeError) when the request was
+;;;   not a valid WebSocket Upgrade, in which case the caller should return a
+;;;   normal HTTP error Response. For the old 1/0 shape see ws-upgrade-or-zero.
 ;;;
 ;;; Example:
 ;;;   (defn ws-echo [conn : Conn req : Request] : Response
-;;;     (if (= (ws-upgrade conn req
-;;;              (fn [ws : WsConn] : void
-;;;                (let [f (ws-server-recv ws)]
-;;;                  (ws-server-send ws (ws-frame-text f))
-;;;                  (ws-server-close ws)))) 1)
+;;;     (if (ok? (ws-upgrade conn req
+;;;                (fn [ws : WsConn] : void
+;;;                  (let [f (ws-server-recv ws)]
+;;;                    (ws-server-send ws (ws-frame-text f))
+;;;                    (ws-server-close ws)))))
 ;;;       (resp-ok "text/plain" "")            ;; placeholder; worker skips it
 ;;;       (bad-request "not a websocket request")))
 ;;;
-;;; Since: WS1
-(defn ws-upgrade [conn : Conn req : Request handler : fn] : int
-  (let [up (req-header req "Upgrade")
-        kr (req-header req "Sec-WebSocket-Key")]
-    (if (not (and (ok? up) (ok? kr) (wss-header-websocket? (ok-val up))))
-      0
-      ;; Wrap the connection first so the 101 handshake -- and every frame after
-      ;; it -- travels over the same transport (raw fd, or TLS when conn-tls is
-      ;; set by httpd's TLS listener).
-      (let [ws (wss-wrap (conn-fd conn) (conn-tls conn))]
-        (if (= (:: ws :int) 0)
-          0
-          (if (= (wss-write-handshake ws (ok-val kr)) 0)
-            ;; Handshake never landed: the httpd worker still owns the fd / TLS
-            ;; session, so release only our wrapper and let it clean up.
-            (do (wss-free-wrapper ws) 0)
-            (do
-              (conn-mark-upgraded! conn)
-              (handler ws)
-              (wss-free ws)
-              1)))))))
+;;; Since: WS1 (result-shaped since UPG-V0)
+(defn ws-upgrade [conn : Conn req : Request ^fat handler : (fn [WsConn] void)]
+  : (Result bool UpgradeError)
+  (let [up  (req-header req "Upgrade")
+        kr  (req-header req "Sec-WebSocket-Key")
+        ver (wss-req-version req)]
+    (cond
+      ;; No Upgrade header at all -- not a WebSocket request.
+      (not (ok? up))
+        (:: (err (UpgradeMissingHeader "Upgrade")) (Result bool UpgradeError))
+      ;; Upgrade present but does not name websocket.
+      (not (wss-header-websocket? (ok-val up)))
+        (:: (err (UpgradeUnsupportedProto (ok-val up))) (Result bool UpgradeError))
+      ;; Version present but not the RFC 6455 value (13).
+      (and (not= ver 0) (not= ver 13))
+        (:: (err (UpgradeBadVersion ver)) (Result bool UpgradeError))
+      ;; Missing the client key we must echo back.
+      (not (ok? kr))
+        (:: (err (UpgradeMissingHeader "Sec-WebSocket-Key")) (Result bool UpgradeError))
+      :else
+        ;; Wrap the connection first so the 101 handshake -- and every frame
+        ;; after it -- travels over the same transport (raw fd, or TLS when
+        ;; conn-tls is set by httpd's TLS listener).
+        (let [ws (wss-wrap (conn-fd conn) (conn-tls conn))]
+          (if (= (:: ws :int) 0)
+            (:: (err (UpgradeWriteFailed)) (Result bool UpgradeError))
+            (if (= (wss-write-handshake ws (ok-val kr)) 0)
+              ;; Handshake never landed: the httpd worker still owns the fd /
+              ;; TLS session, so release only our wrapper and let it clean up.
+              (do (wss-free-wrapper ws)
+                  (:: (err (UpgradeWriteFailed)) (Result bool UpgradeError)))
+              (do
+                (conn-mark-upgraded! conn)
+                (handler ws)
+                (wss-free ws)
+                (ok true))))))))
+
+;;; ws-upgrade-or-zero -- backward-compatible :int shape of ws-upgrade.
+;;;
+;;; DEPRECATED (UPG-V0): returns 1 if the upgrade succeeded and the handler ran,
+;;; 0 otherwise -- the pre-UPG-V0 contract -- by routing through the new
+;;; result-based ws-upgrade and discarding the error detail. Provided for one
+;;; release to ease migration; prefer ws-upgrade and match on UpgradeError.
+;;;
+;;; Since: UPG-V0
+(defn ws-upgrade-or-zero [conn : Conn req : Request ^fat handler : (fn [WsConn] void)] : int
+  (if (ok? (ws-upgrade conn req handler)) 1 0))
 
 ;;; ws-server-send -- send a UTF-8 text frame to the client (unmasked).
 ;;;

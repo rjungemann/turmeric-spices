@@ -385,10 +385,10 @@ static char *wssc__recv_text(wssc_t *c) {
   (defn ws-echo-handler [conn : int req : int] : int
     (let [c (:: conn Conn)
           r (:: req Request)]
-      (if (= (ws-upgrade c r
-               (fn [ws : WsConn] : void
-                 (do (ws-set-server-timeout ws 5000)
-                     (ws-echo-loop ws)))) 1)
+      (if (ok? (ws-upgrade c r
+                 (fn [ws : WsConn] : void
+                   (do (ws-set-server-timeout ws 5000)
+                       (ws-echo-loop ws)))))
         (:: (resp-ok "text/plain" "") :int)
         (:: (bad-request "not a websocket request") :int))))
 

@@ -277,13 +277,13 @@ static wsb_arg_t *wsb__arg_new(int fd, const char *msg) {
   (defn ws-broadcast-handler [conn : int req : int] : int
     (let [c (:: conn Conn)
           r (:: req Request)]
-      (if (= (ws-upgrade c r
-               (fn [ws : WsConn] : void
-                 (do (ws-set-server-timeout ws 5000)
-                     (hub-register! ws)
-                     (broadcast-loop ws)
-                     (hub-unregister! ws)
-                     (ws-server-close ws)))) 1)
+      (if (ok? (ws-upgrade c r
+                 (fn [ws : WsConn] : void
+                   (do (ws-set-server-timeout ws 5000)
+                       (hub-register! ws)
+                       (broadcast-loop ws)
+                       (hub-unregister! ws)
+                       (ws-server-close ws)))))
         (:: (resp-ok "text/plain" "") :int)
         (:: (bad-request "not a websocket request") :int))))
 
