@@ -6,6 +6,40 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **Cross-world systems (X1-X4) -- one `defsystem` body spanning two
+  typed worlds.** A new surface lets a single system read from one world
+  and write to another, with the scheduler proving non-conflict per
+  *(world, component)* pair:
+  - `ecs/xcap` -- per-`(World, Component)` capabilities `XWriteCap<W, T>`
+    / `XReadCap<W, T>` (two-param `:linear` / non-linear opaques). The
+    world is part of the type, so `XWriteCap<RenderWorld, Pos>` and
+    `XWriteCap<SimWorld, Pos>` are nominally distinct lock targets; a
+    `set-<Comp>!` minted for the wrong world rejects the cap (TUR-E0001).
+  - `ecs/xworld` -- `sized-defcomponent-accessors-xmono`, the world-keyed
+    `get`/`set!`/`has?` trio consuming the two-param caps.
+  - `ecs/xsystem` -- the `defxsystem` macro for the repeatable
+    `:reads-from W [...]` / `:writes-to W [...]` clauses, lowering to a
+    two-world-handle impl with per-`(world, comp)` cap bindings
+    (`<w>-<Comp>-{read,write}-cap`) auto-consumed at body end.
+  - `ecs/xstage` -- a two-worlds-per-system scheduler keyed on
+    `(world-id, component)`: distinct worlds never conflict (coalesce
+    into one parallel wave) while same-`(world, component)` writes
+    serialise. `xstage-has-cycle?` statically rejects a stage with a
+    mutual cross-world ordering dependency.
+  - `ecs/xmirror` -- `defmirror`, one-line sugar for the verbatim
+    one-component copy between two worlds, lowering to a `defxsystem`.
+  This builds on `ecs/hstage` (one-world-per-system cross-world
+  scheduling). Regressions: `tests/xworld-extract.tur`,
+  `tests/xworld-scheduling.tur`, `tests/xworld-cycle.tur`,
+  `tests/xworld-mirror.tur`, plus `tests/errors/xworld-wrong-world-cap.tur`
+  and `tests/errors/xworld-undeclared-write.tur`. Guide:
+  `docs/guides/ecs-cross-world-guide.md`. Two surface deviations from the
+  plan are forced by current `tur` name resolution and documented in the
+  guide: caps are named `XWriteCap`/`XReadCap` (a two-param `WriteCap`
+  would collide with `ecs/cap`'s one-param `WriteCap` in `tur`'s single
+  global opaque namespace), and world bindings take a bare type symbol
+  (`[sim SimWorld ...]`) rather than `:SimWorld`.
+
 - **Sized-scheduler direction 2 -- cross-world / heterogeneous
   scheduling (`ecs/hstage`).** A new `HStage` runs systems over
   *differently-typed* worlds in one stage, each system dispatched against

@@ -1,0 +1,86 @@
+;; X4 world-mirror sugar: `defmirror` produces the render-extract
+;; system in one line and must yield the same observable result as the
+;; hand-written `defxsystem` (see xworld-extract.tur). Copies Pos@sim ->
+;; RenderPos@ren for slots 0..count-1.
+;;
+;; Expected output:
+;;   11
+;;   22
+;;   ok
+
+(defmodule xworld_mirror_test
+  (export)
+
+(import ecs/sized-storage :refer [SizedDense])
+(import ecs/sized-world   :refer [sized-defworld-mono])
+(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
+(import ecs/xcap          :refer [XWriteCap XReadCap
+                                  make-write-cap make-read-cap use-cap!])
+(import ecs/xmirror       :refer [defmirror])
+(import ecs/xstage        :refer [BoundXSystem bind-xsystem
+                                  XStage xstage-new xstage-add!
+                                  xstage-run! xstage-free!])
+
+(defopaque Pos       :int)
+(defopaque RenderPos :int)
+
+(sized-defworld-mono SimWorld    (Static 8) [Pos])
+(sized-defcomponent-accessors-xmono SimWorld Pos)
+(sized-defworld-mono RenderWorld (Static 8) [RenderPos])
+(sized-defcomponent-accessors-xmono RenderWorld RenderPos)
+
+(def Pos-cid       0)
+(def RenderPos-cid 0)
+
+(defn box-SimWorld [w : SimWorld] : int ```c
+  #include <stdlib.h>
+  SimWorld *p = (SimWorld *)malloc(sizeof(SimWorld)); *p = w;
+  return (int64_t)(intptr_t)p; ```)
+(defn load-SimWorld [wp : int] : SimWorld ```c
+  return *(SimWorld *)(intptr_t)wp; ```)
+(defn free-SimWorld-box [wp : int] : nil ```c
+  #include <stdlib.h>
+  free((SimWorld *)(intptr_t)wp); ```)
+(defn box-RenderWorld [w : RenderWorld] : int ```c
+  #include <stdlib.h>
+  RenderWorld *p = (RenderWorld *)malloc(sizeof(RenderWorld)); *p = w;
+  return (int64_t)(intptr_t)p; ```)
+(defn load-RenderWorld [wp : int] : RenderWorld ```c
+  return *(RenderWorld *)(intptr_t)wp; ```)
+(defn free-RenderWorld-box [wp : int] : nil ```c
+  #include <stdlib.h>
+  free((RenderWorld *)(intptr_t)wp); ```)
+
+;; One-line render extract.
+(defmirror mirror-pos
+  [sim SimWorld  ren RenderWorld]
+  :count 2
+  :from  Pos
+  :to    RenderPos)
+
+(defn main [] : int
+  (let [sim : SimWorld   (make-SimWorld 8)
+        ren : RenderWorld (make-RenderWorld 8)
+        scap            (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
+    (set-Pos! scap sim 0 (:: 11 :Pos))
+    (let [scap2 (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
+      (set-Pos! scap2 sim 1 (:: 22 :Pos)))
+    (let [sp (box-SimWorld sim)
+          rp (box-RenderWorld ren)
+          xs (xstage-new)
+          ws (bind-xsystem mirror-pos 0 sp 1 rp)]
+      (xstage-add! xs ws)
+      (xstage-run! xs)
+      (let [ren2 : RenderWorld (load-RenderWorld rp)
+            rcap            (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
+            v0              (:: (get-RenderPos rcap ren2 0) :int)
+            v1              (:: (get-RenderPos rcap ren2 1) :int)]
+        (println v0)
+        (println v1)
+        (let [ok (and (= v0 11) (= v1 22))]
+          (xstage-free! xs)
+          (free-SimWorld-box sp)
+          (free-RenderWorld-box rp)
+          (if ok (do (println "ok") 0) (do (println "FAIL") 1)))))))
+
+) ;; end defmodule xworld_mirror_test

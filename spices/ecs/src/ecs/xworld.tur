@@ -1,0 +1,64 @@
+;;; ecs/xworld -- world-keyed component accessors for cross-world systems.
+;;;
+;;; `ecs/sized-world`'s `sized-defcomponent-accessors-mono` emits
+;;; `get-<Comp>` / `set-<Comp>!` / `has-<Comp>?` whose cap parameter is
+;;; the component-only `ecs/cap` `WriteCap<T>` / `ReadCap<T>`. For
+;;; cross-world systems the cap must also pin the *world*, so this
+;;; module emits the same accessor trio against `ecs/xcap`'s two-param
+;;; `XWriteCap<W, T>` / `XReadCap<W, T>`.
+;;;
+;;; A `set-<Comp>!` generated here for `RenderWorld` takes a
+;;; `XWriteCap<RenderWorld, Comp>` and a `RenderWorld` handle. Passing a
+;;; `XWriteCap<SimWorld, Comp>` -- the same component, wrong world -- is a
+;;; nominal type error, so a body that only declared `:writes-to sim`
+;;; cannot smuggle a write into `ren`. This is the (World, Component)
+;;; lock target made real at the type level.
+;;;
+;;; The accessors take the cap by `^borrow`: the linear single-use
+;;; obligation on a `XWriteCap` is discharged once, at system-body end,
+;;; by `defxsystem`'s auto-consume -- not per write call.
+;;;
+;;; Since: X1
+
+(defmodule ecs/xworld
+  (export sized-defcomponent-accessors-xmono)
+
+(import ecs/sized-storage :refer [SizedDense sized-dense-get
+                                   sized-dense-set! sized-dense-has?])
+(import ecs/xcap          :refer [XWriteCap XReadCap])
+
+;;; sized-defcomponent-accessors-xmono -- emit world-keyed get/set/has
+;;; accessors for `comp-name` on the monomorphic sized world
+;;; `world-name`. Identical in shape to
+;;; `sized-defcomponent-accessors-mono`, but the cap parameter is the
+;;; two-param `(XWriteCap world-name comp-name)` / `(XReadCap world-name
+;;; comp-name)` rather than the component-only form.
+;;;
+;;; Example:
+;;;   (sized-defworld-mono RenderWorld (Static 1024) [RenderPos])
+;;;   (sized-defcomponent-accessors-xmono RenderWorld RenderPos)
+;;;   ;; get-RenderPos : (XReadCap  RenderWorld RenderPos) RenderWorld int -> RenderPos
+;;;   ;; set-RenderPos!: (XWriteCap RenderWorld RenderPos) RenderWorld int RenderPos -> nil
+;;;
+;;; Since: X1
+(defmacro sized-defcomponent-accessors-xmono [world-name comp-name]
+  (let [getter (str->sym (str-append "get-"  (symbol-name comp-name)))
+        setter (str->sym (str-append "set-"  (symbol-name comp-name) "!"))
+        haser  (str->sym (str-append "has-"  (symbol-name comp-name) "?"))
+        field  (dot-sym comp-name)]
+    `(do
+       (defn ~getter [^borrow cap : (XReadCap ~world-name ~comp-name)
+                      ^borrow w   : ~world-name
+                      e           : int]
+                    : ~comp-name
+         (let [p : ~comp-name (sized-dense-get (~field w) e)] p))
+       (defn ~setter [^borrow cap : (XWriteCap ~world-name ~comp-name)
+                      ^borrow w   : ~world-name
+                      e           : int
+                      v           : ~comp-name]
+                    : nil
+         (sized-dense-set! (~field w) e v))
+       (defn ~haser [^borrow w : ~world-name e : int] : bool
+         (sized-dense-has? (~field w) e)))))
+
+) ;; end defmodule ecs/xworld
