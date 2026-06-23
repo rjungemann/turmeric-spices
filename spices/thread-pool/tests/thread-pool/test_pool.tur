@@ -1,0 +1,138 @@
+;; test_pool -- correctness tests for thread-pool/pool.
+;;
+;; Drives the public API (pool-new / pool-submit / pool-stop) against a
+;; callback that sums + counts integer work items into a mutex-guarded
+;; accumulator, then asserts the totals after the pool has drained and
+;; joined. main returns the number of failed assertions so a logic failure
+;; surfaces as a non-zero exit (a FAIL line under `tur test`).
+;;
+;; Cases:
+;;   1. Basic submit + drain          -- N items, expect sum == N, count == N.
+;;   2. Back-pressure                 -- submit far more items than ring cap
+;;                                       (forces not-full waits), expect all
+;;                                       delivered exactly once.
+;;   3. pool-new size = 0             -- clamped to 1 worker, still drains.
+;;   4. Stop before any submit        -- pool-stop is clean, count == 0.
+;;   5. Stop with queue non-empty     -- submit then immediately stop; workers
+;;                                       drain every item before join returns.
+
+(defmodule thread-pool/tests/test_pool
+  (import thread-pool/pool :as tp)
+
+;; Mutex-guarded accumulator shared across worker threads, plus the pool
+;; callback itself.  The callback is a NON-static (external) function: its
+;; address is taken in work-cb-ptr and handed to pool-new in a separate
+;; translation unit, where interprocedural constant-propagation may turn it
+;; into a direct symbol reference.  A `static` callback (e.g. an ordinary
+;; defn) would then fail to link, exactly as httpd/server exposes a
+;; non-static srv_worker_loop_trampoline for pool.tur to reference.
+```c
+#include <stdlib.h>
+#include <pthread.h>
+static pthread_mutex_t g_mu    = PTHREAD_MUTEX_INITIALIZER;
+static long            g_sum   = 0;
+static long            g_count = 0;
+
+/* The pool callback: add the item's int value to the accumulator, bump the
+   count, and free the item. */
+void tp_test_work_cb(void *item) {
+  int *v = (int *)item;
+  pthread_mutex_lock(&g_mu);
+  g_sum   += (long)(*v);
+  g_count += 1;
+  pthread_mutex_unlock(&g_mu);
+  free(v);
+}
+```
+
+;; acc-reset -- zero the accumulator before a test case.
+(defn acc-reset [] : void
+  ```c
+  pthread_mutex_lock(&g_mu);
+  g_sum = 0;
+  g_count = 0;
+  pthread_mutex_unlock(&g_mu);
+  ```)
+
+;; acc-sum -- snapshot the running sum of delivered item values.
+(defn acc-sum [] : int
+  ```c
+  long v;
+  pthread_mutex_lock(&g_mu);
+  v = g_sum;
+  pthread_mutex_unlock(&g_mu);
+  return (int)v;
+  ```)
+
+;; acc-count -- snapshot the number of items the callback has consumed.
+(defn acc-count [] : int
+  ```c
+  long v;
+  pthread_mutex_lock(&g_mu);
+  v = g_count;
+  pthread_mutex_unlock(&g_mu);
+  return (int)v;
+  ```)
+
+;; work-cb-ptr -- address of the tp_test_work_cb callback as a ptr<void>.
+(defn work-cb-ptr [] : ptr<void>
+  ```c
+  extern void tp_test_work_cb(void *);
+  return (void *)tp_test_work_cb;
+  ```)
+
+;; make-item -- allocate an int work item carrying value `v`.
+(defn make-item [v : int] : ptr<void>
+  ```c
+  int *p = (int *)malloc(sizeof(int));
+  if (p) *p = (int)v;
+  return (void *)p;
+  ```)
+
+;; submit-n -- submit `n` items each carrying value 1.
+(defn submit-n [pool : ptr<void> n : int] : void
+  (when (> n 0)
+    (do
+      (tp/pool-submit pool (make-item 1))
+      (submit-n pool (- n 1)))))
+
+(defn fail-if [cond : bool label : cstr] : int
+  (if cond
+    (do (println label) 1)
+    0))
+
+;; run-drain-case -- submit `n` items into a `workers`-thread pool, stop
+;; (which drains + joins), and return the failure count for sum/count.
+(defn run-drain-case [workers : int n : int label : cstr] : int
+  (do
+    (acc-reset)
+    (let [pool (tp/pool-new workers (work-cb-ptr))]
+      (do
+        (submit-n pool n)
+        (tp/pool-stop pool)
+        (+ (fail-if (not= (acc-sum) n) label)
+           (fail-if (not= (acc-count) n) label))))))
+
+(defn main [] : int
+  (let [;; 1. Basic submit + drain.
+        f1 (run-drain-case 4 10 "FAIL: basic submit+drain")
+        ;; 2. Back-pressure: 4 workers => cap 64; submit 500 to force waits.
+        f2 (run-drain-case 4 500 "FAIL: back-pressure drain")
+        ;; 3. size = 0 clamps to 1 worker.
+        f3 (run-drain-case 0 50 "FAIL: size=0 clamps to 1")
+        ;; 4. Stop before any submit.
+        f4 (do
+             (acc-reset)
+             (let [pool (tp/pool-new 2 (work-cb-ptr))]
+               (do
+                 (tp/pool-stop pool)
+                 (fail-if (not= (acc-count) 0) "FAIL: stop before submit"))))
+        ;; 5. Stop with queue non-empty (submit then immediately stop).
+        f5 (run-drain-case 2 200 "FAIL: stop with queue non-empty")
+        f  (+ f1 (+ f2 (+ f3 (+ f4 f5))))]
+    (if (= f 0)
+      (println "PASS test_pool")
+      (println "test_pool: failures above"))
+    f))
+
+) ;; end defmodule thread-pool/tests/test_pool

@@ -1,0 +1,266 @@
+;;; thread-pool/pool -- bounded POSIX worker-thread pool over ptr<void> items.
+;;;
+;;; A pool is a Mutex<RingBuffer<ptr<void>>> guarded by two condition
+;;; variables (not-empty / not-full).  Workers block on not-empty while
+;;; idle; the producer thread enqueues items and blocks on not-full when
+;;; the queue is saturated, giving cooperative back-pressure rather than
+;;; dropping work.
+;;;
+;;; Each dequeued item is handed to a single user-supplied callback,
+;;; `void (*)(void *item)`, passed as a raw `ptr<void>` to pool-new.  The
+;;; callback owns the item's lifetime: allocate the item before pool-submit,
+;;; free it inside the callback.
+;;;
+;;; This is the generic core extracted from httpd/pool; httpd/pool is now a
+;;; thin adapter that packs a connection fd + handler into a work item and
+;;; supplies an HTTP-specific callback.
+;;;
+;;; Public API:
+;;;
+;;;   pool-new    -- spawn the workers and allocate the ring buffer.
+;;;   pool-submit -- hand a ptr<void> work item to the pool.
+;;;   pool-stop   -- drain queued items, join every worker, free the pool.
+;;;
+;;; Internal struct layout (duplicated verbatim in every inline-C block):
+;;;
+;;;   struct __thread_pool {
+;;;     pthread_mutex_t mu;
+;;;     pthread_cond_t  not_empty;
+;;;     pthread_cond_t  not_full;
+;;;     void          **items;
+;;;     int             cap;
+;;;     int             head;
+;;;     int             tail;
+;;;     int             count;
+;;;     int             stop;
+;;;     void           *callback;
+;;;     pthread_t      *workers;
+;;;     int             nworkers;
+;;;   };
+;;;
+;;; Since: TP1
+
+(defmodule thread-pool/pool
+  (export pool-new pool-submit pool-stop)
+
+;; file-scope-c-block: pthread.h / unistd.h contain static inline function
+;; definitions that are not legal inside a function body.  Hoist the POSIX
+;; headers and the shared struct layout here so every defn below can
+;; reference them without re-including at block scope.
+```c
+#include <stdlib.h>
+#include <pthread.h>
+
+struct __thread_pool {
+  pthread_mutex_t mu;
+  pthread_cond_t  not_empty;
+  pthread_cond_t  not_full;
+  void          **items;   /* ring buffer of ptr<void> work items */
+  int             cap;
+  int             head;
+  int             tail;
+  int             count;
+  int             stop;
+  void           *callback;  /* void (*)(void *item) -- called per item */
+  pthread_t      *workers;
+  int             nworkers;
+};
+```
+
+;; =============================================================================
+;; Worker entry -- one long-lived thread per pool slot.
+;; =============================================================================
+
+;;; pool-worker-loop -- (internal) thread entry; dequeues and dispatches items.
+;;;
+;;; Blocks on not-empty while the queue is empty.  On each dequeued item it
+;;; releases the lock and invokes the pool's callback with the item.  Exits
+;;; only once the pool is stopped AND the queue has been fully drained, so a
+;;; stop with work still queued processes every remaining item before the
+;;; worker returns.
+(defn pool-worker-loop [arg : ptr<void>] : ptr<void>
+  ```c
+  struct __thread_pool *p = (struct __thread_pool *)arg;
+  for (;;) {
+    pthread_mutex_lock(&p->mu);
+    while (p->count == 0 && !p->stop) {
+      pthread_cond_wait(&p->not_empty, &p->mu);
+    }
+    if (p->count == 0 && p->stop) {
+      pthread_mutex_unlock(&p->mu);
+      break;
+    }
+    void *item = p->items[p->head];
+    p->head = (p->head + 1) % p->cap;
+    p->count--;
+    pthread_cond_signal(&p->not_full);
+    void *cb = p->callback;
+    pthread_mutex_unlock(&p->mu);
+
+    /* The callback owns `item`: it consumes/frees it. */
+    if (cb) {
+      ((void (*)(void *))cb)(item);
+    }
+  }
+  return NULL;
+  ```)
+
+;; =============================================================================
+;; Public API
+;; =============================================================================
+
+;;; pool-new -- allocate a bounded worker pool and spawn `size` threads.
+;;;
+;;; Parameters:
+;;;   size     -- number of worker threads (clamped to >= 1).
+;;;   callback -- :ptr<void> (void (*)(void *item)) invoked on each dequeued
+;;;               item.  Must remain valid for the full lifetime of the pool.
+;;;
+;;; Returns:
+;;;   :ptr<void> -- opaque pool handle, or NULL if allocation or every
+;;;                 thread-spawn failed before at least one worker was running.
+;;;
+;;; Example:
+;;;   (def pool (pool-new 8 my-callback))
+;;;
+;;; Since: TP1
+(defn pool-new [size : int callback : ptr<void>] : ptr<void>
+  ```c
+  extern void *thread_hypool__pool__pool_hyworker_hyloop(void *);
+
+  int n = (int)size;
+  if (n < 1) n = 1;
+  int cap = (n * 4 > 64) ? (n * 4) : 64;
+
+  struct __thread_pool *p = (struct __thread_pool *)calloc(1, sizeof(*p));
+  if (!p) return NULL;
+  if (pthread_mutex_init(&p->mu, NULL) != 0) { free(p); return NULL; }
+  if (pthread_cond_init(&p->not_empty, NULL) != 0) {
+    pthread_mutex_destroy(&p->mu); free(p); return NULL;
+  }
+  if (pthread_cond_init(&p->not_full, NULL) != 0) {
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu); free(p); return NULL;
+  }
+  p->items = (void **)malloc(sizeof(void *) * (size_t)cap);
+  if (!p->items) {
+    pthread_cond_destroy(&p->not_full);
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu);
+    free(p);
+    return NULL;
+  }
+  p->cap      = cap;
+  p->callback = callback;
+  p->workers  = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)n);
+  if (!p->workers) {
+    free(p->items);
+    pthread_cond_destroy(&p->not_full);
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu);
+    free(p);
+    return NULL;
+  }
+  int spawned = 0;
+  for (int i = 0; i < n; i++) {
+    if (pthread_create(&p->workers[i], NULL,
+                       thread_hypool__pool__pool_hyworker_hyloop, p) != 0) {
+      break;
+    }
+    spawned++;
+  }
+  if (spawned == 0) {
+    free(p->workers);
+    free(p->items);
+    pthread_cond_destroy(&p->not_full);
+    pthread_cond_destroy(&p->not_empty);
+    pthread_mutex_destroy(&p->mu);
+    free(p);
+    return NULL;
+  }
+  p->nworkers = spawned;
+  return (void *)p;
+  ```)
+
+;;; pool-submit -- enqueue a work item; blocks when the ring buffer is full.
+;;;
+;;; Applies back-pressure to the caller (typically a single producer thread)
+;;; by blocking on not-full while the queue is saturated.  Ownership of the
+;;; item transfers to the pool: it will be passed to the callback, which is
+;;; responsible for freeing it.  If the pool is NULL or already stopping the
+;;; item is discarded without invoking the callback -- the caller must avoid
+;;; submitting after pool-stop has begun (join the producer first).
+;;;
+;;; Parameters:
+;;;   pool -- :ptr<void> pool handle (NULL discards the item).
+;;;   item -- :ptr<void> work item; ownership transferred to the pool.
+;;;
+;;; Returns: :void
+;;;
+;;; Example:
+;;;   (pool-submit pool (make-work-item data))
+;;;
+;;; Since: TP1
+(defn pool-submit [pool : ptr<void> item : ptr<void>] : void
+  ```c
+  if (!pool) return;
+  struct __thread_pool *p = (struct __thread_pool *)pool;
+  pthread_mutex_lock(&p->mu);
+  while (p->count == p->cap && !p->stop) {
+    pthread_cond_wait(&p->not_full, &p->mu);
+  }
+  if (p->stop) {
+    pthread_mutex_unlock(&p->mu);
+    return;
+  }
+  p->items[p->tail] = item;
+  p->tail = (p->tail + 1) % p->cap;
+  p->count++;
+  pthread_cond_signal(&p->not_empty);
+  pthread_mutex_unlock(&p->mu);
+  ```)
+
+;;; pool-stop -- signal shutdown, let workers drain queued items, then join
+;;; every worker and free the pool.
+;;;
+;;; After this returns all worker threads have exited and the pool's resources
+;;; have been freed.  Because workers drain the queue before exiting, every
+;;; item that was successfully submitted before pool-stop is passed to the
+;;; callback.  Calling pool-submit on the same handle after pool-stop is a
+;;; use-after-free; callers must join their producer thread first.
+;;;
+;;; Parameters:
+;;;   pool -- :ptr<void> pool handle (NULL is a no-op).
+;;;
+;;; Returns: :void
+;;;
+;;; Example:
+;;;   (pool-stop pool)
+;;;
+;;; Since: TP1
+(defn pool-stop [pool : ptr<void>] : void
+  ```c
+  if (!pool) return;
+  struct __thread_pool *p = (struct __thread_pool *)pool;
+  pthread_mutex_lock(&p->mu);
+  p->stop = 1;
+  pthread_cond_broadcast(&p->not_empty);
+  pthread_cond_broadcast(&p->not_full);
+  pthread_mutex_unlock(&p->mu);
+  for (int i = 0; i < p->nworkers; i++) {
+    pthread_join(p->workers[i], NULL);
+  }
+  /* Workers drain every queued item before exiting (see pool-worker-loop),
+     so p->count is 0 here in the normal case.  Any residual items (only
+     reachable if no worker ever ran) are dropped -- the generic pool cannot
+     know how to free an opaque item.  Spawn failure is reported by pool-new
+     returning NULL, so a live handle always has >= 1 draining worker. */
+  free(p->workers);
+  free(p->items);
+  pthread_cond_destroy(&p->not_full);
+  pthread_cond_destroy(&p->not_empty);
+  pthread_mutex_destroy(&p->mu);
+  free(p);
+  ```)
+
+) ;; end defmodule thread-pool/pool
