@@ -1,0 +1,127 @@
+;;; httpd/conn -- live-connection handle for upgrade-aware handlers.
+;;;
+;;; The low-level worker loop normally owns the client socket for the whole
+;;; request/response lifetime: it reads the request, calls the handler, writes
+;;; the Response, and closes the fd. Protocol upgrades (WebSocket, SSE, ...)
+;;; need to break out of that lifecycle -- the handler must take over the raw
+;;; fd and the worker must NOT write a second response or close the socket.
+;;;
+;;; A `Conn` is the handle that makes that possible. Handlers registered via
+;;; `server-start-conn` / `serve-conn` receive a `Conn` alongside the
+;;; `Request`; an upgrade helper reads the fd with `conn-fd`, writes its own
+;;; "101 Switching Protocols" response directly to it, then calls
+;;; `conn-mark-upgraded!`. After the handler returns the worker checks
+;;; `conn-upgraded?` and, when set, skips its serialize / write / close step --
+;;; ownership of the fd has transferred to the upgrade handler.
+;;;
+;;; The `tls` slot is reserved for a future httpd TLS variant (see the
+;;; websocket-server-plan WS4 phase) and stays NULL in v0.
+;;;
+;;; Internal layout (duplicated verbatim in every inline-C block):
+;;;
+;;;   struct __httpd_conn { int fd; int upgraded; void *tls; };
+;;;
+;;; Since: WS0
+
+(defmodule httpd/conn
+  (import httpd/types :refer [Conn])
+  (export conn-new conn-fd conn-mark-upgraded! conn-upgraded? conn-free)
+
+;; file-scope-c-block: keep the struct layout and headers out of function
+;; bodies (system headers carry static inline defs illegal inside functions
+;; on macOS 14+ / Xcode 15+).
+```c
+#include <stdlib.h>
+
+struct __httpd_conn { int fd; int upgraded; void *tls; };
+```
+
+;;; conn-new -- allocate a Conn wrapping a worker's client fd.
+;;;
+;;; The connection starts un-upgraded with a NULL TLS slot. The framework
+;;; constructs this in the worker loop; user code never calls it directly.
+;;;
+;;; Parameters:
+;;;   fd -- connected client socket.
+;;;
+;;; Returns:
+;;;   :Conn -- a fresh handle (free with conn-free), or 0 on allocation failure.
+;;;
+;;; Since: WS0
+(defn conn-new [fd : int] : Conn
+  ```c
+  struct __httpd_conn *c = (struct __httpd_conn *)malloc(sizeof(*c));
+  if (!c) return 0;
+  c->fd       = (int)fd;
+  c->upgraded = 0;
+  c->tls      = NULL;
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;;; conn-fd -- the raw client socket fd behind a Conn.
+;;;
+;;; An upgrade helper writes its switch-protocols response directly to this
+;;; fd and then takes ownership of it (see conn-mark-upgraded!).
+;;;
+;;; Parameters:
+;;;   conn -- Conn handle.
+;;;
+;;; Returns:
+;;;   :int -- the file descriptor, or -1 for a null handle.
+;;;
+;;; Since: WS0
+(defn conn-fd [conn : Conn] : int
+  ```c
+  if (conn == 0) return -1;
+  return (int64_t)((struct __httpd_conn *)(intptr_t)conn)->fd;
+  ```)
+
+;;; conn-mark-upgraded! -- flag the connection as protocol-upgraded.
+;;;
+;;; After this is set, the worker loop skips its serialize / write / close
+;;; step: ownership of the fd has transferred to the upgrade handler, which is
+;;; now responsible for closing it.
+;;;
+;;; Parameters:
+;;;   conn -- Conn handle.
+;;;
+;;; Since: WS0
+(defn conn-mark-upgraded! [conn : Conn] : void
+  ```c
+  if (conn == 0) return;
+  ((struct __httpd_conn *)(intptr_t)conn)->upgraded = 1;
+  ```)
+
+;;; conn-upgraded? -- true once conn-mark-upgraded! has been called.
+;;;
+;;; The worker loop consults this after the handler returns.
+;;;
+;;; Parameters:
+;;;   conn -- Conn handle.
+;;;
+;;; Returns:
+;;;   :bool
+;;;
+;;; Since: WS0
+(defn conn-upgraded? [conn : Conn] : bool
+  ```c
+  return conn != 0 && ((struct __httpd_conn *)(intptr_t)conn)->upgraded != 0;
+  ```)
+
+;;; conn-free -- release the Conn handle.
+;;;
+;;; Frees only the wrapper struct; the underlying fd is NOT closed (whoever
+;;; owns the fd -- the worker loop in the normal path, or the upgrade handler
+;;; in the upgraded path -- closes it). Safe on a null handle.
+;;;
+;;; Parameters:
+;;;   conn -- Conn handle, or 0 (no-op).
+;;;
+;;; Since: WS0
+(defn conn-free [conn : Conn] : void
+  ```c
+  if (conn == 0) return;
+  free((void *)(intptr_t)conn);
+  ```)
+
+) ;; end defmodule httpd/conn

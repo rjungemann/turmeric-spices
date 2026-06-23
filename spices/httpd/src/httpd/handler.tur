@@ -30,8 +30,9 @@
 ;;; Since: U2 (Handler typeclass)
 
 (defmodule httpd/handler
-  (import httpd/types    :refer [Request Response])
-  (import httpd/server   :refer [server-start server-start-pool server-start-spawn])
+  (import httpd/types    :refer [Request Response Conn])
+  (import httpd/server   :refer [server-start server-start-pool server-start-spawn
+                                 server-start-conn server-start-pool-conn])
   (import httpd/request  :refer [req-body])
   (import httpd/response :refer [resp-ok response bad-request])
   ;; json/encode brings the Encode/Decode classes (and the `encode`/`decode`
@@ -41,6 +42,7 @@
   (import json/encode    :refer [derive-json])
   (import json/decode    :refer [json-parse-doc json-doc-free json-doc-root])
   (export serve serve-pool serve-spawn
+          serve-conn serve-pool-conn
           req-decode json-ok json-resp with-json-body)
 
 ;;; Handler -- typeclass for a typed HTTP request handler.
@@ -121,6 +123,57 @@
        (defn ~tramp [req : int] : int
          (:: (respond (:: 0 ~type-name) (:: req Request)) :int))
        (server-start-spawn ~port ~tramp))))
+
+;; ---------------------------------------------------------------------------
+;; serve-conn: the upgrade-aware counterpart of serve.
+;;
+;; Where Handler maps a Request to a Response, ConnHandler maps a (Conn,
+;; Request) pair to a Response -- the extra Conn lets the handler reach the raw
+;; fd and perform a protocol upgrade (see httpd/conn and the ws-server spice).
+;; serve-conn / serve-pool-conn emit a captureless two-arg trampoline matching
+;; server-start-conn's `(c-fn [int int] int)` contract, exactly mirroring how
+;; serve bridges Handler to server-start.
+;; ---------------------------------------------------------------------------
+
+;;; ConnHandler -- typeclass for an upgrade-aware HTTP request handler.
+;;;
+;;; The single method maps a `(Conn, Request)` pair to a `Response`. `self` is
+;;; the instance witness (it selects the instance and carries no per-request
+;;; state); dispatch is value-directed on its type, mirroring `Handler`.
+;;;
+;;; Method:
+;;;   respond-conn : self -> Conn -> Request -> Response
+;;;
+;;; Example:
+;;;   (defopaque WsEcho :int)
+;;;   (definstance ConnHandler [WsEcho]
+;;;     (respond-conn [self conn req] (ws-upgrade conn req ...)))
+(defclass ConnHandler [a]
+  (respond-conn [self  conn : Conn  req : Request] : Response))
+
+;;; serve-conn -- start a pool-dispatched, upgrade-aware server whose handler
+;;; is the `ConnHandler` instance for witness type `T`. Top-level form.
+;;;
+;;; Syntax:
+;;;   (def srv (serve-conn 8080 WsEcho))
+(defmacro serve-conn [port type-name]
+  (let [tramp (str->sym (str-append "__httpd-conn-trampoline-" (symbol-name type-name)))]
+    `(do
+       (defn ~tramp [conn : int  req : int] : int
+         (:: (respond-conn (:: 0 ~type-name) (:: conn Conn) (:: req Request)) :int))
+       (server-start-conn ~port ~tramp))))
+
+;;; serve-pool-conn -- like `serve-conn` but with an explicit worker-pool size,
+;;; bridging to `server-start-pool-conn`.
+;;;
+;;; Syntax:
+;;;   (def srv (serve-pool-conn 8080 WsEcho 32))
+(defmacro serve-pool-conn [port type-name size]
+  (let [tramp (str->sym (str-append "__httpd-conn-trampoline-pool-" (symbol-name type-name)))]
+    `(do
+       (defn ~tramp [conn : int  req : int] : int
+         (:: (respond-conn (:: 0 ~type-name) (:: conn Conn) (:: req Request)) :int))
+       (server-start-pool-conn ~port ~tramp ~size))))
 
 ;; ---------------------------------------------------------------------------
 ;; JSON body codecs (P3): decode a typed request body and encode a typed

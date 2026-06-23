@@ -55,15 +55,23 @@
 ;;   struct __httpd_warg {
 ;;     int   client_fd;
 ;;     void *handler;
+;;     int   conn_mode;   /* 0: (Request)->Response  1: (Conn,Request)->Response */
 ;;   };
+;;
+;; conn_mode selects which handler shape srv-worker-loop calls: the legacy
+;; single-arg path, or the two-arg path that hands the handler a Conn (for
+;; protocol upgrades).  The struct layout is duplicated verbatim -- and must
+;; stay byte-identical -- in pool.tur, which packs the same work item.
 
 (defmodule httpd/server
   (import httpd/parse    :refer [parse-request free-request])
   (import httpd/response :refer [free-response])
   (import httpd/write    :refer [serialize-response wbuf-bytes wbuf-len free-wbuf])
-  (import httpd/pool     :refer [pool-new pool-enqueue pool-stop])
-  (import httpd/types    :refer [Request Response Wbuf])
-  (export server-start server-start-pool server-start-spawn server-stop)
+  (import httpd/pool     :refer [pool-new pool-new-conn pool-enqueue pool-stop])
+  (import httpd/conn     :refer [conn-new conn-upgraded? conn-free])
+  (import httpd/types    :refer [Request Response Wbuf Conn])
+  (export server-start server-start-pool server-start-spawn
+          server-start-conn server-start-pool-conn server-stop)
 
 ;; file-scope-c-block: system headers like <pthread.h> and <sys/socket.h>
 ;; contain static inline function definitions (e.g. __DARWIN_FD_ISSET on
@@ -83,7 +91,7 @@
 
 struct __httpd_rawreq { char *bytes; int len; };
 
-struct __httpd_warg { int client_fd; void *handler; };
+struct __httpd_warg { int client_fd; void *handler; int conn_mode; };
 
 struct __httpd_server {
   int           listen_fd;
@@ -275,6 +283,13 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
   return ((handler_fn)handler)((int64_t)req);
   ```)
 
+;; Invoke a two-arg handler function pointer: handler(conn, req) -> resp.
+(defn srv-call-handler-conn [handler : ptr<void> conn : int req : int] : int
+  ```c
+  typedef int64_t (*handler_fn)(int64_t, int64_t);
+  return ((handler_fn)handler)((int64_t)conn, (int64_t)req);
+  ```)
+
 ;; =============================================================================
 ;; Per-connection worker -- the "dispatch trait" the H7 pool will also reuse.
 ;; Entry: a malloc'd __httpd_warg { client_fd, handler }, ownership transferred.
@@ -285,7 +300,8 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
   ```
   (let [warg-int (srv-warg->int arg)
         client-fd (srv-warg-fd warg-int)
-        handler (srv-warg-handler warg-int)]
+        handler (srv-warg-handler warg-int)
+        conn-mode (srv-warg-conn-mode warg-int)]
     (srv-warg-free warg-int)
     (let [raw (srv-recv-request client-fd)]
       (if (= raw 0)
@@ -294,14 +310,35 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
           (if (= req 0)
             (do (srv-raw-free raw)
                 (srv-close-fd client-fd))
-            (let [resp (:: (srv-call-handler handler req) :Response)
-                  wbuf (serialize-response resp)]
-              (srv-write-all client-fd (wbuf-bytes wbuf) (wbuf-len wbuf))
-              (free-wbuf wbuf)
-              (free-response resp)
-              (free-request (:: req :Request))
-              (srv-raw-free raw)
-              (srv-close-fd client-fd)))))))
+            (if (= conn-mode 0)
+              ;; Single-arg handler: Request -> Response. Worker owns the fd.
+              (let [resp (:: (srv-call-handler handler req) :Response)
+                    wbuf (serialize-response resp)]
+                (srv-write-all client-fd (wbuf-bytes wbuf) (wbuf-len wbuf))
+                (free-wbuf wbuf)
+                (free-response resp)
+                (free-request (:: req :Request))
+                (srv-raw-free raw)
+                (srv-close-fd client-fd))
+              ;; Two-arg handler: Conn, Request -> Response. If the handler
+              ;; upgraded the connection it has taken ownership of the fd, so
+              ;; skip serialize / write / close entirely.
+              (let [conn (conn-new client-fd)
+                    resp (:: (srv-call-handler-conn handler (:: conn :int) req) :Response)]
+                (if (conn-upgraded? conn)
+                  (do
+                    (free-response resp)
+                    (free-request (:: req :Request))
+                    (srv-raw-free raw)
+                    (conn-free conn))
+                  (let [wbuf (serialize-response resp)]
+                    (srv-write-all client-fd (wbuf-bytes wbuf) (wbuf-len wbuf))
+                    (free-wbuf wbuf)
+                    (free-response resp)
+                    (free-request (:: req :Request))
+                    (srv-raw-free raw)
+                    (conn-free conn)
+                    (srv-close-fd client-fd))))))))))
   (srv-null-ptr))
 
 ;; WorkerArg accessors -- the worker is a Turmeric function so we expose the
@@ -319,6 +356,11 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
 (defn srv-warg-handler [arg : int] : ptr<void>
   ```c
   return ((struct __httpd_warg *)(intptr_t)arg)->handler;
+  ```)
+
+(defn srv-warg-conn-mode [arg : int] : int
+  ```c
+  return (int64_t)((struct __httpd_warg *)(intptr_t)arg)->conn_mode;
   ```)
 
 (defn srv-warg-free [arg : int] : void
@@ -343,6 +385,7 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
   }
   wa->client_fd = (int)client_fd;
   wa->handler   = (void *)handler;
+  wa->conn_mode = 0;
   pthread_t tid;
   if (pthread_create(&tid, NULL, httpd__server__srv_hyworker_hyloop, wa) != 0) {
     free(wa);
@@ -361,6 +404,21 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
   struct __httpd_server *s = malloc(sizeof(*s));
   s->listen_fd       = (int)listen_fd;
   s->handler         = (void *)handler;
+  s->stop_flag       = 0;
+  s->listener_thread = NULL;
+  s->pool            = NULL;
+  return (void *)s;
+  ```)
+
+;; Like srv-state-new but with no per-state handler -- used by the pool-conn
+;; dispatchers, where the handler lives in the pool wrapper and the listener
+;; only ever enqueues (it never spawns a worker directly, so the state's
+;; handler slot is unused).
+(defn srv-state-new-pool [listen-fd : int] : ptr<void>
+  ```c
+  struct __httpd_server *s = malloc(sizeof(*s));
+  s->listen_fd       = (int)listen_fd;
+  s->handler         = NULL;
   s->stop_flag       = 0;
   s->listener_thread = NULL;
   s->pool            = NULL;
@@ -534,6 +592,60 @@ void * httpd__server__srv_worker_loop_trampoline(void *arg) {
           (do (srv-close-fd fd)
               (srv-null-ptr))
           (let [s (srv-state-new fd handler)]
+            (srv-state-set-pool s pool)
+            (let [tid (srv-spawn-listener s)]
+              (if (= (srv-state->int tid) 0)
+                (do
+                  (pool-stop pool)
+                  (srv-close-fd fd)
+                  (srv-state-free s)
+                  (srv-null-ptr))
+                (do
+                  (srv-state-set-thread s tid)
+                  s)))))))))
+
+;;; server-start-conn -- like server-start, but the handler receives a Conn
+;;; alongside the Request: `(c-fn [int int] int)` = (Conn, Request) ->
+;;; Response. This is the entry point upgrade-aware handlers (e.g. ws-server's
+;;; `ws-upgrade`) require: the handler can read the raw fd via `conn-fd`, write
+;;; its own switch-protocols response, and call `conn-mark-upgraded!` to take
+;;; ownership of the socket. When a handler does not upgrade, its Response is
+;;; serialized and written exactly as in the single-arg path.
+;;;
+;;; Parameters:
+;;;   port    -- TCP port to bind on
+;;;   handler -- captureless `(c-fn [int int] int)`. Define it as a top-level
+;;;              `(defn h [conn : Conn req : Request] : Response ...)` and pass
+;;;              the name.
+;;;
+;;; Returns:
+;;;   :ptr<void> -- opaque server handle, or NULL on failure.
+;;;
+;;; Since: WS0
+(defn server-start-conn [port : int handler : (c-fn [int int] int)] : ptr<void>
+  (server-start-pool-conn port handler (srv-default-pool-size)))
+
+;;; server-start-pool-conn -- like server-start-conn but with an explicit pool
+;;; size (the two-arg-handler counterpart of server-start-pool).
+;;;
+;;; Parameters:
+;;;   port    -- TCP port to bind on
+;;;   handler -- (c-fn [int int] int) (Conn, Request) -> Response handler
+;;;   size    -- number of worker threads (clamped to >= 1)
+;;;
+;;; Returns:
+;;;   :ptr<void> -- opaque server handle, or NULL on failure.
+;;;
+;;; Since: WS0
+(defn server-start-pool-conn [port : int handler : (c-fn [int int] int) size : int] : ptr<void>
+  (let [fd (srv-make-listener port)]
+    (if (< fd 0)
+      (srv-null-ptr)
+      (let [pool (pool-new-conn size handler)]
+        (if (= (srv-state->int pool) 0)
+          (do (srv-close-fd fd)
+              (srv-null-ptr))
+          (let [s (srv-state-new-pool fd)]
             (srv-state-set-pool s pool)
             (let [tid (srv-spawn-listener s)]
               (if (= (srv-state->int tid) 0)
