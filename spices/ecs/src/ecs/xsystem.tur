@@ -1,0 +1,233 @@
+;;; ecs/xsystem -- cross-world system value + `defxsystem` surface.
+;;;
+;;; A v1 `System` (`ecs/system`) bundles a body with the read/write
+;;; component masks it touches *in one world*. An `XSystem` lifts that
+;;; to *two* worlds: it carries a read and write mask for each of two
+;;; local world slots, plus a run-fn that takes two world handles. The
+;;; scheduler (`ecs/xstage`) keys conflict on the (world, component)
+;;; pair, so two systems that write the same component in *different*
+;;; worlds never conflict.
+;;;
+;;; The headline surface is `defxsystem`:
+;;;
+;;;   (defxsystem extract-renderables
+;;;     [sim SimWorld  ren RenderWorld]
+;;;     :reads-from  sim [Pos Sprite]
+;;;     :writes-to   sim []
+;;;     :reads-from  ren []
+;;;     :writes-to   ren [RenderPos RenderSprite]
+;;;     body)
+;;;
+;;; (The plan illustrates the world bindings as `sim :SimWorld`; `tur`
+;;; tokenises an attached `:SimWorld` as a keyword, and its real type
+;;; ascriptions use a standalone `:`, so the binding type is written as
+;;; a bare symbol `SimWorld` here.)
+;;;
+;;; Two world bindings (`name Type` pairs); then, per world in
+;;; declaration order, its `:reads-from` clause followed by its
+;;; `:writes-to` clause. Each world therefore appears in exactly one
+;;; read set and exactly one write set, satisfying the plan's
+;;; well-formedness rule by construction.
+;;;
+;;; Inside the body, for each `:reads-from <w> [C ...]` a binding
+;;; `<w>-<C>-read-cap : (XReadCap <WType> C)` is in scope, and for each
+;;; `:writes-to <w> [C ...]` a binding `<w>-<C>-write-cap : (XWriteCap
+;;; <WType> C)`. The write-caps are linear and auto-consumed at body
+;;; end (so the body type-checks under `-Xsubstructural` without the
+;;; user calling `use-cap!`). Because the cap type pins the world, a
+;;; `set-<C>!` accessor minted for the wrong world rejects the cap.
+;;;
+;;; Convention: for each component `C` referenced, a `C-cid` binding
+;;; (the world-local component id) must be in scope at the call site,
+;;; exactly as `defsystem` requires. The cid is the bit the component
+;;; occupies in its world's mask; the same `C-cid` value is reused for
+;;; both worlds because the conflict key is (world-id, cid), and the
+;;; world-id is supplied when the system is bound into an `XStage`.
+;;;
+;;; Required imports at the call site:
+;;;   (import ecs/xcap :refer [XWriteCap XReadCap make-write-cap make-read-cap use-cap!])
+;;;
+;;; See `docs/upcoming/ecs-cross-world-systems-plan.md` (phase X2).
+;;;
+;;; Since: X2
+
+(defmodule ecs/xsystem
+  (export XSystem make-xsystem
+          xsystem-w0-reads xsystem-w0-writes
+          xsystem-w1-reads xsystem-w1-writes
+          xsystem-run-fn
+          defxsystem
+          ;; helpers used by the macro expansion (and by ecs/xmirror).
+          xsystem--with-read-caps
+          xsystem--with-write-caps
+          xsystem--consume-write-caps)
+
+(import ecs/system :refer [cid-bit])
+(import ecs/xcap   :refer [XWriteCap XReadCap make-write-cap make-read-cap use-cap!])
+
+;;; xsystem--mask -- build the bit-or'd `(cid-bit <Comp>-cid)` mask for
+;;; a comp-name vector (empty -> 0). A private copy of
+;;; `defsystem--mask`; defined here rather than imported because `tur`
+;;; shares one global macro namespace, so re-`:refer`ing the same macro
+;;; from two modules linked in one program is a conflict.
+(defmacro xsystem--mask [comps]
+  (if (empty? comps)
+    0
+    (if (empty? (rest comps))
+      `(cid-bit ~(str->sym (str-append (symbol-name (first comps)) "-cid")))
+      `(bit-or
+         (cid-bit ~(str->sym (str-append (symbol-name (first comps)) "-cid")))
+         (xsystem--mask ~(rest comps))))))
+
+;;; XSystem -- a runnable two-world bundle. Each slot (w0, w1) carries
+;;; the reads/writes masks the body touches in that world; `run-fn`
+;;; points at a top-level defn with signature `[w0 : int w1 : int] :
+;;; nil`. A single-world system embeds with empty slot-1 masks.
+;;; :copy so it flows through Turmeric values cleanly, like System.
+;;; Since: X2
+(defstruct XSystem :copy
+  [w0-reads  : int
+   w0-writes : int
+   w1-reads  : int
+   w1-writes : int
+   run-fn    : ptr<void>])
+
+;;; make-xsystem -- bundle a top-level two-world run-fn with its
+;;; per-world read/write masks.
+;;; Since: X2
+(defn make-xsystem
+  [w0-reads  : int
+   w0-writes : int
+   w1-reads  : int
+   w1-writes : int
+   run-fn    : ptr<void>]
+  : XSystem
+  (make-struct XSystem w0-reads w0-writes w1-reads w1-writes run-fn))
+
+;;; Field accessors.
+;;; Since: X2
+(defn xsystem-w0-reads  [s : XSystem] : int (.w0-reads  s))
+(defn xsystem-w0-writes [s : XSystem] : int (.w0-writes s))
+(defn xsystem-w1-reads  [s : XSystem] : int (.w1-reads  s))
+(defn xsystem-w1-writes [s : XSystem] : int (.w1-writes s))
+(defn xsystem-run-fn    [s : XSystem] : ptr<void> (.run-fn s))
+
+;;; xsystem--with-write-caps -- wrap `body` in a let-chain binding
+;;; `<wbind>-<Comp>-write-cap : (XWriteCap <wtype> Comp)` for each comp,
+;;; minted from `<Comp>-cid`. World-keyed analogue of
+;;; `defsystem--with-write-caps`.
+(defmacro xsystem--with-write-caps [body wbind wtype comps]
+  (if (empty? comps)
+    `~body
+    (let [comp       (first comps)
+          rest-comps (rest comps)
+          cap-name   (str->sym (str-append (symbol-name wbind) "-"
+                                           (symbol-name comp) "-write-cap"))
+          cid-name   (str->sym (str-append (symbol-name comp) "-cid"))]
+      `(let [~cap-name (:: (make-write-cap ~cid-name) (XWriteCap ~wtype ~comp))]
+         (xsystem--with-write-caps ~body ~wbind ~wtype ~rest-comps)))))
+
+;;; xsystem--with-read-caps -- wrap `body` in a let-chain binding
+;;; `<wbind>-<Comp>-read-cap : (XReadCap <wtype> Comp)` for each comp.
+;;; XReadCap is non-linear, so no auto-consume is needed.
+(defmacro xsystem--with-read-caps [body wbind wtype comps]
+  (if (empty? comps)
+    `~body
+    (let [comp       (first comps)
+          rest-comps (rest comps)
+          cap-name   (str->sym (str-append (symbol-name wbind) "-"
+                                           (symbol-name comp) "-read-cap"))
+          cid-name   (str->sym (str-append (symbol-name comp) "-cid"))]
+      `(let [~cap-name (:: (make-read-cap ~cid-name) (XReadCap ~wtype ~comp))]
+         (xsystem--with-read-caps ~body ~wbind ~wtype ~rest-comps)))))
+
+;;; xsystem--consume-write-caps -- emit `(use-cap! <wbind>-<Comp>-write-cap)`
+;;; for each comp, sequenced via nested `do`. Runs at body end so the
+;;; linear write-caps are consumed exactly once.
+(defmacro xsystem--consume-write-caps [wbind comps]
+  (if (empty? comps)
+    nil
+    (let [comp       (first comps)
+          rest-comps (rest comps)
+          cap-name   (str->sym (str-append (symbol-name wbind) "-"
+                                           (symbol-name comp) "-write-cap"))]
+      `(do
+         (use-cap! ~cap-name)
+         (xsystem--consume-write-caps ~wbind ~rest-comps)))))
+
+;;; defxsystem -- declare a two-world System and its implementation.
+;;;
+;;; Syntax (canonical clause order -- reads then writes, per world, in
+;;; world-binding order):
+;;;
+;;;   (defxsystem NAME
+;;;     [w0 :W0Type  w1 :W1Type]
+;;;     :reads-from  w0 [..]
+;;;     :writes-to   w0 [..]
+;;;     :reads-from  w1 [..]
+;;;     :writes-to   w1 [..]
+;;;     BODY)
+;;;
+;;; Expands (via top-level `do` splicing) to:
+;;;
+;;;   (defn NAME-impl [^borrow w0 : W0Type ^borrow w1 : W1Type] : nil
+;;;     ;; read-caps + write-caps bound per (world, comp); body; auto-consume
+;;;     ...)
+;;;   (defn NAME-fn [wp0 : int wp1 : int] : nil
+;;;     (NAME-impl (load-W0Type wp0) (load-W1Type wp1)))
+;;;   (def NAME (make-xsystem W0-READS W0-WRITES W1-READS W1-WRITES NAME-fn))
+;;;
+;;; `load-<W0Type>` / `load-<W1Type>` (int-carrier -> typed world) must
+;;; be in scope, the same convention `sized-defsystem-scheduled` uses.
+;;;
+;;; Since: X2
+(defmacro defxsystem [name worlds & clauses]
+  (let [impl-name (str->sym (str-append (symbol-name name) "-impl"))
+        fn-name   (str->sym (str-append (symbol-name name) "-fn"))
+        ;; world bindings: [w0 :W0 w1 :W1]
+        ws1   (rest worlds)
+        ws2   (rest ws1)
+        ws3   (rest ws2)
+        w0b   (first worlds)
+        w0t   (first ws1)
+        w1b   (first ws2)
+        w1t   (first ws3)
+        ;; clauses (keyword + world-name skipped positionally):
+        ;;  0 :reads-from  1 w0  2 r0vec  3 :writes-to  4 w0  5 w0vec
+        ;;  6 :reads-from  7 w1  8 r1vec  9 :writes-to 10 w1 11 w1vec  12 body
+        c1  (rest clauses) c2 (rest c1) c3 (rest c2) c4 (rest c3)
+        c5  (rest c4)  c6 (rest c5)  c7 (rest c6)  c8 (rest c7)
+        c9  (rest c8)  c10 (rest c9) c11 (rest c10) c12 (rest c11)
+        r0v (first c2)
+        w0v (first c5)
+        r1v (first c8)
+        w1v (first c11)
+        bdy (first c12)
+        load0 (str->sym (str-append "load-" (symbol-name w0t)))
+        load1 (str->sym (str-append "load-" (symbol-name w1t)))]
+    `(do
+       (defn ~impl-name [^borrow ~w0b : ~w0t  ^borrow ~w1b : ~w1t] : nil
+         (xsystem--with-read-caps
+           (xsystem--with-read-caps
+             (xsystem--with-write-caps
+               (xsystem--with-write-caps
+                 (do
+                   ~bdy
+                   (xsystem--consume-write-caps ~w0b ~w0v)
+                   (xsystem--consume-write-caps ~w1b ~w1v))
+                 ~w1b ~w1t ~w1v)
+               ~w0b ~w0t ~w0v)
+             ~w1b ~w1t ~r1v)
+           ~w0b ~w0t ~r0v))
+       (defn ~fn-name [wp0 : int wp1 : int] : nil
+         (let [a : ~w0t (~load0 wp0)
+               b : ~w1t (~load1 wp1)]
+           (~impl-name a b)))
+       (def ~name (make-xsystem
+                    (xsystem--mask ~r0v)
+                    (xsystem--mask ~w0v)
+                    (xsystem--mask ~r1v)
+                    (xsystem--mask ~w1v)
+                    ~fn-name)))))
+
+) ;; end defmodule ecs/xsystem

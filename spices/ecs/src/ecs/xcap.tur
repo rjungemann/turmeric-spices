@@ -1,0 +1,123 @@
+;;; ecs/xcap -- per-(World, Component) linear capability tokens.
+;;;
+;;; This is the cross-world lift of `ecs/cap`. Where `ecs/cap` keys a
+;;; capability on the component alone (`WriteCap<T>` / `ReadCap<T>`),
+;;; `ecs/xcap` keys it on the *(World, Component)* pair:
+;;;
+;;; The cross-world caps are deliberately named `XWriteCap`/`XReadCap`
+;;; rather than overloading `WriteCap`/`ReadCap`: `tur` resolves an
+;;; opaque type constructor by name in a single global namespace, so a
+;;; two-param `WriteCap [W T]` would collide (kind mismatch) with
+;;; `ecs/cap`'s one-param `WriteCap [T]` whenever both are linked --
+;;; and any cross-world program links `ecs/cap` transitively through
+;;; `ecs/sized-world`. Unifying the two behind one name (the plan's
+;;; "single-world collapses to `WriteCap<DefaultWorld, T>`") is a
+;;; follow-up gated on per-module opaque namespacing or type aliases.
+;;;
+;;;   XWriteCap<W, T>   -- may write component T in world W
+;;;   XReadCap<W, T>    -- may read  component T in world W
+;;;
+;;; Both lower to `:int` in the C ABI; the two parameters `W` and `T`
+;;; are phantoms carried purely by the type system. Because the world
+;;; is now part of the type, a `XWriteCap<RenderWorld, Pos>` is a
+;;; nominally distinct type from a `XWriteCap<SimWorld, Pos>` -- the
+;;; same component, but a different lock target. A body holding only a
+;;; `XWriteCap<RenderWorld, Pos>` cannot pass it to a `set-Pos!`
+;;; accessor parameterised over a `SimWorld` handle; the nominal check
+;;; already in the type system catches the mismatch.
+;;;
+;;; This is the type-level realisation of the I2 mint-helper naming
+;;; convention (`mint-<World>-<Comp>-write-cap`): what used to be a
+;;; distinction at the binding-name level is now an actual type-system
+;;; distinction. `(Read sim Pos)` and `(Read ren Pos)` are different
+;;; capabilities even though `Pos` is the same type.
+;;;
+;;; `XWriteCap<W, T>` is `:linear` -- it must be consumed exactly once
+;;; (the elaborator's single-use check fires under `-Xsubstructural`).
+;;; `XReadCap<W, T>` is non-linear: read access is non-consuming, so the
+;;; cap can be re-borrowed across iterations within a system body.
+;;;
+;;; See `docs/upcoming/ecs-cross-world-systems-plan.md` (phase X1) for
+;;; the full plan.
+;;;
+;;; Since: X1
+
+(defmodule ecs/xcap
+  (export XWriteCap XReadCap
+          make-write-cap make-read-cap
+          use-cap!)
+
+;;; XWriteCap<W, T> -- linear capability proving the holder may write
+;;; component T in world W. Consumed exactly once per write scope.
+;;;
+;;; Since: X1
+(defopaque XWriteCap [W T] :int :linear)
+
+;;; XReadCap<W, T> -- non-linear capability proving the holder may read
+;;; component T in world W. Multiple reads per scope are fine.
+;;;
+;;; Since: X1
+(defopaque XReadCap [W T] :int)
+
+;;; make-write-cap -- mint a fresh write capability for component T in
+;;; world W.
+;;;
+;;; Parameters:
+;;;   cid -- the component's CID within world W (or a placeholder where
+;;;          unused). The CID is world-local: the same component may
+;;;          carry CID 0 in two different worlds without collision,
+;;;          because the conflict key is the (World, CID) pair.
+;;;
+;;; Returns:
+;;;   A `^linear` `XWriteCap<W, T>`. The parameters W and T are inferred
+;;;   from the call-site's expected type or ascription.
+;;;
+;;; Example:
+;;;   (let [cap (:: (make-write-cap 0) (XWriteCap RenderWorld RenderPos))]
+;;;     (use-cap! cap))
+;;;
+;;; Since: X1
+(defn make-write-cap [W T]
+  [cid : int]
+  : (XWriteCap W T)
+  ```c
+  return (int64_t)cid;
+  ```)
+
+;;; make-read-cap -- mint a fresh read capability for component T in
+;;; world W.
+;;;
+;;; Parameters:
+;;;   cid -- the component's world-local CID (or a placeholder).
+;;;
+;;; Returns:
+;;;   A `XReadCap<W, T>` (non-linear).
+;;;
+;;; Since: X1
+(defn make-read-cap [W T]
+  [cid : int]
+  : (XReadCap W T)
+  ```c
+  return (int64_t)cid;
+  ```)
+
+;;; use-cap! -- consume a linear write capability.
+;;;
+;;; A no-op at runtime; the elaborator's single-use check on the
+;;; `^linear` parameter is what enforces the capability discipline.
+;;; `defxsystem` auto-consumes the write-caps it binds at body end, so
+;;; a cross-world system body type-checks under `-Xsubstructural`
+;;; without the user calling this directly.
+;;;
+;;; Parameters:
+;;;   cap -- a `^linear XWriteCap<W, T>` (consumed)
+;;;
+;;; Since: X1
+(defn use-cap! [W T]
+  [^linear cap : (XWriteCap W T)]
+  : nil
+  ```c
+  (void)cap;
+  ```)
+
+) ;; end defmodule ecs/xcap
