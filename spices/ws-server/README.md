@@ -32,7 +32,10 @@ and are unmasked on read.
 
 Within this workspace it resolves as a sibling automatically; it depends on the
 sibling `httpd` spice (for the `Conn` handle and the `server-start-conn` entry
-point).
+point) and on [`ws-core`](../ws-core) for the shared `WsConn` / `WsFrame` types
+and frame predicates (NAME-V0). Import those type-level names from `ws-core`;
+`ws-server` itself exports only the server-side behaviour (`ws-upgrade`,
+`ws-server-send`, ...).
 
 ## Quick start
 
@@ -43,9 +46,10 @@ A mixed REST + WebSocket server: `/health` answers over HTTP, `/ws` echoes.
 (import httpd/server   :refer [server-start-conn server-stop])
 (import httpd/request  :refer [req-method req-path])
 (import httpd/response :refer [resp-ok not-found bad-request])
+(import ws-core/conn   :refer [WsConn])
+(import ws-core/frame  :refer [ws-frame-text ws-text? ws-closed?])
 (import ws-server/server
-  :refer [WsConn ws-upgrade ws-server-recv ws-server-send ws-server-close
-          ws-frame-text ws-text? ws-closed?])
+  :refer [ws-upgrade ws-server-recv ws-server-send ws-server-close])
 
 (defn echo-loop [ws : WsConn] : void
   (let [f (ws-server-recv ws)]

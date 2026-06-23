@@ -42,14 +42,18 @@
 ;; automatically and then surfaced to the caller.
 
 (defmodule ws-client/client
-  (export WsConn WsFrame
-          ws-connect ws-connect-with-ca ws-connect-insecure
+  ;; NAME-V0: the connection-handle type, frame view, and frame predicates are
+  ;; the canonical ws-core definitions, shared with ws-server. ws-client adds
+  ;; only the client-side behaviour (connect / send / recv / close).
+  (import ws-core/conn  :refer [WsConn])
+  (import ws-core/frame :refer [WsFrame
+                                ws-frame-kind ws-frame-data ws-frame-len ws-frame-text
+                                ws-text? ws-binary? ws-ping? ws-pong?
+                                ws-closed? ws-timeout? ws-error?])
+  (export ws-connect ws-connect-with-ca ws-connect-insecure
           ws-conn-null? ws-last-error
           ws-send ws-send-bytes ws-recv
-          ws-close ws-free ws-set-timeout
-          ws-accept-key
-          ws-frame-kind ws-frame-data ws-frame-len ws-frame-text
-          ws-text? ws-binary? ws-ping? ws-pong? ws-closed? ws-timeout? ws-error?)
+          ws-close ws-free ws-set-timeout)
 
 ;; ---------------------------------------------------------------------------
 ;; file-scope C: shared types + static helpers.
@@ -460,25 +464,9 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
 }
 ```
 
-;;; WsConn -- opaque handle to an open WebSocket connection.
-;;;
-;;; Produced by ws-connect; released by ws-free. Stored as int64_t under the
-;;; hood (a `ws_conn_t*`). A null handle (0) is the failure sentinel; test
-;;; with ws-conn-null?.
-;;;
-;;; Since: WC1
-(defopaque WsConn :int)
-
-;;; WsFrame -- opaque handle to the frame most recently returned by ws-recv.
-;;;
-;;; A view into the connection's internal reassembly buffer: ws-frame-data /
-;;; ws-frame-text point into storage that is valid only until the next
-;;; ws-recv or ws-free on the same connection. Callers that need the payload
-;;; longer must copy it. Read fields via ws-frame-kind / ws-frame-data /
-;;; ws-frame-len / ws-frame-text and the ws-text? ... ws-error? predicates.
-;;;
-;;; Since: WC1
-(defopaque WsFrame :int)
+;; WsConn / WsFrame and the frame accessors + predicates are imported from
+;; ws-core (NAME-V0). ws_conn_t below embeds a ws_frame_t whose layout matches
+;; ws-core/frame's, so ws-recv can hand back a pointer to it as a WsFrame.
 
 ;;; ws-connect-impl -- internal core driving every connect entry point.
 ;;;
@@ -880,88 +868,9 @@ static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
   setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   ```)
 
-;;; ws-accept-key -- compute the Sec-WebSocket-Accept value for a client key.
-;;;
-;;; accept = base64(sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")). This
-;;; is the exact transform a server applies to Sec-WebSocket-Key; exposed so
-;;; the handshake crypto is unit-testable against the RFC 6455 4.2.2 vector.
-;;;
-;;; Parameters:
-;;;   key -- the base64 Sec-WebSocket-Key string.
-;;;
-;;; Returns:
-;;;   :cstr -- the 28-character base64 accept value (static storage).
-;;;
-;;; Since: WC1
-(defn ws-accept-key [key : cstr] : cstr
-  ```c
-  static char out[64];
-  ws__accept((const char *)key, out);
-  return out;
-  ```)
-
-;;; ws-frame-kind -- integer kind of a frame (see the WS_KIND_* constants).
-;;; Since: WC1
-(defn ws-frame-kind [frame : WsFrame] : int
-  ```c
-  if (frame == 0) return WS_KIND_ERROR;
-  return (int64_t)((ws_frame_t *)(intptr_t)frame)->kind;
-  ```)
-
-;;; ws-frame-data -- pointer to the frame payload (valid until next ws-recv).
-;;; Since: WC1
-(defn ws-frame-data [frame : WsFrame] : ptr<void>
-  ```c
-  if (frame == 0) return NULL;
-  return ((ws_frame_t *)(intptr_t)frame)->data;
-  ```)
-
-;;; ws-frame-len -- payload length of a frame, in bytes.
-;;; Since: WC1
-(defn ws-frame-len [frame : WsFrame] : int
-  ```c
-  if (frame == 0) return 0;
-  return (int64_t)((ws_frame_t *)(intptr_t)frame)->len;
-  ```)
-
-;;; ws-frame-text -- frame payload as a NUL-terminated string.
-;;;
-;;; Convenience for :text frames; the reassembly buffer is always
-;;; NUL-terminated. Valid until the next ws-recv / ws-free.
-;;; Since: WC1
-(defn ws-frame-text [frame : WsFrame] : cstr
-  ```c
-  if (frame == 0) return (char *)"";
-  ws_frame_t *f = (ws_frame_t *)(intptr_t)frame;
-  return f->data ? (char *)f->data : (char *)"";
-  ```)
-
-;;; ws-text? -- true if the frame is a text message. Since: WC1
-(defn ws-text? [frame : WsFrame] : bool
-  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_TEXT; ```)
-
-;;; ws-binary? -- true if the frame is a binary message. Since: WC1
-(defn ws-binary? [frame : WsFrame] : bool
-  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_BINARY; ```)
-
-;;; ws-ping? -- true if the frame is a ping (already auto-ponged). Since: WC1
-(defn ws-ping? [frame : WsFrame] : bool
-  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_PING; ```)
-
-;;; ws-pong? -- true if the frame is a pong. Since: WC1
-(defn ws-pong? [frame : WsFrame] : bool
-  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_PONG; ```)
-
-;;; ws-closed? -- true if the frame is a close (or the peer closed). Since: WC1
-(defn ws-closed? [frame : WsFrame] : bool
-  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_CLOSE; ```)
-
-;;; ws-timeout? -- true if ws-recv returned because the timeout fired. Since: WC3
-(defn ws-timeout? [frame : WsFrame] : bool
-  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_TIMEOUT; ```)
-
-;;; ws-error? -- true if ws-recv hit a transport error. Since: WC1
-(defn ws-error? [frame : WsFrame] : bool
-  ```c return frame == 0 || ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_ERROR; ```)
+;; ws-accept-key and the WsFrame accessors / predicates now live in ws-core
+;; (NAME-V0) and are imported above. ws-client keeps its own internal SHA-1 +
+;; base64 (ws__sha1 / ws__b64 / ws__accept) for the handshake verification in
+;; ws__handshake; the exported, tested entry point is ws-core's ws-accept-key.
 
 ) ;; end defmodule ws-client/client

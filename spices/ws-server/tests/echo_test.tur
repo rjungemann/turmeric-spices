@@ -3,10 +3,11 @@
 ;; Exercises the whole server stack in one process: an httpd server started via
 ;; server-start-conn whose two-arg handler calls ws-upgrade and then echoes
 ;; every text frame back. The client is a minimal raw-socket WebSocket peer
-;; implemented inline here -- it cannot be the ws-client spice, because both
-;; ws-client and ws-server define `WsConn` / `WsFrame` opaques and so cannot be
-;; loaded into the same program. (The ws-client-driven round-trip lives in
-;; tests/fixtures/echo/, which runs the two as separate processes.)
+;; implemented inline here, keeping this flat unit test self-contained in a
+;; single process. (Since NAME-V0 ws-client and ws-server share one `WsConn` /
+;; `WsFrame` from ws-core, so the two could be loaded into one program now --
+;; the ws-client-driven round-trip in tests/fixtures/echo/ still runs them as
+;; separate processes to exercise the real socket path end to end.)
 ;;
 ;; The inline client sends MASKED frames (client->server, per RFC 6455 5.3) and
 ;; expects the echo back UNMASKED (server->client, per 5.1), so a passing echo
@@ -18,10 +19,12 @@
   (import httpd/server   :refer [server-start-conn server-stop])
   (import httpd/response :refer [resp-ok bad-request])
   (import ws-server/server
-    :refer [WsConn ws-upgrade
+    :refer [ws-upgrade
             ws-server-recv ws-server-send ws-server-close
-            ws-set-server-timeout
-            ws-frame-text ws-text? ws-binary? ws-closed? ws-error? ws-timeout?])
+            ws-set-server-timeout])
+  (import ws-core/conn  :refer [WsConn])
+  (import ws-core/frame :refer [ws-frame-text ws-text? ws-binary?
+                                ws-closed? ws-error? ws-timeout?])
   (import test/suite  :refer [describe it])
   (import test/assert :refer [assert-true])
   (import test/runner :refer [run-all])

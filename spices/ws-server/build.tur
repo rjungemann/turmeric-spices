@@ -4,6 +4,10 @@
   :description "RFC 6455 WebSocket server upgrade for tur-httpd"
   :license     "MIT"
   :spices #{
+    ;; ws-core owns the shared protocol types (WsConn, WsFrame) and the frame
+    ;; predicates (NAME-V0); ws-server imports them so its WsConn is the same
+    ;; type ws-client produces.
+    "ws-core" #{:path "../ws-core"}
     ;; Workspace-local test framework, used only by tests/.
     "test"  #{:path "../test"}
     ;; httpd provides the Conn handle + conn-fd / conn-mark-upgraded! that
@@ -32,14 +36,12 @@
   ;; re-declare mbedTLS here: it is the tls spice's own :cmake-deps and the
   ;; compiler now collects :cmake-deps transitively across the declared :spices
   ;; (tls above) and workspace siblings.
+  ;; WsConn, WsFrame, and the frame predicates are exported by ws-core
+  ;; (NAME-V0); consumers import them from there. ws-server exports only the
+  ;; server-side behaviour.
   :exports #{
-    "ws-server/server" ["WsConn" "WsFrame"
-                        "ws-upgrade"
+    "ws-server/server" ["ws-upgrade"
                         "ws-server-send" "ws-server-send-bytes"
                         "ws-server-recv" "ws-server-close"
-                        "ws-set-server-timeout"
-                        "ws-frame-kind" "ws-frame-data" "ws-frame-len"
-                        "ws-frame-text"
-                        "ws-text?" "ws-binary?" "ws-ping?" "ws-pong?"
-                        "ws-closed?" "ws-timeout?" "ws-error?"]
+                        "ws-set-server-timeout"]
   })

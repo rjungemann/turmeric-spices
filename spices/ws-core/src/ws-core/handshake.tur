@@ -1,0 +1,126 @@
+;; ws-core/handshake.tur -- pure RFC 6455 handshake crypto.
+;;
+;; NAME-V0: ws-accept-key (and its SHA-1 + base64 helpers) was implemented
+;; identically in ws-client and ws-server. It is pure protocol math with no
+;; transport, so it lives here once. ws-client re-publishes it for callers
+;; that compute accept keys directly; both spices keep their own internal
+;; copies of the same helpers inside the connection codecs (those are file
+;; statics threaded through other I/O code), but the canonical, tested entry
+;; point is here.
+
+(defmodule ws-core/handshake
+  (export ws-accept-key)
+
+;; ---------------------------------------------------------------------------
+;; file-scope C: base64 (encode-only) + SHA-1 (RFC 3174) + the accept transform.
+;; ---------------------------------------------------------------------------
+```c
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+/* --- base64 (encode only; the accept transform needs no decode) ---------- */
+static void wscore__b64(const unsigned char *in, size_t len, char *out) {
+  static const char t[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t i = 0, o = 0;
+  while (len - i >= 3) {
+    out[o++] = t[in[i] >> 2];
+    out[o++] = t[((in[i] & 3) << 4) | (in[i+1] >> 4)];
+    out[o++] = t[((in[i+1] & 15) << 2) | (in[i+2] >> 6)];
+    out[o++] = t[in[i+2] & 63];
+    i += 3;
+  }
+  if (len - i == 1) {
+    out[o++] = t[in[i] >> 2];
+    out[o++] = t[(in[i] & 3) << 4];
+    out[o++] = '=';
+    out[o++] = '=';
+  } else if (len - i == 2) {
+    out[o++] = t[in[i] >> 2];
+    out[o++] = t[((in[i] & 3) << 4) | (in[i+1] >> 4)];
+    out[o++] = t[(in[i+1] & 15) << 2];
+    out[o++] = '=';
+  }
+  out[o] = '\0';
+}
+
+/* --- SHA-1 (RFC 3174) ---------------------------------------------------- */
+static void wscore__sha1(const unsigned char *data, size_t len, unsigned char out[20]) {
+  uint32_t h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE,
+           h3 = 0x10325476, h4 = 0xC3D2E1F0;
+  uint64_t ml = (uint64_t)len * 8;
+  size_t total = ((len + 8) / 64 + 1) * 64;
+  unsigned char *msg = (unsigned char *)calloc(total, 1);
+  if (!msg) return;
+  memcpy(msg, data, len);
+  msg[len] = 0x80;
+  for (int i = 0; i < 8; i++)
+    msg[total - 1 - i] = (unsigned char)((ml >> (8 * i)) & 0xff);
+  for (size_t off = 0; off < total; off += 64) {
+    uint32_t w[80];
+    for (int i = 0; i < 16; i++)
+      w[i] = ((uint32_t)msg[off + i*4]     << 24)
+           | ((uint32_t)msg[off + i*4 + 1] << 16)
+           | ((uint32_t)msg[off + i*4 + 2] << 8)
+           | ((uint32_t)msg[off + i*4 + 3]);
+    for (int i = 16; i < 80; i++) {
+      uint32_t v = w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16];
+      w[i] = (v << 1) | (v >> 31);
+    }
+    uint32_t a = h0, b = h1, c = h2, d = h3, e = h4;
+    for (int i = 0; i < 80; i++) {
+      uint32_t f, k;
+      if (i < 20)      { f = (b & c) | ((~b) & d);          k = 0x5A827999; }
+      else if (i < 40) { f = b ^ c ^ d;                     k = 0x6ED9EBA1; }
+      else if (i < 60) { f = (b & c) | (b & d) | (c & d);   k = 0x8F1BBCDC; }
+      else             { f = b ^ c ^ d;                     k = 0xCA62C1D6; }
+      uint32_t tmp = ((a << 5) | (a >> 27)) + f + e + k + w[i];
+      e = d; d = c; c = (b << 30) | (b >> 2); b = a; a = tmp;
+    }
+    h0 += a; h1 += b; h2 += c; h3 += d; h4 += e;
+  }
+  free(msg);
+  uint32_t hh[5] = { h0, h1, h2, h3, h4 };
+  for (int i = 0; i < 5; i++) {
+    out[i*4]     = (unsigned char)(hh[i] >> 24);
+    out[i*4 + 1] = (unsigned char)(hh[i] >> 16);
+    out[i*4 + 2] = (unsigned char)(hh[i] >> 8);
+    out[i*4 + 3] = (unsigned char)(hh[i]);
+  }
+}
+
+/* Sec-WebSocket-Accept = base64(sha1(key + GUID)). `out` needs >= 29 bytes. */
+static void wscore__accept(const char *key, char *out) {
+  static const char GUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+  char buf[128];
+  int n = snprintf(buf, sizeof(buf), "%s%s", key, GUID);
+  unsigned char digest[20];
+  wscore__sha1((const unsigned char *)buf, (size_t)n, digest);
+  wscore__b64(digest, 20, out);
+}
+```
+
+;;; ws-accept-key -- compute the Sec-WebSocket-Accept value for a client key.
+;;;
+;;; accept = base64(sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")). This
+;;; is the exact transform a server applies to Sec-WebSocket-Key; exposed so
+;;; the handshake crypto is unit-testable against the RFC 6455 4.2.2 vector and
+;;; shared by ws-client and ws-server (NAME-V0).
+;;;
+;;; Parameters:
+;;;   key -- the base64 Sec-WebSocket-Key string.
+;;;
+;;; Returns:
+;;;   :cstr -- the 28-character base64 accept value (static storage).
+;;;
+;;; Since: NAME-V0 (was ws-client's ws-accept-key, since WC1)
+(defn ws-accept-key [key : cstr] : cstr
+  ```c
+  static char out[64];
+  wscore__accept((const char *)key, out);
+  return out;
+  ```)
+
+) ;; end defmodule ws-core/handshake

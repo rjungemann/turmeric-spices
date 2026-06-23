@@ -15,6 +15,12 @@ include path the spice still builds and `ws://` works, while a `wss://` connect
 returns a null handle whose `ws-last-error` explains how to enable TLS. This is
 the same optional-TLS pattern `tur-http` uses.
 
+The connection handle `WsConn`, the frame view `WsFrame`, the frame predicates,
+and `ws-accept-key` come from the shared [`ws-core`](../ws-core) spice
+(NAME-V0), so `ws-client` and `ws-server` speak one set of types -- import
+those names from `ws-core`. `ws-client` exports only the client-side behaviour
+(`ws-connect` and friends).
+
 It is a blocking, single-threaded client -- ideal for chat bots, market-data
 feeds, dev-tools bridges, and echo tests. See *Non-goals* below for what it
 deliberately leaves out.
@@ -91,23 +97,26 @@ for `ws://`. For `wss://`, run `tur fetch` once to build mbedTLS.
 | `ws-close` | `(WsConn) -> void` | Closing handshake, then close the socket. |
 | `ws-free` | `(WsConn) -> void` | Release all resources (fd + memory + TLS). |
 | `ws-set-timeout` | `(WsConn int) -> void` | Set receive timeout in ms (0 = block forever). |
-| `ws-accept-key` | `(cstr) -> cstr` | Compute `Sec-WebSocket-Accept` for a key (handshake crypto). |
+
+`WsConn` is defined in [`ws-core`](../ws-core); `ws-accept-key` and the frame
+accessors / predicates below also live there (NAME-V0) -- import them from
+`ws-core`.
 
 ### Reading a frame
 
-`ws-recv` returns an opaque `WsFrame` handle -- a **view into the connection's
-internal reassembly buffer**, valid only until the next `ws-recv` or `ws-free`.
-Copy the payload if you need it longer.
+`ws-recv` returns an opaque `WsFrame` handle (from `ws-core/frame`) -- a **view
+into the connection's internal reassembly buffer**, valid only until the next
+`ws-recv` or `ws-free`. Copy the payload if you need it longer.
 
-| Accessor | Returns |
+| Accessor (`ws-core/frame`) | Returns |
 |---|---|
 | `ws-frame-kind` | `int` -- `1` text, `2` binary, `8` close, `9` ping, `10` pong, `-1` timeout, `-2` error |
 | `ws-frame-data` | `ptr<void>` -- payload pointer |
 | `ws-frame-len` | `int` -- payload length |
 | `ws-frame-text` | `cstr` -- payload as a NUL-terminated string |
 
-Predicates: `ws-text?`, `ws-binary?`, `ws-ping?`, `ws-pong?`, `ws-closed?`,
-`ws-timeout?`, `ws-error?`.
+Predicates (`ws-core/frame`): `ws-text?`, `ws-binary?`, `ws-ping?`, `ws-pong?`,
+`ws-closed?`, `ws-timeout?`, `ws-error?`.
 
 `ws-recv` reassembles fragmented messages, answers Ping frames with a Pong
 automatically (then surfaces the Ping), and surfaces Pong and Close frames.
