@@ -1,0 +1,838 @@
+;; ws-client/client.tur -- RFC 6455 WebSocket client.
+;;
+;; Plain ws:// connections go over raw POSIX sockets and have no native
+;; dependencies (SHA-1 + base64 for the handshake are implemented inline).
+;; wss:// is implemented via mbedTLS and is gated at compile time on
+;; `__has_include(<mbedtls/ssl.h>)` -- exactly like the tur-http spice. When
+;; the mbedTLS headers are not on the include path the spice still builds and
+;; ws:// works; a wss:// connect returns a null handle whose error message
+;; (see ws-last-error) tells the caller to rebuild with mbedTLS available.
+;;
+;; Design notes vs. docs/upcoming/v1/websocket-client-plan.md:
+;;
+;;   * The plan sketches `ws-recv` returning a `(defstruct WsFrame ...)` by
+;;     value. This spice follows the house style used by tur-http/tur-httpd
+;;     instead: `WsFrame` is an opaque handle (a view into the connection's
+;;     internal reassembly buffer) read through accessors -- ws-frame-kind,
+;;     ws-frame-data, ws-frame-len, ws-frame-text -- plus kind predicates.
+;;     The borrow-until-next-recv ownership the plan describes falls straight
+;;     out of this: the handle points into the WsConn, valid until the next
+;;     ws-recv / ws-free. Callers that need the payload longer memcpy it.
+;;
+;;   * The plan says ws-connect "throws on failure". Turmeric spices model
+;;     fallible constructors with a null sentinel (cf. tls-wrap-fd), so
+;;     ws-connect returns a null WsConn on failure; test with ws-conn-null?
+;;     and read ws-last-error for the reason.
+;;
+;; Frame codec: client->server frames are always masked (RFC 6455 5.3);
+;; server->client frames are never masked. Fragmented data messages are
+;; reassembled before being surfaced. Ping frames are answered with a Pong
+;; automatically and then surfaced to the caller.
+
+(defmodule ws-client/client
+  (export WsConn WsFrame
+          ws-connect ws-conn-null? ws-last-error
+          ws-send ws-send-bytes ws-recv
+          ws-close ws-free ws-set-timeout
+          ws-accept-key
+          ws-frame-kind ws-frame-data ws-frame-len ws-frame-text
+          ws-text? ws-binary? ws-ping? ws-pong? ws-closed? ws-timeout? ws-error?)
+
+;; ---------------------------------------------------------------------------
+;; file-scope C: shared types + static helpers.
+;;
+;; Each `defn` inline-C body is emitted into the same translation unit as this
+;; block (the tur-http spice relies on the same property for its file-scope
+;; yyjson include), so the statics below are visible to every op without the
+;; per-defn typedef duplication other spices use.
+;; ---------------------------------------------------------------------------
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <netdb.h>
+
+/* TLS is optional -- detect mbedTLS at compile time. When absent, ws://
+   still works and wss:// connect returns a runtime error. */
+#if defined(__has_include)
+#  if __has_include(<mbedtls/ssl.h>)
+#    define __TUR_WS_TLS 1
+#  endif
+#endif
+
+#ifdef __TUR_WS_TLS
+#include <mbedtls/net_sockets.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/error.h>
+#endif
+
+/* WsFrame kinds. The data opcodes match the wire opcodes; the synthetic
+   negatives are surfaced by ws-recv for non-frame conditions. */
+#define WS_KIND_TEXT     1
+#define WS_KIND_BINARY   2
+#define WS_KIND_CLOSE    8
+#define WS_KIND_PING     9
+#define WS_KIND_PONG    10
+#define WS_KIND_TIMEOUT (-1)
+#define WS_KIND_ERROR   (-2)
+
+typedef struct { int kind; unsigned char *data; long len; } ws_frame_t;
+
+#ifdef __TUR_WS_TLS
+typedef struct {
+  mbedtls_net_context      net;
+  mbedtls_entropy_context  entropy;
+  mbedtls_ctr_drbg_context ctr_drbg;
+  mbedtls_ssl_context      ssl;
+  mbedtls_ssl_config       conf;
+} ws_tls_t;
+#endif
+
+typedef struct {
+  int            fd;      /* underlying TCP fd (also net.fd when is_tls) */
+  int            is_tls;
+  void          *tls;     /* ws_tls_t* when is_tls, else NULL */
+  unsigned char *rbuf;    /* reassembly buffer for the current message */
+  size_t         rcap;
+  size_t         rlen;
+  ws_frame_t     frame;   /* view returned by ws-recv; points into rbuf */
+} ws_conn_t;
+
+/* last-error scratch, surfaced via ws-last-error. */
+static char ws__errbuf[256];
+static void ws__set_err(const char *m) {
+  snprintf(ws__errbuf, sizeof(ws__errbuf), "%s", m ? m : "unknown error");
+}
+
+/* --- randomness ---------------------------------------------------------- */
+static void ws__rand_bytes(unsigned char *b, size_t n) {
+  FILE *f = fopen("/dev/urandom", "rb");
+  if (f) { size_t r = fread(b, 1, n, f); fclose(f); if (r == n) return; }
+  for (size_t i = 0; i < n; i++) b[i] = (unsigned char)(rand() & 0xff);
+}
+
+/* --- base64 (encode only; handshake needs no decode) --------------------- */
+static void ws__b64(const unsigned char *in, size_t len, char *out) {
+  static const char t[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t i = 0, o = 0;
+  while (len - i >= 3) {
+    out[o++] = t[in[i] >> 2];
+    out[o++] = t[((in[i] & 3) << 4) | (in[i+1] >> 4)];
+    out[o++] = t[((in[i+1] & 15) << 2) | (in[i+2] >> 6)];
+    out[o++] = t[in[i+2] & 63];
+    i += 3;
+  }
+  if (len - i == 1) {
+    out[o++] = t[in[i] >> 2];
+    out[o++] = t[(in[i] & 3) << 4];
+    out[o++] = '=';
+    out[o++] = '=';
+  } else if (len - i == 2) {
+    out[o++] = t[in[i] >> 2];
+    out[o++] = t[((in[i] & 3) << 4) | (in[i+1] >> 4)];
+    out[o++] = t[(in[i+1] & 15) << 2];
+    out[o++] = '=';
+  }
+  out[o] = '\0';
+}
+
+/* --- SHA-1 (RFC 3174) ---------------------------------------------------- */
+static void ws__sha1(const unsigned char *data, size_t len, unsigned char out[20]) {
+  uint32_t h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE,
+           h3 = 0x10325476, h4 = 0xC3D2E1F0;
+  uint64_t ml = (uint64_t)len * 8;
+  size_t total = ((len + 8) / 64 + 1) * 64;
+  unsigned char *msg = (unsigned char *)calloc(total, 1);
+  if (!msg) return;
+  memcpy(msg, data, len);
+  msg[len] = 0x80;
+  for (int i = 0; i < 8; i++)
+    msg[total - 1 - i] = (unsigned char)((ml >> (8 * i)) & 0xff);
+  for (size_t off = 0; off < total; off += 64) {
+    uint32_t w[80];
+    for (int i = 0; i < 16; i++)
+      w[i] = ((uint32_t)msg[off + i*4]     << 24)
+           | ((uint32_t)msg[off + i*4 + 1] << 16)
+           | ((uint32_t)msg[off + i*4 + 2] << 8)
+           | ((uint32_t)msg[off + i*4 + 3]);
+    for (int i = 16; i < 80; i++) {
+      uint32_t v = w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16];
+      w[i] = (v << 1) | (v >> 31);
+    }
+    uint32_t a = h0, b = h1, c = h2, d = h3, e = h4;
+    for (int i = 0; i < 80; i++) {
+      uint32_t f, k;
+      if (i < 20)      { f = (b & c) | ((~b) & d);          k = 0x5A827999; }
+      else if (i < 40) { f = b ^ c ^ d;                     k = 0x6ED9EBA1; }
+      else if (i < 60) { f = (b & c) | (b & d) | (c & d);   k = 0x8F1BBCDC; }
+      else             { f = b ^ c ^ d;                     k = 0xCA62C1D6; }
+      uint32_t tmp = ((a << 5) | (a >> 27)) + f + e + k + w[i];
+      e = d; d = c; c = (b << 30) | (b >> 2); b = a; a = tmp;
+    }
+    h0 += a; h1 += b; h2 += c; h3 += d; h4 += e;
+  }
+  free(msg);
+  uint32_t hh[5] = { h0, h1, h2, h3, h4 };
+  for (int i = 0; i < 5; i++) {
+    out[i*4]     = (unsigned char)(hh[i] >> 24);
+    out[i*4 + 1] = (unsigned char)(hh[i] >> 16);
+    out[i*4 + 2] = (unsigned char)(hh[i] >> 8);
+    out[i*4 + 3] = (unsigned char)(hh[i]);
+  }
+}
+
+/* Sec-WebSocket-Accept = base64(sha1(key + GUID)). `out` needs >= 29 bytes. */
+static void ws__accept(const char *key, char *out) {
+  static const char GUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+  char buf[128];
+  int n = snprintf(buf, sizeof(buf), "%s%s", key, GUID);
+  unsigned char digest[20];
+  ws__sha1((const unsigned char *)buf, (size_t)n, digest);
+  ws__b64(digest, 20, out);
+}
+
+/* --- transport: TLS read/write (gated) ----------------------------------- */
+#ifdef __TUR_WS_TLS
+static long ws__tls_read(ws_conn_t *c, unsigned char *b, size_t n) {
+  ws_tls_t *t = (ws_tls_t *)c->tls;
+  int r = mbedtls_ssl_read(&t->ssl, b, n);
+  if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+    errno = EAGAIN; return -1;            /* SO_RCVTIMEO fired -> timeout */
+  }
+  if (r == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) return 0;
+  return r;
+}
+static long ws__tls_write(ws_conn_t *c, const unsigned char *b, size_t n) {
+  ws_tls_t *t = (ws_tls_t *)c->tls;
+  int r;
+  do { r = mbedtls_ssl_write(&t->ssl, b, n); }
+  while (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE);
+  return r;
+}
+#endif
+
+/* --- transport: dispatched send_all / recv_n ----------------------------- */
+static long ws__send_all(ws_conn_t *c, const unsigned char *b, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    long s;
+    if (c->is_tls) {
+#ifdef __TUR_WS_TLS
+      s = ws__tls_write(c, b + off, n - off);
+#else
+      return -1;
+#endif
+    } else {
+      s = (long)send(c->fd, b + off, n - off, 0);
+    }
+    if (s <= 0) return -1;
+    off += (size_t)s;
+  }
+  return (long)n;
+}
+
+/* Fill exactly n bytes. Returns 1 ok, 0 peer-closed, -2 timeout, -1 error. */
+static int ws__recv_n(ws_conn_t *c, unsigned char *buf, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    long r;
+    if (c->is_tls) {
+#ifdef __TUR_WS_TLS
+      r = ws__tls_read(c, buf + off, n - off);
+#else
+      return -1;
+#endif
+    } else {
+      r = (long)recv(c->fd, buf + off, n - off, 0);
+    }
+    if (r == 0) return 0;
+    if (r < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return -2;
+      return -1;
+    }
+    off += (size_t)r;
+  }
+  return 1;
+}
+
+/* --- framing ------------------------------------------------------------- */
+/* Send one masked frame. Returns bytes handed to the transport, or -1. */
+static long ws__send_frame(ws_conn_t *c, int opcode,
+                           const unsigned char *payload, size_t len) {
+  unsigned char hdr[14];
+  size_t hl = 0;
+  hdr[hl++] = (unsigned char)(0x80 | (opcode & 0x0f));   /* FIN + opcode */
+  if (len < 126) {
+    hdr[hl++] = (unsigned char)(0x80 | len);
+  } else if (len <= 0xffff) {
+    hdr[hl++] = 0x80 | 126;
+    hdr[hl++] = (unsigned char)((len >> 8) & 0xff);
+    hdr[hl++] = (unsigned char)(len & 0xff);
+  } else {
+    hdr[hl++] = 0x80 | 127;
+    for (int i = 7; i >= 0; i--)
+      hdr[hl++] = (unsigned char)((len >> (8 * i)) & 0xff);
+  }
+  unsigned char key[4];
+  ws__rand_bytes(key, 4);
+  memcpy(hdr + hl, key, 4); hl += 4;
+  if (ws__send_all(c, hdr, hl) < 0) return -1;
+
+  unsigned char chunk[4096];
+  size_t off = 0;
+  while (off < len) {
+    size_t take = len - off;
+    if (take > sizeof(chunk)) take = sizeof(chunk);
+    for (size_t i = 0; i < take; i++)
+      chunk[i] = (unsigned char)(payload[off + i] ^ key[(off + i) & 3]);
+    if (ws__send_all(c, chunk, take) < 0) return -1;
+    off += take;
+  }
+  return (long)(hl + len);
+}
+
+/* Read one frame. On success mallocs *payload (caller frees) and reports
+   fin/opcode. Returns 1 ok, 0 peer-closed, -2 timeout, -1 error. */
+static int ws__read_one(ws_conn_t *c, int *fin, int *opcode,
+                        unsigned char **payload, size_t *plen) {
+  unsigned char h2[2];
+  int st = ws__recv_n(c, h2, 2);
+  if (st != 1) return st;
+  *fin    = (h2[0] & 0x80) ? 1 : 0;
+  *opcode = h2[0] & 0x0f;
+  int masked = (h2[1] & 0x80) ? 1 : 0;
+  uint64_t len = h2[1] & 0x7f;
+  if (len == 126) {
+    unsigned char e[2];
+    if ((st = ws__recv_n(c, e, 2)) != 1) return st;
+    len = ((uint64_t)e[0] << 8) | e[1];
+  } else if (len == 127) {
+    unsigned char e[8];
+    if ((st = ws__recv_n(c, e, 8)) != 1) return st;
+    len = 0;
+    for (int i = 0; i < 8; i++) len = (len << 8) | e[i];
+  }
+  unsigned char mkey[4] = {0,0,0,0};
+  if (masked) {                          /* RFC-compliant servers won't set */
+    if ((st = ws__recv_n(c, mkey, 4)) != 1) return st;
+  }
+  unsigned char *buf = (unsigned char *)malloc((size_t)len + 1);
+  if (!buf) return -1;
+  if (len > 0) {
+    if ((st = ws__recv_n(c, buf, (size_t)len)) != 1) { free(buf); return st; }
+    if (masked)
+      for (uint64_t i = 0; i < len; i++) buf[i] ^= mkey[i & 3];
+  }
+  buf[len] = '\0';
+  *payload = buf;
+  *plen = (size_t)len;
+  return 1;
+}
+
+/* Append bytes to the connection's reassembly buffer (NUL-kept at tail). */
+static int ws__rbuf_append(ws_conn_t *c, const unsigned char *p, size_t n) {
+  if (c->rlen + n + 1 > c->rcap) {
+    size_t cap = c->rcap ? c->rcap : 256;
+    while (cap < c->rlen + n + 1) cap *= 2;
+    unsigned char *nb = (unsigned char *)realloc(c->rbuf, cap);
+    if (!nb) return -1;
+    c->rbuf = nb; c->rcap = cap;
+  }
+  memcpy(c->rbuf + c->rlen, p, n);
+  c->rlen += n;
+  c->rbuf[c->rlen] = '\0';
+  return 0;
+}
+
+/* --- handshake ----------------------------------------------------------- */
+static int ws__connect_plain(const char *host, const char *port) {
+  struct addrinfo hints, *ai = NULL;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  if (getaddrinfo(host, port, &hints, &ai) != 0 || !ai) return -1;
+  int fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+  if (fd < 0 || connect(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) != 0) {
+    if (fd >= 0) close(fd);
+    freeaddrinfo(ai);
+    return -1;
+  }
+  freeaddrinfo(ai);
+  return fd;
+}
+
+/* Perform the RFC 6455 4 client handshake over an already-connected conn. */
+static int ws__handshake(ws_conn_t *c, const char *host, const char *port,
+                         const char *path) {
+  unsigned char nonce[16];
+  ws__rand_bytes(nonce, 16);
+  char key[32];
+  ws__b64(nonce, 16, key);
+
+  char req[1024];
+  int n = snprintf(req, sizeof(req),
+    "GET %s HTTP/1.1\r\n"
+    "Host: %s:%s\r\n"
+    "Upgrade: websocket\r\n"
+    "Connection: Upgrade\r\n"
+    "Sec-WebSocket-Key: %s\r\n"
+    "Sec-WebSocket-Version: 13\r\n"
+    "\r\n",
+    path, host, port, key);
+  if (ws__send_all(c, (const unsigned char *)req, (size_t)n) < 0) {
+    ws__set_err("handshake: failed to send upgrade request");
+    return -1;
+  }
+
+  /* Read the response head one byte at a time so we never swallow frame
+     bytes that may follow the terminating CRLFCRLF. */
+  char resp[4096];
+  size_t rl = 0;
+  while (rl < sizeof(resp) - 1) {
+    unsigned char ch;
+    int st = ws__recv_n(c, &ch, 1);
+    if (st != 1) { ws__set_err("handshake: connection closed before response"); return -1; }
+    resp[rl++] = (char)ch;
+    if (rl >= 4 && resp[rl-4]=='\r' && resp[rl-3]=='\n'
+                && resp[rl-2]=='\r' && resp[rl-1]=='\n') break;
+  }
+  resp[rl] = '\0';
+
+  int status = 0;
+  if (sscanf(resp, "HTTP/%*s %d", &status) != 1 || status != 101) {
+    ws__set_err("handshake: server did not return 101 Switching Protocols");
+    return -1;
+  }
+  /* Verify Sec-WebSocket-Accept == base64(sha1(key + GUID)). */
+  char expect[64];
+  ws__accept(key, expect);
+  if (!strstr(resp, expect)) {
+    ws__set_err("handshake: Sec-WebSocket-Accept mismatch");
+    return -1;
+  }
+  return 0;
+}
+```
+
+;;; WsConn -- opaque handle to an open WebSocket connection.
+;;;
+;;; Produced by ws-connect; released by ws-free. Stored as int64_t under the
+;;; hood (a `ws_conn_t*`). A null handle (0) is the failure sentinel; test
+;;; with ws-conn-null?.
+;;;
+;;; Since: WC1
+(defopaque WsConn :int)
+
+;;; WsFrame -- opaque handle to the frame most recently returned by ws-recv.
+;;;
+;;; A view into the connection's internal reassembly buffer: ws-frame-data /
+;;; ws-frame-text point into storage that is valid only until the next
+;;; ws-recv or ws-free on the same connection. Callers that need the payload
+;;; longer must copy it. Read fields via ws-frame-kind / ws-frame-data /
+;;; ws-frame-len / ws-frame-text and the ws-text? ... ws-error? predicates.
+;;;
+;;; Since: WC1
+(defopaque WsFrame :int)
+
+;;; ws-connect -- open a WebSocket connection to uri.
+;;;
+;;; Parameters:
+;;;   uri -- a ws:// or wss:// URI string (e.g. "ws://localhost:9000/feed").
+;;;
+;;; Returns:
+;;;   A WsConn handle on success; a null handle on failure (test with
+;;;   ws-conn-null?, then read ws-last-error). wss:// requires the spice to
+;;;   have been built with mbedTLS available.
+;;;
+;;; Example:
+;;;   (let [c (ws-connect "ws://localhost:9000/feed")]
+;;;     (when (not (ws-conn-null? c)) (ws-send c "hi") (ws-free c)))
+;;;
+;;; Since: WC1
+(defn ws-connect [uri : cstr] : WsConn
+  ```c
+  const char *raw = (const char *)uri;
+  int use_tls;
+  const char *hoststart;
+  if (strncmp(raw, "wss://", 6) == 0)      { use_tls = 1; hoststart = raw + 6; }
+  else if (strncmp(raw, "ws://", 5) == 0)  { use_tls = 0; hoststart = raw + 5; }
+  else { ws__set_err("ws-connect: uri must start with ws:// or wss://"); return 0; }
+
+  char host[512], port[8], path[3072];
+  const char *slash = strchr(hoststart, '/');
+  const char *colon = strchr(hoststart, ':');
+  if (slash && colon && colon < slash) {
+    size_t hl = (size_t)(colon - hoststart);
+    memcpy(host, hoststart, hl); host[hl] = '\0';
+    size_t pl = (size_t)(slash - colon - 1);
+    memcpy(port, colon + 1, pl); port[pl] = '\0';
+    snprintf(path, sizeof(path), "%s", slash);
+  } else if (slash) {
+    size_t hl = (size_t)(slash - hoststart);
+    memcpy(host, hoststart, hl); host[hl] = '\0';
+    snprintf(port, sizeof(port), "%s", use_tls ? "443" : "80");
+    snprintf(path, sizeof(path), "%s", slash);
+  } else {
+    snprintf(host, sizeof(host), "%s", hoststart);
+    snprintf(port, sizeof(port), "%s", use_tls ? "443" : "80");
+    strcpy(path, "/");
+  }
+
+  ws_conn_t *c = (ws_conn_t *)calloc(1, sizeof(*c));
+  if (!c) { ws__set_err("ws-connect: out of memory"); return 0; }
+  c->fd = -1;
+
+  if (use_tls) {
+  #ifdef __TUR_WS_TLS
+    ws_tls_t *t = (ws_tls_t *)calloc(1, sizeof(*t));
+    if (!t) { free(c); ws__set_err("ws-connect: out of memory"); return 0; }
+    mbedtls_net_init(&t->net);
+    mbedtls_ssl_init(&t->ssl);
+    mbedtls_ssl_config_init(&t->conf);
+    mbedtls_entropy_init(&t->entropy);
+    mbedtls_ctr_drbg_init(&t->ctr_drbg);
+    const char *pers = "tur_ws_client";
+    mbedtls_ctr_drbg_seed(&t->ctr_drbg, mbedtls_entropy_func, &t->entropy,
+                          (const unsigned char *)pers, strlen(pers));
+    int rc;
+    if ((rc = mbedtls_net_connect(&t->net, host, port,
+                                  MBEDTLS_NET_PROTO_TCP)) != 0) {
+      char e[128]; mbedtls_strerror(rc, e, sizeof(e));
+      ws__set_err(e);
+      mbedtls_net_free(&t->net); free(t); free(c);
+      return 0;
+    }
+    mbedtls_ssl_config_defaults(&t->conf, MBEDTLS_SSL_IS_CLIENT,
+                                MBEDTLS_SSL_TRANSPORT_STREAM,
+                                MBEDTLS_SSL_PRESET_DEFAULT);
+    mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_NONE);
+    mbedtls_ssl_conf_rng(&t->conf, mbedtls_ctr_drbg_random, &t->ctr_drbg);
+    mbedtls_ssl_setup(&t->ssl, &t->conf);
+    mbedtls_ssl_set_hostname(&t->ssl, host);
+    mbedtls_ssl_set_bio(&t->ssl, &t->net, mbedtls_net_send, mbedtls_net_recv, NULL);
+    while ((rc = mbedtls_ssl_handshake(&t->ssl)) != 0) {
+      if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        char e[128]; mbedtls_strerror(rc, e, sizeof(e));
+        ws__set_err(e);
+        mbedtls_ssl_free(&t->ssl); mbedtls_ssl_config_free(&t->conf);
+        mbedtls_ctr_drbg_free(&t->ctr_drbg); mbedtls_entropy_free(&t->entropy);
+        mbedtls_net_free(&t->net); free(t); free(c);
+        return 0;
+      }
+    }
+    c->is_tls = 1; c->tls = t; c->fd = t->net.fd;
+  #else
+    free(c);
+    ws__set_err("wss:// not supported: rebuild tur-ws-client with mbedTLS available");
+    return 0;
+  #endif
+  } else {
+    int fd = ws__connect_plain(host, port);
+    if (fd < 0) { free(c); ws__set_err("ws-connect: TCP connect failed"); return 0; }
+    c->fd = fd;
+  }
+
+  if (ws__handshake(c, host, port, path) != 0) {
+  #ifdef __TUR_WS_TLS
+    if (c->is_tls) {
+      ws_tls_t *t = (ws_tls_t *)c->tls;
+      mbedtls_ssl_free(&t->ssl); mbedtls_ssl_config_free(&t->conf);
+      mbedtls_ctr_drbg_free(&t->ctr_drbg); mbedtls_entropy_free(&t->entropy);
+      mbedtls_net_free(&t->net); free(t); free(c);
+      return 0;
+    }
+  #endif
+    if (c->fd >= 0) close(c->fd);
+    free(c);
+    return 0;
+  }
+  return (int64_t)(intptr_t)c;
+  ```)
+
+;;; ws-conn-null? -- true if `conn` is the failure sentinel from ws-connect.
+;;; Since: WC1
+(defn ws-conn-null? [conn : WsConn] : bool
+  ```c
+  return conn == 0;
+  ```)
+
+;;; ws-last-error -- human-readable reason for the most recent failure.
+;;;
+;;; Returns static storage (do not free); meaningful immediately after a
+;;; ws-connect that returned a null handle.
+;;;
+;;; Since: WC1
+(defn ws-last-error [] : cstr
+  ```c
+  return ws__errbuf[0] ? ws__errbuf : (char *)"no error";
+  ```)
+
+;;; ws-send -- send a UTF-8 text frame.
+;;;
+;;; Parameters:
+;;;   conn -- WsConn handle.
+;;;   msg  -- null-terminated UTF-8 string.
+;;;
+;;; Returns:
+;;;   Number of bytes handed to the transport, or negative on error.
+;;;
+;;; Since: WC1
+(defn ws-send [conn : WsConn msg : cstr] : int
+  ```c
+  if (conn == 0) return -1;
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  const char *m = (const char *)msg;
+  return ws__send_frame(c, 0x1, (const unsigned char *)m, m ? strlen(m) : 0);
+  ```)
+
+;;; ws-send-bytes -- send a binary frame.
+;;;
+;;; Parameters:
+;;;   conn -- WsConn handle.
+;;;   ptr  -- pointer to the payload buffer.
+;;;   len  -- byte length of the payload.
+;;;
+;;; Returns:
+;;;   Number of bytes handed to the transport, or negative on error.
+;;;
+;;; Since: WC1
+(defn ws-send-bytes [conn : WsConn ptr : ptr<void> len : int] : int
+  ```c
+  if (conn == 0) return -1;
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  return ws__send_frame(c, 0x2, (const unsigned char *)ptr, (size_t)len);
+  ```)
+
+;;; ws-recv -- receive the next WebSocket message.
+;;;
+;;; Blocks until a complete (possibly reassembled) message arrives, or the
+;;; receive timeout fires. Ping frames are answered with a Pong automatically
+;;; and then surfaced; Pong and Close frames are surfaced to the caller.
+;;;
+;;; Parameters:
+;;;   conn -- WsConn handle.
+;;;
+;;; Returns:
+;;;   A WsFrame handle (a view valid until the next ws-recv / ws-free). Its
+;;;   kind is :text / :binary / :ping / :pong / :close / :timeout / :error.
+;;;
+;;; Since: WC1
+(defn ws-recv [conn : WsConn] : WsFrame
+  ```c
+  if (conn == 0) return 0;
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  c->rlen = 0;
+  if (c->rbuf) c->rbuf[0] = '\0';
+  int data_opcode = 0;
+
+  for (;;) {
+    int fin, opcode;
+    unsigned char *payload = NULL;
+    size_t plen = 0;
+    int st = ws__read_one(c, &fin, &opcode, &payload, &plen);
+    if (st == -2) {
+      c->frame.kind = WS_KIND_TIMEOUT; c->frame.data = NULL; c->frame.len = 0;
+      return (int64_t)(intptr_t)&c->frame;
+    }
+    if (st <= 0) {
+      c->frame.kind = (st == 0) ? WS_KIND_CLOSE : WS_KIND_ERROR;
+      c->frame.data = NULL; c->frame.len = 0;
+      return (int64_t)(intptr_t)&c->frame;
+    }
+
+    if (opcode == 0x8) {                 /* close */
+      ws__send_frame(c, 0x8, payload, plen);   /* echo close */
+      ws__rbuf_append(c, payload, plen);
+      free(payload);
+      c->frame.kind = WS_KIND_CLOSE;
+      c->frame.data = c->rbuf; c->frame.len = (long)c->rlen;
+      return (int64_t)(intptr_t)&c->frame;
+    }
+    if (opcode == 0x9) {                 /* ping -> auto pong, then surface */
+      ws__send_frame(c, 0xA, payload, plen);
+      ws__rbuf_append(c, payload, plen);
+      free(payload);
+      c->frame.kind = WS_KIND_PING;
+      c->frame.data = c->rbuf; c->frame.len = (long)c->rlen;
+      return (int64_t)(intptr_t)&c->frame;
+    }
+    if (opcode == 0xA) {                 /* pong */
+      ws__rbuf_append(c, payload, plen);
+      free(payload);
+      c->frame.kind = WS_KIND_PONG;
+      c->frame.data = c->rbuf; c->frame.len = (long)c->rlen;
+      return (int64_t)(intptr_t)&c->frame;
+    }
+
+    /* data frame (text/binary/continuation) -- reassemble */
+    if (opcode != 0x0) data_opcode = opcode;
+    ws__rbuf_append(c, payload, plen);
+    free(payload);
+    if (fin) {
+      c->frame.kind = (data_opcode == 0x2) ? WS_KIND_BINARY : WS_KIND_TEXT;
+      c->frame.data = c->rbuf; c->frame.len = (long)c->rlen;
+      return (int64_t)(intptr_t)&c->frame;
+    }
+    /* else: not final -- keep reading continuation frames */
+  }
+  ```)
+
+;;; ws-close -- initiate the WebSocket closing handshake.
+;;;
+;;; Sends a Close frame, drains until the peer's Close echo (best-effort,
+;;; bounded), then closes the underlying socket. The handle's memory is still
+;;; owned by the caller -- call ws-free afterward.
+;;;
+;;; Since: WC1
+(defn ws-close [conn : WsConn] : void
+  ```c
+  if (conn == 0) return;
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  ws__send_frame(c, 0x8, NULL, 0);
+  for (int i = 0; i < 8; i++) {
+    int fin, opcode; unsigned char *p = NULL; size_t pl = 0;
+    int st = ws__read_one(c, &fin, &opcode, &p, &pl);
+    free(p);
+    if (st != 1 || opcode == 0x8) break;
+  }
+  if (c->fd >= 0) { close(c->fd); c->fd = -1; }
+  ```)
+
+;;; ws-free -- unconditionally release all resources for conn.
+;;;
+;;; Closes the fd if still open, tears down any TLS state, and frees the
+;;; handle. Safe on a null handle.
+;;;
+;;; Since: WC1
+(defn ws-free [conn : WsConn] : void
+  ```c
+  if (conn == 0) return;
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  #ifdef __TUR_WS_TLS
+  if (c->is_tls && c->tls) {
+    ws_tls_t *t = (ws_tls_t *)c->tls;
+    mbedtls_ssl_free(&t->ssl); mbedtls_ssl_config_free(&t->conf);
+    mbedtls_ctr_drbg_free(&t->ctr_drbg); mbedtls_entropy_free(&t->entropy);
+    mbedtls_net_free(&t->net);            /* closes fd for the TLS path */
+    free(t);
+    c->fd = -1;
+  }
+  #endif
+  if (c->fd >= 0) close(c->fd);
+  if (c->rbuf) free(c->rbuf);
+  free(c);
+  ```)
+
+;;; ws-set-timeout -- set the receive timeout in milliseconds.
+;;;
+;;; A value of 0 disables the timeout (ws-recv blocks indefinitely). When the
+;;; timeout fires, ws-recv returns a frame whose kind is :timeout.
+;;;
+;;; Parameters:
+;;;   conn -- WsConn handle.
+;;;   ms   -- timeout in milliseconds.
+;;;
+;;; Since: WC3
+(defn ws-set-timeout [conn : WsConn ms : int] : void
+  ```c
+  if (conn == 0) return;
+  ws_conn_t *c = (ws_conn_t *)(intptr_t)conn;
+  struct timeval tv;
+  tv.tv_sec  = (time_t)(ms / 1000);
+  tv.tv_usec = (suseconds_t)((ms % 1000) * 1000);
+  setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  ```)
+
+;;; ws-accept-key -- compute the Sec-WebSocket-Accept value for a client key.
+;;;
+;;; accept = base64(sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")). This
+;;; is the exact transform a server applies to Sec-WebSocket-Key; exposed so
+;;; the handshake crypto is unit-testable against the RFC 6455 4.2.2 vector.
+;;;
+;;; Parameters:
+;;;   key -- the base64 Sec-WebSocket-Key string.
+;;;
+;;; Returns:
+;;;   :cstr -- the 28-character base64 accept value (static storage).
+;;;
+;;; Since: WC1
+(defn ws-accept-key [key : cstr] : cstr
+  ```c
+  static char out[64];
+  ws__accept((const char *)key, out);
+  return out;
+  ```)
+
+;;; ws-frame-kind -- integer kind of a frame (see the WS_KIND_* constants).
+;;; Since: WC1
+(defn ws-frame-kind [frame : WsFrame] : int
+  ```c
+  if (frame == 0) return WS_KIND_ERROR;
+  return (int64_t)((ws_frame_t *)(intptr_t)frame)->kind;
+  ```)
+
+;;; ws-frame-data -- pointer to the frame payload (valid until next ws-recv).
+;;; Since: WC1
+(defn ws-frame-data [frame : WsFrame] : ptr<void>
+  ```c
+  if (frame == 0) return NULL;
+  return ((ws_frame_t *)(intptr_t)frame)->data;
+  ```)
+
+;;; ws-frame-len -- payload length of a frame, in bytes.
+;;; Since: WC1
+(defn ws-frame-len [frame : WsFrame] : int
+  ```c
+  if (frame == 0) return 0;
+  return (int64_t)((ws_frame_t *)(intptr_t)frame)->len;
+  ```)
+
+;;; ws-frame-text -- frame payload as a NUL-terminated string.
+;;;
+;;; Convenience for :text frames; the reassembly buffer is always
+;;; NUL-terminated. Valid until the next ws-recv / ws-free.
+;;; Since: WC1
+(defn ws-frame-text [frame : WsFrame] : cstr
+  ```c
+  if (frame == 0) return (char *)"";
+  ws_frame_t *f = (ws_frame_t *)(intptr_t)frame;
+  return f->data ? (char *)f->data : (char *)"";
+  ```)
+
+;;; ws-text? -- true if the frame is a text message. Since: WC1
+(defn ws-text? [frame : WsFrame] : bool
+  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_TEXT; ```)
+
+;;; ws-binary? -- true if the frame is a binary message. Since: WC1
+(defn ws-binary? [frame : WsFrame] : bool
+  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_BINARY; ```)
+
+;;; ws-ping? -- true if the frame is a ping (already auto-ponged). Since: WC1
+(defn ws-ping? [frame : WsFrame] : bool
+  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_PING; ```)
+
+;;; ws-pong? -- true if the frame is a pong. Since: WC1
+(defn ws-pong? [frame : WsFrame] : bool
+  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_PONG; ```)
+
+;;; ws-closed? -- true if the frame is a close (or the peer closed). Since: WC1
+(defn ws-closed? [frame : WsFrame] : bool
+  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_CLOSE; ```)
+
+;;; ws-timeout? -- true if ws-recv returned because the timeout fired. Since: WC3
+(defn ws-timeout? [frame : WsFrame] : bool
+  ```c return frame != 0 && ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_TIMEOUT; ```)
+
+;;; ws-error? -- true if ws-recv hit a transport error. Since: WC1
+(defn ws-error? [frame : WsFrame] : bool
+  ```c return frame == 0 || ((ws_frame_t *)(intptr_t)frame)->kind == WS_KIND_ERROR; ```)
+
+) ;; end defmodule ws-client/client

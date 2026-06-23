@@ -1,0 +1,35 @@
+(defpackage tur-ws-client
+  :name        "tur-ws-client"
+  :version     "0.1.0"
+  :description "RFC 6455 WebSocket client (ws:// and wss://) for Turmeric"
+  :license     "MIT"
+  :spices #{
+    ;; Workspace-local test framework, used only by tests/. Declared as a
+    ;; :path dep so `tur test tests` resolves test/suite + test/assert +
+    ;; test/runner from the sibling spice without a fetch or lockfile entry.
+    "test" #{:path "../test"}
+  }
+  :cmake-deps #{
+    ;; mbedTLS powers the wss:// path (TCP connect + TLS handshake + record
+    ;; I/O). It is optional: the ws-client module gates every TLS reference
+    ;; on __has_include(<mbedtls/ssl.h>), so when these headers are absent the
+    ;; spice still builds and ws:// works -- a wss:// connect just returns a
+    ;; null handle whose ws-last-error says to rebuild with mbedTLS. Same
+    ;; pattern and pin as tur-http / tur-tls.
+    "mbedtls" #{:url     "https://github.com/Mbed-TLS/mbedtls"
+               :ref     "v3.6.2"
+               :targets ["mbedtls" "mbedx509" "mbedcrypto"]
+               :options #{:BUILD_SHARED_LIBS "OFF"
+                         :ENABLE_TESTING    "OFF"
+                         :ENABLE_PROGRAMS   "OFF"}}
+  }
+  :exports #{
+    "ws-client/client" ["WsConn" "WsFrame"
+                        "ws-connect" "ws-conn-null?" "ws-last-error"
+                        "ws-send" "ws-send-bytes" "ws-recv"
+                        "ws-close" "ws-free" "ws-set-timeout"
+                        "ws-accept-key"
+                        "ws-frame-kind" "ws-frame-data" "ws-frame-len" "ws-frame-text"
+                        "ws-text?" "ws-binary?" "ws-ping?" "ws-pong?"
+                        "ws-closed?" "ws-timeout?" "ws-error?"]
+  })
