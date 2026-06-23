@@ -183,6 +183,13 @@ pattern as `ws-client`), so when mbedTLS is absent the spice still builds and
 `ws://` works; only `wss://` requires it. httpd terminates TLS via the
 [`tur-tls`](../tls) spice; see its `tools/gen-cert.sh` for a throwaway dev cert.
 
+## Using with tourist
+
+Building on the [`tourist`](../tourist) framework? Use
+[`tur-tourist-ws`](../tourist-ws), which wraps `ws-upgrade` in a `ws-route!`
+that drops straight into a tourist app's route list -- no need to wire up
+`server-start-conn` and call `ws-upgrade` by hand.
+
 ## Non-goals (v0)
 
 - No broadcast / pub-sub hub built in -- it is a few lines of user code

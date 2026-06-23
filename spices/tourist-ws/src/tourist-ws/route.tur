@@ -1,0 +1,77 @@
+;; tourist-ws/route.tur -- WebSocket routes for the tourist framework (TOUR-V0).
+;;
+;; `ws-route!` declares a tourist route that, when matched, upgrades the
+;; connection to a WebSocket and hands the upgraded WsConn to your handler. It
+;; slots into the ordinary tourist item list next to get!/post!/use!, so a
+;; single app serves REST and WebSocket endpoints side by side:
+;;
+;;   (tourist-conn 8080
+;;     (get! "/health" (fn [ctx] (text "ok")))
+;;     (ws-route! "/ws" (fn [ws]
+;;                        (let [f (ws-server-recv ws)]
+;;                          (ws-server-send ws (ws-frame-text f))
+;;                          (ws-server-close ws)))))
+;;
+;; IMPORTANT: serve the app with `tourist-conn`, not `tourist`. ws-route! needs
+;; the underlying httpd Conn (to perform the upgrade), and only the Conn-aware
+;; `tourist-conn` entry point makes it available (via tourist-request-conn).
+;; Under plain `tourist` the Conn is unavailable and the upgrade fails with a
+;; 400.
+;;
+;; How the hijack works: ws-route!'s generated tourist handler recovers the
+;; per-request Conn with tourist-request-conn and calls ws-upgrade. On success
+;; ws-upgrade marks the Conn upgraded, so httpd's worker skips its normal
+;; serialize/write/close -- the placeholder Response returned here is ignored
+;; and the socket the WebSocket handler owns is not double-closed. The route
+;; still flows through tourist's middleware chain like any other route; no
+;; special tourist-core interception is required (see the TOUR-V0 notes in the
+;; tourist spice's tourist-conn).
+
+(defmodule tourist-ws/route
+  (import tourist/dsl   :refer [get!])
+  (import tourist/app   :refer [tourist-request-conn])
+  (import tourist/types :refer [Ctx])
+  (import httpd/types   :refer [Request Response])
+  (import httpd/response :refer [resp-ok bad-request])
+  (import ws-server/server :refer [ws-upgrade])
+  (import ws-core/conn  :refer [WsConn])
+  (export ws-route!)
+
+;;; ws-route! -- declare a tourist route that upgrades to a WebSocket.
+;;;
+;;; Returns a tourist route Item (like get!) matching GET requests at `path`.
+;;; When a request matches, the connection is upgraded and `handler` is invoked
+;;; with the upgraded WsConn for the lifetime of the session; use
+;;; ws-server-recv / ws-server-send / ws-server-close (from ws-server) inside
+;;; it. Must be served via `tourist-conn` (not `tourist`).
+;;;
+;;; Parameters:
+;;;   path    -- route pattern string, e.g. "/ws" or "/feed/:room".
+;;;   handler -- (fn [WsConn] void), run after a successful upgrade.
+;;;
+;;; Returns:
+;;;   :int -- a tourist route Item, to be passed to tourist-conn.
+;;;
+;;; Example:
+;;;   (ws-route! "/echo"
+;;;     (fn [ws : WsConn] : void
+;;;       (let [f (ws-server-recv ws)]
+;;;         (ws-server-send ws (ws-frame-text f))
+;;;         (ws-server-close ws))))
+;;;
+;;; Since: TOUR-V0
+(defn ws-route! [path : cstr ^fat handler : (fn [WsConn] void)] : int
+  (get! path
+    (fn [ctx : Ctx] : Response
+      ;; Recover the live Conn for this request (tourist-conn stashed it) and
+      ;; perform the upgrade. ctx doubles as the Request -- its first fields
+      ;; mirror httpd's req struct, so req-header reads work through the cast.
+      (if (ok? (ws-upgrade (tourist-request-conn) (:: ctx :Request) handler))
+        ;; Upgraded: the worker skips this placeholder once conn-mark-upgraded!
+        ;; fired inside ws-upgrade.
+        (resp-ok "text/plain" "")
+        ;; Not a valid WebSocket request (or no Conn -- served via `tourist`
+        ;; rather than `tourist-conn`).
+        (bad-request "not a websocket request")))))
+
+) ;; end defmodule tourist-ws/route
