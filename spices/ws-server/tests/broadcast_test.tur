@@ -1,0 +1,342 @@
+;; tests/broadcast_test.tur -- WS2 live broadcast fan-out (self-contained).
+;;
+;; Demonstrates the broadcast-hub pattern the websocket-server-plan WS2 phase
+;; calls for: a `Mutex<vec<WsConn>>` shared registry, built entirely from user
+;; code on top of the ws-server spice surface (no framework). Every upgraded
+;; connection registers its WsConn in the hub; when any one client sends a
+;; message, the worker handling it fans the message out to *every* registered
+;; connection under the hub mutex. On disconnect a worker removes itself from
+;; the hub before its WsConn is freed, so a broadcast never touches a dead
+;; connection.
+;;
+;; The test drives three concurrent clients (one raw-socket peer per thread,
+;; same inline client as echo_test.tur -- it cannot be the ws-client spice,
+;; because both spices define `WsConn` / `WsFrame` opaques and so cannot share a
+;; program). All three connect, one sends a single text frame, and each of the
+;; three reader threads must receive that same frame -- proving the fan-out.
+;; This is a flat tests/*.tur so CI's `tur test tests` picks it up.
+;;
+;; thread-spawn-fn / thread-join live in stdlib/thread.tur, which is a T19-C/D
+;; library module deliberately NOT auto-loaded (same note as httpd's
+;; concurrent_test.tur); pull it in explicitly. stdlib/mutex.tur backs the hub
+;; lock; stdlib/vec.tur is auto-loaded.
+(load "stdlib/thread.tur")
+(load "stdlib/mutex.tur")
+
+(defmodule ws-server/tests/broadcast
+  (import httpd/types    :refer [Conn Request])
+  (import httpd/server   :refer [server-start-pool-conn server-stop])
+  (import httpd/response :refer [resp-ok bad-request])
+  (import ws-server/server
+    :refer [WsConn ws-upgrade
+            ws-server-recv ws-server-send ws-server-close
+            ws-set-server-timeout
+            ws-frame-text ws-text? ws-binary? ws-closed? ws-error? ws-timeout?])
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-true])
+  (import test/runner :refer [run-all])
+
+;; ---------------------------------------------------------------------------
+;; file-scope C: a tiny raw-socket WebSocket client + the per-thread reader
+;; argument block used to drive the server from three threads at once. The
+;; client framing mirrors echo_test.tur (masked client->server, unmasked
+;; server->client).
+;; ---------------------------------------------------------------------------
+```c
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+/* Read exactly n bytes; 1 ok, else <= 0. */
+static int wsb__recv_n(int fd, unsigned char *b, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    long r = (long)recv(fd, b + off, n - off, 0);
+    if (r <= 0) return 0;
+    off += (size_t)r;
+  }
+  return 1;
+}
+
+/* Connect + perform the client handshake on /ws. Returns fd, or -1. The fixed
+   key's accept is "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (RFC 6455 4.2.2 vector); we
+   require the server to echo exactly that, proving its accept computation. A
+   3s recv timeout is armed so a missed broadcast fails the reader rather than
+   hanging the whole test. */
+static int wsb__connect(int port) {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return -1;
+  struct sockaddr_in a; memset(&a, 0, sizeof(a));
+  a.sin_family = AF_INET;
+  a.sin_port   = htons((uint16_t)port);
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) { close(fd); return -1; }
+  const char *req =
+    "GET /ws HTTP/1.1\r\n"
+    "Host: 127.0.0.1\r\n"
+    "Upgrade: websocket\r\n"
+    "Connection: Upgrade\r\n"
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+    "Sec-WebSocket-Version: 13\r\n"
+    "\r\n";
+  if (send(fd, req, strlen(req), 0) < 0) { close(fd); return -1; }
+  char buf[2048]; size_t n = 0;
+  while (n < sizeof(buf) - 1) {
+    unsigned char ch;
+    if (wsb__recv_n(fd, &ch, 1) != 1) { close(fd); return -1; }
+    buf[n++] = (char)ch;
+    if (n >= 4 && buf[n-4]=='\r' && buf[n-3]=='\n' && buf[n-2]=='\r' && buf[n-1]=='\n')
+      break;
+  }
+  buf[n] = '\0';
+  if (!strstr(buf, " 101 ")) { close(fd); return -1; }
+  if (!strstr(buf, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")) { close(fd); return -1; }
+  struct timeval tv; tv.tv_sec = 3; tv.tv_usec = 0;
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  return fd;
+}
+
+/* Send one masked text frame. Returns 0 ok, -1 error. */
+static int wsb__send_text(int fd, const char *msg) {
+  size_t len = strlen(msg);
+  unsigned char hdr[14]; size_t hl = 0;
+  hdr[hl++] = 0x81;                                  /* FIN + text */
+  unsigned char mask[4] = { 0x12, 0x34, 0x56, 0x78 };
+  if (len < 126) {
+    hdr[hl++] = (unsigned char)(0x80 | len);
+  } else if (len <= 0xffff) {
+    hdr[hl++] = 0x80 | 126;
+    hdr[hl++] = (unsigned char)((len >> 8) & 0xff);
+    hdr[hl++] = (unsigned char)(len & 0xff);
+  } else {
+    hdr[hl++] = 0x80 | 127;
+    for (int i = 7; i >= 0; i--) hdr[hl++] = (unsigned char)((len >> (8*i)) & 0xff);
+  }
+  memcpy(hdr + hl, mask, 4); hl += 4;
+  if (send(fd, hdr, hl, 0) < 0) return -1;
+  unsigned char *m = (unsigned char *)malloc(len ? len : 1);
+  for (size_t i = 0; i < len; i++) m[i] = (unsigned char)(msg[i] ^ mask[i & 3]);
+  int rc = (len > 0 && send(fd, m, len, 0) < 0) ? -1 : 0;
+  free(m);
+  return rc;
+}
+
+/* Read one (unmasked) frame from the server, return payload as a malloc'd
+   NUL-terminated string (caller frees). Returns NULL on error/timeout. */
+static char *wsb__recv_text(int fd) {
+  unsigned char h2[2];
+  if (wsb__recv_n(fd, h2, 2) != 1) return NULL;
+  uint64_t len = h2[1] & 0x7f;
+  if (len == 126) {
+    unsigned char e[2];
+    if (wsb__recv_n(fd, e, 2) != 1) return NULL;
+    len = ((uint64_t)e[0] << 8) | e[1];
+  } else if (len == 127) {
+    unsigned char e[8];
+    if (wsb__recv_n(fd, e, 8) != 1) return NULL;
+    len = 0;
+    for (int i = 0; i < 8; i++) len = (len << 8) | e[i];
+  }
+  if (h2[1] & 0x80) return NULL;                     /* server frames must be unmasked */
+  char *buf = (char *)malloc((size_t)len + 1);
+  if (!buf) return NULL;
+  if (len > 0 && wsb__recv_n(fd, (unsigned char *)buf, (size_t)len) != 1) {
+    free(buf); return NULL;
+  }
+  buf[len] = '\0';
+  return buf;
+}
+
+/* Per-reader-thread argument: which fd to read, the message we expect to be
+   broadcast to us, and a result slot the main thread reads after the join. */
+typedef struct { int fd; char msg[256]; int ok; } wsb_arg_t;
+
+static wsb_arg_t *wsb__arg_new(int fd, const char *msg) {
+  wsb_arg_t *a = (wsb_arg_t *)calloc(1, sizeof(*a));
+  if (!a) return NULL;
+  a->fd = fd;
+  strncpy(a->msg, msg, sizeof(a->msg) - 1);
+  a->ok = 0;
+  return a;
+}
+```
+
+  ;; ---------------------------------------------------------------------
+  ;; Client driver helpers (thin wrappers over the inline C above).
+  ;; ---------------------------------------------------------------------
+
+  (defn wsb-connect [port : int] : int
+    ```c return (int64_t)wsb__connect((int)port); ```)
+
+  (defn wsb-close [fd : int] : void
+    ```c if ((int)fd >= 0) close((int)fd); ```)
+
+  (defn wsb-send [fd : int msg : cstr] : void
+    ```c wsb__send_text((int)fd, (const char *)msg); ```)
+
+  (defn wsb-arg-new [fd : int msg : cstr] : ptr<void>
+    ```c return (void *)wsb__arg_new((int)fd, (const char *)msg); ```)
+
+  (defn wsb-arg-ok? [a : ptr<void>] : bool
+    ```c return a != 0 && ((wsb_arg_t *)a)->ok != 0; ```)
+
+  (defn null-ptr [] : ptr<void>
+    ```c return NULL; ```)
+
+  ;; Reader thread entry (pthread shape: void *(*)(void *)). Blocks on the next
+  ;; server frame for its fd and records whether it matched the expected message.
+  (defn reader-task [arg : ptr<void>] : ptr<void>
+    ```c
+    wsb_arg_t *a = (wsb_arg_t *)arg;
+    if (a) {
+      char *got = wsb__recv_text(a->fd);
+      if (got) { a->ok = (strcmp(got, a->msg) == 0); free(got); }
+    }
+    return NULL;
+    ```)
+
+  (defn sleep-ms [ms : int] #{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    if (ms > 0) usleep((useconds_t)ms * 1000u);
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; The broadcast hub -- `Mutex<vec<WsConn>>` in plain user code. Every
+  ;; mutation and every fan-out runs under the one mutex, so registration,
+  ;; deregistration, and broadcast never race. A connection is removed from the
+  ;; hub (under the lock) before its WsConn is freed, so a broadcast in flight
+  ;; can never dereference a dead connection.
+  ;; ---------------------------------------------------------------------
+
+  (def hub-mutex (mutex-new))
+  (def hub (:: (vec-new) (Vec WsConn)))
+
+  (defn ws-eq? [a : WsConn b : WsConn] : bool
+    (= (:: a :int) (:: b :int)))
+
+  (defn hub-register! [ws : WsConn] : nil
+    (do (mutex-lock hub-mutex)
+        (vec-push! hub ws)
+        (mutex-unlock hub-mutex)))
+
+  ;; Locate ws in the hub, or -1. Caller holds the lock.
+  (defn hub-index [ws : WsConn i : int n : int] : int
+    (if (>= i n)
+      -1
+      (if (ws-eq? ws (vec-get hub i))
+        i
+        (hub-index ws (+ i 1) n))))
+
+  (defn hub-unregister! [ws : WsConn] : nil
+    (do (mutex-lock hub-mutex)
+        (let [n   (vec-len hub)
+              idx (hub-index ws 0 n)]
+          (when (>= idx 0)
+            ;; swap-remove: overwrite the slot with the last element, then drop
+            ;; the tail. Order in the hub does not matter for a broadcast.
+            (do (vec-set! hub idx (vec-get hub (- n 1)))
+                (vec-pop! hub)
+                nil)))
+        (mutex-unlock hub-mutex)))
+
+  ;; Send `msg` to every connection in the hub. Caller holds the lock.
+  (defn hub-send-each [msg : cstr i : int n : int] : nil
+    (when (< i n)
+      (do (ws-server-send (vec-get hub i) msg)
+          (hub-send-each msg (+ i 1) n))))
+
+  (defn hub-broadcast! [msg : cstr] : nil
+    (do (mutex-lock hub-mutex)
+        (hub-send-each msg 0 (vec-len hub))
+        (mutex-unlock hub-mutex)))
+
+  ;; ---------------------------------------------------------------------
+  ;; Server side: register, then fan every inbound data frame out to the whole
+  ;; hub until the client closes (or the receive idle-timeout fires).
+  ;; ---------------------------------------------------------------------
+
+  (defn broadcast-loop [ws : WsConn] : void
+    (let [f (ws-server-recv ws)]
+      (if (or (ws-closed? f) (ws-error? f) (ws-timeout? f))
+        nil
+        (do
+          (when (or (ws-text? f) (ws-binary? f))
+            (hub-broadcast! (ws-frame-text f)))
+          (broadcast-loop ws)))))
+
+  (defn ws-broadcast-handler [conn : int req : int] : int
+    (let [c (:: conn Conn)
+          r (:: req Request)]
+      (if (= (ws-upgrade c r
+               (fn [ws : WsConn] : void
+                 (do (ws-set-server-timeout ws 5000)
+                     (hub-register! ws)
+                     (broadcast-loop ws)
+                     (hub-unregister! ws)
+                     (ws-server-close ws)))) 1)
+        (:: (resp-ok "text/plain" "") :int)
+        (:: (bad-request "not a websocket request") :int))))
+
+  ;; ---------------------------------------------------------------------
+  ;; Test driver
+  ;; ---------------------------------------------------------------------
+
+  (def broadcast-msg "hello from client zero")
+
+  (defn main [] : int
+    ;; Pool size 4 > 3 long-lived connections, so all three workers run
+    ;; concurrently (server-start-conn's default pool would also suffice, but
+    ;; an explicit size makes the requirement obvious).
+    (let [srv (server-start-pool-conn 18751 ws-broadcast-handler 4)]
+      (do
+        (unsafe (sleep-ms 100))
+
+        (let [fd1 (wsb-connect 18751)
+              fd2 (wsb-connect 18751)
+              fd3 (wsb-connect 18751)]
+          (do
+            ;; Let all three upgrades land and register in the hub before the
+            ;; sender fires (registration runs in the handler after the 101).
+            (unsafe (sleep-ms 200))
+
+            (let [a1 (wsb-arg-new fd1 broadcast-msg)
+                  a2 (wsb-arg-new fd2 broadcast-msg)
+                  a3 (wsb-arg-new fd3 broadcast-msg)]
+              (do
+                (unsafe
+                  (let [t1 (thread-spawn-fn reader-task a1)
+                        t2 (thread-spawn-fn reader-task a2)
+                        t3 (thread-spawn-fn reader-task a3)]
+                    (do
+                      ;; Give the readers a moment to block in recv, then have
+                      ;; one client send the single broadcast trigger.
+                      (sleep-ms 50)
+                      (wsb-send fd1 broadcast-msg)
+                      (thread-join t1)
+                      (thread-join t2)
+                      (thread-join t3))))
+
+                (describe "ws-server broadcast -- Mutex<vec<WsConn>> hub fan-out"
+
+                  (it "three clients complete the WebSocket handshake"
+                    (assert-true (and (>= fd1 0) (and (>= fd2 0) (>= fd3 0)))))
+
+                  (it "a message from one client reaches all three connections"
+                    (assert-true (and (wsb-arg-ok? a1)
+                                      (and (wsb-arg-ok? a2) (wsb-arg-ok? a3))))))
+
+                (wsb-close fd1)
+                (wsb-close fd2)
+                (wsb-close fd3)
+                (server-stop srv)
+                (run-all)))))))
+    0)
+
+) ;; end defmodule ws-server/tests/broadcast
