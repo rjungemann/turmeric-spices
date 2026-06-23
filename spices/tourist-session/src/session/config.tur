@@ -1,0 +1,53 @@
+;;; session/config -- cookie + TTL configuration for the session middleware.
+;;;
+;;; A plain value struct describing how the session cookie is emitted and how
+;;; long sessions live. Two ready-made configs are provided:
+;;;
+;;;   default-session-config -- production defaults (Secure cookie, 24h TTL)
+;;;   dev-session-config     -- HTTP-friendly defaults (Secure off) for local
+;;;                             development over plain http://
+;;;
+;;; Boolean-ish fields use :int (1 = on, 0 = off) to keep the struct trivially
+;;; copyable and easy to read from the after-middleware flush, matching the
+;;; int-flag convention used elsewhere in tourist.
+;;;
+;;; Since: v0.1.0
+
+(defmodule session/config
+  (export SessionConfig default-session-config dev-session-config)
+
+;;; SessionConfig -- cookie attributes and session lifetime.
+;;;
+;;; Fields:
+;;;   cookie-name -- name of the session cookie (default "tur_session")
+;;;   path        -- cookie Path attribute (default "/")
+;;;   domain      -- cookie Domain; "" omits the attribute
+;;;   max-age     -- TTL in seconds; also the store-side expiry hint
+;;;   secure?     -- 1 adds the Secure attribute
+;;;   http-only?  -- 1 adds the HttpOnly attribute
+;;;   same-site   -- "Strict" | "Lax" | "None"
+;;;   rolling?    -- 1 re-issues the cookie + re-saves on every request,
+;;;                  implementing sliding-window expiry
+(defstruct SessionConfig :copy
+  [cookie-name :cstr
+   path        :cstr
+   domain      :cstr
+   max-age     :int
+   secure?     :int
+   http-only?  :int
+   same-site   :cstr
+   rolling?    :int])
+
+;;; default-session-config -- production defaults: Secure, HttpOnly, 24h, Lax.
+;;;
+;;; Since: v0.1.0
+(defn default-session-config [] : SessionConfig
+  (make-struct SessionConfig "tur_session" "/" "" 86400 1 1 "Lax" 0))
+
+;;; dev-session-config -- development defaults: Secure off (works over HTTP).
+;;;
+;;; Since: v0.1.0
+(defn dev-session-config [] : SessionConfig
+  (make-struct SessionConfig "tur_session" "/" "" 86400 0 1 "Lax" 0))
+
+) ;; end defmodule session/config

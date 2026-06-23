@@ -26,6 +26,7 @@ Tiers: **1** = pure Turmeric, **2** = inline-C, **3** = cmake-dep
 | [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 2 -- inline-C | -- |
 | [`tur-stats`](spices/stats/) | Statistical analysis on dataframes (summary, distributions, hypothesis tests, OLS, resampling) | 2 -- inline-C | -- |
 | [`tur-ansi`](spices/ansi/) | ANSI terminal control, raw-mode key input, color, style, inline images (Kitty/iTerm2/sixel) | 2 -- inline-C | -- |
+| [`tur-tourist-session`](spices/tourist-session/) | Swappable-store session middleware for tur-tourist (memory + file stores) | 2 -- inline-C | tur-tourist, tur-httpd |
 | [`tur-opengl`](spices/opengl/) | OpenGL 3.3 Core + GLFW + GLAD bindings | 3 -- cmake-dep | glfw 3.4, glad v2.0.6 |
 | [`tur-sqlite`](spices/sqlite/) | SQLite3 database bindings | 3 -- cmake-dep | sqlite 3.47.2 |
 | [`tur-raylib`](spices/raylib/) | Raylib 5.5 graphics and input | 3 -- cmake-dep | raylib 5.5 |

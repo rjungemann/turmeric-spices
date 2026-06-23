@@ -1,0 +1,44 @@
+;; tests/session/cookie_test.tur -- Cookie parsing + Set-Cookie construction.
+(defmodule session/tests/cookie
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-true])
+  (import test/runner :refer [run-all])
+  (import session/cookie :refer [cookie-find cookie-build cookie-build-expired])
+
+(defn seq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+(defn found-is? [header : cstr name : cstr want : cstr] : bool
+  (let [r (cookie-find header name)]
+    (if (.is-ok r) (seq? (.ok-val r) want) false)))
+
+(defn not-found? [header : cstr name : cstr] : bool
+  (let [r (cookie-find header name)] (if (.is-ok r) false true)))
+
+(defn main [] : int
+ (do
+  (describe "session/cookie"
+    (it "finds a cookie among several"
+      (assert-true (found-is? "a=1; tur_session=deadbeef; b=2" "tur_session" "deadbeef")))
+    (it "finds the first cookie"
+      (assert-true (found-is? "sid=xyz; other=1" "sid" "xyz")))
+    (it "returns missing when absent"
+      (assert-true (not-found? "a=1; b=2" "tur_session")))
+    (it "handles an empty header"
+      (assert-true (not-found? "" "tur_session")))
+    (it "builds a production Set-Cookie"
+      (assert-true (seq? (cookie-build "tur_session" "ID" "/" "" 86400 1 1 "Lax")
+                         "tur_session=ID; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax")))
+    (it "builds with Domain and Secure off"
+      (assert-true (seq? (cookie-build "sid" "ID" "/app" "ex.com" 60 0 1 "Strict")
+                         "sid=ID; Path=/app; Max-Age=60; Domain=ex.com; HttpOnly; SameSite=Strict")))
+    (it "builds an expiring Set-Cookie"
+      (assert-true (seq? (cookie-build-expired "tur_session" "/" "")
+                         "tur_session=; Path=/; Max-Age=0"))))
+  (run-all)
+  0))
+
+) ;; end module

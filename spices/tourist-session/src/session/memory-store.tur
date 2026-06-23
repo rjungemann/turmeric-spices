@@ -1,0 +1,186 @@
+;;; session/memory-store -- in-process, thread-safe session store.
+;;;
+;;; A mutex-guarded singly-linked list of (id, map, expires-at) entries. The
+;;; store owns a private clone of every session map: store-save copies the
+;;; caller's map in, store-load copies a fresh map out, so a request's working
+;;; copy never aliases the master copy held under the lock. Expiry is lazy --
+;;; an entry past its deadline is evicted the next time its ID is loaded.
+;;;
+;;; Suitable for development and single-process apps. For multi-process or
+;;; multi-server deployments use the Valkey store, whose state is external.
+;;;
+;;; Since: v0.1.0
+
+(defmodule session/memory-store
+  (import session/data  :refer [SessMap])
+  (import session/store :refer [Store store-new])
+  (export memory-store-new memory-store-count)
+
+;; struct __mementry { char *id; int64_t map; int64_t expires; struct __mementry *next; };
+;; struct __memtab   { pthread_mutex_t mu; struct __mementry *head; };
+;;
+;; expires == 0 is the "never expires" sentinel; otherwise it is a Unix
+;; timestamp (seconds) past which the entry is dead.
+
+;;; __memtab-new -- allocate an empty, mutex-protected table.
+(defn __memtab-new [] : int
+  ```c
+  #include <stdlib.h>
+  #include <pthread.h>
+  struct __memtab { pthread_mutex_t mu; void *head; };
+  struct __memtab *t = malloc(sizeof(*t));
+  pthread_mutex_init(&t->mu, NULL);
+  t->head = NULL;
+  return (int64_t)(intptr_t)t;
+  ```)
+
+;;; mem-load -- backend load: clone out the live session map, or 0.
+(defn mem-load [state : int id : cstr] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <time.h>
+  #include <pthread.h>
+  extern int64_t session__data__sessmap_hyclone(int64_t);
+  extern void    session__data__sessmap_hyfree(int64_t);
+  struct __mementry { char *id; int64_t map; int64_t expires; struct __mementry *next; };
+  struct __memtab { pthread_mutex_t mu; struct __mementry *head; };
+  struct __memtab *t = (struct __memtab *)(intptr_t)state;
+  const char *key = (const char *)id;
+  int64_t now = (int64_t)time(NULL);
+  int64_t out = 0;
+  pthread_mutex_lock(&t->mu);
+  struct __mementry *prev = NULL, *p = t->head;
+  while (p) {
+    if (strcmp(p->id, key) == 0) {
+      if (p->expires != 0 && p->expires <= now) {
+        /* expired: evict and report a miss. */
+        if (prev) prev->next = p->next; else t->head = p->next;
+        session__data__sessmap_hyfree(p->map);
+        free(p->id);
+        free(p);
+        out = 0;
+      } else {
+        out = session__data__sessmap_hyclone(p->map);
+      }
+      break;
+    }
+    prev = p;
+    p = p->next;
+  }
+  pthread_mutex_unlock(&t->mu);
+  return out;
+  ```)
+
+;;; mem-save -- backend save: store a private clone with an absolute deadline.
+(defn mem-save [state : int id : cstr map : int ttl : int] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <time.h>
+  #include <pthread.h>
+  extern int64_t session__data__sessmap_hyclone(int64_t);
+  extern void    session__data__sessmap_hyfree(int64_t);
+  struct __mementry { char *id; int64_t map; int64_t expires; struct __mementry *next; };
+  struct __memtab { pthread_mutex_t mu; struct __mementry *head; };
+  struct __memtab *t = (struct __memtab *)(intptr_t)state;
+  const char *key = (const char *)id;
+  int64_t expires = (ttl > 0) ? ((int64_t)time(NULL) + ttl) : 0;
+  int64_t copy = session__data__sessmap_hyclone(map);
+  pthread_mutex_lock(&t->mu);
+  for (struct __mementry *p = t->head; p; p = p->next) {
+    if (strcmp(p->id, key) == 0) {
+      session__data__sessmap_hyfree(p->map);
+      p->map = copy;
+      p->expires = expires;
+      pthread_mutex_unlock(&t->mu);
+      return 0;
+    }
+  }
+  struct __mementry *e = malloc(sizeof(*e));
+  size_t kl = strlen(key);
+  e->id = malloc(kl + 1); memcpy(e->id, key, kl + 1);
+  e->map = copy;
+  e->expires = expires;
+  e->next = t->head;
+  t->head = e;
+  pthread_mutex_unlock(&t->mu);
+  return 0;
+  ```)
+
+;;; mem-del -- backend delete: unlink and free the entry for id.
+(defn mem-del [state : int id : cstr] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  #include <pthread.h>
+  extern void session__data__sessmap_hyfree(int64_t);
+  struct __mementry { char *id; int64_t map; int64_t expires; struct __mementry *next; };
+  struct __memtab { pthread_mutex_t mu; struct __mementry *head; };
+  struct __memtab *t = (struct __memtab *)(intptr_t)state;
+  const char *key = (const char *)id;
+  pthread_mutex_lock(&t->mu);
+  struct __mementry *prev = NULL, *p = t->head;
+  while (p) {
+    if (strcmp(p->id, key) == 0) {
+      if (prev) prev->next = p->next; else t->head = p->next;
+      session__data__sessmap_hyfree(p->map);
+      free(p->id);
+      free(p);
+      break;
+    }
+    prev = p;
+    p = p->next;
+  }
+  pthread_mutex_unlock(&t->mu);
+  return 0;
+  ```)
+
+;;; memory-store-new -- create an in-process session Store.
+;;;
+;;; Returns:
+;;;   Store -- a vtable bound to a fresh, empty in-memory table.
+;;;
+;;; Example:
+;;;   (let [store (memory-store-new)] ...)
+;;;
+;;; Since: v0.1.0
+(defn memory-store-new [] : Store
+  (store-new mem-load mem-save mem-del (__memtab-new)))
+
+;;; memory-store-count -- number of live (not-yet-evicted) sessions.
+;;;
+;;; Counts entries without sweeping; an expired-but-unloaded entry still
+;;; counts until its next load evicts it. Intended for tests and dashboards.
+;;;
+;;; Parameters:
+;;;   store -- a Store returned by memory-store-new
+;;;
+;;; Returns:
+;;;   :int -- entry count.
+;;;
+;;; Since: v0.1.0
+(defn memory-store-count [store : Store] : int
+  (__memtab-count (__store-state store)))
+
+;;; __store-state -- read the state pointer out of a Store vtable.
+(defn __store-state [s : Store] : int
+  ```c
+  struct __sess_store { int64_t load; int64_t save; int64_t del; int64_t state; };
+  return ((struct __sess_store *)(intptr_t)s)->state;
+  ```)
+
+(defn __memtab-count [state : int] : int
+  ```c
+  #include <pthread.h>
+  struct __mementry { char *id; int64_t map; int64_t expires; struct __mementry *next; };
+  struct __memtab { pthread_mutex_t mu; struct __mementry *head; };
+  struct __memtab *t = (struct __memtab *)(intptr_t)state;
+  int n = 0;
+  pthread_mutex_lock(&t->mu);
+  for (struct __mementry *p = t->head; p; p = p->next) n++;
+  pthread_mutex_unlock(&t->mu);
+  return n;
+  ```)
+
+) ;; end defmodule session/memory-store
