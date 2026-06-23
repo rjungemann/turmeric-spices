@@ -66,10 +66,10 @@
 ;;;           (none)))
 ;;;
 ;;; Since: v0.2.0 (Ctx-based signature; req-based shape was v0.1.0)
-(defn use! [fn : (c-fn [Ctx] (Option Response))] : int
-  (route-new "__mw" 0 (__mw-fn->int fn)))
+(defn use! [handler : (fn [Ctx] (Option Response))] : int
+  (route-new "__mw" 0 (__mw-fn->int handler)))
 
-(defn __mw-fn->int [h : (c-fn [Ctx] (Option Response))] : int
+(defn __mw-fn->int [h : (fn [Ctx] (Option Response))] : int
   ```c
   return (int64_t)(intptr_t)h;
   ```)
@@ -165,10 +165,10 @@
 ;;;                 resp))
 ;;;
 ;;; Since: v0.2.0
-(defn use-after! [fn : (c-fn [Ctx Response] Response)] : int
-  (route-new "__mwafter" 0 (__mwafter-fn->int fn)))
+(defn use-after! [handler : (fn [Ctx Response] Response)] : int
+  (route-new "__mwafter" 0 (__mwafter-fn->int handler)))
 
-(defn __mwafter-fn->int [h : (c-fn [Ctx Response] Response)] : int
+(defn __mwafter-fn->int [h : (fn [Ctx Response] Response)] : int
   ```c
   return (int64_t)(intptr_t)h;
   ```)
@@ -199,8 +199,7 @@
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   struct __tourist_route *rt = (struct __tourist_route *)(intptr_t)mw;
-  return ((int64_t(*)(int64_t, int64_t))(intptr_t)rt->handler)
-           ((int64_t)ctx, (int64_t)resp);
+  return TUR_APPLY2(rt->handler, (int64_t)ctx, (int64_t)resp);
   ```)
 
 ;;; mwafter-chain-run -- thread resp through the after-mw cons list.

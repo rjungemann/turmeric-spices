@@ -139,8 +139,10 @@
 
 ;;; route-call-handler -- invoke a Route's handler with a request.
 ;;;
-;;; Calls the stored Turmeric function value as int64_t(*)(int64_t),
-;;; following the same convention as signal/core __signal_call1.
+;;; Dispatches via the standard fat-closure protocol (TUR_APPLY1), so the
+;;; handler's captured environment is preserved across the call. The stored
+;;; handler is a fat-closure handle (the env box pointer); slot 0 carries the
+;;; lifted thunk.
 ;;;
 ;;; Parameters:
 ;;;   r   -- :int Route handle
@@ -152,12 +154,12 @@
 ;;; Example:
 ;;;   (route-call-handler route req)
 ;;;
-;;; Since: v0.1.0
+;;; Since: v0.1.0 (TUR_APPLY1 dispatch: fat-closure ABI audit, 2026-06-23)
 (defn route-call-handler [r : int req : int] : int
   ```c
   struct __tourist_route { char *method; int64_t pattern; int64_t handler; };
   struct __tourist_route *rt = (struct __tourist_route *)(intptr_t)r;
-  return ((int64_t(*)(int64_t))(intptr_t)rt->handler)((int64_t)req);
+  return TUR_APPLY1(rt->handler, (int64_t)req);
   ```)
 
 ;;; route-free -- release a Route handle and its compiled pattern.
@@ -182,7 +184,7 @@
 ;; The route struct stores the handler as an int64_t; the DSL surface takes a
 ;; (c-fn [int] int) for type safety, and we narrow at the boundary.
 
-(defn __handler->int [h : (c-fn [Ctx] Response)] : int
+(defn __handler->int [h : (fn [Ctx] Response)] : int
   ```c
   return (int64_t)(intptr_t)h;
   ```)
@@ -203,7 +205,7 @@
 ;;;     (fn [req] (text "hi")))
 ;;;
 ;;; Since: v0.1.0
-(defn get! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
+(defn get! [pattern : cstr handler : (fn [Ctx] Response)] : int
   (route-new "GET" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; post! -- declare a POST route.
@@ -216,7 +218,7 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn post! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
+(defn post! [pattern : cstr handler : (fn [Ctx] Response)] : int
   (route-new "POST" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; put! -- declare a PUT route.
@@ -229,7 +231,7 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn put! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
+(defn put! [pattern : cstr handler : (fn [Ctx] Response)] : int
   (route-new "PUT" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; delete! -- declare a DELETE route.
@@ -242,7 +244,7 @@
 ;;;   :int -- Route handle
 ;;;
 ;;; Since: v0.1.0
-(defn delete! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
+(defn delete! [pattern : cstr handler : (fn [Ctx] Response)] : int
   (route-new "DELETE" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ;;; any! -- declare a route matching any HTTP method.
@@ -258,7 +260,7 @@
 ;;;   (any! "/catch-all" (fn [req] (text "ok")))
 ;;;
 ;;; Since: v0.1.0
-(defn any! [pattern : cstr handler : (c-fn [Ctx] Response)] : int
+(defn any! [pattern : cstr handler : (fn [Ctx] Response)] : int
   (route-new "" (:: (router-compile pattern) :int) (__handler->int handler)))
 
 ) ;; end defmodule tourist/dsl
