@@ -15,7 +15,7 @@
 ;;   struct __tourist_route {
 ;;     char    *method;   /* "GET", "POST", "PUT", "DELETE", "" for any */
 ;;     int64_t  pattern;  /* compiled __tourist_pattern handle           */
-;;     int64_t  handler;  /* Turmeric fn value: int64_t(*)(int64_t)     */
+;;     int64_t  handler;  /* fat-closure box ptr; dispatch via TUR_APPLY1 */
 ;;   };
 
 (defmodule tourist/dsl
@@ -180,9 +180,11 @@
       (router-free (:: (route-pattern r) :Pattern))
       (__route-free-struct r))))
 
-;; -- Internal: convert a typed c-fn handler to an int64_t for storage -----
-;; The route struct stores the handler as an int64_t; the DSL surface takes a
-;; (c-fn [int] int) for type safety, and we narrow at the boundary.
+;; -- Internal: convert a typed fat-closure handler to an int64_t for storage --
+;; The route struct stores the handler as an int64_t (a fat-closure box ptr);
+;; the DSL surface takes a (fn [Ctx] Response) for type safety, and we narrow
+;; to the carrier at the boundary. route-call-handler then dispatches the
+;; stored value through TUR_APPLY1 so any captured environment survives.
 
 (defn __handler->int [h : (fn [Ctx] Response)] : int
   ```c
@@ -195,7 +197,7 @@
 ;;;
 ;;; Parameters:
 ;;;   pattern -- route pattern string, e.g. "/hello/:name"
-;;;   handler -- (c-fn [Ctx] Response) request handler
+;;;   handler -- (fn [Ctx] Response) request handler -- may capture
 ;;;
 ;;; Returns:
 ;;;   :int -- Route handle; consumed by tourist
@@ -212,7 +214,7 @@
 ;;;
 ;;; Parameters:
 ;;;   pattern -- route pattern string
-;;;   handler -- (c-fn [Ctx] Response) request handler
+;;;   handler -- (fn [Ctx] Response) request handler -- may capture
 ;;;
 ;;; Returns:
 ;;;   :int -- Route handle
@@ -225,7 +227,7 @@
 ;;;
 ;;; Parameters:
 ;;;   pattern -- route pattern string
-;;;   handler -- (c-fn [Ctx] Response) request handler
+;;;   handler -- (fn [Ctx] Response) request handler -- may capture
 ;;;
 ;;; Returns:
 ;;;   :int -- Route handle
@@ -238,7 +240,7 @@
 ;;;
 ;;; Parameters:
 ;;;   pattern -- route pattern string
-;;;   handler -- (c-fn [Ctx] Response) request handler
+;;;   handler -- (fn [Ctx] Response) request handler -- may capture
 ;;;
 ;;; Returns:
 ;;;   :int -- Route handle
@@ -251,7 +253,7 @@
 ;;;
 ;;; Parameters:
 ;;;   pattern -- route pattern string
-;;;   handler -- (c-fn [Ctx] Response) request handler
+;;;   handler -- (fn [Ctx] Response) request handler -- may capture
 ;;;
 ;;; Returns:
 ;;;   :int -- Route handle

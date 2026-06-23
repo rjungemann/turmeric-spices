@@ -2,10 +2,11 @@
 ;;;
 ;;; Two flavours of middleware:
 ;;;
-;;;   use!       -- (c-fn [Ctx] (Option Response)) runs BEFORE the route
+;;;   use!       -- (fn [Ctx] (Option Response)) runs BEFORE the route
 ;;;                 handler in declaration order. Return (none) to continue
 ;;;                 dispatch; (some resp) short-circuits with that response.
-;;;   use-after! -- (c-fn [Ctx Response] Response) runs AFTER the route
+;;;                 May capture; the env survives the dispatch boundary.
+;;;   use-after! -- (fn [Ctx Response] Response) runs AFTER the route
 ;;;                 handler in REVERSE declaration order. Each can return
 ;;;                 the same resp or a replacement.
 ;;;
@@ -54,8 +55,8 @@
 ;;; and route handlers share the same context).
 ;;;
 ;;; Parameters:
-;;;   fn -- (c-fn [Ctx] (Option Response)):
-;;;           (none) to continue, (some resp) to short-circuit
+;;;   handler -- (fn [Ctx] (Option Response)) -- may capture:
+;;;              (none) to continue, (some resp) to short-circuit
 ;;;
 ;;; Returns:
 ;;;   :int -- middleware handle; consumed by tourist
@@ -153,7 +154,7 @@
 ;;; have those headers land on the final response.
 ;;;
 ;;; Parameters:
-;;;   fn -- (c-fn [Ctx Response] Response): receives ctx + current
+;;;   handler -- (fn [Ctx Response] Response) -- may capture; receives ctx + current
 ;;;         response; returns the same handle or a replacement
 ;;;
 ;;; Returns:
