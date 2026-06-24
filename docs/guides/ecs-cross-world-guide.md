@@ -250,7 +250,21 @@ by how `tur` tokenises and resolves names today:
 
 `load-<WorldType>` (int-carrier → typed world) must be in scope for each
 world the system drives, the same convention `sized-defsystem-scheduled`
-uses.
+uses. As of GEN-V0 the trio comes from a single macro call:
+
+```turmeric
+(import ecs/xworld :refer [defworld-box-helpers])
+
+(sized-defworld-mono SimWorld (Static 8) [Pos])
+(defworld-box-helpers SimWorld)
+;; emits box-SimWorld / load-SimWorld / free-SimWorld-box,
+;; each a thin wrapper over the polymorphic box-world / load-world /
+;; free-world-box helpers in `ecs/xworld`.
+```
+
+Pre-GEN-V0 fixtures hand-rolled the three inline-C blocks per world
+(see `tests/xworld-extract.tur`); new cross-world setups should reach
+for `defworld-box-helpers` instead.
 
 ## Tests
 
@@ -267,6 +281,9 @@ uses.
   run, with no 64-system truncation (CAP-V0).
 - `spices/ecs/tests/xsystem-clause-flex.tur` — clauses in any order, empty
   sides omitted (CLAUSE-V0).
+- `spices/ecs/tests/xworld-defbox.tur` — `defworld-box-helpers` emits the
+  per-world `box-<W>` / `load-<W>` / `free-<W>-box` trio; round-trips
+  identical values to the hand-written-helpers fixture (GEN-V0).
 - `spices/ecs/tests/errors/xworld-wrong-world-cap.tur` — wrong-world cap
   rejected (TUR-E0001).
 - `spices/ecs/tests/errors/xworld-undeclared-write.tur` — undeclared
