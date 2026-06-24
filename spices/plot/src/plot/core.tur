@@ -16,41 +16,42 @@
 
   (import plot/style :refer [plot-opts-width plot-opts-height])
 
+  ;; Result helpers: route through the typed preamble builders /
+  ;; inspectors (tur_ok_int / tur_err_int / tur_is_ok / tur_ok_value /
+  ;; tur_err_value) so the canonical layout lives in one place
+  ;; (tur_runtime.h). The :ptr<void> carrier surface is preserved
+  ;; because the in-tree plot modules and test suite both call these
+  ;; through their existing types; tightening to (Result int int) is a
+  ;; downstream sweep beyond this migration's scope.
+
   ;;; __ok -- create an ok result wrapping integer value v.
   (defn __ok [v : int] : ptr<void>
     ```c
-    #include <stdlib.h>
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
+    return (void *)(intptr_t)tur_ok_int(v);
     ```)
 
   ;;; __err -- create an err result wrapping integer error value e.
   (defn __err [e : int] : ptr<void>
     ```c
-    #include <stdlib.h>
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
+    return (void *)(intptr_t)tur_err_int(e);
     ```)
 
   ;;; __ok? -- predicate for the local :ptr<void> result envelope.
   (defn __ok? [r : ptr<void>] : bool
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
-    return res && res->is_ok;
+    return r != 0 && tur_is_ok((int64_t)(intptr_t)r);
     ```)
 
   ;;; __ok-val -- extract the ok payload from the local :ptr<void> result envelope.
   (defn __ok-val [r : ptr<void>] : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
-    return res ? res->ok_val : 0;
+    return r != 0 ? tur_ok_value((int64_t)(intptr_t)r) : 0;
     ```)
 
   ;;; __err-val -- extract the err payload from the local :ptr<void> result envelope.
   (defn __err-val [r : ptr<void>] : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
-    return res ? res->err_val : 0;
+    return r != 0 ? tur_err_value((int64_t)(intptr_t)r) : 0;
     ```)
 
   ;;; __make-renderer -- allocate the generic opaque renderer handle used by all plot modules.
