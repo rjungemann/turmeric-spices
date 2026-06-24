@@ -1,0 +1,27 @@
+;; U6 negative fixture: `cmd` takes a typed variadic of `ValkeyArg`, so a
+;; bare cstr argument (the old untyped cons-list style) must be rejected at
+;; the elaborator rather than marshalled onto the wire.
+;;
+;; Verify: tur check -I src tests/errors/valkey-cmd-untyped-arg.tur
+;;   => error: variadic call to 'cmd': rest arg has wrong type
+;;            (expected ValkeyArg, got cstr)
+;;
+;; Wrap each argument with vk-str / vk-int / vk-bytes instead:
+;;   (cmd c "SET" (vk-str "k") (vk-str "v"))
+;;
+;; Compile-fail fixture (see valkey-use-after-close.tur for the placement note).
+
+(defmodule valkey_cmd_untyped_arg_test
+  (export)
+
+(import valkey/client :refer [Client client-connect client-of client-close])
+(import valkey/cmd    :refer [cmd])
+
+(defn untyped-arg [] : int
+  (let [c (client-of (client-connect "127.0.0.1" 6379))]
+    (do
+      (cmd c "SET" "k" "v")    ;; ERROR: expected ValkeyArg, got cstr
+      (client-close c)
+      0)))
+
+) ;; end defmodule valkey_cmd_untyped_arg_test

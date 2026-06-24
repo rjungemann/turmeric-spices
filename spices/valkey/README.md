@@ -54,6 +54,34 @@ let [c ok-val(client-connect("127.0.0.1" 6379))]
   client-close(c)
 ```
 
+### Typed `cmd` arguments (U6)
+
+The generic `cmd` takes a typed variadic of `ValkeyArg` values rather than
+an untyped argument list. Build each argument with `vk-str`, `vk-int`, or
+`vk-bytes` so a value of the wrong kind (a bare `Client`, a stray cstr, a
+freed reply pointer) is a compile error at the call site instead of a
+downstream `WRONGTYPE` reply or a segfault:
+
+```turmeric
+(import valkey/cmd :refer [cmd vk-str vk-int vk-bytes])
+(import valkey/reply :refer [reply-free])
+
+;; string args
+(let [r (cmd c "SET" (vk-str "mykey") (vk-str "myval"))]
+  (if (ok? r) (reply-free (ok-val r)) (println "set failed")))
+
+;; integers are formatted to decimal on the wire
+(cmd c "EXPIRE" (vk-str "mykey") (vk-int 60))
+
+;; vk-bytes is binary-safe: embedded NULs flow through untruncated
+(cmd c "SET" (vk-str "blob") (vk-bytes payload n))
+```
+
+`(cmd c "SET" "mykey" "myval")` -- passing bare cstrs -- does **not**
+type-check: `expected ValkeyArg, got cstr`. Wrap each argument with the
+appropriate `vk-*` constructor. The typed helpers (`cmd-set`, `cmd-get`,
+...) keep their positional `cstr` parameters and are unaffected.
+
 ### Linear `Client` (U1)
 
 `Client` is a `:linear` opaque. A connection extracted with `client-of`
