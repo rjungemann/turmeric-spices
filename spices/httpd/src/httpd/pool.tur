@@ -65,21 +65,23 @@ void httpd_pool_dispatch(void *item) {
   ```)
 
 ;; tp-new / tp-stop -- thread-pool/pool entry points reached via inline-C
-;; extern.  thread-pool also names its functions pool-new / pool-stop, which
-;; collide with this module's public defns of the same name, so the qualified
-;; `tp/...` call resolves to the local definition.  pool-submit has no local
-;; namesake and is called as `tp/pool-submit` (see pool-enqueue) -- that
-;; reference is what anchors the thread-pool module in the build graph.
+;; extern.  As of tur-thread-pool 0.2.0 the canonical pool-new / pool-submit /
+;; pool-stop are the typed, linear `(Pool T)` surface; this adapter holds the
+;; handle as a plain `void *` in struct __httpd_pool, so it targets the raw
+;; C-interop hatch instead: pool-new-raw / pool-submit-raw / pool-stop-raw,
+;; which keep a stable, non-monomorphized ptr<void> ABI (and a raw
+;; `void (*)(void *)` callback).  The qualified `tp/pool-submit-raw` call (see
+;; pool-enqueue) anchors the thread-pool module in the build graph.
 (defn tp-new [size : int callback : ptr<void>] : ptr<void>
   ```c
-  extern void *thread_hypool__pool__pool_hynew(int64_t, void *);
-  return (void *)thread_hypool__pool__pool_hynew((int64_t)size, callback);
+  extern void *thread_hypool__pool__pool_hynew_hyraw(int64_t, void *);
+  return (void *)thread_hypool__pool__pool_hynew_hyraw((int64_t)size, callback);
   ```)
 
 (defn tp-stop [tpool : ptr<void>] : void
   ```c
-  extern void thread_hypool__pool__pool_hystop(void *);
-  thread_hypool__pool__pool_hystop(tpool);
+  extern void thread_hypool__pool__pool_hystop_hyraw(void *);
+  thread_hypool__pool__pool_hystop_hyraw(tpool);
   ```)
 
 ;; null-ptr / is-null? -- NULL handle construction and test.
@@ -224,7 +226,7 @@ void httpd_pool_dispatch(void *item) {
     (let [warg (wrap-make-warg pool client-fd)]
       (if (is-null? warg)
         (close-fd client-fd)
-        (tp/pool-submit (wrap-tp pool) warg)))))
+        (tp/pool-submit-raw (wrap-tp pool) warg)))))
 
 ;;; pool-stop -- signal shutdown, let workers drain queued connections, then
 ;;; join every worker and free the pool.

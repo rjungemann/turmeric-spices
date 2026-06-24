@@ -1,0 +1,61 @@
+;;; thread-pool/scope -- the `with-pool` scope macro (SCOPE-V0).
+;;;
+;;; `(with-pool [p (pool-new ...)] body...)` binds the linear pool handle `p`,
+;;; runs the body, and consumes the handle with `pool-stop` on scope exit.  It
+;;; mirrors the stdlib `with-*` combinators and leans on the linear discipline:
+;;; because `pool-stop` is the macro's job, the body must NOT call it (a manual
+;;; `pool-stop p` inside the body is a TUR-E0101 double-consume), and you can no
+;;; longer forget it (the macro always runs it on the way out).
+;;;
+;;; Lowering:
+;;;
+;;;   (with-pool [p INIT] BODY...)
+;;;   =>
+;;;   (let [p INIT]
+;;;     (let [r (do BODY...)]   ;; evaluate body, capture its value
+;;;       (do (pool-stop p)     ;; consume the linear handle
+;;;           r)))              ;; yield the body value
+;;;
+;;; Exit paths.  `with-pool` guarantees `pool-stop` on normal completion of the
+;;; body (the overwhelmingly common path, and the one the linear checker holds
+;;; you to).  It does NOT install an unwinding cleanup: if the body raises a
+;;; panic that is not caught inside it, the panic propagates and -- absent an
+;;; enclosing `catch-unwind` -- aborts the process, at which point the OS
+;;; reclaims the worker threads and the pool's memory.  (A `catch-unwind`-based
+;;; finally was prototyped but rejected: catch-unwind's thunk is int-returning
+;;; and capturing a linear `Pool` in it is unsound -- see
+;;; catch-unwind-drops-captures-segv in the turmeric repo.)  If you need a
+;;; pool to survive a recoverable panic, wrap the body in your own
+;;; `catch-unwind` and stop the pool yourself.
+;;;
+;;; Since: TP2
+
+(defmodule thread-pool/scope
+  (export with-pool)
+
+  (import thread-pool/pool :refer [Pool pool-stop])
+
+;;; with-pool -- run `body` with a linear pool bound to `name`, stopping it on
+;;; scope exit.
+;;;
+;;; Parameters:
+;;;   binding -- a 2-vector [name init], where init evaluates to a (Pool T).
+;;;   body    -- one or more expressions; the last expression's value is the
+;;;              value of the whole with-pool form.
+;;;
+;;; Example:
+;;;   (with-pool [p (pool-new 8 worker)]
+;;;     (pool-submit p 1)
+;;;     (pool-submit p 2))     ;; pool-stop p runs here automatically
+;;;
+;;; Since: TP2
+(defmacro with-pool [binding & body]
+  (let [name (first binding)
+        init (second binding)]
+    `(let [~name ~init]
+       (let [__with_pool_r__ (do ~@body)]
+         (do
+           (pool-stop ~name)
+           __with_pool_r__)))))
+
+) ;; end defmodule thread-pool/scope
