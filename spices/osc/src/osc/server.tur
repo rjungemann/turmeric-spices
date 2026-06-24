@@ -8,38 +8,18 @@
 ;; since c-fn parameters lower to the bare C-ABI function pointer.
 
 (defmodule osc/server
-  (export Server server-of
+  (export Server
           server-new server-new-tcp server-free
           server-add-method server-recv server-recv-noblock)
 
 ;;; Server -- opaque handle to a liblo lo_server_thread.
 ;;;
 ;;; Stored as int64_t (cast through intptr_t). server-new / server-new-tcp
-;;; return an ok result wrapping a Server; extract with server-of after
-;;; checking ok?. Release with server-free.
+;;; return (Result Server int); extract the handle with stdlib `ok-val`
+;;; after checking ok?. Release with server-free.
 ;;;
 ;;; Since: OSC1
 (defopaque Server :int)
-
-;; -------------------------------------------------------------------------
-;; Private: result helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -52,28 +32,22 @@
 ;;;   proto -- ignored; always creates a UDP server in this implementation
 ;;;
 ;;; Returns:
-;;;   (ok st-ptr) on success; (err 0) on failure.
-;;;   st-ptr is an opaque :int handle; pass to server-free and server-add-method.
+;;;   (Result Server int) -- ok carries the Server handle; err carries 0
+;;;   when lo_server_thread_new fails.
 ;;;
 ;;; Example:
 ;;;   (let [r (server-new "7770" "udp")]
 ;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "server-new failed")))
 ;;;
 ;;; Since: OSC0
-(defn server-new [port : cstr proto : cstr] : ptr<void>
+(defn server-new [port : cstr proto : cstr] : (Result Server int)
   ```c
-  #include <stdlib.h>
   #include <lo/lo.h>
   (void)proto; /* proto arg reserved; always UDP in this implementation */
   lo_server_thread st = lo_server_thread_new((const char *)port, NULL);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!st) {
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    lo_server_thread_start(st);
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)st; r->err_val = 0;
-  }
-  return r;
+  if (!st) return tur_err_int(0);
+  lo_server_thread_start(st);
+  return tur_ok_ptr(st);
   ```)
 
 ;;; server-new-tcp -- create a new TCP OSC server thread on the given port.
@@ -82,27 +56,22 @@
 ;;;   port -- port string (e.g. "7771")
 ;;;
 ;;; Returns:
-;;;   (ok st-ptr) on success; (err 0) on failure.
+;;;   (Result Server int) -- ok carries the Server handle; err carries 0
+;;;   on failure.
 ;;;
 ;;; Example:
 ;;;   (let [r (server-new-tcp "7771")]
 ;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "server-new-tcp failed")))
 ;;;
 ;;; Since: OSC0
-(defn server-new-tcp [port : cstr] : ptr<void>
+(defn server-new-tcp [port : cstr] : (Result Server int)
   ```c
-  #include <stdlib.h>
   #include <lo/lo.h>
   lo_server_thread st = lo_server_thread_new_with_proto((const char *)port,
                                                         LO_TCP, NULL);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!st) {
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    lo_server_thread_start(st);
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)st; r->err_val = 0;
-  }
-  return r;
+  if (!st) return tur_err_int(0);
+  lo_server_thread_start(st);
+  return tur_ok_ptr(st);
   ```)
 
 ;;; server-free -- stop and free a server thread created by server-new or server-new-tcp.
@@ -198,21 +167,6 @@
   lo_server_thread st = (lo_server_thread)(intptr_t)s;
   lo_server srv = lo_server_thread_get_server(st);
   return (int64_t)lo_server_recv_noblock(srv, 0);
-  ```)
-
-;;; server-of -- extract a typed Server from an ok result.
-;;;
-;;; Parameters:
-;;;   r -- :ptr<void> ok result from server-new or server-new-tcp
-;;;
-;;; Returns:
-;;;   :Server -- opaque handle to the lo_server_thread
-;;;
-;;; Since: OSC1
-(defn server-of [r : ptr<void>] : Server
-  ```c
-  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
-  return (int64_t)((struct __r *)r)->ok_val;
   ```)
 
 ) ;; end defmodule osc/server

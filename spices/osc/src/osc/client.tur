@@ -7,36 +7,16 @@
 (defmodule osc/client
   (import osc/msg    :refer [Msg])
   (import osc/bundle :refer [Bundle])
-  (export Address address-of
+  (export Address
           client-new client-free client-send client-send-bundle)
 
 ;;; Address -- opaque handle to a liblo lo_address (client target).
 ;;;
-;;; Stored as int64_t. client-new returns an ok result wrapping an
-;;; Address; extract with address-of. Release with client-free.
+;;; Stored as int64_t. client-new returns (Result Address int); extract
+;;; the handle with stdlib `ok-val`. Release with client-free.
 ;;;
 ;;; Since: OSC1
 (defopaque Address :int)
-
-;; -------------------------------------------------------------------------
-;; Private: result helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -50,27 +30,21 @@
 ;;;   proto -- ignored; lo_address_new always uses UDP
 ;;;
 ;;; Returns:
-;;;   (ok addr-ptr) on success; (err 0) on failure.
-;;;   addr-ptr is an opaque :int handle; pass to client-send and client-free.
+;;;   (Result Address int) -- ok carries the Address handle; err carries 0
+;;;   when lo_address_new fails. Inspect with stdlib ok? / ok-val / err-val.
 ;;;
 ;;; Example:
 ;;;   (let [r (client-new "127.0.0.1" "7770" "udp")]
 ;;;     (if (ok? r) (let [c (ok-val r)] ...) (println "client-new failed")))
 ;;;
 ;;; Since: OSC0
-(defn client-new [host : cstr port : cstr proto : cstr] : ptr<void>
+(defn client-new [host : cstr port : cstr proto : cstr] : (Result Address int)
   ```c
-  #include <stdlib.h>
   #include <lo/lo.h>
   (void)proto; /* lo_address_new always uses UDP; proto reserved */
   lo_address addr = lo_address_new((const char *)host, (const char *)port);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!addr) {
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)addr; r->err_val = 0;
-  }
-  return r;
+  if (!addr) return tur_err_int(0);
+  return tur_ok_ptr(addr);
   ```)
 
 ;;; client-free -- release a client address created by client-new.
@@ -98,7 +72,7 @@
 ;;;   m -- msg wrapper :int (return value of msg-new from osc/msg)
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err rc) on failure where rc is the liblo error code.
+;;;   (Result int int) -- ok carries 0; err carries the liblo error code.
 ;;;
 ;;; Example:
 ;;;   (let [m (msg-new "/synth/freq")]
@@ -107,21 +81,15 @@
 ;;;       (if (ok? r) (println "sent") (println "send failed"))))
 ;;;
 ;;; Since: OSC0
-(defn client-send [c : Address m : Msg] : ptr<void>
+(defn client-send [c : Address m : Msg] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <lo/lo.h>
   struct __msg_wrapper { char *path; lo_message msg; };
   lo_address addr = (lo_address)(intptr_t)c;
   struct __msg_wrapper *w = (struct __msg_wrapper *)(intptr_t)m;
   int rc = lo_send_message(addr, w->path, w->msg);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (rc < 0) {
-    r->is_ok = false; r->ok_val = 0; r->err_val = (int64_t)rc;
-  } else {
-    r->is_ok = true; r->ok_val = 0; r->err_val = 0;
-  }
-  return r;
+  if (rc < 0) return tur_err_int((int64_t)rc);
+  return tur_ok_int(0);
   ```)
 
 ;;; client-send-bundle -- send an OSC bundle to the client address.
@@ -131,7 +99,7 @@
 ;;;   bundle -- bundle :int (return value of bundle-new from osc/bundle)
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err rc) on failure where rc is the liblo error code.
+;;;   (Result int int) -- ok carries 0; err carries the liblo error code.
 ;;;
 ;;; Example:
 ;;;   (let [b (bundle-new 0.0)]
@@ -140,34 +108,13 @@
 ;;;       (if (ok? r) (println "sent") (println "send-bundle failed"))))
 ;;;
 ;;; Since: OSC0
-(defn client-send-bundle [c : Address bundle : Bundle] : ptr<void>
+(defn client-send-bundle [c : Address bundle : Bundle] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <lo/lo.h>
   lo_address addr = (lo_address)(intptr_t)c;
   int rc = lo_send_bundle(addr, (lo_bundle)(intptr_t)bundle);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (rc < 0) {
-    r->is_ok = false; r->ok_val = 0; r->err_val = (int64_t)rc;
-  } else {
-    r->is_ok = true; r->ok_val = 0; r->err_val = 0;
-  }
-  return r;
-  ```)
-
-;;; address-of -- extract a typed Address from an ok result.
-;;;
-;;; Parameters:
-;;;   r -- :ptr<void> ok result from client-new
-;;;
-;;; Returns:
-;;;   :Address -- opaque handle to the lo_address
-;;;
-;;; Since: OSC1
-(defn address-of [r : ptr<void>] : Address
-  ```c
-  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
-  return (int64_t)((struct __r *)r)->ok_val;
+  if (rc < 0) return tur_err_int((int64_t)rc);
+  return tur_ok_int(0);
   ```)
 
 ) ;; end defmodule osc/client

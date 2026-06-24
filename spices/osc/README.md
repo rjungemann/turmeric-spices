@@ -30,12 +30,15 @@ Pairs naturally with `tur-scscm` for SuperCollider synthesis.
 (import osc/client :refer [client-new client-send client-free])
 (import osc/msg    :refer [msg-new msg-add-float msg-free])
 
-(let [c   (client-new "127.0.0.1" 57110)
-      msg (msg-new "/s_new")]
-  (msg-add-float msg 440.0)
-  (client-send c msg)
-  (msg-free msg)
-  (client-free c))
+(let [r (client-new "127.0.0.1" "57110" "udp")]
+  (if (ok? r)
+    (let [c   (ok-val r)
+          msg (msg-new "/s_new")]
+      (msg-add-float msg 440.0)
+      (client-send c msg)
+      (msg-free msg)
+      (client-free c))
+    (println "client-new failed")))
 ```
 
 ```sweet-exp
@@ -43,12 +46,15 @@ Pairs naturally with `tur-scscm` for SuperCollider synthesis.
 import osc/client :refer [client-new client-send client-free]
 import osc/msg    :refer [msg-new msg-add-float msg-free]
 
-let [c   client-new("127.0.0.1" 57110)
-     msg msg-new("/s_new")]
-  msg-add-float(msg 440.0)
-  client-send(c msg)
-  msg-free(msg)
-  client-free(c)
+let [r client-new("127.0.0.1" "57110" "udp")]
+  if ok?(r)
+    let [c   ok-val(r)
+         msg msg-new("/s_new")]
+      msg-add-float(msg 440.0)
+      client-send(c msg)
+      msg-free(msg)
+      client-free(c)
+    println("client-new failed")
 ```
 
 ## See also
