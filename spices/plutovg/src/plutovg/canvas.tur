@@ -36,28 +36,7 @@
           ;; PV4: fill rule, blend operator, global opacity
           canvas-set-fill-rule canvas-set-operator canvas-set-opacity
           ;; PV6: arc helpers + draw-image
-          canvas-arc canvas-arc-to canvas-round-rect canvas-draw-image
-          canvas-of dash-array-of)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
+          canvas-arc canvas-arc-to canvas-round-rect canvas-draw-image)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -78,15 +57,12 @@
 ;;;     (if (ok? r) (let [c (ok-val r)] ...) (println "create failed")))
 ;;;
 ;;; Since: PV0
-(defn canvas-create [s : Surface] : ptr<void>
+(defn canvas-create [s : Surface] : (Result Canvas int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   plutovg_canvas_t *c = plutovg_canvas_create((plutovg_surface_t *)(intptr_t)s);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!c) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)c; r->err_val = 0;
-  return r;
+  if (!c) return tur_err_int(0);
+  return tur_ok_ptr(c);
   ```)
 
 ;;; canvas-destroy -- release a canvas allocated by canvas-create.
@@ -647,18 +623,16 @@
 ;;;   (ok dash-handle) on success; (err 0) on allocation failure.
 ;;;
 ;;; Since: PV4
-(defn dash-array-create [] : ptr<void>
+(defn dash-array-create [] : (Result DashArray int)
   ```c
   #include <stdlib.h>
   int initial_cap = 8;
   size_t bytes = sizeof(int) * 2 + (size_t)initial_cap * sizeof(float);
   char *buf = (char *)malloc(bytes);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!buf) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
+  if (!buf) return tur_err_int(0);
   ((int *)buf)[0] = initial_cap;
   ((int *)buf)[1] = 0;
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)buf; r->err_val = 0;
-  return r;
+  return tur_ok_ptr(buf);
   ```)
 
 ;;; dash-array-add -- append a dash-segment length.
@@ -914,20 +888,6 @@
                       (float)x, (float)y, (float)w, (float)h);
   plutovg_canvas_fill((plutovg_canvas_t *)(intptr_t)c);
   plutovg_canvas_restore((plutovg_canvas_t *)(intptr_t)c);
-  ```)
-
-;;; canvas-of -- extract a typed Canvas handle from an ok result returned by canvas-create.
-(defn canvas-of [r : ptr<void>] : Canvas
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
-
-;;; dash-array-of -- extract a typed DashArray handle from an ok result returned by dash-array-create.
-(defn dash-array-of [r : ptr<void>] : DashArray
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
   ```)
 
 ) ;; end defmodule plutovg/canvas

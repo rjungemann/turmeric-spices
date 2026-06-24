@@ -11,7 +11,7 @@
 ;;   ":latin1" ":utf8" ":utf16" ":utf32"  (default if unrecognized: ":utf8")
 
 (defmodule plutovg/font
-  (import plutovg/types :refer [Canvas FontFace FontCache])
+  (import plutovg/types :refer [Canvas FontFace FontCache Rect])
   (export ;; Face lifecycle
           font-face-load-from-file font-face-load-from-data
           font-face-destroy
@@ -24,28 +24,7 @@
           font-cache-add-file font-cache-load-system font-cache-get
           ;; Canvas bridges
           canvas-set-font-face canvas-set-font-size canvas-set-font
-          canvas-fill-text canvas-stroke-text canvas-text-extents
-          font-face-of font-cache-of)
-
-;; -------------------------------------------------------------------------
-;; Private: result-type helpers (matches stdlib/result.tur layout)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
+          canvas-fill-text canvas-stroke-text canvas-text-extents)
 
 ;; -------------------------------------------------------------------------
 ;; Face lifecycle
@@ -65,16 +44,13 @@
 ;;;   (font-face-load-from-file "/Library/Fonts/Helvetica.ttc" 0)
 ;;;
 ;;; Since: PV5
-(defn font-face-load-from-file [path : cstr index : int] : ptr<void>
+(defn font-face-load-from-file [path : cstr index : int] : (Result FontFace int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   plutovg_font_face_t *ff = plutovg_font_face_load_from_file(
       (const char *)(intptr_t)path, (int)index);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!ff) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)ff; r->err_val = 0;
-  return r;
+  if (!ff) return tur_err_int(0);
+  return tur_ok_ptr(ff);
   ```)
 
 ;;; font-face-load-from-data -- load a font face from an in-memory buffer.
@@ -91,17 +67,14 @@
 ;;; the face.  Free the buffer only AFTER font-face-destroy.
 ;;;
 ;;; Since: PV5
-(defn font-face-load-from-data [data : cstr len : int index : int] : ptr<void>
+(defn font-face-load-from-data [data : cstr len : int index : int] : (Result FontFace int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   plutovg_font_face_t *ff = plutovg_font_face_load_from_data(
       (const void *)(intptr_t)data, (unsigned int)(int)len,
       (int)index, NULL, NULL);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!ff) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)ff; r->err_val = 0;
-  return r;
+  if (!ff) return tur_err_int(0);
+  return tur_ok_ptr(ff);
   ```)
 
 ;;; font-face-destroy -- release a font face.
@@ -188,7 +161,7 @@
 ;;;       (rect-destroy box)))
 ;;;
 ;;; Since: PV5
-(defn font-face-text-extents [ff : FontFace size : float text : cstr] : ptr<void>
+(defn font-face-text-extents [ff : FontFace size : float text : cstr] : (Result Rect int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -201,9 +174,7 @@
                                  PLUTOVG_TEXT_ENCODING_UTF8, &ext);
   float *out = malloc(sizeof(float) * 4);
   out[0] = ext.x; out[1] = ext.y; out[2] = ext.w; out[3] = ext.h;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)out; r->err_val = 0;
-  return r;
+  return tur_ok_ptr(out);
   ```)
 
 ;; -------------------------------------------------------------------------
@@ -220,15 +191,12 @@
 ;;;   (ok cache-handle) on success; (err 0) on allocation failure.
 ;;;
 ;;; Since: PV5
-(defn font-cache-create [] : ptr<void>
+(defn font-cache-create [] : (Result FontCache int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   plutovg_font_face_cache_t *fc = plutovg_font_face_cache_create();
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!fc) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)fc; r->err_val = 0;
-  return r;
+  if (!fc) return tur_err_int(0);
+  return tur_ok_ptr(fc);
   ```)
 
 ;;; font-cache-destroy -- release a font-face cache and all faces it owns.
@@ -255,17 +223,14 @@
 ;;;   (font-cache-add-file fc "/System/Library/Fonts/Helvetica.ttc")
 ;;;
 ;;; Since: PV5
-(defn font-cache-add-file [fc : FontCache path : cstr] : ptr<void>
+(defn font-cache-add-file [fc : FontCache path : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   int n = plutovg_font_face_cache_load_file(
       (plutovg_font_face_cache_t *)(intptr_t)fc,
       (const char *)(intptr_t)path);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (n <= 0) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)n; r->err_val = 0;
-  return r;
+  if (n <= 0) return tur_err_int(0);
+  return tur_ok_int((int64_t)n);
   ```)
 
 ;;; font-cache-load-system -- discover and register fonts from the
@@ -276,15 +241,12 @@
 ;;;   system fonts were found.
 ;;;
 ;;; Since: PV5
-(defn font-cache-load-system [fc : FontCache] : ptr<void>
+(defn font-cache-load-system [fc : FontCache] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   int n = plutovg_font_face_cache_load_sys((plutovg_font_face_cache_t *)(intptr_t)fc);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (n <= 0) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)n; r->err_val = 0;
-  return r;
+  if (n <= 0) return tur_err_int(0);
+  return tur_ok_int((int64_t)n);
   ```)
 
 ;;; font-cache-get -- look up a font face by family name and style.
@@ -307,9 +269,8 @@
 ;;;   (font-cache-get fc "Helvetica" ":bold" 24.0)
 ;;;
 ;;; Since: PV5
-(defn font-cache-get [fc : FontCache family : cstr style : cstr size : float] : ptr<void>
+(defn font-cache-get [fc : FontCache family : cstr style : cstr size : float] : (Result FontFace int)
   ```c
-  #include <stdlib.h>
   #include <string.h>
   #include <plutovg.h>
   const char *k = (const char *)(intptr_t)style;
@@ -323,11 +284,9 @@
   plutovg_font_face_t *ff = plutovg_font_face_cache_get(
       (plutovg_font_face_cache_t *)(intptr_t)fc,
       (const char *)(intptr_t)family, bold, italic);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!ff) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)ff; r->err_val = 0;
   (void)size;
-  return r;
+  if (!ff) return tur_err_int(0);
+  return tur_ok_ptr(ff);
   ```)
 
 ;; -------------------------------------------------------------------------
@@ -431,7 +390,7 @@
 ;;;   (ok rect-handle) -- release with rect-destroy.
 ;;;
 ;;; Since: PV5
-(defn canvas-text-extents [c : Canvas text : cstr encoding : cstr] : ptr<void>
+(defn canvas-text-extents [c : Canvas text : cstr encoding : cstr] : (Result Rect int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -450,23 +409,7 @@
                               s, len, enc, &ext);
   float *out = malloc(sizeof(float) * 4);
   out[0] = ext.x; out[1] = ext.y; out[2] = ext.w; out[3] = ext.h;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)out; r->err_val = 0;
-  return r;
-  ```)
-
-;;; font-face-of -- extract a typed FontFace handle from an ok result.
-(defn font-face-of [r : ptr<void>] : FontFace
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
-
-;;; font-cache-of -- extract a typed FontCache handle from an ok result returned by font-cache-create.
-(defn font-cache-of [r : ptr<void>] : FontCache
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
+  return tur_ok_ptr(out);
   ```)
 
 ) ;; end defmodule plutovg/font

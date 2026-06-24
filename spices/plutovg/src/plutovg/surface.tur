@@ -11,27 +11,7 @@
           surface-destroy
           surface-width surface-height surface-stride surface-data
           ;; PV6: export
-          surface-write-png surface-write-jpeg surface-of)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
+          surface-write-png surface-write-jpeg)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -52,15 +32,12 @@
 ;;;     (if (ok? r) (let [s (ok-val r)] ...) (println "create failed")))
 ;;;
 ;;; Since: PV0
-(defn surface-create [width : int height : int] : ptr<void>
+(defn surface-create [width : int height : int] : (Result Surface int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   plutovg_surface_t *s = plutovg_surface_create((int)width, (int)height);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!s) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)s; r->err_val = 0;
-  return r;
+  if (!s) return tur_err_int(0);
+  return tur_ok_ptr(s);
   ```)
 
 ;;; surface-create-from-data -- wrap an existing pixel buffer as a surface.
@@ -80,16 +57,13 @@
 ;;;   (surface-create-from-data buf 64 64 (* 64 4))
 ;;;
 ;;; Since: PV0
-(defn surface-create-from-data [data : cstr width : int height : int stride : int] : ptr<void>
+(defn surface-create-from-data [data : cstr width : int height : int stride : int] : (Result Surface int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   plutovg_surface_t *s = plutovg_surface_create_for_data(
     (unsigned char *)(intptr_t)data, (int)width, (int)height, (int)stride);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (!s) { r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r; }
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)s; r->err_val = 0;
-  return r;
+  if (!s) return tur_err_int(0);
+  return tur_ok_ptr(s);
   ```)
 
 ;;; surface-destroy -- release a surface allocated by surface-create.
@@ -203,16 +177,14 @@
 ;;;     (if (ok? r) (println "written") (println "failed")))
 ;;;
 ;;; Since: PV6
-(defn surface-write-png [s : Surface path : cstr] : ptr<void>
+(defn surface-write-png [s : Surface path : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   bool ok = plutovg_surface_write_to_png(
       (const plutovg_surface_t *)(intptr_t)s,
       (const char *)(intptr_t)path);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = ok; r->ok_val = 0; r->err_val = ok ? 0 : 1;
-  return r;
+  if (!ok) return tur_err_int(1);
+  return tur_ok_int(0);
   ```)
 
 ;;; surface-write-jpeg -- write the surface to a JPEG file.
@@ -229,24 +201,15 @@
 ;;;   (surface-write-jpeg s "out.jpg" 90)
 ;;;
 ;;; Since: PV6
-(defn surface-write-jpeg [s : Surface path : cstr quality : int] : ptr<void>
+(defn surface-write-jpeg [s : Surface path : cstr quality : int] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <plutovg.h>
   bool ok = plutovg_surface_write_to_jpg(
       (const plutovg_surface_t *)(intptr_t)s,
       (const char *)(intptr_t)path,
       (int)quality);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = ok; r->ok_val = 0; r->err_val = ok ? 0 : 1;
-  return r;
-  ```)
-
-;;; surface-of -- extract a typed Surface handle from an ok result returned by surface-create.
-(defn surface-of [r : ptr<void>] : Surface
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
+  if (!ok) return tur_err_int(1);
+  return tur_ok_int(0);
   ```)
 
 ) ;; end defmodule plutovg/surface
