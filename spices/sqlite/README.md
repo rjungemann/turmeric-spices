@@ -55,10 +55,10 @@ let [db ok-val(db-open("app.db"))]
 
 ### Linear `Db` / `Stmt` (U1)
 
-`Db` and `Stmt` are `:linear` opaques. A connection from `db-of` (or
-`ok-val`) must be closed exactly once with `db-close`, and a prepared
-statement from `stmt-of` must be finalized exactly once with
-`stmt-finalize`. The query / step / bind / column operations take their
+`Db` and `Stmt` are `:linear` opaques. A connection from `ok-val` on
+`db-open` must be closed exactly once with `db-close`, and a prepared
+statement from `ok-val` on `db-prepare` must be finalized exactly once
+with `stmt-finalize`. The query / step / bind / column operations take their
 handle by `^borrow`, observing it without discharging that obligation.
 Under `-Xsubstructural` this makes use-after-close, use-after-finalize,
 double-close, and forgotten finalize into compile-time errors

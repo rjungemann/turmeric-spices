@@ -7,10 +7,10 @@
 (defmodule sqlite_db_double_close_test
   (export)
 
-(import sqlite/db :refer [Db db-open db-of db-close])
+(import sqlite/db :refer [Db db-open db-close])
 
 (defn double-close [] : int
-  (let [db (db-of (db-open ":memory:"))]
+  (let [db (ok-val (db-open ":memory:"))]
     (do
       (db-close db)    ;; single legal consumption
       (db-close db)    ;; ERROR TUR-E0101: consume after consume
