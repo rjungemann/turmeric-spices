@@ -12,26 +12,6 @@
   (import wav/info :refer [Wav])
 
 ;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
-
-;; -------------------------------------------------------------------------
 ;; Public API
 ;; -------------------------------------------------------------------------
 
@@ -41,8 +21,8 @@
 ;;;   path -- filesystem path to the audio file
 ;;;
 ;;; Returns:
-;;;   (ok handle) on success; (err 0) if the file could not be opened.
-;;;   Pass handle as :int to wav-read-float, wav-seek, wav-close, and wav/info.
+;;;   (Result Wav int) -- ok carries the Wav handle; err carries 0 if the
+;;;   file could not be opened.
 ;;;   Free with wav-close when done.
 ;;;
 ;;; Example:
@@ -50,7 +30,7 @@
 ;;;     (if (ok? r) (let [w (ok-val r)] ...) (println "open failed")))
 ;;;
 ;;; Since: WV0
-(defn wav-open-read [path : cstr] : ptr<void>
+(defn wav-open-read [path : cstr] : (Result Wav int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -59,15 +39,11 @@
   SF_INFO info;
   memset(&info, 0, sizeof(info));
   SNDFILE *sf = sf_open((const char *)path, SFM_READ, &info);
-  if (!sf) {
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
-  }
+  if (!sf) return tur_err_int(0);
   struct __wav *w = malloc(sizeof(struct __wav));
   w->sf = sf;
   w->info = info;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)w; r->err_val = 0; return r;
+  return tur_ok_ptr(w);
   ```)
 
 ;;; wav-close -- close a WAV handle and free associated memory.
@@ -122,16 +98,16 @@
 ;;;   whence       -- seek anchor keyword: ":set", ":cur", or ":end"
 ;;;
 ;;; Returns:
-;;;   (ok new-position) on success; (err 0) if the seek failed.
+;;;   (Result int int) -- ok carries the new frame position; err carries 0
+;;;   if the seek failed.
 ;;;
 ;;; Example:
 ;;;   (let [r (wav-seek w 0 ":set")]
 ;;;     (if (ok? r) (println "seeked") (println "seek failed")))
 ;;;
 ;;; Since: WV0
-(defn wav-seek [w : Wav frame-offset : int whence : cstr] : ptr<void>
+(defn wav-seek [w : Wav frame-offset : int whence : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <string.h>
   #include <sndfile.h>
   struct __wav { SNDFILE *sf; SF_INFO info; };
@@ -141,13 +117,8 @@
   else if (strcmp((const char *)whence, ":cur") == 0) whence_val = SEEK_CUR;
   else if (strcmp((const char *)whence, ":end") == 0) whence_val = SEEK_END;
   sf_count_t result = sf_seek(wav->sf, (sf_count_t)frame_offset, whence_val);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (result < 0) {
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)result; r->err_val = 0;
-  }
-  return r;
+  if (result < 0) return tur_err_int(0);
+  return tur_ok_int((int64_t)result);
   ```)
 
 ) ;; end defmodule wav/reader

@@ -8,34 +8,13 @@
 
 (defmodule wav/info
   (export Wav wav-open-read wav-open-write wav-close
-          wav-sample-rate wav-channels wav-frame-count wav-format
-          wav-of)
+          wav-sample-rate wav-channels wav-frame-count wav-format)
 
 ;;; Wav -- WAV/audio file handle.
 ;;; Wraps a heap-allocated `struct __wav { SNDFILE*, SF_INFO }`.
 ;;; Construct with wav-open-read / wav-open-write; free with wav-close.
 ;;; Since: 0.2.0
 (defopaque Wav :int)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -47,8 +26,8 @@
 ;;;   path -- filesystem path to the audio file
 ;;;
 ;;; Returns:
-;;;   (ok handle) on success; (err 0) if the file could not be opened.
-;;;   Pass handle as :int to wav/reader and wav/info functions.
+;;;   (Result Wav int) -- ok carries the Wav handle; err carries 0 if the
+;;;   file could not be opened.
 ;;;   Free with wav-close when done.
 ;;;
 ;;; Example:
@@ -56,7 +35,7 @@
 ;;;     (if (ok? r) (let [w (ok-val r)] ...) (println "open failed")))
 ;;;
 ;;; Since: WV0
-(defn wav-open-read [path : cstr] : ptr<void>
+(defn wav-open-read [path : cstr] : (Result Wav int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -65,15 +44,11 @@
   SF_INFO info;
   memset(&info, 0, sizeof(info));
   SNDFILE *sf = sf_open((const char *)path, SFM_READ, &info);
-  if (!sf) {
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
-  }
+  if (!sf) return tur_err_int(0);
   struct __wav *w = malloc(sizeof(struct __wav));
   w->sf = sf;
   w->info = info;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)w; r->err_val = 0; return r;
+  return tur_ok_ptr(w);
   ```)
 
 ;;; wav-open-write -- open a new audio file for writing.
@@ -86,8 +61,8 @@
 ;;;                  ":wav-float", ":aiff-pcm16", ":flac-pcm16", ":flac-pcm24"
 ;;;
 ;;; Returns:
-;;;   (ok handle) on success; (err 0) if the file could not be created.
-;;;   Pass handle as :int to wav/writer and wav/info functions.
+;;;   (Result Wav int) -- ok carries the Wav handle; err carries 0 if the
+;;;   file could not be created.
 ;;;   Free with wav-close when done.
 ;;;
 ;;; Example:
@@ -95,7 +70,7 @@
 ;;;     (if (ok? r) (let [w (ok-val r)] ...) (println "open failed")))
 ;;;
 ;;; Since: WV0
-(defn wav-open-write [path : cstr sample-rate : int channels : int format : cstr] : ptr<void>
+(defn wav-open-write [path : cstr sample-rate : int channels : int format : cstr] : (Result Wav int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -115,15 +90,11 @@
   info.channels   = (int)channels;
   info.format     = fmt;
   SNDFILE *sf = sf_open((const char *)path, SFM_WRITE, &info);
-  if (!sf) {
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
-  }
+  if (!sf) return tur_err_int(0);
   struct __wav *w = malloc(sizeof(struct __wav));
   w->sf = sf;
   w->info = info;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)w; r->err_val = 0; return r;
+  return tur_ok_ptr(w);
   ```)
 
 ;;; wav-close -- close a WAV handle and free associated memory.
@@ -225,13 +196,6 @@
   else if (type == SF_FORMAT_AIFF) return "aiff";
   else if (type == SF_FORMAT_FLAC) return "flac";
   else                             return "unknown";
-  ```)
-
-;;; wav-of -- extract a typed Wav handle from an ok result returned by wav-open-{read,write}.
-(defn wav-of [r : ptr<void>] : Wav
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
   ```)
 
 ) ;; end defmodule wav/info
