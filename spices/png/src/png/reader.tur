@@ -7,29 +7,9 @@
 ;; All images are normalized to 8-bit RGBA on read (4 channels).
 
 (defmodule png/reader
-  (export png-read img-free img-of)
+  (export png-read img-free)
 
   (import png/info :refer [Img])
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -41,7 +21,8 @@
 ;;;   path -- filesystem path to the PNG file
 ;;;
 ;;; Returns:
-;;;   (ok handle) on success; (err 0) on failure.
+;;;   (Result Img int) -- ok carries the Img handle; err carries 0 on
+;;;   failure (file-open or libpng failure).
 ;;;   The image is always converted to 8-bit RGBA (4 channels).
 ;;;   Free with img-free when done.
 ;;;
@@ -50,7 +31,7 @@
 ;;;     (if (ok? r) (let [img (ok-val r)] ...) (println "read failed")))
 ;;;
 ;;; Since: PN0
-(defn png-read [path : cstr] : ptr<void>
+(defn png-read [path : cstr] : (Result Img int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -65,28 +46,19 @@
     unsigned char *pixels;
   };
   FILE *fp = fopen((const char *)path, "rb");
-  if (!fp) {
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
-  }
+  if (!fp) return tur_err_int(0);
   png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-  if (!png) {
-    fclose(fp);
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
-  }
+  if (!png) { fclose(fp); return tur_err_int(0); }
   png_infop info = png_create_info_struct(png);
   if (!info) {
     png_destroy_read_struct(&png, NULL, NULL);
     fclose(fp);
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+    return tur_err_int(0);
   }
   if (setjmp(png_jmpbuf(png))) {
     png_destroy_read_struct(&png, &info, NULL);
     fclose(fp);
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
+    return tur_err_int(0);
   }
   png_init_io(png, fp);
   png_read_info(png, info);
@@ -125,8 +97,7 @@
   img->channels  = 4;
   img->bit_depth = 8;
   img->pixels    = pixels;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)img; r->err_val = 0; return r;
+  return tur_ok_ptr(img);
   ```)
 
 ;;; img-free -- free an image handle allocated by png-read.
@@ -153,13 +124,6 @@
   };
   struct __img *i = (struct __img *)(intptr_t)img;
   if (i) { free(i->pixels); free(i); }
-  ```)
-
-;;; img-of -- extract a typed Img handle from an ok result returned by png-read.
-(defn img-of [r : ptr<void>] : Img
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
   ```)
 
 ) ;; end defmodule png/reader
