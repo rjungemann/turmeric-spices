@@ -1,0 +1,210 @@
+;;; thread-pool/future -- Future<R> result cells for fan-out / await (FUT-V0).
+;;;
+;;; `pool-submit-future` submits a `(item, work)` pair to a pool and hands back
+;;; a linear `(Future R)` the caller can await.  This standardizes the
+;;; fan-out/collect pattern: instead of threading mutexes and result slots
+;;; through work items, submit N futures and await them.
+;;;
+;;; ---- Storage + lifetime ----
+;;;
+;;; A `(Future R)` owns a heap `__tp_future` cell: a mutex, a condition
+;;; variable, the result slot, an `is_set` flag, and a reference count.  The
+;;; cell is shared by exactly two parties -- the worker that runs the task and
+;;; the awaiter that holds the Future -- so it is born with refcount = 2.  Each
+;;; party decrements after its operation (the worker after fulfilling in
+;;; pool.tur's __tp_dispatch; the awaiter in future-await / future-cancel);
+;;; whoever drops the count to zero tears the cell down.  This is what makes a
+;;; dropped-but-uncollected future safe: `future-cancel` is the linear drop
+;;; path, and the worker still writes through its own live reference.
+;;;
+;;;   * future-await  -- block until the result is set, return it, consume the
+;;;                      Future (drop the awaiter's reference).
+;;;   * future-try    -- non-blocking peek; BORROWS the Future (no consume, no
+;;;                      refcount change), returns (Option R).
+;;;   * future-cancel -- consume the Future and drop the awaiter's reference
+;;;                      WITHOUT awaiting.  Does NOT stop in-flight work: the
+;;;                      worker still runs the task and writes its result before
+;;;                      dropping its reference; whichever side is last frees.
+;;;
+;;; ---- Memory ordering ----
+;;;
+;;; The cell's mutex is the synchronization edge: the work's writes
+;;; happen-before the awaiter's read.  That is the maximum claim correctly
+;;; available under pthreads.
+;;;
+;;; ---- The work closure's lifetime ----
+;;;
+;;; `work` is invoked later, on a worker thread.  It must remain valid until
+;;; the task runs -- bind it in a scope that outlives the await (pool-map does
+;;; this for you).  This is the same closure-lifetime contract as the pool's
+;;; own callback.
+;;;
+;;; The `__thread_pool` / `__tp_qitem` / `__tp_future` / `__tp_ftask` C structs
+;;; are duplicated verbatim from pool.tur -- keep all four in sync.
+;;;
+;;; Since: TP2
+
+(defmodule thread-pool/future
+  (export Future pool-submit-future future-await future-try future-cancel)
+
+  (import thread-pool/pool :refer [Pool])
+
+;; file-scope-c-block: POSIX headers + the verbatim struct layouts shared with
+;; pool.tur, plus the extern for pool.tur's non-static enqueue.
+```c
+#include <stdlib.h>
+#include <pthread.h>
+#include <stdint.h>
+
+/* Shared struct layouts -- byte-identical to pool.tur, guarded because both
+   modules inline into one program translation unit. */
+#ifndef TUR_THREAD_POOL_STRUCTS
+#define TUR_THREAD_POOL_STRUCTS
+struct __tp_qitem { int64_t payload; int is_future; };
+
+struct __thread_pool {
+  pthread_mutex_t   mu;
+  pthread_cond_t    not_empty;
+  pthread_cond_t    not_full;
+  struct __tp_qitem *items;
+  int               cap;
+  int               head;
+  int               tail;
+  int               count;
+  int               stop;
+  void             *callback;
+  int               cb_is_fat;
+  pthread_t        *workers;
+  int               nworkers;
+};
+
+struct __tp_future {
+  pthread_mutex_t lock;
+  pthread_cond_t  ready;
+  int64_t         value;
+  int             is_set;
+  int             refcount;
+};
+struct __tp_ftask {
+  void              *work_box;
+  int64_t            item;
+  struct __tp_future *cell;
+};
+#endif /* TUR_THREAD_POOL_STRUCTS */
+
+extern int __tp_enqueue(struct __thread_pool *, int64_t, int, int);
+```
+
+;;; Future -- an opaque, linear handle to a one-shot result cell parameterised
+;;; by the result type `R`.  Consume it exactly once with future-await or
+;;; future-cancel.
+;;;
+;;; Since: TP2
+(defopaque Future [R] :ptr<void> :linear)
+
+;;; pool-submit-future -- submit (item, work) to the pool; get a (Future R).
+;;;
+;;; The pool runs `work(item)` on a worker thread; its result lands in the
+;;; returned future's cell.  Like pool-submit it blocks under back-pressure and
+;;; transfers ownership of `item` to the task.  A submit to a pool that is
+;;; already stopping is dropped and the future never completes -- await only
+;;; futures submitted to a live pool (join producers before pool-stop).
+;;;
+;;; Parameters:
+;;;   pool -- borrowed (Pool T) handle.
+;;;   item -- an owned T handed to `work`.
+;;;   work -- (fn [T] R) run on a worker; must outlive the await.
+;;;
+;;; Returns: a linear (Future R).
+;;;
+;;; Since: TP2
+(defn pool-submit-future [T R]
+    [^borrow pool : (Pool T) item : T ^fat work : (fn [T] R)] : (Future R)
+  ```c
+  struct __tp_future *cell = (struct __tp_future *)malloc(sizeof(*cell));
+  if (!cell) { fprintf(stderr, "pool-submit-future: oom\n"); abort(); }
+  pthread_mutex_init(&cell->lock, NULL);
+  pthread_cond_init(&cell->ready, NULL);
+  cell->value    = 0;
+  cell->is_set   = 0;
+  cell->refcount = 2;   /* worker + awaiter */
+
+  struct __tp_ftask *t = (struct __tp_ftask *)malloc(sizeof(*t));
+  if (!t) { fprintf(stderr, "pool-submit-future: oom\n"); abort(); }
+  t->work_box = (void *)(intptr_t)work;
+  t->item     = (int64_t)item;
+  t->cell     = cell;
+
+  __tp_enqueue((struct __thread_pool *)(intptr_t)pool, (int64_t)(intptr_t)t, 1, 1);
+  return (int64_t)(intptr_t)cell;
+  ```)
+
+;;; future-await -- block until the result is set, return it, consume the
+;;; Future (drop the awaiter's reference; free the cell if last).
+;;;
+;;; Since: TP2
+(defn future-await [R] [fut : (Future R)] : R
+  ```c
+  struct __tp_future *c = (struct __tp_future *)(intptr_t)fut;
+  pthread_mutex_lock(&c->lock);
+  while (!c->is_set) pthread_cond_wait(&c->ready, &c->lock);
+  int64_t v = c->value;
+  int dead = (--c->refcount == 0);
+  pthread_mutex_unlock(&c->lock);
+  if (dead) {
+    pthread_cond_destroy(&c->ready);
+    pthread_mutex_destroy(&c->lock);
+    free(c);
+  }
+  return v;
+  ```)
+
+;; future-set? -- (internal) is the result available yet? (borrows; no consume)
+(defn future-set? [R] [^borrow fut : (Future R)] : int
+  ```c
+  struct __tp_future *c = (struct __tp_future *)(intptr_t)fut;
+  pthread_mutex_lock(&c->lock);
+  int s = c->is_set;
+  pthread_mutex_unlock(&c->lock);
+  return s;
+  ```)
+
+;; future-peek -- (internal) read the result value (0 if not set yet).
+(defn future-peek [R] [^borrow fut : (Future R)] : R
+  ```c
+  struct __tp_future *c = (struct __tp_future *)(intptr_t)fut;
+  pthread_mutex_lock(&c->lock);
+  int64_t v = c->is_set ? c->value : 0;
+  pthread_mutex_unlock(&c->lock);
+  return v;
+  ```)
+
+;;; future-try -- non-blocking peek: (some R) if the result is ready, else
+;;; (none).  Borrows the Future (no consume, no refcount change) so you can
+;;; poll it repeatedly and still await or cancel it afterwards.
+;;;
+;;; Since: TP2
+(defn future-try [R] [^borrow fut : (Future R)] : (Option R)
+  (if (= (future-set? fut) 1)
+    (some (future-peek fut))
+    (none)))
+
+;;; future-cancel -- consume the Future without awaiting; drop the awaiter's
+;;; reference (free the cell if the worker already finished).  Does NOT stop
+;;; in-flight work: a running task still completes and writes its result.
+;;;
+;;; Since: TP2
+(defn future-cancel [R] [fut : (Future R)] : void
+  ```c
+  struct __tp_future *c = (struct __tp_future *)(intptr_t)fut;
+  pthread_mutex_lock(&c->lock);
+  int dead = (--c->refcount == 0);
+  pthread_mutex_unlock(&c->lock);
+  if (dead) {
+    pthread_cond_destroy(&c->ready);
+    pthread_mutex_destroy(&c->lock);
+    free(c);
+  }
+  ```)
+
+) ;; end defmodule thread-pool/future
