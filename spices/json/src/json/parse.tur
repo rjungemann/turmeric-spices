@@ -7,43 +7,26 @@
 (defmodule json/parse
   (export json-parse json-free)
 
-;; Private result helpers (layout matches stdlib/result.tur)
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct __jres { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __jres *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0;
-  return r;
-  ```)
-
-(defn __err [msg : cstr] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct __jres { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __jres *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = (int64_t)(intptr_t)msg;
-  return r;
-  ```)
-
 ;;; json-parse -- parse a JSON string into an opaque document handle.
 ;;;
 ;;; Parameters:
 ;;;   json -- NUL-terminated JSON string
 ;;;
 ;;; Returns:
-;;;   result<:int> -- ok(doc-handle) on success, err(:cstr message) on failure.
-;;;   The doc handle must be freed with json-free when no longer needed.
+;;;   (Result int cstr) -- ok carries the doc handle (as :int); err carries
+;;;   a heap-allocated diagnostic message. The doc handle must be freed
+;;;   with json-free when no longer needed.
 ;;;
 ;;; Example:
 ;;;   (let [r (json-parse "{\"x\":1}")]
 ;;;     (if (ok? r) (json-emit (ok-val r)) "parse error"))
 ;;;
 ;;; Since: P4
-(defn json-parse [json : cstr] : ptr<void>
+(defn json-parse [json : cstr] : (Result int cstr)
   ```c
   #include <yyjson.h>
   #include <stdlib.h>
+  #include <string.h>
   yyjson_read_err err;
   yyjson_doc *doc = yyjson_read_opts((char *)json, strlen((char *)json),
                                      YYJSON_READ_NOFLAG, NULL, &err);
@@ -52,17 +35,11 @@
     size_t len = strlen(msg);
     char *buf = malloc(len + 1);
     memcpy(buf, msg, len + 1);
-    struct __jres { bool is_ok; int64_t ok_val; int64_t err_val; };
-    struct __jres *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = (int64_t)(intptr_t)buf;
-    return r;
+    return tur_err_ptr(buf);
   }
   yyjson_doc **pp = malloc(sizeof(yyjson_doc *));
   *pp = doc;
-  struct __jres { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __jres *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)pp; r->err_val = 0;
-  return r;
+  return tur_ok_ptr(pp);
   ```)
 
 ;;; json-free -- free a document handle returned by json-parse.
