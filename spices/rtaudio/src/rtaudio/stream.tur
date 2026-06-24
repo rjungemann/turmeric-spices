@@ -15,26 +15,6 @@
 (import rtaudio/core :refer [Audio])
 
 ;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
-
-;; -------------------------------------------------------------------------
 ;; Public API
 ;; -------------------------------------------------------------------------
 
@@ -56,7 +36,7 @@
 ;;;                  `(c-fn [ptr<void> ptr<void> int float int ptr<void>] int)`
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (let [r (stream-open a 0 2 -1 0 ":float32" 44100 512 my-cb)]
@@ -66,9 +46,8 @@
 (defn stream-open [a : Audio out-device : int out-chans : int
                    in-device : int in-chans : int
                    format : cstr sample-rate : int buf-frames : int
-                   callback : (c-fn [ptr<void> ptr<void> int float int ptr<void>] int)] : ptr<void>
+                   callback : (c-fn [ptr<void> ptr<void> int float int ptr<void>] int)] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <string.h>
   #include <rtaudio/rtaudio_c.h>
   rtaudio_format_t fmt = RTAUDIO_FORMAT_FLOAT32;
@@ -99,10 +78,8 @@
                                &frames,
                                (rtaudio_cb_t)callback,
                                NULL, NULL, NULL);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (rc == 0) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
-  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
-  return r;
+  if (rc != 0) return tur_err_int(0);
+  return tur_ok_int(0);
   ```)
 
 ;;; stream-start -- begin audio processing on an open stream.
@@ -111,21 +88,18 @@
 ;;;   a -- audio handle (ok-val from audio-new)
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (stream-start a)
 ;;;
 ;;; Since: RA0
-(defn stream-start [a : Audio] : ptr<void>
+(defn stream-start [a : Audio] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <rtaudio/rtaudio_c.h>
   int rc = rtaudio_start_stream((rtaudio_t)(intptr_t)a);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (rc == 0) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
-  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
-  return r;
+  if (rc != 0) return tur_err_int(0);
+  return tur_ok_int(0);
   ```)
 
 ;;; stream-stop -- stop audio processing without closing the stream.

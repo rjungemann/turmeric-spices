@@ -5,7 +5,7 @@
 ;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
 
 (defmodule rtaudio/core
-  (export Audio DeviceInfo audio-new audio-free audio-api audio-of)
+  (export Audio DeviceInfo audio-new audio-free audio-api)
 
 ;;; Audio -- opaque handle to an RtAudio instance (rtaudio_t).
 (defopaque Audio :int)
@@ -14,26 +14,6 @@
 ;;; device-info (rtaudio/devices). Owns its name string and sample-rates list;
 ;;; free with device-info-free.
 (defopaque DeviceInfo :int)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -46,8 +26,8 @@
 ;;;          or any other value for RTAUDIO_API_UNSPECIFIED (auto-select)
 ;;;
 ;;; Returns:
-;;;   (ok handle) on success; (err 0) if rtaudio_create returned NULL.
-;;;   Pass handle as :int to other rtaudio/* functions.
+;;;   (Result Audio int) -- ok carries the Audio handle; err carries 0 if
+;;;   rtaudio_create returned NULL.
 ;;;   Free with audio-free when done.
 ;;;
 ;;; Example:
@@ -55,9 +35,8 @@
 ;;;     (if (ok? r) (let [a (ok-val r)] ...) (println "audio init failed")))
 ;;;
 ;;; Since: RA0
-(defn audio-new [api : cstr] : ptr<void>
+(defn audio-new [api : cstr] : (Result Audio int)
   ```c
-  #include <stdlib.h>
   #include <string.h>
   #include <rtaudio/rtaudio_c.h>
   rtaudio_api_t api_val = RTAUDIO_API_UNSPECIFIED;
@@ -67,12 +46,8 @@
   else if (strcmp((const char*)api, ":jack") == 0)       api_val = RTAUDIO_API_UNIX_JACK;
   else if (strcmp((const char*)api, ":dummy") == 0)      api_val = RTAUDIO_API_DUMMY;
   rtaudio_t handle = rtaudio_create(api_val);
-  if (!handle) {
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
-  }
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = (int64_t)(intptr_t)handle; r->err_val = 0; return r;
+  if (!handle) return tur_err_int(0);
+  return tur_ok_ptr(handle);
   ```)
 
 ;;; audio-free -- destroy an RtAudio handle created with audio-new.
@@ -109,13 +84,6 @@
   ```c
   #include <rtaudio/rtaudio_c.h>
   return (char*)rtaudio_api_name(rtaudio_current_api((rtaudio_t)(intptr_t)a));
-  ```)
-
-;;; audio-of -- extract a typed Audio handle from an ok result returned by audio-new.
-(defn audio-of [r : ptr<void>] : Audio
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
   ```)
 
 ) ;; end defmodule rtaudio/core

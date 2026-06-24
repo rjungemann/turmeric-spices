@@ -29,12 +29,14 @@ and any real-time audio program.
 (import rtaudio/core    :refer [audio-new audio-free])
 (import rtaudio/devices :refer [device-count device-info device-info-name])
 
-(let [a (audio-new)]
-  (let [n (device-count a)]
-    (for [i (range 0 n)]
-      (let [info (device-info a i)]
-        (println i (device-info-name info)))))
-  (audio-free a))
+(let [r (audio-new ":core-audio")]
+  (when (ok? r)
+    (let [a (ok-val r)
+          n (device-count a)]
+      (for [i (range 0 n)]
+        (let [info (device-info a i)]
+          (println i (device-info-name info))))
+      (audio-free a))))
 ```
 
 ```sweet-exp
@@ -42,12 +44,14 @@ and any real-time audio program.
 import rtaudio/core    :refer [audio-new audio-free]
 import rtaudio/devices :refer [device-count device-info device-info-name]
 
-let [a audio-new()]
-  let [n device-count(a)]
-    for [i range(0 n)]
-      let [info device-info(a i)]
-        println(i device-info-name(info))
-  audio-free(a)
+let [r audio-new(":core-audio")]
+  when ok?(r)
+    let [a ok-val(r)
+         n device-count(a)]
+      for [i range(0 n)]
+        let [info device-info(a i)]
+          println(i device-info-name(info))
+      audio-free(a)
 ```
 
 ## See also
