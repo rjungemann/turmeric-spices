@@ -1,34 +1,15 @@
 ;; rtmidi/out.tur -- MIDI output port management and message sending.
 ;;
-;; All functions accept a MIDI output handle (ok-val from midi-out-new in rtmidi/core).
-;; Build messages with rtmidi/msg constructors, then pass msg-bytes and msg-len
-;; to midi-out-send.
-;; Results are compatible with stdlib/result.tur:
-;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
+;; Functions accept a MIDI output handle (the (ok-val ...) of midi-out-new).
+;; Fallible operations return real typed `(Result int int)` values built with
+;; the preamble's typed Result builders -- see
+;; docs/guides/inline-c-results-guide.md.
+;; Build messages with rtmidi/msg constructors, then pass msg-bytes and
+;; msg-len to midi-out-send.
 
 (defmodule rtmidi/out
   (import rtmidi/core :refer [MidiOut])
   (export midi-out-open midi-out-open-virtual midi-out-close midi-out-send)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Public API
@@ -37,60 +18,57 @@
 ;;; midi-out-open -- open a physical MIDI output port by index.
 ;;;
 ;;; Parameters:
-;;;   mo   -- MIDI output handle (ok-val from midi-out-new)
+;;;   mo   -- MIDI output handle (ok-val of the midi-out-new result)
 ;;;   i    -- port index (0-based, must be < midi-out-port-count)
 ;;;   name -- client name to register with the system
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries an integer status code
+;;;   (1 when the underlying RtMidi handle's `ok` flag is false after the
+;;;   open call).
 ;;;
 ;;; Example:
 ;;;   (let [r (midi-out-open mo 0 "Turmeric Out")]
 ;;;     (if (ok? r) ... (println "open failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-out-open [mo : MidiOut i : int name : cstr] : ptr<void>
+(defn midi-out-open [mo : MidiOut i : int name : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
-  rtmidi_open_port((RtMidiPtr)(intptr_t)mo, (unsigned int)i, (const char*)name);
   RtMidiPtr ptr = (RtMidiPtr)(intptr_t)mo;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (ptr->ok) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
-  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
-  return r;
+  rtmidi_open_port(ptr, (unsigned int)i, (const char*)name);
+  if (!ptr->ok) return tur_err_int(1);
+  return tur_ok_int(0);
   ```)
 
 ;;; midi-out-open-virtual -- open a virtual MIDI output port.
 ;;;
 ;;; Parameters:
-;;;   mo   -- MIDI output handle (ok-val from midi-out-new)
+;;;   mo   -- MIDI output handle (ok-val of the midi-out-new result)
 ;;;   name -- name for the virtual port
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries an integer status code
+;;;   (1 when the open call left the handle's `ok` flag false).
 ;;;
 ;;; Example:
 ;;;   (let [r (midi-out-open-virtual mo "My Virtual Out")]
 ;;;     (if (ok? r) ... (println "virtual open failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-out-open-virtual [mo : MidiOut name : cstr] : ptr<void>
+(defn midi-out-open-virtual [mo : MidiOut name : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
-  rtmidi_open_virtual_port((RtMidiPtr)(intptr_t)mo, (const char*)name);
   RtMidiPtr ptr = (RtMidiPtr)(intptr_t)mo;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (ptr->ok) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
-  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
-  return r;
+  rtmidi_open_virtual_port(ptr, (const char*)name);
+  if (!ptr->ok) return tur_err_int(1);
+  return tur_ok_int(0);
   ```)
 
 ;;; midi-out-close -- close the currently open MIDI output port.
 ;;;
 ;;; Parameters:
-;;;   mo -- MIDI output handle (ok-val from midi-out-new)
+;;;   mo -- MIDI output handle (ok-val of the midi-out-new result)
 ;;;
 ;;; Returns:
 ;;;   void
@@ -108,12 +86,13 @@
 ;;; midi-out-send -- send a raw MIDI message buffer on the output port.
 ;;;
 ;;; Parameters:
-;;;   mo    -- MIDI output handle (ok-val from midi-out-new)
+;;;   mo    -- MIDI output handle (ok-val of the midi-out-new result)
 ;;;   bytes -- pointer to raw MIDI bytes as :cstr (e.g. msg-bytes from rtmidi/msg)
 ;;;   len   -- number of bytes to send (e.g. msg-len from rtmidi/msg)
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries the non-zero return
+;;;   code from rtmidi_out_send_message.
 ;;;
 ;;; Example:
 ;;;   (let [m (msg-note-on 0 60 127)]
@@ -121,17 +100,14 @@
 ;;;     (msg-free m))
 ;;;
 ;;; Since: RM0
-(defn midi-out-send [mo : MidiOut bytes : cstr len : int] : ptr<void>
+(defn midi-out-send [mo : MidiOut bytes : cstr len : int] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   int rc = rtmidi_out_send_message((RtMidiOutPtr)(intptr_t)mo,
                                    (const unsigned char*)bytes,
                                    (size_t)len);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (rc == 0) { r->is_ok = true;  r->ok_val = 0; r->err_val = 0; }
-  else         { r->is_ok = false; r->ok_val = 0; r->err_val = 0; }
-  return r;
+  if (rc != 0) return tur_err_int((int64_t)rc);
+  return tur_ok_int(0);
   ```)
 
 ) ;; end defmodule rtmidi/out

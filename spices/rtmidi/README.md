@@ -18,40 +18,51 @@ pair with `tur-rtaudio` for a complete real-time setup.
 ```turmeric no-check
 :spices {
   "rtmidi" {:url    "https://github.com/rjungemann/turmeric-spices"
-            :ref    "rtmidi-v0.1.0"
+            :ref    "rtmidi-v0.2.0"
             :subdir "spices/rtmidi"}
 }
 ```
 
 ## Quick start
 
-```turmeric
-(import rtmidi/core :refer [midi-out-new midi-out-free midi-out-port-count])
-(import rtmidi/out  :refer [midi-out-open midi-out-close midi-out-send])
-(import rtmidi/msg  :refer [msg-note-on msg-free])
+`midi-in-new` / `midi-out-new` return a real `(Result MidiIn int)` /
+`(Result MidiOut int)` -- read the handle out with stdlib `ok-val`:
 
-(let [m   (midi-out-new "tur")
-      msg (msg-note-on 0 60 100)]
-  (midi-out-open m 0)
-  (midi-out-send m msg)
-  (msg-free msg)
-  (midi-out-close m)
-  (midi-out-free m))
+```turmeric
+(import result      :refer [ok? ok-val])
+(import rtmidi/core :refer [midi-out-new midi-out-free])
+(import rtmidi/out  :refer [midi-out-open midi-out-close midi-out-send])
+(import rtmidi/msg  :refer [msg-note-on msg-bytes msg-len msg-free])
+
+(let [r (midi-out-new ":core-midi")]
+  (if (ok? r)
+    (let [m   (ok-val r)
+          msg (msg-note-on 0 60 100)]
+      (midi-out-open m 0 "tur")
+      (midi-out-send m (msg-bytes msg) (msg-len msg))
+      (msg-free msg)
+      (midi-out-close m)
+      (midi-out-free m))
+    (println "midi-out init failed")))
 ```
 
 ```sweet-exp
 #lang sweet-exp
-import rtmidi/core :refer [midi-out-new midi-out-free midi-out-port-count]
+import result      :refer [ok? ok-val]
+import rtmidi/core :refer [midi-out-new midi-out-free]
 import rtmidi/out  :refer [midi-out-open midi-out-close midi-out-send]
-import rtmidi/msg  :refer [msg-note-on msg-free]
+import rtmidi/msg  :refer [msg-note-on msg-bytes msg-len msg-free]
 
-let [m   midi-out-new("tur")
-     msg msg-note-on(0 60 100)]
-  midi-out-open(m 0)
-  midi-out-send(m msg)
-  msg-free(msg)
-  midi-out-close(m)
-  midi-out-free(m)
+let [r midi-out-new(":core-midi")]
+  if ok?(r)
+    let [m   ok-val(r)
+         msg msg-note-on(0 60 100)]
+      midi-out-open(m 0 "tur")
+      midi-out-send(m msg-bytes(msg) msg-len(msg))
+      msg-free(msg)
+      midi-out-close(m)
+      midi-out-free(m)
+    println("midi-out init failed")
 ```
 
 ## See also

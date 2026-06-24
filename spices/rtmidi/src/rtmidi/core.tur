@@ -1,14 +1,14 @@
 ;; rtmidi/core.tur -- RtMidi handle lifecycle and port enumeration.
 ;;
-;; Handles returned by midi-in-new / midi-out-new are opaque MidiIn / MidiOut
-;; values (defopaque newtype over int64 storage; the underlying value is a
-;; RtMidiInPtr / RtMidiOutPtr cast through intptr_t).  Use midi-in-of /
-;; midi-out-of to extract a typed handle from the ok-val of the new-result.
-;; Results are compatible with stdlib/result.tur:
-;;   ok? / ok-val / err-val from (import result :refer [ok? ok-val err-val])
+;; Constructors return real typed `(Result MidiIn int)` / `(Result MidiOut int)`
+;; values built from inline-C with the preamble's typed builders
+;; (tur_ok_ptr / tur_err_int) -- see docs/guides/inline-c-results-guide.md.
+;; Callers consume them with the stdlib accessors directly:
+;;   (let [r (midi-in-new ":core-midi")]
+;;     (if (ok? r) (let [mi (ok-val r)] ...) (println "init failed")))
 
 (defmodule rtmidi/core
-  (export MidiIn MidiOut midi-in-of midi-out-of
+  (export MidiIn MidiOut
           midi-in-new midi-out-new midi-in-free midi-out-free
           midi-in-port-count midi-out-port-count
           midi-in-port-name midi-out-port-name)
@@ -18,33 +18,13 @@
 ;; -------------------------------------------------------------------------
 
 ;;; MidiIn -- opaque handle to an RtMidi input port (RtMidiInPtr).
-;;; Storage is int64_t. Construct via midi-in-new (then midi-in-of on the
-;;; ok-val) or coerce in inline-C with (:: x :int) / (:: x :MidiIn).
+;;; Storage is int64_t. Construct via midi-in-new, then read the handle out
+;;; of the result with (ok-val r).
 (defopaque MidiIn :int)
 
 ;;; MidiOut -- opaque handle to an RtMidi output port (RtMidiOutPtr).
 ;;; Storage is int64_t.
 (defopaque MidiOut :int)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Private: API keyword -> enum helpers
@@ -78,29 +58,23 @@
 ;;;          or any other value for RTMIDI_API_UNSPECIFIED (auto-select)
 ;;;
 ;;; Returns:
-;;;   (ok handle) on success; (err 0) on failure.
-;;;   Extract the typed MidiIn handle with midi-in-of and pass it to
-;;;   rtmidi/in / rtmidi/core functions. Free with midi-in-free when done.
+;;;   (Result MidiIn int) -- ok carries the live handle; err carries an
+;;;   integer status code (1 = rtmidi_in_create returned NULL; 2 = handle
+;;;   returned but its `ok` flag was false).
 ;;;
 ;;; Example:
 ;;;   (let [r (midi-in-new ":core-midi")]
-;;;     (if (ok? r) (let [mi (midi-in-of r)] ...) (println "midi-in init failed")))
+;;;     (if (ok? r) (let [mi (ok-val r)] ...) (println "midi-in init failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-in-new [api : cstr] : ptr<void>
+(defn midi-in-new [api : cstr] : (Result MidiIn int)
   ```c
-  #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   enum RtMidiApi api_val = (enum RtMidiApi)(__TUR_CNAME__parse-midi-api__(api));
   RtMidiInPtr mi = rtmidi_in_create(api_val, "Turmeric", 100);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (mi != NULL && mi->ok) {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)mi; r->err_val = 0;
-  } else {
-    if (mi) rtmidi_in_free(mi);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  }
-  return r;
+  if (mi == NULL) return tur_err_int(1);
+  if (!mi->ok)    { rtmidi_in_free(mi); return tur_err_int(2); }
+  return tur_ok_ptr(mi);
   ```)
 
 ;;; midi-out-new -- create an RtMidi output handle for the given backend API.
@@ -110,35 +84,29 @@
 ;;;          or any other value for RTMIDI_API_UNSPECIFIED (auto-select)
 ;;;
 ;;; Returns:
-;;;   (ok handle) on success; (err 0) on failure.
-;;;   Extract the typed MidiOut handle with midi-out-of and pass it to
-;;;   rtmidi/out / rtmidi/core functions. Free with midi-out-free when done.
+;;;   (Result MidiOut int) -- ok carries the live handle; err carries an
+;;;   integer status code (1 = rtmidi_out_create returned NULL; 2 = handle
+;;;   returned but its `ok` flag was false).
 ;;;
 ;;; Example:
 ;;;   (let [r (midi-out-new ":core-midi")]
-;;;     (if (ok? r) (let [mo (midi-out-of r)] ...) (println "midi-out init failed")))
+;;;     (if (ok? r) (let [mo (ok-val r)] ...) (println "midi-out init failed")))
 ;;;
 ;;; Since: RM0
-(defn midi-out-new [api : cstr] : ptr<void>
+(defn midi-out-new [api : cstr] : (Result MidiOut int)
   ```c
-  #include <stdlib.h>
   #include <rtmidi/rtmidi_c.h>
   enum RtMidiApi api_val = (enum RtMidiApi)(__TUR_CNAME__parse-midi-api__(api));
   RtMidiOutPtr mo = rtmidi_out_create(api_val, "Turmeric");
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (mo != NULL && mo->ok) {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)mo; r->err_val = 0;
-  } else {
-    if (mo) rtmidi_out_free(mo);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  }
-  return r;
+  if (mo == NULL) return tur_err_int(1);
+  if (!mo->ok)    { rtmidi_out_free(mo); return tur_err_int(2); }
+  return tur_ok_ptr(mo);
   ```)
 
 ;;; midi-in-free -- destroy an RtMidi input handle created with midi-in-new.
 ;;;
 ;;; Parameters:
-;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;   mi -- MIDI input handle (ok-val of the midi-in-new result)
 ;;;
 ;;; Returns:
 ;;;   void
@@ -156,7 +124,7 @@
 ;;; midi-out-free -- destroy an RtMidi output handle created with midi-out-new.
 ;;;
 ;;; Parameters:
-;;;   mo -- MIDI output handle (ok-val from midi-out-new)
+;;;   mo -- MIDI output handle (ok-val of the midi-out-new result)
 ;;;
 ;;; Returns:
 ;;;   void
@@ -174,7 +142,7 @@
 ;;; midi-in-port-count -- return the number of available MIDI input ports.
 ;;;
 ;;; Parameters:
-;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;   mi -- MIDI input handle (ok-val of the midi-in-new result)
 ;;;
 ;;; Returns:
 ;;;   Port count as :int.
@@ -192,7 +160,7 @@
 ;;; midi-out-port-count -- return the number of available MIDI output ports.
 ;;;
 ;;; Parameters:
-;;;   mo -- MIDI output handle (ok-val from midi-out-new)
+;;;   mo -- MIDI output handle (ok-val of the midi-out-new result)
 ;;;
 ;;; Returns:
 ;;;   Port count as :int.
@@ -210,7 +178,7 @@
 ;;; midi-in-port-name -- return the name of MIDI input port at index i.
 ;;;
 ;;; Parameters:
-;;;   mi -- MIDI input handle (ok-val from midi-in-new)
+;;;   mi -- MIDI input handle (ok-val of the midi-in-new result)
 ;;;   i  -- port index (0-based, must be < midi-in-port-count)
 ;;;
 ;;; Returns:
@@ -246,7 +214,7 @@
 ;;; midi-out-port-name -- return the name of MIDI output port at index i.
 ;;;
 ;;; Parameters:
-;;;   mo -- MIDI output handle (ok-val from midi-out-new)
+;;;   mo -- MIDI output handle (ok-val of the midi-out-new result)
 ;;;   i  -- port index (0-based, must be < midi-out-port-count)
 ;;;
 ;;; Returns:
@@ -274,44 +242,6 @@
     return (char *)"";
   }
   return buf;
-  ```)
-
-;; -------------------------------------------------------------------------
-;; Result extractors
-;; -------------------------------------------------------------------------
-
-;;; midi-in-of -- extract a typed MidiIn from an ok result returned by midi-in-new.
-;;;
-;;; Parameters:
-;;;   r -- :ptr<void> ok result from midi-in-new (caller checks ok? first)
-;;;
-;;; Returns:
-;;;   :MidiIn -- opaque MIDI input handle
-;;;
-;;; Example:
-;;;   (let [r (midi-in-new ":core-midi")]
-;;;     (if (ok? r) (let [mi (midi-in-of r)] ...) (println "init failed")))
-;;;
-;;; Since: RM1
-(defn midi-in-of [r : ptr<void>] : MidiIn
-  ```c
-  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
-  return (int64_t)((struct __r *)r)->ok_val;
-  ```)
-
-;;; midi-out-of -- extract a typed MidiOut from an ok result returned by midi-out-new.
-;;;
-;;; Parameters:
-;;;   r -- :ptr<void> ok result from midi-out-new
-;;;
-;;; Returns:
-;;;   :MidiOut -- opaque MIDI output handle
-;;;
-;;; Since: RM1
-(defn midi-out-of [r : ptr<void>] : MidiOut
-  ```c
-  struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
-  return (int64_t)((struct __r *)r)->ok_val;
   ```)
 
 ) ;; end defmodule rtmidi/core
