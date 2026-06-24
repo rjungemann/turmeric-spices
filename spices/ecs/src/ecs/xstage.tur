@@ -1,27 +1,36 @@
-;;; ecs/xstage -- cross-world (two-world) system scheduler.
+;;; ecs/xstage -- cross-world (N-world) system scheduler.
 ;;;
 ;;; `ecs/hstage` schedules systems that each drive *one* world, keying
-;;; conflict on (world-id, component). `ecs/xstage` schedules `XSystem`s
-;;; that each drive *two* worlds. The conflict key is still the
+;;; conflict on (world-id, component). `ecs/xstage` schedules systems
+;;; that each drive *two or more* worlds. The conflict key is still the
 ;;; (world-id, component) pair, but a single system now occupies nodes
-;;; in two worlds at once -- exactly the render-extract / client-
+;;; in several worlds at once -- exactly the render-extract / client-
 ;;; prediction / snapshot shapes the cross-world plan motivates.
 ;;;
-;;; A `BoundXSystem` is an `XSystem` with concrete world identities and
-;;; boxed world handles filled in for each of its two slots:
+;;; A scheduled system is stored as a *vector* of (world-id, reads,
+;;; writes, handle) lock targets (N-W-V0). Two systems conflict iff, for
+;;; *some* world they both touch (equal world-id on a pair of their
+;;; slots), the v1 mask rule fires -- a write that overlaps the other's
+;;; reads-or-writes. Worlds touched by only one of them are independent
+;;; lock targets and never conflict. This is the v1 rule lifted
+;;; point-wise over the set of worlds, with the world-id as the
+;;; per-target discriminator. A world-id of -1 marks an unused slot (a
+;;; single-world system bound through the two-slot `bind-xsystem` leaves
+;;; slot 1 empty).
 ;;;
-;;;   slot 0 -> (w0-id, w0-reads, w0-writes, w0 handle)
-;;;   slot 1 -> (w1-id, w1-reads, w1-writes, w1 handle)
+;;; Two entry points feed the same ragged storage:
 ;;;
-;;; A world-id of -1 marks an unused slot (a single-world system bound
-;;; through here leaves slot 1 empty).
+;;;   - `bind-xsystem` / `make-bound-xsystem` + `xstage-add!` -- the
+;;;     two-world surface (X3). The run-fn ABI is `void(int64,int64)`.
+;;;   - `bind-xsystem-n` / `make-bound-xsystem-n` + `xstage-add-n!` --
+;;;     the N-world surface (N-W-V0). The run-fn ABI is `void(int64)`,
+;;;     the single argument being a pointer to the system's int64[n]
+;;;     handle array.
 ;;;
-;;; Two systems conflict iff, for *some* world they both touch (equal
-;;; world-id on a pair of their slots), the v1 mask rule fires -- a
-;;; write that overlaps the other's reads-or-writes. Worlds touched by
-;;; only one of them are independent lock targets and never conflict.
-;;; This is the v1 rule lifted point-wise over the set of worlds, with
-;;; the world-id as the per-target discriminator.
+;;; Each stored system records its ABI tag so the wave dispatcher can
+;;; call the right run-fn shape; everything else (conflict, wave
+;;; partitioning, cycle detection) is uniform over the ragged slot
+;;; vectors.
 ;;;
 ;;; `xstage-has-cycle?` is the static well-formedness check the plan
 ;;; calls for: if system S writes a (world, component) that T reads
@@ -31,17 +40,21 @@
 ;;; systems in separate, sequenced stages) instead. The check is O(n^2)
 ;;; edge-build plus a DFS, run once before the simulation loop.
 ;;;
-;;; Since: X3
+;;; Since: X3 (N-W-V0: N-world slot vectors + `*-n` entry points)
 
 (defmodule ecs/xstage
   (export BoundXSystem make-bound-xsystem bind-xsystem
           xsystem-conflicts?
-          XStage xstage-new xstage-add! xstage-len xstage-n-waves
+          BoundXSystemN make-bound-xsystem-n bind-xsystem-n
+          XStage xstage-new xstage-add! xstage-add-n! xstage-len xstage-n-waves
           xstage-run! xstage-has-cycle? xstage-free!)
 
 (import ecs/xsystem :refer [XSystem xsystem-w0-reads xsystem-w0-writes
                             xsystem-w1-reads xsystem-w1-writes
-                            xsystem-run-fn])
+                            xsystem-run-fn
+                            XSystemN xsystemn-n xsystemn-reads xsystemn-writes
+                            xsystemn-run-fn
+                            xsm-alloc xsm-set! xsm-get])
 
 ;;; BoundXSystem -- an XSystem with world identities + boxed handles
 ;;; resolved for both slots. :copy, like XSystem.
@@ -99,20 +112,89 @@
   return 0;
   ```)
 
-;;; xstage-task -- pthread worker. Reads {fn, w0, w1} and calls the
-;;; two-world run-fn. Top-level for a stable C symbol.
-;;; Since: X3
+;;; BoundXSystemN -- an N-world system with world identities + boxed
+;;; handles resolved for every slot. `n` is the slot count; `ids`,
+;;; `reads`, `writes`, `wps` are :int-carried pointers to int64[n]
+;;; arrays (world-id / read mask / write mask / boxed handle per slot).
+;;; :copy; the arrays it points at are owned by the binding site
+;;; (`bind-xsystem-n`) and copied into stage-owned storage by
+;;; `xstage-add-n!`. Since: N-W-V0
+(defstruct BoundXSystemN :copy
+  [n      : int
+   ids    : int
+   reads  : int
+   writes : int
+   wps    : int
+   run-fn : ptr<void>])
+
+;;; make-bound-xsystem-n -- low-level N-world constructor.
+;;; Since: N-W-V0
+(defn make-bound-xsystem-n
+  [n : int ids : int reads : int writes : int wps : int run-fn : ptr<void>]
+  : BoundXSystemN
+  (make-struct BoundXSystemN n ids reads writes wps run-fn))
+
+;;; xstage--bind-fills -- emit the per-slot `(xsm-set! __ids i WORLD-ID)`
+;;; / `(xsm-set! __wps i HANDLE)` pairs for `bind-xsystem-n`. `pairs` is
+;;; a flat clause list `world-id handle world-id handle ...`.
+;;; Since: N-W-V0
+(defmacro xstage--bind-fills [pairs i]
+  (if (empty? pairs)
+    `()
+    (let [wid (first pairs)
+          h   (first (rest pairs))]
+      `((xsm-set! __ids ~i ~wid)
+        (xsm-set! __wps ~i ~h)
+        ~@(xstage--bind-fills (rest (rest pairs)) (+ i 1))))))
+
+;;; bind-xsystem-n -- resolve an XSystemN against concrete worlds.
+;;; Variadic over slots: each world contributes a `world-id handle`
+;;; pair (handle is the boxed :int carrier).
+;;;
+;;;   (bind-xsystem-n snapshot->render
+;;;     0 snap-box   1 pred-box   2 render-box)
+;;;
+;;; The per-slot read / write masks are taken from the XSystemN; only
+;;; the world identities and handles vary per binding. The id / handle
+;;; arrays are allocated here and copied into stage storage by
+;;; `xstage-add-n!`. Since: N-W-V0
+(defmacro bind-xsystem-n [sys & pairs]
+  (let [countf
+        (letrec [go (fn [ps] (if (empty? ps) 0 (+ 1 (go (rest (rest ps))))))]
+          go)
+        n (countf (quote pairs))]
+    `(let [__n   ~n
+           __ids (xsm-alloc ~n)
+           __wps (xsm-alloc ~n)]
+       (do
+         ~@(xstage--bind-fills (quote pairs) 0)
+         (make-bound-xsystem-n
+           __n __ids
+           (xsystemn-reads  ~sys)
+           (xsystemn-writes ~sys)
+           __wps
+           (xsystemn-run-fn ~sys))))))
+
+;;; xstage-task -- pthread worker. Reads {fn, wps, abi} and calls the
+;;; run-fn in the shape its ABI tag selects: abi 0 -> two-world
+;;; `void(int64,int64)` over wps[0]/wps[1]; abi 1 -> N-world
+;;; `void(int64)` over the handle-array pointer. Top-level for a stable
+;;; C symbol. Since: X3 (N-W-V0: ABI-tagged dispatch)
 (defn xstage-task [arg : ptr<void>] : ptr<void>
   ```c
-  typedef struct { void (*fn)(int64_t,int64_t); int64_t w0; int64_t w1; } __ecs_x_arg;
+  typedef struct { void *fn; int64_t *wps; int abi; } __ecs_x_arg;
   __ecs_x_arg *t = (__ecs_x_arg *)arg;
-  t->fn(t->w0, t->w1);
+  if (t->abi == 0) {
+    ((void (*)(int64_t,int64_t))t->fn)(t->wps[0], t->wps[1]);
+  } else {
+    ((void (*)(int64_t))t->fn)((int64_t)(intptr_t)t->wps);
+  }
   return NULL;
   ```)
 
-;;; XStage -- heap container of BoundXSystems, grouped into conflict-
-;;; free waves on first run. Mirrors HStage but stores two world slots
-;;; per system and dispatches a two-arg run-fn.
+;;; XStage -- heap container of scheduled systems, grouped into conflict-
+;;; free waves on first run. Each system is a ragged slot vector keyed on
+;;; (world-id, component), plus an ABI tag and run-fn.
 ;;; Since: X3
 (defopaque XStage :int)
 
@@ -123,9 +205,9 @@
   #include <stdlib.h>
   #include <stdint.h>
   typedef struct {
-    int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0;
-    int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1;
-    void   **fns; int *waves;
+    int *n; int *abi;
+    int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps;
+    void **fns; int *waves;
     int n_systems; int n_waves; int cap; int dirty;
   } __ecs_xstage;
   __ecs_xstage *s = (__ecs_xstage *)calloc(1, sizeof(*s));
@@ -136,67 +218,112 @@
 ;;; Since: X3
 (defn xstage-len [s : XStage] : int
   ```c
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   return (int64_t)st->n_systems;
   ```)
 
-;;; xstage-add! -- append a BoundXSystem. Invalidates the wave
-;;; partition.
-;;; Since: X3
+;;; __ECS-XSTAGE-GROW -- shared C snippet (inlined as a comment for
+;;; reference): grow the parallel top-level arrays 2x when full. Kept
+;;; inline in each add path rather than a separate `defn` because a
+;;; sole-C-block body passes struct params (`sys`) by value, whereas a
+;;; mixed Turmeric+C body would pass them by pointer.
+
+;;; xstage-add! -- append a two-world BoundXSystem (ABI 0). Stored as a
+;;; two-slot vector (slot 1 unused when its world-id is -1). Invalidates
+;;; the wave partition. Since: X3
 (defn xstage-add! [s : XStage sys : BoundXSystem] : nil
   ```c
   #include <stdlib.h>
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   if (st->n_systems >= st->cap) {
     int nc = st->cap ? st->cap * 2 : 8;
-    st->id0 = (int64_t *)realloc(st->id0, nc * sizeof(int64_t));
-    st->r0  = (int64_t *)realloc(st->r0,  nc * sizeof(int64_t));
-    st->w0m = (int64_t *)realloc(st->w0m, nc * sizeof(int64_t));
-    st->wp0 = (int64_t *)realloc(st->wp0, nc * sizeof(int64_t));
-    st->id1 = (int64_t *)realloc(st->id1, nc * sizeof(int64_t));
-    st->r1  = (int64_t *)realloc(st->r1,  nc * sizeof(int64_t));
-    st->w1m = (int64_t *)realloc(st->w1m, nc * sizeof(int64_t));
-    st->wp1 = (int64_t *)realloc(st->wp1, nc * sizeof(int64_t));
-    st->fns = (void   **)realloc(st->fns, nc * sizeof(void *));
-    st->waves = (int   *)realloc(st->waves, nc * sizeof(int));
+    st->n     = (int     *)realloc(st->n,     nc * sizeof(int));
+    st->abi   = (int     *)realloc(st->abi,   nc * sizeof(int));
+    st->ids   = (int64_t **)realloc(st->ids,  nc * sizeof(int64_t *));
+    st->rs    = (int64_t **)realloc(st->rs,   nc * sizeof(int64_t *));
+    st->ws    = (int64_t **)realloc(st->ws,   nc * sizeof(int64_t *));
+    st->wps   = (int64_t **)realloc(st->wps,  nc * sizeof(int64_t *));
+    st->fns   = (void    **)realloc(st->fns,  nc * sizeof(void *));
+    st->waves = (int     *)realloc(st->waves, nc * sizeof(int));
     st->cap = nc;
   }
   int i = st->n_systems++;
-  st->id0[i] = sys.w0_id; st->r0[i] = sys.w0_reads; st->w0m[i] = sys.w0_writes; st->wp0[i] = sys.w0;
-  st->id1[i] = sys.w1_id; st->r1[i] = sys.w1_reads; st->w1m[i] = sys.w1_writes; st->wp1[i] = sys.w1;
+  st->n[i]   = 2;
+  st->abi[i] = 0;
+  st->ids[i] = (int64_t *)malloc(2 * sizeof(int64_t));
+  st->rs[i]  = (int64_t *)malloc(2 * sizeof(int64_t));
+  st->ws[i]  = (int64_t *)malloc(2 * sizeof(int64_t));
+  st->wps[i] = (int64_t *)malloc(2 * sizeof(int64_t));
+  st->ids[i][0] = sys.w0_id;     st->ids[i][1] = sys.w1_id;
+  st->rs[i][0]  = sys.w0_reads;  st->rs[i][1]  = sys.w1_reads;
+  st->ws[i][0]  = sys.w0_writes; st->ws[i][1]  = sys.w1_writes;
+  st->wps[i][0] = sys.w0;        st->wps[i][1] = sys.w1;
   st->fns[i] = sys.run_fn;
   st->dirty  = 1;
   ```)
 
-;;; __xstage-pair-conflict -- internal C helper macro is inlined into
-;;; the loops below; kept as a comment for reference:
-;;;   for each pair of slots sharing a world-id, apply the v1 rule.
+;;; xstage-add-n! -- append an N-world BoundXSystemN (ABI 1). The id /
+;;; reads / writes / handle arrays are *copied* into stage-owned storage
+;;; (so the BoundXSystemN may be added to more than one stage, matching
+;;; the value semantics of the two-world path). Since: N-W-V0
+(defn xstage-add-n! [s : XStage sys : BoundXSystemN] : nil
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
+  if (st->n_systems >= st->cap) {
+    int nc = st->cap ? st->cap * 2 : 8;
+    st->n     = (int     *)realloc(st->n,     nc * sizeof(int));
+    st->abi   = (int     *)realloc(st->abi,   nc * sizeof(int));
+    st->ids   = (int64_t **)realloc(st->ids,  nc * sizeof(int64_t *));
+    st->rs    = (int64_t **)realloc(st->rs,   nc * sizeof(int64_t *));
+    st->ws    = (int64_t **)realloc(st->ws,   nc * sizeof(int64_t *));
+    st->wps   = (int64_t **)realloc(st->wps,  nc * sizeof(int64_t *));
+    st->fns   = (void    **)realloc(st->fns,  nc * sizeof(void *));
+    st->waves = (int     *)realloc(st->waves, nc * sizeof(int));
+    st->cap = nc;
+  }
+  int i = st->n_systems++;
+  int nn = (int)sys.n;
+  size_t bytes = (size_t)nn * sizeof(int64_t);
+  st->n[i]   = nn;
+  st->abi[i] = 1;
+  st->ids[i] = (int64_t *)malloc(bytes);
+  st->rs[i]  = (int64_t *)malloc(bytes);
+  st->ws[i]  = (int64_t *)malloc(bytes);
+  st->wps[i] = (int64_t *)malloc(bytes);
+  memcpy(st->ids[i], (int64_t *)(intptr_t)sys.ids,    bytes);
+  memcpy(st->rs[i],  (int64_t *)(intptr_t)sys.reads,  bytes);
+  memcpy(st->ws[i],  (int64_t *)(intptr_t)sys.writes, bytes);
+  memcpy(st->wps[i], (int64_t *)(intptr_t)sys.wps,    bytes);
+  st->fns[i] = sys.run_fn;
+  st->dirty  = 1;
+  ```)
 
 ;;; __xstage-recompute-waves -- greedy first-fit grouping under the
-;;; (world-id, component) conflict rule.
-;;; Since: X3
+;;; (world-id, component) conflict rule, over ragged slot vectors.
+;;; Since: X3 (N-W-V0: ragged)
 (defn __xstage-recompute-waves [s : XStage] : nil
   ```c
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   int n_waves = 0;
   for (int i = 0; i < st->n_systems; i++) {
-    int64_t aid[2] = { st->id0[i], st->id1[i] };
-    int64_t ar[2]  = { st->r0[i],  st->r1[i]  };
-    int64_t aw[2]  = { st->w0m[i], st->w1m[i] };
+    int ni = st->n[i];
+    int64_t *aid = st->ids[i], *ar = st->rs[i], *aw = st->ws[i];
     int placed = -1;
     for (int wi = 0; wi < n_waves; wi++) {
       int ok = 1;
       for (int j = 0; j < i && ok; j++) {
         if (st->waves[j] != wi) continue;
-        int64_t bid[2] = { st->id0[j], st->id1[j] };
-        int64_t br[2]  = { st->r0[j],  st->r1[j]  };
-        int64_t bw[2]  = { st->w0m[j], st->w1m[j] };
-        for (int a = 0; a < 2 && ok; a++) {
+        int nj = st->n[j];
+        int64_t *bid = st->ids[j], *br = st->rs[j], *bw = st->ws[j];
+        for (int a = 0; a < ni && ok; a++) {
           if (aid[a] < 0) continue;
-          for (int b = 0; b < 2; b++) {
+          for (int b = 0; b < nj; b++) {
             if (bid[b] < 0 || aid[a] != bid[b]) continue;
             if ((aw[a] & (br[b] | bw[b])) || (bw[b] & (ar[a] | aw[a]))) { ok = 0; break; }
           }
@@ -212,16 +339,17 @@
   ```)
 
 ;;; __xstage-run-wave-raw -- dispatch the systems in `wave-idx`
-;;; concurrently, each against its own pair of bound worlds. The index,
-;;; thread, and arg buffers are wave-scoped heap allocations sized to the
-;;; actual wave occupancy -- no fixed cap.
-;;; Since: X3 (CAP-V0: lifted the 64-system wave cap)
+;;; concurrently, each against its own bound worlds. The index, thread,
+;;; and arg buffers are wave-scoped heap allocations sized to the actual
+;;; wave occupancy -- no fixed cap. Each system is dispatched via its
+;;; ABI tag (two-world `void(int64,int64)` or N-world `void(int64)`).
+;;; Since: X3 (CAP-V0: lifted the 64-system wave cap; N-W-V0: ABI dispatch)
 (defn __xstage-run-wave-raw [s : XStage wave-idx : int] : nil
   ```c
   #include <pthread.h>
   #include <stdlib.h>
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
-  typedef struct { void (*fn)(int64_t,int64_t); int64_t w0; int64_t w1; } __ecs_x_arg;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { void *fn; int64_t *wps; int abi; } __ecs_x_arg;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   int n_in_wave = 0;
   for (int i = 0; i < st->n_systems; i++) {
@@ -233,31 +361,40 @@
   for (int i = 0; i < st->n_systems; i++) {
     if (st->waves[i] == (int)wave_idx) idxs[fill++] = i;
   }
-  if (n_in_wave == 1) {
-    void (*fn)(int64_t,int64_t) = (void (*)(int64_t,int64_t))(uintptr_t)st->fns[idxs[0]];
-    fn(st->wp0[idxs[0]], st->wp1[idxs[0]]);
-    free(idxs);
-    return;
+  /* Run slots 1..n-1 on helper threads; slot 0 on this thread. */
+  pthread_t *threads = NULL;
+  __ecs_x_arg *args = NULL;
+  if (n_in_wave > 1) {
+    threads = (pthread_t *)malloc((size_t)(n_in_wave - 1) * sizeof(pthread_t));
+    args = (__ecs_x_arg *)malloc((size_t)(n_in_wave - 1) * sizeof(__ecs_x_arg));
+    for (int k = 1; k < n_in_wave; k++) {
+      int idx = idxs[k];
+      args[k - 1].fn  = st->fns[idx];
+      args[k - 1].wps = st->wps[idx];
+      args[k - 1].abi = st->abi[idx];
+      pthread_create(&threads[k - 1], NULL, ecs__xstage__xstage_hytask, &args[k - 1]);
+    }
   }
-  pthread_t *threads = (pthread_t *)malloc((size_t)(n_in_wave - 1) * sizeof(pthread_t));
-  __ecs_x_arg *args = (__ecs_x_arg *)malloc((size_t)(n_in_wave - 1) * sizeof(__ecs_x_arg));
-  for (int k = 1; k < n_in_wave; k++) {
-    args[k - 1].fn = (void (*)(int64_t,int64_t))(uintptr_t)st->fns[idxs[k]];
-    args[k - 1].w0 = st->wp0[idxs[k]];
-    args[k - 1].w1 = st->wp1[idxs[k]];
-    pthread_create(&threads[k - 1], NULL, ecs__xstage__xstage_hytask, &args[k - 1]);
+  {
+    int idx0 = idxs[0];
+    if (st->abi[idx0] == 0) {
+      ((void (*)(int64_t,int64_t))st->fns[idx0])(st->wps[idx0][0], st->wps[idx0][1]);
+    } else {
+      ((void (*)(int64_t))st->fns[idx0])((int64_t)(intptr_t)st->wps[idx0]);
+    }
   }
-  void (*fn0)(int64_t,int64_t) = (void (*)(int64_t,int64_t))(uintptr_t)st->fns[idxs[0]];
-  fn0(st->wp0[idxs[0]], st->wp1[idxs[0]]);
-  for (int k = 1; k < n_in_wave; k++) pthread_join(threads[k - 1], NULL);
-  free(idxs); free(threads); free(args);
+  if (n_in_wave > 1) {
+    for (int k = 1; k < n_in_wave; k++) pthread_join(threads[k - 1], NULL);
+    free(threads); free(args);
+  }
+  free(idxs);
   ```)
 
 ;;; xstage-n-waves -- wave count, recomputing if stale.
 ;;; Since: X3
 (defn xstage-n-waves [s : XStage] : int
   ```c
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   return (int64_t)st->n_waves;
   ```)
@@ -266,7 +403,7 @@
 ;;; Since: X3
 (defn __xstage-dirty? [s : XStage] : bool
   ```c
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   return st->dirty != 0;
   ```)
@@ -276,27 +413,27 @@
 ;;; component) that S writes) and reports whether it contains a cycle.
 ;;; A cyclic cross-world stage cannot be linearised by any wave order
 ;;; and is rejected by the plan; split it with a sequencing barrier.
-;;; Since: X3
+;;; Since: X3 (N-W-V0: ragged)
 (defn xstage-has-cycle? [s : XStage] : bool
   ```c
   #include <stdlib.h>
   #include <string.h>
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   int n = st->n_systems;
   if (n == 0) return 0;
   unsigned char *adj = (unsigned char *)calloc((size_t)n * n, 1);
   for (int p = 0; p < n; p++) {
-    int64_t pid[2] = { st->id0[p], st->id1[p] };
-    int64_t pw[2]  = { st->w0m[p], st->w1m[p] };
+    int np = st->n[p];
+    int64_t *pid = st->ids[p], *pw = st->ws[p];
     for (int c = 0; c < n; c++) {
       if (p == c) continue;
-      int64_t cid[2] = { st->id0[c], st->id1[c] };
-      int64_t cr[2]  = { st->r0[c],  st->r1[c]  };
+      int nc = st->n[c];
+      int64_t *cid = st->ids[c], *cr = st->rs[c];
       int edge = 0;
-      for (int a = 0; a < 2 && !edge; a++) {
+      for (int a = 0; a < np && !edge; a++) {
         if (pid[a] < 0) continue;
-        for (int b = 0; b < 2; b++) {
+        for (int b = 0; b < nc; b++) {
           if (cid[b] < 0 || pid[a] != cid[b]) continue;
           if (pw[a] & cr[b]) { edge = 1; break; }
         }
@@ -337,16 +474,20 @@
       (__xstage-run-wave-raw s wi)
       (set! wi (+ wi 1)))))
 
-;;; xstage-free! -- release the XStage's backing arrays.
-;;; Since: X3
+;;; xstage-free! -- release the XStage's backing arrays, including each
+;;; system's per-slot vectors.
+;;; Since: X3 (N-W-V0: free ragged slot vectors)
 (defn xstage-free! [s : XStage] : nil
   ```c
   #include <stdlib.h>
-  typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
+  typedef struct { int *n; int *abi; int64_t **ids; int64_t **rs; int64_t **ws; int64_t **wps; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
   if (st) {
-    free(st->id0); free(st->r0); free(st->w0m); free(st->wp0);
-    free(st->id1); free(st->r1); free(st->w1m); free(st->wp1);
+    for (int i = 0; i < st->n_systems; i++) {
+      free(st->ids[i]); free(st->rs[i]); free(st->ws[i]); free(st->wps[i]);
+    }
+    free(st->n); free(st->abi);
+    free(st->ids); free(st->rs); free(st->ws); free(st->wps);
     free(st->fns); free(st->waves); free(st);
   }
   ```)

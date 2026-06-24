@@ -6,6 +6,43 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **Cross-world followups (CAP-V0, CLAUSE-V0, N-W-V0) -- per
+  `docs/upcoming/ecs-cross-world-followups-plan.md`.** Three rough edges
+  in the shipped cross-world surface are smoothed:
+  - **N-W-V0 -- N-world `defxsystem` + `XStage`.** `defxsystem` now
+    accepts *three or more* world bindings, not just two. The clause
+    parser generalises to any world count and validates that every
+    declared world appears in at least one `:reads-from` / `:writes-to`
+    clause (a dropped world fails to compile, naming the world). The
+    two-world expansion is left byte-for-byte unchanged; a system over
+    `>= 3` worlds lowers to an array-ABI run-fn (`NAME-fn [hp]` reading
+    one boxed world handle per slot from an int64 array) plus a new
+    `XSystemN` value carrying its per-world masks in heap arrays. The
+    scheduler (`ecs/xstage`) stores each system as a *ragged
+    `(world-id, reads, writes, handle)` vector* with an ABI tag, so
+    conflict detection, wave partitioning, and cycle detection are
+    uniform over any slot count; the original two-world API
+    (`make-xsystem` / `bind-xsystem` / `make-bound-xsystem` /
+    `xstage-add!`) is preserved exactly. New surface: `XSystemN`,
+    `make-xsystem-n`, `xsystemn-*` accessors, the int64-array helpers
+    `xsm-alloc` / `xsm-set!` / `xsm-get` / `xsm-free` (`ecs/xsystem`);
+    `BoundXSystemN`, `make-bound-xsystem-n`, the variadic `bind-xsystem-n`,
+    and `xstage-add-n!` (`ecs/xstage`). Regression:
+    `tests/xworld-3world.tur` (a 3-world snapshot -> predicted -> render
+    extract that schedules to one wave and serialises two conflicting
+    bindings into two) and `tests/errors/xworld-unused-world.tur`
+    (declared-but-unused world rejected).
+  - **CAP-V0 -- the 64-system-per-wave hard cap is gone.** `ecs/xstage`
+    sizes its per-wave index / thread / arg buffers to the actual wave
+    occupancy (heap, wave-scoped) instead of a fixed `[64]`; a wave with
+    more than 64 ready systems no longer silently truncates. Regression:
+    `tests/xstage-wide-wave.tur` (200 systems in one wave all run).
+  - **CLAUSE-V0 -- flexible clause order.** `defxsystem` accepts its
+    `:reads-from` / `:writes-to` clauses in any order, and a world that
+    only reads (or only writes) may omit the empty side rather than
+    spell out `:writes-to W []`. Regression:
+    `tests/xsystem-clause-flex.tur`.
+
 - **Cross-world systems (X1-X4) -- one `defsystem` body spanning two
   typed worlds.** A new surface lets a single system read from one world
   and write to another, with the scheduler proving non-conflict per
