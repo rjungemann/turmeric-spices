@@ -6,10 +6,52 @@
 
 (defmodule valkey/cmd
   (import valkey/client :refer [Client])
-  (export cmd cmd-get cmd-set cmd-del cmd-incr cmd-expire
+  (export ValkeyArg vk-str vk-int vk-bytes
+          cmd cmd-get cmd-set cmd-del cmd-incr cmd-expire
           cmd-hset cmd-hget cmd-lpush cmd-lrange)
 
 (import valkey/client :refer [Client])
+
+;; -------------------------------------------------------------------------
+;; Typed command arguments (U6 -- Track C / typed variadic builders)
+;; -------------------------------------------------------------------------
+
+;;; ValkeyArg -- a single typed argument to `cmd`. The sum discriminates a
+;;; string argument from a stringified integer and from a binary-safe blob,
+;;; so a mis-kinded value (e.g. a bare `Client` handle, or a freed reply
+;;; pointer that happens to lower to `:int`) is rejected at the elaborator
+;;; rather than marshalled onto the wire. `:copy` so the handle can be read
+;;; out of the variadic's cons list without a move.
+;;;
+;;; Construct with the smart constructors `vk-str` / `vk-int` / `vk-bytes`;
+;;; the raw variant constructors are intentionally not exported.
+;;;
+;;; The variant order is load-bearing: `__cmd-impl` discriminates on the
+;;; runtime tag (VkStr=0, VkInt=1, VkBytes=2) -- keep them in sync.
+;;;
+;;; Since: 0.5.0 (U6)
+(defdata ValkeyArg :copy
+  (VkStr   :cstr)        ;; NUL-terminated string argument
+  (VkInt   :int)         ;; integer; formatted to decimal at send time
+  (VkBytes :cstr :int))  ;; (ptr, len) for a binary-safe argument
+
+;;; vk-str -- wrap a string as a typed command argument.
+;;; Example: (cmd c "SET" (vk-str "mykey") (vk-str "myval"))
+;;; Since: 0.5.0 (U6)
+(defn vk-str [s : cstr] : ValkeyArg (VkStr s))
+
+;;; vk-int -- wrap an integer as a typed command argument. The value is
+;;; formatted to its decimal string form when the command is sent, so
+;;; (cmd c "EXPIRE" (vk-str "k") (vk-int 60)) sends "60" on the wire.
+;;; Since: 0.5.0 (U6)
+(defn vk-int [n : int] : ValkeyArg (VkInt n))
+
+;;; vk-bytes -- wrap a (pointer, length) pair as a binary-safe argument.
+;;; The length is honored verbatim, so embedded NUL bytes flow through to
+;;; Valkey without truncation (protobuf / msgpack / arbitrary blobs).
+;;; Example: (cmd c "SET" (vk-str "blob") (vk-bytes payload n))
+;;; Since: 0.5.0 (U6)
+(defn vk-bytes [p : cstr len : int] : ValkeyArg (VkBytes p len))
 
 ;; -------------------------------------------------------------------------
 ;; Private: result helpers (layout matches stdlib/result.tur)
@@ -35,43 +77,100 @@
 ;; Public API
 ;; -------------------------------------------------------------------------
 
-;;; cmd -- send an arbitrary command with a cons list of string arguments.
+;;; cmd -- send an arbitrary command with typed variadic arguments.
+;;;
+;;; Each argument is a `ValkeyArg` built with `vk-str` / `vk-int` /
+;;; `vk-bytes`, so a value of the wrong kind (a bare `Client`, a raw cstr,
+;;; a freed reply pointer) is a compile error at the call site rather than
+;;; a downstream `WRONGTYPE` or segfault. This replaces the old untyped
+;;; `(cmd c "SET" (cons "k" (cons "v" 0)))` cons-list form, which no longer
+;;; type-checks (that is the point of the typed surface).
 ;;;
 ;;; Parameters:
 ;;;   c       -- ctx-ptr (ok-val from client-connect)
 ;;;   command -- command name string (e.g. "SET")
-;;;   args    -- cons list of :cstr argument strings; use 0 for empty list
+;;;   args    -- zero or more `ValkeyArg` values
 ;;;
 ;;; Returns:
 ;;;   (ok reply-ptr) on success; (err 0) on error or NULL reply.
 ;;;   Call reply-free on the reply-ptr when done.
 ;;;
 ;;; Example:
-;;;   (let [r (cmd c "SET" (cons "mykey" (cons "myval" 0)))]
+;;;   (let [r (cmd c "SET" (vk-str "mykey") (vk-str "myval"))]
 ;;;     (if (ok? r) (reply-free (ok-val r)) (println "cmd failed")))
+;;;   (cmd c "EXPIRE" (vk-str "mykey") (vk-int 60))
+;;;   (cmd c "SET" (vk-str "blob") (vk-bytes payload n))
 ;;;
-;;; Since: VK0
-(defn cmd [^borrow c : Client command : cstr args : int] : ptr<void>
+;;; Since: VK0 (typed variadic surface in 0.5.0 / U6)
+(defn cmd [^borrow c : Client command : cstr & args : ValkeyArg] : ptr<void>
+  (__cmd-impl c command args))
+
+;;; __cmd-impl -- fixed-arity worker behind the variadic `cmd`. Walks the
+;;; rest-arg cons list (each cell value is a `ValkeyArg` pointer), formats
+;;; every argument into the parallel argv / argvlen arrays hiredis expects,
+;;; and sends one `redisCommandArgv`. The argvlen form is binary-safe, so
+;;; `VkBytes` flows embedded NULs through untouched.
+(defn __cmd-impl [^borrow c : Client command : cstr args : int] : ptr<void>
   ```c
   #include <stdlib.h>
   #include <string.h>
+  #include <stdio.h>
   #include <hiredis/hiredis.h>
   struct __vc { int64_t value; int64_t next; };
+  /* Mirrors the compiler's `defdata ValkeyArg` layout (tur_adt_VA):
+     an `int` tag followed by the per-variant payload union. */
+  struct __vk_arg {
+    int tag;
+    union {
+      struct { const char *_0; } VkStr;
+      struct { int64_t _0; } VkInt;
+      struct { const char *_0; int64_t _1; } VkBytes;
+    } as;
+  };
   redisContext *ctx = (redisContext *)(intptr_t)c;
   /* count args */
   int argc = 1;
   struct __vc *cell = (struct __vc *)(intptr_t)args;
   while (cell) { argc++; cell = (struct __vc *)(intptr_t)cell->next; }
   const char **argv = malloc(sizeof(char *) * (size_t)argc);
+  size_t *argvlen = malloc(sizeof(size_t) * (size_t)argc);
+  /* One 24-byte scratch slot per arg; only VkInt args format into theirs.
+     INT64_MIN's decimal form is 20 chars + sign + NUL, so 24 is ample. */
+  char *scratch = malloc((size_t)argc * 24);
   argv[0] = (const char *)command;
+  argvlen[0] = strlen((const char *)command);
   int i = 1;
   cell = (struct __vc *)(intptr_t)args;
   while (cell) {
-    argv[i++] = (const char *)(intptr_t)cell->value;
+    struct __vk_arg *a = (struct __vk_arg *)(intptr_t)cell->value;
+    switch (a->tag) {
+      case 0: /* VkStr */
+        argv[i] = a->as.VkStr._0;
+        argvlen[i] = strlen(a->as.VkStr._0);
+        break;
+      case 1: { /* VkInt */
+        char *buf = scratch + (size_t)i * 24;
+        int n = snprintf(buf, 24, "%lld", (long long)a->as.VkInt._0);
+        argv[i] = buf;
+        argvlen[i] = (size_t)n;
+        break;
+      }
+      case 2: /* VkBytes */
+        argv[i] = a->as.VkBytes._0;
+        argvlen[i] = (size_t)a->as.VkBytes._1;
+        break;
+      default:
+        argv[i] = "";
+        argvlen[i] = 0;
+        break;
+    }
+    i++;
     cell = (struct __vc *)(intptr_t)cell->next;
   }
-  redisReply *reply = (redisReply *)redisCommandArgv(ctx, argc, argv, NULL);
+  redisReply *reply = (redisReply *)redisCommandArgv(ctx, argc, argv, argvlen);
   free(argv);
+  free(argvlen);
+  free(scratch);
   struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
