@@ -1,0 +1,166 @@
+;;; session/serde -- the per-session JSON envelope, shared across store backends.
+;;;
+;;; A persisted session is one JSON object:
+;;;
+;;;   {"expires_at":1717200000,"data":{"user_id":"42","csrf":"abc"}}
+;;;
+;;; `expires_at` is an absolute Unix timestamp (0 = never); `data` is the flat
+;;; string->string session map. The file store writes this shape to one file per
+;;; session; the Valkey store writes the same shape to one key per session (and
+;;; additionally sets a key TTL). Factoring the encoder/decoder here (V0.3) lets
+;;; both backends share exactly one serializer instead of each re-deriving the
+;;; format in inline-C.
+;;;
+;;; Because a store only ever parses envelopes it wrote itself, the reader is a
+;;; small tolerant scanner rather than a general JSON parser. It reads and
+;;; writes the session map through the shared __sessmap layout owned by
+;;; session/data, so no cross-module marshalling is needed.
+;;;
+;;; Since: v0.2.0
+(defmodule session/serde
+  (import session/data :refer [SessMap])
+  (export sessmap-encode sessmap-decode envelope-expires-at)
+
+;;; sessmap-encode -- serialise a SessMap to the JSON envelope.
+;;;
+;;; `expires_at` is computed from `ttl`: now+ttl when ttl > 0, else 0 (never
+;;; expires). Returns a freshly allocated string; the caller frees it.
+;;;
+;;; Parameters:
+;;;   map -- the session map
+;;;   ttl -- lifetime in seconds (<= 0 means no expiry)
+;;;
+;;; Returns:
+;;;   :cstr -- caller-owned JSON envelope.
+;;;
+;;; Since: v0.2.0
+(defn sessmap-encode [map : SessMap ttl : int] : cstr
+  ```c
+  #include <stdlib.h>
+  #include <stdio.h>
+  #include <string.h>
+  #include <time.h>
+  struct __sessmap { char **keys; char **vals; int count; int cap; };
+  struct __sessmap *m = (struct __sessmap *)(intptr_t)map;
+  long long expires = (ttl > 0) ? ((long long)time(NULL) + ttl) : 0;
+
+  size_t cap = 256, len = 0;
+  char *out = malloc(cap);
+  #define APP(s) do { const char *_s=(s); size_t _n=strlen(_s); \
+      while (len+_n+2 > cap) { cap*=2; out=realloc(out,cap); } \
+      memcpy(out+len,_s,_n); len+=_n; out[len]='\0'; } while(0)
+  #define APPC(ch) do { if (len+2>cap){cap*=2;out=realloc(out,cap);} out[len++]=(ch); out[len]='\0'; } while(0)
+
+  char num[32];
+  snprintf(num, sizeof(num), "%lld", expires);
+  APP("{\"expires_at\":"); APP(num); APP(",\"data\":{");
+  for (int i = 0; i < m->count; i++) {
+    if (i) APPC(',');
+    for (int pass = 0; pass < 2; pass++) {
+      const char *str = pass == 0 ? m->keys[i] : m->vals[i];
+      APPC('"');
+      for (const char *q = str; *q; q++) {
+        unsigned char ch = (unsigned char)*q;
+        if (ch == '"' || ch == '\\') { APPC('\\'); APPC((char)ch); }
+        else if (ch == '\n') { APPC('\\'); APPC('n'); }
+        else if (ch == '\t') { APPC('\\'); APPC('t'); }
+        else if (ch < 0x20) { /* drop other control chars */ }
+        else APPC((char)ch);
+      }
+      APPC('"');
+      if (pass == 0) APPC(':');
+    }
+  }
+  APP("}}");
+  #undef APP
+  #undef APPC
+  return (const char *)out;
+  ```)
+
+;;; envelope-expires-at -- read the envelope's expires_at (0 if absent/never).
+;;;
+;;; Lets a backend decide expiry without parsing the whole envelope. The file
+;;; store uses it to evict expired files lazily; the Valkey store leans on its
+;;; key TTL instead and generally ignores this.
+;;;
+;;; Since: v0.2.0
+(defn envelope-expires-at [json : cstr] : int
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const char *buf = (const char *)json;
+  const char *ek = strstr(buf, "\"expires_at\"");
+  if (!ek) return 0;
+  const char *c = strchr(ek, ':');
+  if (!c) return 0;
+  return (int64_t)atoll(c + 1);
+  ```)
+
+;;; sessmap-decode -- parse the envelope's "data" object into a fresh SessMap.
+;;;
+;;; Returns a new caller-owned SessMap (empty if there is no data object).
+;;; Expiry is the backend's concern (see envelope-expires-at); this never drops
+;;; entries.
+;;;
+;;; Since: v0.2.0
+(defn sessmap-decode [json : cstr] : SessMap
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  struct __sessmap { char **keys; char **vals; int count; int cap; };
+  const char *buf = (const char *)json;
+  size_t sz = strlen(buf);
+
+  struct __sessmap *m = malloc(sizeof(*m));
+  m->cap = 4; m->count = 0;
+  m->keys = malloc(sizeof(char *) * (size_t)m->cap);
+  m->vals = malloc(sizeof(char *) * (size_t)m->cap);
+
+  const char *d = strstr(buf, "\"data\"");
+  const char *p = d ? strchr(d, '{') : NULL;
+  if (p) {
+    p++; /* past '{' */
+    while (*p) {
+      while (*p && *p != '"' && *p != '}') p++;
+      if (*p != '"') break;
+      p++;
+      char *kbuf = malloc(sz + 1); size_t ki = 0;
+      while (*p && *p != '"') {
+        if (*p == '\\' && p[1]) { p++; kbuf[ki++] = (*p=='n')?'\n':(*p=='t')?'\t':*p; }
+        else kbuf[ki++] = *p;
+        p++;
+      }
+      kbuf[ki] = '\0';
+      if (*p == '"') p++;
+      while (*p && *p != ':') p++;
+      if (*p == ':') p++;
+      while (*p && *p != '"') p++;
+      if (*p != '"') { free(kbuf); break; }
+      p++;
+      char *vbuf = malloc(sz + 1); size_t vi = 0;
+      while (*p && *p != '"') {
+        if (*p == '\\' && p[1]) { p++; vbuf[vi++] = (*p=='n')?'\n':(*p=='t')?'\t':*p; }
+        else vbuf[vi++] = *p;
+        p++;
+      }
+      vbuf[vi] = '\0';
+      if (*p == '"') p++;
+
+      if (m->count >= m->cap) {
+        m->cap *= 2;
+        m->keys = realloc(m->keys, sizeof(char *) * (size_t)m->cap);
+        m->vals = realloc(m->vals, sizeof(char *) * (size_t)m->cap);
+      }
+      m->keys[m->count] = realloc(kbuf, strlen(kbuf) + 1);
+      m->vals[m->count] = realloc(vbuf, strlen(vbuf) + 1);
+      m->count++;
+
+      while (*p && *p != ',' && *p != '}') p++;
+      if (*p == ',') { p++; continue; }
+      break;
+    }
+  }
+  return (int64_t)(intptr_t)m;
+  ```)
+
+) ;; end defmodule session/serde

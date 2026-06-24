@@ -9,6 +9,11 @@ HTTP micro-framework.
 - Ships two stores out of the box:
   - **memory store** — in-process, mutex-guarded; no external deps
   - **file store** — one JSON file per session; survives restarts
+- A third, **Valkey/Redis store**, ships as the sibling spice
+  [`tur-tourist-session-valkey`](../tourist-session-valkey) (keeps the native
+  dep optional)
+- **Optional HMAC-signed cookies**, **`session-rotate!`** for session-fixation
+  defense, and **CSRF synchronizer-token** helpers
 
 The API is modelled on Rack's session middleware, adapted to Turmeric's
 ownership model and tourist's context pattern.
@@ -91,19 +96,86 @@ pays nothing and is handed no cookie.
 - `(session-set! ctx key val)` → mark dirty, store `val`
 - `(session-del! ctx key)` → remove a key, mark dirty
 - `(session-destroy! ctx)` → delete from the store + clear the cookie
+- `(session-rotate! ctx)` → issue a fresh ID, carry the data forward (fixation
+  defense; call after login)
 - `(session-id ctx)` → the current session ID (64-char hex)
 
 ### Configuration
 
 - `(default-session-config)` — production: `Secure`, `HttpOnly`, 24 h, `Lax`
 - `(dev-session-config)` — development: `Secure` off (works over plain HTTP)
+- `(with-signing-key cfg key)` — a copy of `cfg` with HMAC cookie signing on
 - `SessionConfig` fields: `cookie-name`, `path`, `domain`, `max-age`,
-  `secure?`, `http-only?`, `same-site`, `rolling?`
+  `secure?`, `http-only?`, `same-site`, `rolling?`, `signing-key`
 
 ### Stores
 
 - `(memory-store-new)` → `Store`; `(memory-store-count store)` for tests
 - `(file-store-new dir)` → `Store` (creates `dir` 0700 if absent)
+- `(valkey-store-new client prefix max-age)` → `Store` — from the sibling spice
+  [`tur-tourist-session-valkey`](../tourist-session-valkey)
+
+### Signed cookies
+
+By default the cookie is an unsigned opaque bearer token: a 256-bit random ID
+the store maps to data, so a tampered or guessed cookie simply fails to look
+up. Turn on HMAC-SHA256 signing to reject a tampered or forged cookie at
+**parse time**, before any store lookup:
+
+```turmeric
+(import session/config :refer [default-session-config with-signing-key])
+
+(session-mw store (with-signing-key (default-session-config) my-secret-key))
+```
+
+The cookie value becomes `<id>.<base64url-hmac>`; on the way in the MAC is
+recomputed and **constant-time** compared. A mismatch is treated exactly like
+an unknown ID — a fresh session is minted. Signing is **fail-closed**: turning
+it on rejects every previously-issued unsigned cookie, so existing sessions are
+invalidated on deploy. The key is a single key (`""` disables signing); a
+"current + N previous" key set for rotation is a later follow-up. No formal
+timing claim is made beyond the constant-time MAC compare.
+
+### `session-rotate!` — session-fixation defense
+
+Rotate the session ID at a privilege boundary (e.g. right after a successful
+login) without losing the data the user just keyed in:
+
+```turmeric
+(defn do-login [ctx : Ctx] : Response
+  (let [uid (authenticate ctx)]
+    (do
+      (session-set! ctx "user_id" uid)
+      (session-rotate! ctx)            ;; new ID, same data
+      (redirect "/dashboard"))))
+```
+
+`session-rotate!` mints a fresh ID, keeps the live session map, and at flush
+saves under the new ID, deletes the old store entry, and `Set-Cookie`s the new
+ID. Calling it more than once in a request is safe (only the original entry is
+deleted). With signing on, the cookie's MAC updates automatically.
+
+### CSRF synchronizer tokens
+
+`session/csrf` adds per-session CSRF tokens on top of the session machinery (no
+new deps). Mint/read the token in a handler and guard state-changing requests
+with the middleware:
+
+```turmeric
+(import tourist/middleware :refer [use!])
+(import session/csrf       :refer [csrf-token csrf-mw default-csrf-opts])
+
+(tourist 3000
+  (session-mw (memory-store-new) (default-session-config))
+  (use! (csrf-mw (default-csrf-opts)))     ;; 403s POST/PUT/PATCH/DELETE w/o a valid token
+  (get!  "/form" (fn [ctx] (html (form-with-token (csrf-token ctx)))))
+  (post! "/save" save-handler))
+```
+
+The token lives in the session under the reserved `__csrf` key. The middleware
+accepts it as an `X-Csrf-Token` header (SPAs) or a configured form field
+(classic forms — `(csrf-opts "field_name")`, default `csrf_token`); the compare
+is constant-time. Safe methods (GET/HEAD/OPTIONS) always pass.
 
 ## Writing a custom store
 
@@ -129,10 +201,13 @@ typeclass would give, expressed in tourist's established fn-pointer idiom.
 
 - **Session IDs** are 32 bytes (256 bits) from the OS CSPRNG
   (`getentropy`, falling back to `/dev/urandom`), hex-encoded. The ID is a
-  bearer token; it is not signed or encrypted.
-- **Session fixation:** this version does not regenerate the ID after login.
-  Until a `session-rotate!` lands, call `session-destroy!` and re-create the
-  session after a privilege change.
+  bearer token; optionally HMAC-signed (see *Signed cookies*) but never
+  encrypted (server-side storage means there is nothing to encrypt in the
+  cookie).
+- **Session fixation:** call `(session-rotate! ctx)` after a privilege change
+  (e.g. login) to regenerate the ID while keeping the data.
+- **CSRF:** add `(use! (csrf-mw (default-csrf-opts)))` to reject state-changing
+  requests that lack a valid synchronizer token.
 - The file store requires a POSIX filesystem (atomic `rename`). Session IDs
   are hex so they are always safe path components.
 
@@ -142,14 +217,13 @@ typeclass would give, expressed in tourist's established fn-pointer idiom.
 |---------|-------|
 | memory store | ✅ implemented + tested |
 | file store | ✅ implemented + tested |
-| Valkey/Redis store | ⏳ deferred — see [docs](../../docs) |
+| Valkey/Redis store | ✅ sibling spice [`tur-tourist-session-valkey`](../tourist-session-valkey) |
 
-The Valkey store (plan phase SS8) is deferred: the repo already ships a full
-[`valkey`](../valkey) client (hiredis-based, superseding the plan's minimal
-RESP2 client in SS7), but a Valkey-backed store can only be verified against a
-live server (the plan tags those tests `requires.valkey`, skipped in CI). The
-memory and file stores already demonstrate the swappable-store thesis — two
-backends behind one `Store` vtable.
+The Valkey store lives in a **sibling spice** so the `valkey`/hiredis native
+dependency stays optional — apps using the memory or file store don't link it.
+Its round-trip test is self-skipping when no Valkey server is reachable, so CI
+stays green without one. All three backends sit behind one `Store` vtable, and
+the JSON envelope is shared via `session/serde`.
 
 ## Tests
 
@@ -157,7 +231,9 @@ backends behind one `Store` vtable.
 tur test spices/tourist-session/tests/session
 ```
 
-Covers session ID generation, cookie parse/build, the `SessMap`, both stores
-through the `Store` vtable, and the full ctx + middleware request lifecycle
-(lazy load, dirty persist, destroy) driven against fabricated tourist
-contexts.
+Covers session ID generation, cookie parse/build, signed-cookie round-trip and
+tamper rejection (HMAC against the RFC 4231 vector), the `SessMap`, the shared
+JSON `serde` codec, both built-in stores through the `Store` vtable,
+`session-rotate!`, the CSRF token + middleware decision, and the full ctx +
+middleware request lifecycle (lazy load, dirty persist, destroy) driven against
+fabricated tourist contexts.

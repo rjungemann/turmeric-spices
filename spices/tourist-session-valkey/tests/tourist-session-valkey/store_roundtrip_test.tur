@@ -1,0 +1,75 @@
+;; tests/tourist-session-valkey/store_roundtrip_test.tur -- V0.4 round-trip.
+;;
+;; Drives valkey-store-new's vtable (save -> load -> delete) against a real
+;; Valkey on 127.0.0.1:6379. A developer (or CI) without a running server gets a
+;; PASS-skip, not a FAIL: if the connection cannot be opened the test prints a
+;; skip notice and exits 0. When a server IS present it asserts that a saved
+;; session map round-trips and that delete makes it miss.
+(defmodule tourist-session-valkey/tests/store-roundtrip
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-true])
+  (import test/runner :refer [run-all])
+  (import tourist-session-valkey/store :refer [valkey-store-new])
+  (import session/store :refer [Store store-save store-load store-delete])
+  (import session/data  :refer [SessMap sessmap-new sessmap-set! sessmap-get
+                                sessmap-free])
+  (import session/id    :refer [session-id-new])
+  (import valkey/client :refer [Client client-connect client-of client-close])
+
+(defn cok? [r : ptr<void>] : bool
+  ```c
+  struct __vc_res { bool is_ok; int64_t ok_val; int64_t err_val; };
+  return ((struct __vc_res *)r)->is_ok;
+  ```)
+
+(defn skip-note [] : void
+  ```c
+  #include <stdio.h>
+  printf("# SKIP tourist-session-valkey/store: no Valkey on 127.0.0.1:6379\n");
+  ```)
+
+(defn seq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+;; loaded is a SessMap handle (int) or 0; true iff key maps to want.
+(defn loaded-has? [loaded : int key : cstr want : cstr] : bool
+  (if (= loaded 0)
+    false
+    (let [r (sessmap-get (:: loaded :SessMap) key)]
+      (if (.is-ok r) (seq? (.ok-val r) want) false))))
+
+;; runs the real round-trip; consumes the linear Client.
+(defn run-roundtrip [c : Client] : int
+  (let [store (valkey-store-new c "turtestsess" 60)
+        m     (sessmap-new)
+        id    (session-id-new)]
+    (do
+      (sessmap-set! m "user_id" "777")
+      (store-save store id m 60)
+      (let [loaded (store-load store id)
+            ok1    (loaded-has? loaded "user_id" "777")]
+        (when (not= loaded 0) (sessmap-free (:: loaded :SessMap)))
+        (store-delete store id)
+        (let [after (store-load store id)
+              ok2   (= after 0)]
+          (when (not= after 0) (sessmap-free (:: after :SessMap)))
+          (sessmap-free m)
+          (client-close c)
+          (describe "tourist-session-valkey/store"
+            (it "round-trips a session map through Valkey"
+              (assert-true ok1))
+            (it "delete removes the session"
+              (assert-true ok2)))
+          (run-all)
+          0)))))
+
+(defn main [] : int
+  (let [r (client-connect "127.0.0.1" 6379)]
+    (if (cok? r)
+      (run-roundtrip (client-of r))
+      (do (skip-note) 0))))
+
+) ;; end module

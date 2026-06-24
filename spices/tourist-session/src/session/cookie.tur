@@ -11,7 +11,9 @@
 ;;; Since: v0.1.0
 
 (defmodule session/cookie
-  (export cookie-find cookie-build cookie-build-expired)
+  (import session/hmac :refer [hmac-sign ct-eq?])
+  (export cookie-find cookie-build cookie-build-expired
+          cookie-sign cookie-unsign)
 
 ;;; cookie-find -- extract a single cookie's value from a Cookie header.
 ;;;
@@ -152,5 +154,123 @@
     n += snprintf(out + n, cap - (size_t)n, "; Domain=%s", dm);
   return (const char *)out;
   ```)
+
+;; -- HMAC signing of the cookie value (S0) ---------------------------------
+;;
+;; A signed cookie value is "<id>.<mac>" where mac = base64url HMAC-SHA256 of
+;; the id under the configured key (session/hmac). The session ID is hex and
+;; the MAC is base64url, neither of which contains '.', so the separator is
+;; unambiguous; cookie-unsign still splits on the *last* '.' defensively.
+
+(defn __empty? [s : cstr] : bool
+  ```c
+  const char *p = (const char *)s;
+  return p[0] == '\0';
+  ```)
+
+(defn __cstr-dup [s : cstr] : cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  return (const char *)strdup((const char *)s);
+  ```)
+
+(defn __cstr-free [s : cstr] : void
+  ```c
+  #include <stdlib.h>
+  free((void *)(intptr_t)s);
+  ```)
+
+;;; __join-dot -- malloc'd "<a>.<b>".
+(defn __join-dot [a : cstr b : cstr] : cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const char *x=(const char *)a, *y=(const char *)b;
+  size_t la=strlen(x), lb=strlen(y);
+  char *out=malloc(la+lb+2);
+  memcpy(out,x,la); out[la]='.'; memcpy(out+la+1,y,lb); out[la+1+lb]='\0';
+  return (const char *)out;
+  ```)
+
+;;; __last-dot -- index of the last '.' in s, or -1 if none.
+(defn __last-dot [s : cstr] : int
+  ```c
+  #include <string.h>
+  const char *p=(const char *)s;
+  const char *d=strrchr(p,'.');
+  return d ? (int64_t)(d - p) : -1;
+  ```)
+
+;;; __substr-dup -- malloc'd copy of s[start..end); end < 0 means to the NUL.
+(defn __substr-dup [s : cstr start : int end : int] : cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  const char *p=(const char *)s;
+  size_t slen=strlen(p);
+  size_t a=(size_t)start;
+  size_t b=(end<0)?slen:(size_t)end;
+  if(b>slen) b=slen;
+  if(a>b) a=b;
+  size_t n=b-a;
+  char *out=malloc(n+1);
+  memcpy(out,p+a,n); out[n]='\0';
+  return (const char *)out;
+  ```)
+
+;;; cookie-sign -- compute the cookie value to emit for a session ID.
+;;;
+;;; With signing off (empty key) this is just a copy of the ID. With a key set
+;;; it is "<id>.<base64url-hmac>". Always returns a freshly allocated string the
+;;; caller frees.
+;;;
+;;; Parameters:
+;;;   signing-key -- HMAC key, or "" to disable signing
+;;;   id          -- the session ID
+;;;
+;;; Returns:
+;;;   :cstr -- caller-owned cookie value.
+;;;
+;;; Since: v0.2.0
+(defn cookie-sign [signing-key : cstr id : cstr] : cstr
+  (if (__empty? signing-key)
+    (__cstr-dup id)
+    (let [mac (hmac-sign signing-key id)
+          out (__join-dot id mac)]
+      (do (__cstr-free mac) out))))
+
+;;; cookie-unsign -- recover the session ID from a (possibly signed) value.
+;;;
+;;; With signing off (empty key) the value is the ID verbatim. With a key set
+;;; the value must be "<id>.<mac>" with a MAC that constant-time matches a fresh
+;;; HMAC of the ID; otherwise this returns err and the caller treats the request
+;;; as having no valid session (a fresh ID is minted). This is the fail-closed
+;;; behavior: turning signing on rejects every previously-issued unsigned
+;;; cookie.
+;;;
+;;; Parameters:
+;;;   signing-key -- HMAC key, or "" to disable verification
+;;;   value       -- the raw cookie value as received
+;;;
+;;; Returns:
+;;;   (Result cstr cstr) -- ok(id) with a freshly allocated ID (caller frees),
+;;;                         or err(reason) on a missing/bad signature.
+;;;
+;;; Since: v0.2.0
+(defn cookie-unsign [signing-key : cstr value : cstr] : (Result cstr cstr)
+  (if (__empty? signing-key)
+    (:: (ok (__cstr-dup value)) (Result cstr cstr))
+    (let [di (__last-dot value)]
+      (if (< di 0)
+        (:: (err "unsigned") (Result cstr cstr))
+        (let [id  (__substr-dup value 0 di)
+              mac (__substr-dup value (+ di 1) -1)
+              exp (hmac-sign signing-key id)]
+          (if (ct-eq? mac exp)
+            (do (__cstr-free mac) (__cstr-free exp)
+                (:: (ok id) (Result cstr cstr)))
+            (do (__cstr-free mac) (__cstr-free exp) (__cstr-free id)
+                (:: (err "badmac") (Result cstr cstr)))))))))
 
 ) ;; end defmodule session/cookie

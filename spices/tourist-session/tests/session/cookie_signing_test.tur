@@ -1,0 +1,77 @@
+;; tests/session/cookie_signing_test.tur -- S0: signed-cookie round-trip.
+;;
+;; Exercises the cookie helper in isolation (no HTTP): sign produces "<id>.<mac>"
+;; under a key, unsign recovers the id, tampering is rejected, and with signing
+;; off the value passes through unchanged.
+(defmodule session/tests/cookie-signing
+  (import test/suite  :refer [describe it])
+  (import test/assert :refer [assert-true])
+  (import test/runner :refer [run-all])
+  (import session/cookie :refer [cookie-sign cookie-unsign])
+  (import session/hmac   :refer [hmac-sign ct-eq?])
+
+(defn seq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+(defn has-dot? [s : cstr] : bool
+  ```c
+  #include <string.h>
+  return strchr((const char *)s, '.') != 0;
+  ```)
+
+;; flip the last character of a string (in place on a fresh copy) to forge a MAC.
+(defn tamper [s : cstr] : cstr
+  ```c
+  #include <stdlib.h>
+  #include <string.h>
+  char *out = strdup((const char *)s);
+  size_t n = strlen(out);
+  if (n) out[n-1] = (out[n-1] == 'A') ? 'B' : 'A';
+  return (const char *)out;
+  ```)
+
+(defn unsign-ok-is? [key : cstr value : cstr want : cstr] : bool
+  (let [r (cookie-unsign key value)]
+    (if (.is-ok r) (seq? (.ok-val r) want) false)))
+
+(defn unsign-rejects? [key : cstr value : cstr] : bool
+  (let [r (cookie-unsign key value)] (if (.is-ok r) false true)))
+
+(defn main [] : int
+ (do
+  (describe "session/cookie-signing"
+    (it "signed value is <id>.<mac>"
+      (assert-true (has-dot? (cookie-sign "secret" "abc123"))))
+
+    (it "off-by-default leaves the value unchanged"
+      (assert-true (seq? (cookie-sign "" "abc123") "abc123")))
+
+    (it "round-trips a signed value back to the id"
+      (assert-true (unsign-ok-is? "secret" (cookie-sign "secret" "abc123") "abc123")))
+
+    (it "unsign with no key passes the value through"
+      (assert-true (unsign-ok-is? "" "abc123" "abc123")))
+
+    (it "rejects a tampered MAC (treated as unknown id)"
+      (assert-true (unsign-rejects? "secret" (tamper (cookie-sign "secret" "abc123")))))
+
+    (it "rejects a value with no signature when a key is set"
+      (assert-true (unsign-rejects? "secret" "abc123")))
+
+    (it "rejects a signature made under a different key"
+      (assert-true (unsign-rejects? "secret" (cookie-sign "other-key" "abc123"))))
+
+    (it "hmac handles an empty key without crashing"
+      (assert-true (ct-eq? (hmac-sign "" "msg") (hmac-sign "" "msg"))))
+
+    (it "hmac handles a long (>64 byte) key"
+      (assert-true (ct-eq?
+        (hmac-sign "0123456789012345678901234567890123456789012345678901234567890123456789" "m")
+        (hmac-sign "0123456789012345678901234567890123456789012345678901234567890123456789" "m")))))
+  (run-all)
+  0))
+
+) ;; end module
