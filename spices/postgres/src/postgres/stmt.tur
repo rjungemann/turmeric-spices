@@ -5,30 +5,9 @@
 ;; and stmt-deallocate to drop the plan when finished.
 
 (defmodule postgres/stmt
-  (import postgres/db :refer [Conn])
+  (import postgres/db  :refer [Conn])
+  (import postgres/row :refer [Rows])
   (export stmt-prepare stmt-exec-prepared stmt-deallocate)
-
-  (import postgres/db :refer [Conn])
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Private: cons list helpers
@@ -97,21 +76,6 @@
   return ok;
   ```)
 
-;;; __pq-exec-prepared-raw -- PQexecPrepared; returns PGresult* as :int (0 on failure).
-(defn __pq-exec-prepared-raw [^borrow conn : Conn name : cstr paramValues : int nparams : int] : int
-  ```c
-  #include <libpq-fe.h>
-  const char **vals = (const char **)(intptr_t)paramValues;
-  PGresult *res = PQexecPrepared((PGconn *)(intptr_t)conn,
-                                 (const char *)name,
-                                 (int)nparams,
-                                 vals, NULL, NULL, 0);
-  if (!res) return 0;
-  ExecStatusType st = PQresultStatus(res);
-  if (st != PGRES_TUPLES_OK && st != PGRES_COMMAND_OK) { PQclear(res); return 0; }
-  return (int64_t)(intptr_t)res;
-  ```)
-
 ;;; __pq-exec-raw -- execute SQL with no params; returns 1 on success, 0 on failure.
 (defn __pq-exec-raw [^borrow conn : Conn sql : cstr] : int
   ```c
@@ -136,15 +100,20 @@
 ;;;   nparams  -- number of parameters in sql
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (stmt-prepare conn "insert-user" "INSERT INTO users (name) VALUES ($1)" 1)
 ;;;
 ;;; Since: PG2
-(defn stmt-prepare [^borrow conn : Conn name : cstr sql : cstr nparams : int] : ptr<void>
-  (let [rc (__pq-prepare-raw conn name sql nparams)]
-    (if (not= rc 0) (__ok 0) (__err 0))))
+(defn __stmt-result-of-rc [rc : int] : (Result int int)
+  ```c
+  if (rc == 0) return tur_err_int(0);
+  return tur_ok_int(0);
+  ```)
+
+(defn stmt-prepare [^borrow conn : Conn name : cstr sql : cstr nparams : int] : (Result int int)
+  (__stmt-result-of-rc (__pq-prepare-raw conn name sql nparams)))
 
 ;;; stmt-exec-prepared -- execute a previously prepared statement with parameters.
 ;;;
@@ -154,19 +123,35 @@
 ;;;   params -- cons list of :cstr parameter values (positional, 1-indexed)
 ;;;
 ;;; Returns:
-;;;   (ok rows-handle) on success; (err 0) on failure.
-;;;   Free the rows-handle with rows-free from postgres/row when done.
+;;;   (Result Rows int) -- ok carries the Rows handle; err carries 0 on
+;;;   failure. Free the Rows with rows-free from postgres/row when done.
 ;;;
 ;;; Example:
 ;;;   (let [r (stmt-exec-prepared conn "insert-user" (cons "Alice" 0))]
-;;;     (if (ok? r) (rows-free (rows-of r)) (println "exec failed")))
+;;;     (if (ok? r) (rows-free (ok-val r)) (println "exec failed")))
 ;;;
 ;;; Since: PG2
-(defn stmt-exec-prepared [^borrow conn : Conn name : cstr params : int] : ptr<void>
+(defn __pq-exec-prepared-typed [^borrow conn : Conn name : cstr paramValues : int nparams : int] : (Result Rows int)
+  ```c
+  #include <libpq-fe.h>
+  const char **vals = (const char **)(intptr_t)paramValues;
+  PGresult *res = PQexecPrepared((PGconn *)(intptr_t)conn,
+                                 (const char *)name,
+                                 (int)nparams,
+                                 vals, NULL, NULL, 0);
+  if (!res) return tur_err_int(0);
+  ExecStatusType st = PQresultStatus(res);
+  if (st != PGRES_TUPLES_OK && st != PGRES_COMMAND_OK) {
+    PQclear(res);
+    return tur_err_int(0);
+  }
+  return tur_ok_ptr(res);
+  ```)
+
+(defn stmt-exec-prepared [^borrow conn : Conn name : cstr params : int] : (Result Rows int)
   (let [n    (__params-count params)
-        vals (__params-values params n)
-        raw  (__pq-exec-prepared-raw conn name vals n)]
-    (if (not= raw 0) (__ok raw) (__err 0))))
+        vals (__params-values params n)]
+    (__pq-exec-prepared-typed conn name vals n)))
 
 ;;; stmt-deallocate -- drop a named prepared statement from the server.
 ;;;
@@ -175,15 +160,15 @@
 ;;;   name -- name used in stmt-prepare
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (stmt-deallocate conn "insert-user")
 ;;;
 ;;; Since: PG2
-(defn stmt-deallocate [^borrow conn : Conn name : cstr] : ptr<void>
+(defn stmt-deallocate [^borrow conn : Conn name : cstr] : (Result int int)
   (let [sql (__dealloc-sql name)
         rc  (__pq-exec-raw conn sql)]
-    (if (not= rc 0) (__ok 0) (__err 0))))
+    (__stmt-result-of-rc rc)))
 
 ) ;; end defmodule postgres/stmt

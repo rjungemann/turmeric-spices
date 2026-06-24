@@ -7,10 +7,10 @@
 ;; Use rows-count / row-get / rows-free from postgres/row to work with results.
 
 (defmodule postgres/db
+  (import postgres/row :refer [Rows])
   (export Conn
           db-connect db-close db-exec db-query
-          db-query-params db-begin db-commit db-rollback
-          conn-of)
+          db-query-params db-begin db-commit db-rollback)
 
 ;; -------------------------------------------------------------------------
 ;; Opaque handle type
@@ -27,47 +27,6 @@
 ;;; discipline is inert in ordinary builds, so existing call sites compile
 ;;; unchanged.
 (defopaque Conn :int :linear)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
-
-;;; __ok-val-conn -- extract the ok value as a Conn handle.
-(defn __ok-val-conn [r : ptr<void>] : Conn
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
-
-;;; __ok? -- return true if a result is ok.
-(defn __ok? [r : ptr<void>] : bool
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res != NULL && res->is_ok;
-  ```)
-
-;;; __ok-val -- extract the ok value from a result.
-(defn __ok-val [r : ptr<void>] : int
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Private: cons list helpers (layout matches stdlib/list.tur)
@@ -117,66 +76,6 @@
   ```)
 
 ;; -------------------------------------------------------------------------
-;; Private: raw libpq wrappers
-;; -------------------------------------------------------------------------
-
-;;; __pq-connect-raw -- connect to postgres; returns PGconn* as :int (0 on failure).
-;;; Returns the raw int (not Conn) so db-connect's error branch never holds a
-;;; linear handle; the typed Conn is minted by conn-of.
-(defn __pq-connect-raw [connstr : cstr] : int
-  ```c
-  #include <libpq-fe.h>
-  PGconn *conn = PQconnectdb((const char *)connstr);
-  if (!conn || PQstatus(conn) != CONNECTION_OK) {
-    if (conn) PQfinish(conn);
-    return 0;
-  }
-  return (int64_t)(intptr_t)conn;
-  ```)
-
-;;; __pq-finish-raw -- close a PGconn*. Consumes the linear Conn.
-(defn __pq-finish-raw [conn : Conn] : void
-  ```c
-  #include <libpq-fe.h>
-  PQfinish((PGconn *)(intptr_t)conn);
-  ```)
-
-;;; __pq-exec-raw -- execute SQL; returns 1 on success, 0 on failure.
-(defn __pq-exec-raw [^borrow conn : Conn sql : cstr] : int
-  ```c
-  #include <libpq-fe.h>
-  PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
-  if (!res) return 0;
-  ExecStatusType st = PQresultStatus(res);
-  PQclear(res);
-  return (st == PGRES_COMMAND_OK || st == PGRES_TUPLES_OK) ? 1 : 0;
-  ```)
-
-;;; __pq-query-raw -- execute SELECT; returns PGresult* as :int (0 on failure).
-(defn __pq-query-raw [^borrow conn : Conn sql : cstr] : int
-  ```c
-  #include <libpq-fe.h>
-  PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
-  if (!res) return 0;
-  if (PQresultStatus(res) != PGRES_TUPLES_OK) { PQclear(res); return 0; }
-  return (int64_t)(intptr_t)res;
-  ```)
-
-;;; __pq-query-params-raw -- PQexecParams; returns PGresult* as :int (0 on failure).
-(defn __pq-query-params-raw [^borrow conn : Conn sql : cstr paramValues : int nparams : int] : int
-  ```c
-  #include <libpq-fe.h>
-  const char **vals = (const char **)(intptr_t)paramValues;
-  PGresult *res = PQexecParams((PGconn *)(intptr_t)conn,
-                               (const char *)sql,
-                               (int)nparams,
-                               NULL, vals, NULL, NULL, 0);
-  if (!res) return 0;
-  if (PQresultStatus(res) != PGRES_TUPLES_OK) { PQclear(res); return 0; }
-  return (int64_t)(intptr_t)res;
-  ```)
-
-;; -------------------------------------------------------------------------
 ;; Public API
 ;; -------------------------------------------------------------------------
 
@@ -186,17 +85,24 @@
 ;;;   connstr -- libpq connection string, e.g. "host=localhost dbname=mydb"
 ;;;
 ;;; Returns:
-;;;   (ok conn-handle) on success; (err 0) on failure.
-;;;   Inspect with ok? / ok-val / err-val from stdlib/result.
+;;;   (Result Conn int) -- ok carries the Conn handle; err carries 0 on
+;;;   failure.
 ;;;
 ;;; Example:
 ;;;   (let [r (db-connect "host=localhost dbname=test user=postgres")]
-;;;     (if (ok? r) (let [conn (conn-of r)] ...) (println "connect failed")))
+;;;     (if (ok? r) (let [conn (ok-val r)] ...) (println "connect failed")))
 ;;;
 ;;; Since: PG0
-(defn db-connect [connstr : cstr] : ptr<void>
-  (let [raw (__pq-connect-raw connstr)]
-    (if (not= raw 0) (__ok raw) (__err 0))))
+(defn db-connect [connstr : cstr] : (Result Conn int)
+  ```c
+  #include <libpq-fe.h>
+  PGconn *conn = PQconnectdb((const char *)connstr);
+  if (!conn || PQstatus(conn) != CONNECTION_OK) {
+    if (conn) PQfinish(conn);
+    return tur_err_int(0);
+  }
+  return tur_ok_ptr(conn);
+  ```)
 
 ;;; db-close -- close a connection opened with db-connect.
 ;;;
@@ -204,14 +110,20 @@
 ;;;   conn -- connection handle (ok-val from db-connect)
 ;;;
 ;;; Returns:
-;;;   (ok 0) always.
+;;;   (Result int int) -- ok carries 0, always.
 ;;;
 ;;; Example:
 ;;;   (db-close conn)
 ;;;
 ;;; Since: PG0
-(defn db-close [conn : Conn] : ptr<void>
-  (do (__pq-finish-raw conn) (__ok 0)))
+;; db-close consumes the linear Conn (its single legal consumption); using
+;; the handle afterward is rejected under -Xsubstructural.
+(defn db-close [conn : Conn] : (Result int int)
+  ```c
+  #include <libpq-fe.h>
+  PQfinish((PGconn *)(intptr_t)conn);
+  return tur_ok_int(0);
+  ```)
 
 ;;; db-exec -- execute a SQL statement that returns no rows.
 ;;;
@@ -220,15 +132,22 @@
 ;;;   sql  -- DDL or DML SQL string
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (db-exec conn "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT)")
 ;;;
 ;;; Since: PG0
-(defn db-exec [^borrow conn : Conn sql : cstr] : ptr<void>
-  (let [rc (__pq-exec-raw conn sql)]
-    (if (not= rc 0) (__ok 0) (__err 0))))
+(defn db-exec [^borrow conn : Conn sql : cstr] : (Result int int)
+  ```c
+  #include <libpq-fe.h>
+  PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
+  if (!res) return tur_err_int(0);
+  ExecStatusType st = PQresultStatus(res);
+  PQclear(res);
+  if (st != PGRES_COMMAND_OK && st != PGRES_TUPLES_OK) return tur_err_int(0);
+  return tur_ok_int(0);
+  ```)
 
 ;;; db-query -- execute a SELECT and return a rows handle.
 ;;;
@@ -237,21 +156,46 @@
 ;;;   sql  -- SELECT SQL string (no $N placeholders; use db-query-params for those)
 ;;;
 ;;; Returns:
-;;;   (ok rows-handle) on success; (err 0) on failure.
-;;;   Free the rows-handle with rows-free from postgres/row when done.
+;;;   (Result Rows int) -- ok carries the Rows handle; err carries 0 on
+;;;   failure. Free the Rows with rows-free from postgres/row when done.
 ;;;
 ;;; Example:
 ;;;   (let [r (db-query conn "SELECT id, name FROM users")]
 ;;;     (if (ok? r)
-;;;       (let [rows (rows-of r)]
+;;;       (let [rows (ok-val r)]
 ;;;         (println (rows-count rows))
 ;;;         (rows-free rows))
 ;;;       (println "query failed")))
 ;;;
 ;;; Since: PG0
-(defn db-query [^borrow conn : Conn sql : cstr] : ptr<void>
-  (let [raw (__pq-query-raw conn sql)]
-    (if (not= raw 0) (__ok raw) (__err 0))))
+(defn db-query [^borrow conn : Conn sql : cstr] : (Result Rows int)
+  ```c
+  #include <libpq-fe.h>
+  PGresult *res = PQexec((PGconn *)(intptr_t)conn, (const char *)sql);
+  if (!res) return tur_err_int(0);
+  if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+    PQclear(res);
+    return tur_err_int(0);
+  }
+  return tur_ok_ptr(res);
+  ```)
+
+;;; __pq-query-params-typed -- PQexecParams; returns (Result Rows int).
+(defn __pq-query-params-typed [^borrow conn : Conn sql : cstr paramValues : int nparams : int] : (Result Rows int)
+  ```c
+  #include <libpq-fe.h>
+  const char **vals = (const char **)(intptr_t)paramValues;
+  PGresult *res = PQexecParams((PGconn *)(intptr_t)conn,
+                               (const char *)sql,
+                               (int)nparams,
+                               NULL, vals, NULL, NULL, 0);
+  if (!res) return tur_err_int(0);
+  if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+    PQclear(res);
+    return tur_err_int(0);
+  }
+  return tur_ok_ptr(res);
+  ```)
 
 ;;; db-query-params -- execute a parameterized SELECT with $1,$2,... placeholders.
 ;;;
@@ -261,20 +205,19 @@
 ;;;   params -- cons list of :cstr parameter values (positional, 1-indexed)
 ;;;
 ;;; Returns:
-;;;   (ok rows-handle) on success; (err 0) on failure.
-;;;   Free the rows-handle with rows-free from postgres/row when done.
+;;;   (Result Rows int) -- ok carries the Rows handle; err carries 0 on
+;;;   failure. Free the Rows with rows-free from postgres/row when done.
 ;;;
 ;;; Example:
 ;;;   (let [r (db-query-params conn "SELECT * FROM users WHERE name = $1"
 ;;;                            (cons "Alice" 0))]
-;;;     (if (ok? r) (let [rows (rows-of r)] ...) (println "query failed")))
+;;;     (if (ok? r) (let [rows (ok-val r)] ...) (println "query failed")))
 ;;;
 ;;; Since: PG1
-(defn db-query-params [^borrow conn : Conn sql : cstr params : int] : ptr<void>
+(defn db-query-params [^borrow conn : Conn sql : cstr params : int] : (Result Rows int)
   (let [n    (__params-count params)
-        vals (__params-values params n)
-        raw  (__pq-query-params-raw conn sql vals n)]
-    (if (not= raw 0) (__ok raw) (__err 0))))
+        vals (__params-values params n)]
+    (__pq-query-params-typed conn sql vals n)))
 
 ;;; db-begin -- begin a transaction.
 ;;;
@@ -282,13 +225,13 @@
 ;;;   conn -- connection handle
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (db-begin conn)
 ;;;
 ;;; Since: PG1
-(defn db-begin [^borrow conn : Conn] : ptr<void>
+(defn db-begin [^borrow conn : Conn] : (Result int int)
   (db-exec conn "BEGIN"))
 
 ;;; db-commit -- commit the current transaction.
@@ -297,13 +240,13 @@
 ;;;   conn -- connection handle
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (db-commit conn)
 ;;;
 ;;; Since: PG1
-(defn db-commit [^borrow conn : Conn] : ptr<void>
+(defn db-commit [^borrow conn : Conn] : (Result int int)
   (db-exec conn "COMMIT"))
 
 ;;; db-rollback -- roll back the current transaction.
@@ -312,30 +255,13 @@
 ;;;   conn -- connection handle
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (db-rollback conn)
 ;;;
 ;;; Since: PG1
-(defn db-rollback [^borrow conn : Conn] : ptr<void>
+(defn db-rollback [^borrow conn : Conn] : (Result int int)
   (db-exec conn "ROLLBACK"))
-
-;;; conn-of -- extract a typed Conn handle from an ok result returned by db-connect.
-;;;
-;;; Parameters:
-;;;   r -- result (ptr<void>) from db-connect
-;;;
-;;; Returns:
-;;;   The Conn handle stored in r. Caller is responsible for first checking
-;;;   (ok? r); reading from an err result yields a stale/zero handle.
-;;;
-;;; Example:
-;;;   (let [r (db-connect "host=localhost dbname=test")]
-;;;     (if (ok? r) (let [conn (conn-of r)] ...) (println "connect failed")))
-;;;
-;;; Since: PG0
-(defn conn-of [r : ptr<void>] : Conn
-  (__ok-val-conn r))
 
 ) ;; end defmodule postgres/db

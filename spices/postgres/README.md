@@ -56,9 +56,10 @@ let [r db-connect("postgresql://localhost/app")]
 
 ### Linear `Conn` / `Rows` (U1)
 
-`Conn` and `Rows` are `:linear` opaques. A connection from `conn-of` (or
-`ok-val`) must be closed exactly once with `db-close` (PQfinish), and a
-result set from `rows-of` must be released exactly once with `rows-free`
+`Conn` and `Rows` are `:linear` opaques. A connection from `ok-val` on
+`db-connect` must be closed exactly once with `db-close` (PQfinish), and
+a result set from `ok-val` on `db-query` / `db-query-params` /
+`stmt-exec-prepared` must be released exactly once with `rows-free`
 (PQclear). The exec / query / transaction / prepared-statement / notify
 operations and the row accessors take their handle by `^borrow`. Under
 `-Xsubstructural` this makes use-after-close, use-after-free, double-close,

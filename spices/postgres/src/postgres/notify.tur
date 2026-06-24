@@ -15,11 +15,9 @@
 
 (defmodule postgres/notify
   (import postgres/db :refer [Conn])
-  (export Notification notification-of
+  (export Notification
           notify-listen notify-unlisten notify-poll
           notification-channel notification-payload)
-
-  (import postgres/db :refer [Conn])
 
 ;; -------------------------------------------------------------------------
 ;; Opaque handle type
@@ -27,55 +25,9 @@
 
 ;;; Notification -- opaque handle to a libpq PGnotify notification.
 ;;; Storage is int64_t (PGnotify* cast). Extract from a notify-poll ok-result
-;;; with notification-of; the caller is responsible for freeing the pointer
+;;; with stdlib ok-val; the caller is responsible for freeing the pointer
 ;;; via PQfreemem after reading its fields.
 (defopaque Notification :int)
-
-;;; notification-of -- extract a typed Notification handle from a notify-poll ok result.
-;;;
-;;; Parameters:
-;;;   r -- ptr<void> result (from notify-poll)
-;;;
-;;; Returns:
-;;;   The Notification handle stored in the result's ok-val slot.
-;;;   May be a null handle when notify-poll succeeded but no notification
-;;;   was pending; check with (= (:: n :int) 0) before reading fields.
-;;;
-;;; Example:
-;;;   (let [r (notify-poll conn)]
-;;;     (if (ok? r)
-;;;       (let [n (notification-of r)]
-;;;         (if (not= (:: n :int) 0)
-;;;           (println (notification-channel n))
-;;;           nil))
-;;;       nil))
-;;;
-;;; Since: PG3
-(defn notification-of [r : ptr<void>] : Notification
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
-
-;; -------------------------------------------------------------------------
-;; Private: result type helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Private: string-building helpers for LISTEN/UNLISTEN
@@ -152,16 +104,22 @@
 ;;;   channel -- channel name to listen on
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (notify-listen conn "my_channel")
 ;;;
 ;;; Since: PG3
-(defn notify-listen [^borrow conn : Conn channel : cstr] : ptr<void>
+(defn __notify-result-of-rc [rc : int] : (Result int int)
+  ```c
+  if (rc == 0) return tur_err_int(0);
+  return tur_ok_int(0);
+  ```)
+
+(defn notify-listen [^borrow conn : Conn channel : cstr] : (Result int int)
   (let [sql (__listen-sql channel)
         rc  (__pq-exec-raw conn sql)]
-    (if (not= rc 0) (__ok 0) (__err 0))))
+    (__notify-result-of-rc rc)))
 
 ;;; notify-unlisten -- unsubscribe from asynchronous notifications on a channel.
 ;;;
@@ -170,16 +128,16 @@
 ;;;   channel -- channel name to stop listening on
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (notify-unlisten conn "my_channel")
 ;;;
 ;;; Since: PG3
-(defn notify-unlisten [^borrow conn : Conn channel : cstr] : ptr<void>
+(defn notify-unlisten [^borrow conn : Conn channel : cstr] : (Result int int)
   (let [sql (__unlisten-sql channel)
         rc  (__pq-exec-raw conn sql)]
-    (if (not= rc 0) (__ok 0) (__err 0))))
+    (__notify-result-of-rc rc)))
 
 ;;; notify-poll -- poll for a pending notification without blocking.
 ;;;
@@ -187,26 +145,32 @@
 ;;;   conn -- connection handle
 ;;;
 ;;; Returns:
-;;;   (ok notif-handle) if a notification is available; (ok 0) if none pending;
-;;;   (err 0) if PQconsumeInput fails.
-;;;   Use notification-channel and notification-payload to read the notif-handle.
-;;;   The handle is a PGnotify* owned by libpq; free it with PQfreemem after reading.
+;;;   (Result Notification int) -- ok carries a Notification handle (which
+;;;   may itself be 0 if none was pending); err carries 0 if PQconsumeInput
+;;;   failed. The handle is a PGnotify* owned by libpq; free it with
+;;;   PQfreemem after reading.
 ;;;
 ;;; Example:
 ;;;   (let [r (notify-poll conn)]
 ;;;     (if (ok? r)
-;;;       (let [n (notification-of r)]
+;;;       (let [n (ok-val r)]
 ;;;         (if (not= (:: n :int) 0)
 ;;;           (println (notification-channel n))
 ;;;           nil))
 ;;;       (println "poll error")))
 ;;;
 ;;; Since: PG3
-(defn notify-poll [^borrow conn : Conn] : ptr<void>
+(defn __notify-poll-ok [n : int] : (Result Notification int)
+  ```c return tur_ok_int(n); ```)
+
+(defn __notify-poll-err [] : (Result Notification int)
+  ```c return tur_err_int(0); ```)
+
+(defn notify-poll [^borrow conn : Conn] : (Result Notification int)
   (let [ci (__pq-consume-input conn)]
     (if (= ci 0)
-      (__err 0)
-      (__ok (__pq-notifies conn)))))
+      (__notify-poll-err)
+      (__notify-poll-ok (__pq-notifies conn)))))
 
 ;;; notification-channel -- return the channel name of a PGnotify notification.
 ;;;

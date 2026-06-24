@@ -6,41 +6,20 @@
 ;; with row-get / row-get-int, and release with rows-free when done.
 
 (defmodule postgres/row
-  (export Rows rows-of
+  (export Rows
           rows-count rows-free row-get row-get-int col-count col-name)
 
 ;;; Rows -- opaque handle to a libpq PGresult row set.
-;;; Storage is int64_t (PGresult* cast). Construct via rows-of from a
-;;; db-query / db-query-params / stmt-exec-prepared ok-result.
+;;; Storage is int64_t (PGresult* cast). Extract from a db-query /
+;;; db-query-params / stmt-exec-prepared ok-result with stdlib ok-val.
 ;;;
-;;; `Rows` is `:linear` (U1): a result set extracted with rows-of must be
+;;; `Rows` is `:linear` (U1): a result set extracted with ok-val must be
 ;;; consumed exactly once by rows-free (PQclear). The accessors
 ;;; (rows-count, row-get, row-get-int, col-count, col-name) take it by
 ;;; `^borrow`. Under -Xsubstructural this makes use-after-free and leaked
 ;;; result sets compile-time errors (TUR-E0101 / TUR-E0100); the discipline
 ;;; is inert in ordinary builds.
 (defopaque Rows :int :linear)
-
-;;; rows-of -- extract a typed Rows handle from an ok result.
-;;;
-;;; Parameters:
-;;;   r -- ptr<void> result (from db-query, db-query-params, stmt-exec-prepared)
-;;;
-;;; Returns:
-;;;   The Rows handle stored in the result's ok-val slot. Caller is
-;;;   responsible for first checking (ok? r); reading from an err result
-;;;   yields a stale/zero handle.
-;;;
-;;; Example:
-;;;   (let [r (db-query conn "SELECT id FROM users")]
-;;;     (if (ok? r) (let [rows (rows-of r)] ... (rows-free rows)) nil))
-;;;
-;;; Since: PG0
-(defn rows-of [r : ptr<void>] : Rows
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
 
 ;;; rows-count -- return the number of rows in a result set.
 ;;;
