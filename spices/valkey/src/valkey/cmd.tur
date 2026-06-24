@@ -1,16 +1,16 @@
 ;; valkey/cmd.tur -- command dispatch for Valkey/Redis via hiredis.
 ;;
-;; All functions return :ptr<void> results: (ok reply-ptr) or (err 0).
+;; All functions return (Result Reply int): ok carries the reply handle,
+;; err carries 0 on a NULL reply or REDIS_REPLY_ERROR.
 ;; The reply-ptr is an opaque :int; use valkey/reply functions to inspect it.
 ;; Call reply-free when done with a reply to avoid memory leaks.
 
 (defmodule valkey/cmd
   (import valkey/client :refer [Client])
+  (import valkey/reply  :refer [Reply])
   (export ValkeyArg vk-str vk-int vk-bytes
           cmd cmd-get cmd-set cmd-del cmd-incr cmd-expire
           cmd-hset cmd-hget cmd-lpush cmd-lrange)
-
-(import valkey/client :refer [Client])
 
 ;; -------------------------------------------------------------------------
 ;; Typed command arguments (U6 -- Track C / typed variadic builders)
@@ -54,26 +54,6 @@
 (defn vk-bytes [p : cstr len : int] : ValkeyArg (VkBytes p len))
 
 ;; -------------------------------------------------------------------------
-;; Private: result helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
-
-;; -------------------------------------------------------------------------
 ;; Public API
 ;; -------------------------------------------------------------------------
 
@@ -102,7 +82,7 @@
 ;;;   (cmd c "SET" (vk-str "blob") (vk-bytes payload n))
 ;;;
 ;;; Since: VK0 (typed variadic surface in 0.5.0 / U6)
-(defn cmd [^borrow c : Client command : cstr & args : ValkeyArg] : ptr<void>
+(defn cmd [^borrow c : Client command : cstr & args : ValkeyArg] : (Result Reply int)
   (__cmd-impl c command args))
 
 ;;; __cmd-impl -- fixed-arity worker behind the variadic `cmd`. Walks the
@@ -110,7 +90,7 @@
 ;;; every argument into the parallel argv / argvlen arrays hiredis expects,
 ;;; and sends one `redisCommandArgv`. The argvlen form is binary-safe, so
 ;;; `VkBytes` flows embedded NULs through untouched.
-(defn __cmd-impl [^borrow c : Client command : cstr args : int] : ptr<void>
+(defn __cmd-impl [^borrow c : Client command : cstr args : int] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -171,14 +151,11 @@
   free(argv);
   free(argvlen);
   free(scratch);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-get -- send GET key.
@@ -196,20 +173,17 @@
 ;;;     (if (ok? r) (println (reply-string (ok-val r))) (println "get failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-get [^borrow c : Client key : cstr] : ptr<void>
+(defn cmd-get [^borrow c : Client key : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
   redisContext *ctx = (redisContext *)(intptr_t)c;
   redisReply *reply = (redisReply *)redisCommand(ctx, "GET %s", (const char *)key);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-set -- send SET key value.
@@ -227,7 +201,7 @@
 ;;;     (if (ok? r) (reply-free (ok-val r)) (println "set failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-set [^borrow c : Client key : cstr val : cstr] : ptr<void>
+(defn cmd-set [^borrow c : Client key : cstr val : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -235,14 +209,11 @@
   redisReply *reply = (redisReply *)redisCommand(ctx, "SET %s %s",
                                                  (const char *)key,
                                                  (const char *)val);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-del -- send DEL key.
@@ -259,20 +230,17 @@
 ;;;     (if (ok? r) (reply-free (ok-val r)) (println "del failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-del [^borrow c : Client key : cstr] : ptr<void>
+(defn cmd-del [^borrow c : Client key : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
   redisContext *ctx = (redisContext *)(intptr_t)c;
   redisReply *reply = (redisReply *)redisCommand(ctx, "DEL %s", (const char *)key);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-incr -- send INCR key.
@@ -289,20 +257,17 @@
 ;;;     (if (ok? r) (println (reply-int (ok-val r))) (println "incr failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-incr [^borrow c : Client key : cstr] : ptr<void>
+(defn cmd-incr [^borrow c : Client key : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
   redisContext *ctx = (redisContext *)(intptr_t)c;
   redisReply *reply = (redisReply *)redisCommand(ctx, "INCR %s", (const char *)key);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-expire -- send EXPIRE key seconds.
@@ -320,7 +285,7 @@
 ;;;     (if (ok? r) (reply-free (ok-val r)) (println "expire failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-expire [^borrow c : Client key : cstr seconds : cstr] : ptr<void>
+(defn cmd-expire [^borrow c : Client key : cstr seconds : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -328,14 +293,11 @@
   redisReply *reply = (redisReply *)redisCommand(ctx, "EXPIRE %s %s",
                                                  (const char *)key,
                                                  (const char *)seconds);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-hset -- send HSET hash field value.
@@ -354,7 +316,7 @@
 ;;;     (if (ok? r) (reply-free (ok-val r)) (println "hset failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-hset [^borrow c : Client hash : cstr field : cstr val : cstr] : ptr<void>
+(defn cmd-hset [^borrow c : Client hash : cstr field : cstr val : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -363,14 +325,11 @@
                                                  (const char *)hash,
                                                  (const char *)field,
                                                  (const char *)val);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-hget -- send HGET hash field.
@@ -388,7 +347,7 @@
 ;;;     (if (ok? r) (println (reply-string (ok-val r))) (println "hget failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-hget [^borrow c : Client hash : cstr field : cstr] : ptr<void>
+(defn cmd-hget [^borrow c : Client hash : cstr field : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -396,14 +355,11 @@
   redisReply *reply = (redisReply *)redisCommand(ctx, "HGET %s %s",
                                                  (const char *)hash,
                                                  (const char *)field);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-lpush -- send LPUSH list value.
@@ -421,7 +377,7 @@
 ;;;     (if (ok? r) (reply-free (ok-val r)) (println "lpush failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-lpush [^borrow c : Client list : cstr val : cstr] : ptr<void>
+(defn cmd-lpush [^borrow c : Client list : cstr val : cstr] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <hiredis/hiredis.h>
@@ -429,14 +385,11 @@
   redisReply *reply = (redisReply *)redisCommand(ctx, "LPUSH %s %s",
                                                  (const char *)list,
                                                  (const char *)val);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ;;; cmd-lrange -- send LRANGE list start stop.
@@ -456,7 +409,7 @@
 ;;;     (if (ok? r) (let [rep (ok-val r)] ...) (println "lrange failed")))
 ;;;
 ;;; Since: VK0
-(defn cmd-lrange [^borrow c : Client list : cstr start : int stop : int] : ptr<void>
+(defn cmd-lrange [^borrow c : Client list : cstr start : int stop : int] : (Result Reply int)
   ```c
   #include <stdlib.h>
   #include <stdio.h>
@@ -468,14 +421,11 @@
   redisReply *reply = (redisReply *)redisCommand(ctx, "LRANGE %s %s %s",
                                                  (const char *)list,
                                                  start_buf, stop_buf);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)reply; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  return tur_ok_ptr(reply);
   ```)
 
 ) ;; end defmodule valkey/cmd

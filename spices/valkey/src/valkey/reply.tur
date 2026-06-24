@@ -4,35 +4,16 @@
 ;; Always call reply-free when done with a reply to avoid memory leaks.
 
 (defmodule valkey/reply
-  (export Reply reply-of
+  (export Reply
           reply-type reply-string reply-int reply-array-len
           reply-array-get reply-free)
 
 ;;; Reply -- opaque handle to a Valkey/Redis reply object.
-;;; Wraps a `redisReply*`. Extract from a cmd/* result with reply-of; free
-;;; with reply-free (sub-replies returned by reply-array-get are owned by
-;;; the parent reply and must not be reply-free'd individually).
+;;; Wraps a `redisReply*`. Extract from a cmd/* result with stdlib ok-val;
+;;; free with reply-free (sub-replies returned by reply-array-get are owned
+;;; by the parent reply and must not be reply-free'd individually).
 ;;; Since: 0.3.0
 (defopaque Reply :int)
-
-;;; reply-of -- extract a typed Reply handle from an ok result returned by cmd/*.
-;;;
-;;; Parameters:
-;;;   r -- ptr<void> result (from cmd, cmd-get, cmd-set, ...)
-;;;
-;;; Returns:
-;;;   The Reply handle stored in the result's ok-val slot.
-;;;
-;;; Example:
-;;;   (let [r (cmd-get c "k")]
-;;;     (if (ok? r) (println (reply-string (reply-of r))) (println "fail")))
-;;;
-;;; Since: 0.3.0
-(defn reply-of [r : ptr<void>] : Reply
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
 
 ;;; reply-type -- return a string describing the type of a reply.
 ;;;

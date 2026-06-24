@@ -84,8 +84,8 @@ appropriate `vk-*` constructor. The typed helpers (`cmd-set`, `cmd-get`,
 
 ### Linear `Client` (U1)
 
-`Client` is a `:linear` opaque. A connection extracted with `client-of`
-(or `ok-val`) must be released exactly once with `client-close`
+`Client` is a `:linear` opaque. A connection extracted with `ok-val` on
+`client-connect` must be released exactly once with `client-close`
 (`redisFree`); the command, pubsub, and ping operations take it by
 `^borrow`, observing the connection without discharging that obligation.
 Under `-Xsubstructural` this makes use-after-close and connection leaks

@@ -10,54 +10,16 @@
 
 (defmodule valkey/pubsub
   (import valkey/client :refer [Client])
-  (export Message message-of
+  (export Message
           pubsub-subscribe pubsub-unsubscribe pubsub-publish
           pubsub-recv message-channel message-payload)
 
-(import valkey/client :refer [Client])
-
 ;;; Message -- opaque handle to a received pub/sub message.
 ;;; Wraps a heap-allocated `struct __msg { char *channel; char *payload; }`.
-;;; Construct via pubsub-recv (extract with message-of from the ok result);
+;;; Construct via pubsub-recv (extract with stdlib ok-val on the ok result);
 ;;; inspect with message-channel / message-payload.
 ;;; Since: 0.3.0
 (defopaque Message :int)
-
-;;; message-of -- extract a typed Message handle from an ok result returned by pubsub-recv.
-;;;
-;;; Parameters:
-;;;   r -- ptr<void> result (from pubsub-recv)
-;;;
-;;; Returns:
-;;;   The Message handle stored in the result's ok-val slot. Zero indicates
-;;;   the push was non-message (e.g. a subscribe confirmation).
-;;;
-;;; Since: 0.3.0
-(defn message-of [r : ptr<void>] : Message
-  ```c
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-  return res->ok_val;
-  ```)
-
-;; -------------------------------------------------------------------------
-;; Private: result helpers (layout matches stdlib/result.tur)
-;; -------------------------------------------------------------------------
-
-;;; __ok -- create an ok result wrapping integer value v.
-(defn __ok [v : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = true; r->ok_val = v; r->err_val = 0; return r;
-  ```)
-
-;;; __err -- create an err result wrapping integer error value e.
-(defn __err [e : int] : ptr<void>
-  ```c
-  #include <stdlib.h>
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = false; r->ok_val = 0; r->err_val = e; return r;
-  ```)
 
 ;; -------------------------------------------------------------------------
 ;; Private: message struct
@@ -77,24 +39,23 @@
 ;;;   channel -- channel name string
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (let [r (pubsub-subscribe c "events")]
 ;;;     (if (ok? r) (println "subscribed") (println "subscribe failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-subscribe [^borrow c : Client channel : cstr] : ptr<void>
+(defn pubsub-subscribe [^borrow c : Client channel : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <hiredis/hiredis.h>
   redisContext *ctx = (redisContext *)(intptr_t)c;
   redisReply *reply = (redisReply *)redisCommand(ctx, "SUBSCRIBE %s",
                                                  (const char *)channel);
   bool ok = reply != NULL;
   if (reply) freeReplyObject(reply);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = ok; r->ok_val = 0; r->err_val = 0; return r;
+  if (!ok) return tur_err_int(0);
+  return tur_ok_int(0);
   ```)
 
 ;;; pubsub-unsubscribe -- unsubscribe the connection from a channel.
@@ -104,24 +65,23 @@
 ;;;   channel -- channel name string
 ;;;
 ;;; Returns:
-;;;   (ok 0) on success; (err 0) on failure.
+;;;   (Result int int) -- ok carries 0; err carries 0 on failure.
 ;;;
 ;;; Example:
 ;;;   (let [r (pubsub-unsubscribe c "events")]
 ;;;     (if (ok? r) (println "unsubscribed") (println "unsubscribe failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-unsubscribe [^borrow c : Client channel : cstr] : ptr<void>
+(defn pubsub-unsubscribe [^borrow c : Client channel : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <hiredis/hiredis.h>
   redisContext *ctx = (redisContext *)(intptr_t)c;
   redisReply *reply = (redisReply *)redisCommand(ctx, "UNSUBSCRIBE %s",
                                                  (const char *)channel);
   bool ok = reply != NULL;
   if (reply) freeReplyObject(reply);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  r->is_ok = ok; r->ok_val = 0; r->err_val = 0; return r;
+  if (!ok) return tur_err_int(0);
+  return tur_ok_int(0);
   ```)
 
 ;;; pubsub-publish -- publish a message to a channel.
@@ -132,32 +92,28 @@
 ;;;   message -- message payload string
 ;;;
 ;;; Returns:
-;;;   (ok count) where count is the number of subscribers that received the message;
-;;;   (err 0) on failure.
+;;;   (Result int int) -- ok carries the subscriber count; err carries 0
+;;;   on failure.
 ;;;
 ;;; Example:
 ;;;   (let [r (pubsub-publish pub "events" "hello")]
 ;;;     (if (ok? r) (println (ok-val r)) (println "publish failed")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-publish [^borrow c : Client channel : cstr message : cstr] : ptr<void>
+(defn pubsub-publish [^borrow c : Client channel : cstr message : cstr] : (Result int int)
   ```c
-  #include <stdlib.h>
   #include <hiredis/hiredis.h>
   redisContext *ctx = (redisContext *)(intptr_t)c;
   redisReply *reply = (redisReply *)redisCommand(ctx, "PUBLISH %s %s",
                                                  (const char *)channel,
                                                  (const char *)message);
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
   if (!reply || reply->type == REDIS_REPLY_ERROR) {
     if (reply) freeReplyObject(reply);
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0;
-  } else {
-    int64_t count = (reply->type == REDIS_REPLY_INTEGER) ? reply->integer : 0;
-    freeReplyObject(reply);
-    r->is_ok = true; r->ok_val = count; r->err_val = 0;
+    return tur_err_int(0);
   }
-  return r;
+  int64_t count = (reply->type == REDIS_REPLY_INTEGER) ? reply->integer : 0;
+  freeReplyObject(reply);
+  return tur_ok_int(count);
   ```)
 
 ;;; pubsub-recv -- block until a message is received on a subscribed connection.
@@ -166,22 +122,22 @@
 ;;;   c -- ctx-ptr (ok-val from client-connect; must have called pubsub-subscribe)
 ;;;
 ;;; Returns:
-;;;   (ok msg-ptr) when a "message" push is received; msg-ptr is a heap-allocated
-;;;   message struct -- inspect with message-channel and message-payload.
-;;;   (ok 0) for non-message pushes (subscribe confirmations, etc.).
-;;;   (err 0) on connection error.
+;;;   (Result Message int) -- ok carries the Message handle for a "message"
+;;;   push (heap-allocated; inspect with message-channel and
+;;;   message-payload), or 0 for non-message pushes (subscribe
+;;;   confirmations, etc.); err carries 0 on connection error.
 ;;;
 ;;; Example:
 ;;;   (let [r (pubsub-recv c)]
 ;;;     (if (ok? r)
 ;;;       (let [m (ok-val r)]
-;;;         (if (!= m 0)
+;;;         (if (!= (:: m :int) 0)
 ;;;           (println (message-payload m))
 ;;;           (println "non-message push")))
 ;;;       (println "recv error")))
 ;;;
 ;;; Since: VK0
-(defn pubsub-recv [^borrow c : Client] : ptr<void>
+(defn pubsub-recv [^borrow c : Client] : (Result Message int)
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -191,10 +147,7 @@
   void *raw = NULL;
   int rc = redisGetReply(ctx, &raw);
   redisReply *reply = (redisReply *)raw;
-  struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-  if (rc != REDIS_OK || !reply) {
-    r->is_ok = false; r->ok_val = 0; r->err_val = 0; return r;
-  }
+  if (rc != REDIS_OK || !reply) return tur_err_int(0);
   /* check for a "message" push: array of 3 elements, first is "message" */
   if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 3 &&
       reply->element[0]->type == REDIS_REPLY_STRING &&
@@ -204,12 +157,10 @@
     m->channel = strdup(reply->element[1]->str ? reply->element[1]->str : "");
     m->payload = strdup(reply->element[2]->str ? reply->element[2]->str : "");
     freeReplyObject(reply);
-    r->is_ok = true; r->ok_val = (int64_t)(intptr_t)m; r->err_val = 0;
-  } else {
-    freeReplyObject(reply);
-    r->is_ok = true; r->ok_val = 0; r->err_val = 0;
+    return tur_ok_ptr(m);
   }
-  return r;
+  freeReplyObject(reply);
+  return tur_ok_int(0);
   ```)
 
 ;;; message-channel -- return the channel name from a received message struct.

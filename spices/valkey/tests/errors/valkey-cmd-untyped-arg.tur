@@ -14,11 +14,11 @@
 (defmodule valkey_cmd_untyped_arg_test
   (export)
 
-(import valkey/client :refer [Client client-connect client-of client-close])
+(import valkey/client :refer [Client client-connect client-close])
 (import valkey/cmd    :refer [cmd])
 
 (defn untyped-arg [] : int
-  (let [c (client-of (client-connect "127.0.0.1" 6379))]
+  (let [c (ok-val (client-connect "127.0.0.1" 6379))]
     (do
       (cmd c "SET" "k" "v")    ;; ERROR: expected ValkeyArg, got cstr
       (client-close c)
