@@ -31,7 +31,7 @@
                                 builder-append-null builder-finish])
   (import frame/frame  :refer [frame frame-nrows frame-ncols frame-schema
                                 frame-column-at])
-  (import frame/sort   :refer [arrange-indices])
+  (import frame/sort   :refer [arrange-indices __so-take])
 
 ;; ---------------------------------------------------------------------------
 ;; Aggregation tags (small constants matching the plan).
@@ -608,15 +608,10 @@
 (defn __g-build-key-col [f : int col-ix : int rep-rows : int n-groups : int] : int
   ;; The sort-take helper from frame/sort handles this exactly: take rows in
   ;; the given order.  We piggyback on __so-take by treating rep-rows as a perm.
-  (__so-take-bridge (frame-column-at f col-ix) rep-rows n-groups))
-
-(defn __so-take-bridge [col : int perm : int n : int] : int
-  ;; Forward to frame/sort's __so-take by calling its mangled C name.
-  ```c
-  #include <stdint.h>
-  extern int64_t frame__sort____so_take(int64_t col, int64_t perm, int64_t n);
-  return frame__sort____so_take(col, perm, n);
-  ```)
+  ;; Call it through the module system rather than a raw extern-C bridge so the
+  ;; compiler's reachability analysis keeps __so-take alive in whole-program
+  ;; (`tur test`) builds -- inline-C `extern` references are invisible to it.
+  (__so-take (frame-column-at f col-ix) rep-rows n-groups))
 
 ;; ---------------------------------------------------------------------------
 ;; Public: agg
