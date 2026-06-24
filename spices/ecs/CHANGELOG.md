@@ -6,9 +6,22 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
-- **Cross-world followups (CAP-V0, CLAUSE-V0, GEN-V0, N-W-V0) -- per
-  `docs/upcoming/ecs-cross-world-followups-plan.md`.** Four rough edges
+- **Cross-world followups (CAP-V0, CLAUSE-V0, GEN-V0, MULTI-MIR-V0,
+  N-W-V0) -- per
+  `docs/archive/history/ecs-cross-world-followups-plan.md`.** Five rough edges
   in the shipped cross-world surface are smoothed:
+  - **MULTI-MIR-V0 -- multi-component `defmirror`.** `defmirror`
+    accepts a `:components [[SrcC DstC] ...]` vector (with
+    `:component <entry>` as one-element sugar) and lowers to one
+    `defxsystem` whose `:reads-from src [...]` and `:writes-to dst
+    [...]` clauses carry every named component. The scheduler sees a
+    single system holding the full read+write cap bundle; users who
+    want independent per-component scheduling keep separate
+    `defmirror`s. Entries are `[Src Dst]` pairs (not bare symbols)
+    because `sized-defcomponent-accessors-xmono` mints `set-<C>!` /
+    `get-<C>` in one global namespace -- the pair form forces distinct
+    names per world. Regression: `tests/xmirror-multi.tur` (3-component
+    extract from a `SimWorld` to a `RenderWorld`, round-trip verified).
   - **GEN-V0 -- macro-emitted per-component cid constants.** A new
     `defcomponent-cids` macro in `ecs/world` takes a component vector
     and emits `(def <Comp>-cid N)` for each entry, numbered in
