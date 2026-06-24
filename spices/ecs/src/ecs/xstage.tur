@@ -212,26 +212,35 @@
   ```)
 
 ;;; __xstage-run-wave-raw -- dispatch the systems in `wave-idx`
-;;; concurrently, each against its own pair of bound worlds.
-;;; Since: X3
+;;; concurrently, each against its own pair of bound worlds. The index,
+;;; thread, and arg buffers are wave-scoped heap allocations sized to the
+;;; actual wave occupancy -- no fixed cap.
+;;; Since: X3 (CAP-V0: lifted the 64-system wave cap)
 (defn __xstage-run-wave-raw [s : XStage wave-idx : int] : nil
   ```c
   #include <pthread.h>
+  #include <stdlib.h>
   typedef struct { int64_t *id0; int64_t *r0; int64_t *w0m; int64_t *wp0; int64_t *id1; int64_t *r1; int64_t *w1m; int64_t *wp1; void **fns; int *waves; int n_systems; int n_waves; int cap; int dirty; } __ecs_xstage;
   typedef struct { void (*fn)(int64_t,int64_t); int64_t w0; int64_t w1; } __ecs_x_arg;
   __ecs_xstage *st = (__ecs_xstage *)(intptr_t)s;
-  int idxs[64]; int n_in_wave = 0;
-  for (int i = 0; i < st->n_systems && n_in_wave < 64; i++) {
-    if (st->waves[i] == (int)wave_idx) idxs[n_in_wave++] = i;
+  int n_in_wave = 0;
+  for (int i = 0; i < st->n_systems; i++) {
+    if (st->waves[i] == (int)wave_idx) n_in_wave++;
   }
   if (n_in_wave == 0) return;
+  int *idxs = (int *)malloc((size_t)n_in_wave * sizeof(int));
+  int fill = 0;
+  for (int i = 0; i < st->n_systems; i++) {
+    if (st->waves[i] == (int)wave_idx) idxs[fill++] = i;
+  }
   if (n_in_wave == 1) {
     void (*fn)(int64_t,int64_t) = (void (*)(int64_t,int64_t))(uintptr_t)st->fns[idxs[0]];
     fn(st->wp0[idxs[0]], st->wp1[idxs[0]]);
+    free(idxs);
     return;
   }
-  pthread_t threads[63];
-  __ecs_x_arg args[63];
+  pthread_t *threads = (pthread_t *)malloc((size_t)(n_in_wave - 1) * sizeof(pthread_t));
+  __ecs_x_arg *args = (__ecs_x_arg *)malloc((size_t)(n_in_wave - 1) * sizeof(__ecs_x_arg));
   for (int k = 1; k < n_in_wave; k++) {
     args[k - 1].fn = (void (*)(int64_t,int64_t))(uintptr_t)st->fns[idxs[k]];
     args[k - 1].w0 = st->wp0[idxs[k]];
@@ -241,6 +250,7 @@
   void (*fn0)(int64_t,int64_t) = (void (*)(int64_t,int64_t))(uintptr_t)st->fns[idxs[0]];
   fn0(st->wp0[idxs[0]], st->wp1[idxs[0]]);
   for (int k = 1; k < n_in_wave; k++) pthread_join(threads[k - 1], NULL);
+  free(idxs); free(threads); free(args);
   ```)
 
 ;;; xstage-n-waves -- wave count, recomputing if stale.
