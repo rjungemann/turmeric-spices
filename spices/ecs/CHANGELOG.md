@@ -6,9 +6,21 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
-- **Cross-world followups (CAP-V0, CLAUSE-V0, N-W-V0) -- per
-  `docs/upcoming/ecs-cross-world-followups-plan.md`.** Three rough edges
+- **Cross-world followups (CAP-V0, CLAUSE-V0, GEN-V0, N-W-V0) -- per
+  `docs/upcoming/ecs-cross-world-followups-plan.md`.** Four rough edges
   in the shipped cross-world surface are smoothed:
+  - **GEN-V0 -- macro-emitted per-component cid constants.** A new
+    `defcomponent-cids` macro in `ecs/world` takes a component vector
+    and emits `(def <Comp>-cid N)` for each entry, numbered in
+    declaration order. Pair one call per world to retire the
+    hand-numbered `(def Pos-cid 0) (def Vel-cid 1) ...` boilerplate that
+    every cross-world setup previously had to keep in sync by hand;
+    numbering is stable per declaration order, so reordering is a
+    breaking change to any external consumer of cid numbers. Per-world
+    `box-<W>` / `load-<W>` / `free-<W>-box` were already covered by
+    `defworld-box-helpers` in `ecs/xworld` (shipped earlier under the
+    same plan tag). Regression: `tests/defcomponent-cids.tur` (two
+    independent cid blocks in one TU number from 0).
   - **N-W-V0 -- N-world `defxsystem` + `XStage`.** `defxsystem` now
     accepts *three or more* world bindings, not just two. The clause
     parser generalises to any world count and validates that every

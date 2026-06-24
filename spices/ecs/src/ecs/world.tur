@@ -47,6 +47,7 @@
 
 (defmodule ecs/world
   (export defcomponent defworld defcomponent-accessors
+          defcomponent-cids
           defcomponent-class defcomponent-class-instance
           world-alloc-entity! world-despawn!)
 
@@ -223,6 +224,42 @@
 ;;; fields); E2d-P5b (variadic, uncapped arity)
 (defmacro defworld [name comps]
   `(defstruct ~name [gens : int ~@(world-fields comps)]))
+
+;;; defcomponent-cids--from -- internal helper. Walks a component
+;;; vector and emits `(def <Comp>-cid <idx>)` for each entry, starting
+;;; from `idx`. Returns a flat list of `def` forms that
+;;; `defcomponent-cids` splices into a `do`.
+(defmacro defcomponent-cids--from [comps idx]
+  (if (empty? comps)
+    `()
+    `((def ~(str->sym (str-append (symbol-name (first comps)) "-cid")) ~idx)
+      ~@(defcomponent-cids--from (rest comps) (+ idx 1)))))
+
+;;; defcomponent-cids -- emit `(def <Comp>-cid N)` for each component
+;;; in `comps`, numbered in declaration order starting at 0.
+;;;
+;;; Syntax:
+;;;   (defcomponent-cids [Pos Vel Sprite])
+;;;     ;; emits:
+;;;     ;;   (def Pos-cid    0)
+;;;     ;;   (def Vel-cid    1)
+;;;     ;;   (def Sprite-cid 2)
+;;;
+;;; Cids are per-world: the conflict key used by every scheduler in this
+;;; spice is `(world, cid)`, so two distinct worlds may legitimately
+;;; assign `0` to different components. Pair one `defcomponent-cids` call
+;;; with each `defworld` / `sized-defworld-mono` to retire the
+;;; hand-numbered `(def Pos-cid 0)` / `(def Vel-cid 1)` boilerplate that
+;;; every cross-world setup previously had to keep in sync by hand.
+;;;
+;;; **Numbering is stable per `:components` order; reordering is a
+;;; breaking change to any external consumer of cid numbers** (persisted
+;;; save files, on-the-wire formats, manually-written caps that hold a
+;;; raw cid). Re-order with care.
+;;;
+;;; Since: GEN-V0
+(defmacro defcomponent-cids [comps]
+  `(do ~@(defcomponent-cids--from comps 0)))
 
 ;;; defcomponent-class -- declare a `Has<Comp>` typeclass with one
 ;;; method `<Comp>-storage-of` that returns the component's dense
