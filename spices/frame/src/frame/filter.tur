@@ -12,7 +12,7 @@
   (import frame/column :refer [column-length column-type])
   (import frame/frame  :refer [frame frame-nrows frame-ncols frame-schema
                                 frame-column-at])
-  (import frame/sort   :refer [arrange-indices reorder])
+  (import frame/sort   :refer [arrange-indices reorder __so-take])
   (import frame/group  :refer [__group-by-cons grouped-count grouped-free])
 
 (defn __f-nil [] : int ```c return 0; ```)
@@ -294,15 +294,8 @@
 (defn __take-all-cols [f : int perm : int n : int i : int acc : int] : int
   (if (< i 0)
     acc
-    (let [c (__f-so-take (frame-column-at f i) perm n)]
+    (let [c (__so-take (frame-column-at f i) perm n)]
       (__take-all-cols f perm n (- i 1) (__f-cons c acc)))))
-
-(defn __f-so-take [col : int perm : int n : int] : int
-  ```c
-  #include <stdint.h>
-  extern int64_t frame__sort____so_take(int64_t col, int64_t perm, int64_t n);
-  return frame__sort____so_take(col, perm, n);
-  ```)
 
 ;;; __distinct-first-of-group -- given a frame, key-name list, and the
 ;;; (already-computed) group-by handle, build a cons list of row indices that
