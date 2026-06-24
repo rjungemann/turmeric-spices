@@ -45,20 +45,6 @@
   return buf;
   ```)
 
-(defn ok-val-cstr [r : int] : cstr
-  ```c
-  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __res *rr = (struct __res *)(intptr_t)r;
-  return (char *)(intptr_t)rr->ok_val;
-  ```)
-
-(defn is-ok? [r : int] : bool
-  ```c
-  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __res *rr = (struct __res *)(intptr_t)r;
-  return rr && rr->is_ok;
-  ```)
-
 (defn tap [n : int name : cstr ok : bool] : void
   ```c
   #include <stdio.h>
@@ -73,7 +59,7 @@
       (env-set e "logged-in" logged)
       (env-set e "name" name-v)
       (let [r (render-file path e)
-            out (if (is-ok? r) (ok-val-cstr r) "")]
+            out (if (ok? r) (ok-val r) "")]
         out))))
 
 (defn main [] : int

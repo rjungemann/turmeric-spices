@@ -32,20 +32,6 @@
   return buf;
   ```)
 
-(defn ok-val-cstr [r : int] : cstr
-  ```c
-  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __res *rr = (struct __res *)(intptr_t)r;
-  return (char *)(intptr_t)rr->ok_val;
-  ```)
-
-(defn is-ok? [r : int] : bool
-  ```c
-  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __res *rr = (struct __res *)(intptr_t)r;
-  return rr && rr->is_ok;
-  ```)
-
 (defn tap [n : int name : cstr ok : bool] : void
   ```c
   #include <stdio.h>
@@ -60,9 +46,9 @@
     (do
       (env-set e "val" "hello")
       (let [r (render-file path e)]
-        (if (is-ok? r)
-          (let [got (ok-val-cstr r)
+        (if (ok? r)
+          (let [got (ok-val r)
                 expected (read-file expected-path)
-                ok (cstr-eq? got expected)]
-            (do (tap 1 "escaping" ok) (if ok 0 1)))
+                eq? (cstr-eq? got expected)]
+            (do (tap 1 "escaping" eq?) (if eq? 0 1)))
           (do (tap 1 "escaping" false) 1))))))
