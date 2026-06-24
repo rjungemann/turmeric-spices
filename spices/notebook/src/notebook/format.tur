@@ -44,23 +44,21 @@
     return cell->tail;
     ```)
 
-  ;; Result helpers compatible with stdlib/result.tur.
+  ;; Result helpers: route through the typed preamble builders so the
+  ;; canonical layout lives in one place (tur_runtime.h). The surface
+  ;; here stays :int (carrier) because the in-tree consumers in
+  ;; notebook/cli, notebook/tui, notebook/render-md, notebook/render-html
+  ;; share private __rmd-result-* helpers that read the layout as :int;
+  ;; tightening parse-string / parse-file to (Result int int) is a
+  ;; downstream sweep beyond this migration's scope.
   (defn __ok [value : int] #{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = true;
-    r->ok_val = value;
-    r->err_val = 0;
-    return (int64_t)(intptr_t)r;
+    return tur_ok_int(value);
     ```)
 
   (defn __err [value : int] #{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false;
-    r->ok_val = 0;
-    r->err_val = value;
-    return (int64_t)(intptr_t)r;
+    return tur_err_int(value);
     ```)
 
   (defn __fmt-cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
