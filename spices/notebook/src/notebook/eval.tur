@@ -11,17 +11,17 @@
                                    cell-output-elapsed-ms cell-output-image-paths])
   (export eval-cell eval-all eval-from)
 
-  (defn __nbe-nil-value [] #{Unsafe} : int
+  (defn __nbe-nil-value [] #fx{Unsafe} : int
     ```c
     return 0;
     ```)
 
-  (defn __nbe-list-nil? [lst : int] #{Unsafe} : bool
+  (defn __nbe-list-nil? [lst : int] #fx{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn __nbe-cons [value : int next : int] #{Unsafe} : int
+  (defn __nbe-cons [value : int next : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -29,45 +29,45 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn __nbe-head [lst : int] #{Unsafe} : int
+  (defn __nbe-head [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
     return cell->head;
     ```)
 
-  (defn __nbe-tail [lst : int] #{Unsafe} : int
+  (defn __nbe-tail [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
     return cell->tail;
     ```)
 
-  (defn __nbe-cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn __nbe-cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn __nbe-cstr-len [s : cstr] #{Unsafe} : int
+  (defn __nbe-cstr-len [s : cstr] #fx{Unsafe} : int
     ```c
     const char *src = s ? (const char *)(intptr_t)s : "";
     return (int64_t)strlen(src);
     ```)
 
-  (defn __nbe-cstr-ptr [s : cstr] #{Unsafe} : int
+  (defn __nbe-cstr-ptr [s : cstr] #fx{Unsafe} : int
     ```c
     return (int64_t)(intptr_t)s;
     ```)
 
-  (defn __nbe-cstr-free [s : cstr] #{Unsafe} : void
+  (defn __nbe-cstr-free [s : cstr] #fx{Unsafe} : void
     ```c
     void *p = (void *)(intptr_t)s;
     if (p) free(p);
     ```)
 
-  (defn __nbe-hash-entry-make [entry_id : cstr hash_value : cstr] #{Unsafe} : int
+  (defn __nbe-hash-entry-make [entry_id : cstr hash_value : cstr] #fx{Unsafe} : int
     ```c
     typedef struct { char *id; char *hash; } NotebookHashEntry;
     NotebookHashEntry *entry = malloc(sizeof(*entry));
@@ -76,10 +76,10 @@
     return (int64_t)(intptr_t)entry;
     ```)
 
-  (defn __nbe-hash-map-put [entries : int entry_id : cstr hash_value : cstr] #{Unsafe} : int
+  (defn __nbe-hash-map-put [entries : int entry_id : cstr hash_value : cstr] #fx{Unsafe} : int
     (__nbe-cons (__nbe-hash-entry-make entry_id hash_value) entries))
 
-  (defn __nbe-dep-hashes [depends_spec : cstr entries : int] #{Unsafe} : cstr
+  (defn __nbe-dep-hashes [depends_spec : cstr entries : int] #fx{Unsafe} : cstr
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *id; char *hash; } NotebookHashEntry;
@@ -127,7 +127,7 @@
     return out;
     ```)
 
-  (defn __nbe-cache-material [cell : int dep_hashes : cstr] #{Unsafe} : cstr
+  (defn __nbe-cache-material [cell : int dep_hashes : cstr] #fx{Unsafe} : cstr
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *name; char *value; } Attr;
@@ -205,7 +205,7 @@
     return out;
     ```)
 
-  (defn __nbe-sha256-hex [s : cstr] #{Unsafe} : cstr
+  (defn __nbe-sha256-hex [s : cstr] #fx{Unsafe} : cstr
     ```c
     #include <stdint.h>
     static const uint32_t K[64] = {
@@ -262,14 +262,14 @@
     return out;
     ```)
 
-  (defn __nbe-cache-key [cell : int dep_hashes : cstr] #{Unsafe} : cstr
+  (defn __nbe-cache-key [cell : int dep_hashes : cstr] #fx{Unsafe} : cstr
     (let [material (__nbe-cache-material cell dep_hashes)
           key (__nbe-sha256-hex material)]
       (do
         (__nbe-cstr-free material)
         key)))
 
-  (defn __nbe-wrap-output [cell-id-value : cstr output : int] #{Unsafe} : int
+  (defn __nbe-wrap-output [cell-id-value : cstr output : int] #fx{Unsafe} : int
     (cell-output-make cell-id-value
                       (cell-output-status output)
                       (cell-output-stdout output)
@@ -278,11 +278,11 @@
                       (cell-output-elapsed-ms output)
                       (cell-output-image-paths output)))
 
-  (defn __nbe-fresh-output [session : int cell : int] #{Unsafe} : int
+  (defn __nbe-fresh-output [session : int cell : int] #fx{Unsafe} : int
     (__nbe-wrap-output (cell-id cell)
                        (session-eval session (cell-source cell) (cell-lang cell))))
 
-  (defn __nbe-eval-cell-with-key [session : int cell : int cache : int key : cstr] #{Unsafe} : int
+  (defn __nbe-eval-cell-with-key [session : int cell : int cache : int key : cstr] #fx{Unsafe} : int
     (let [cache-enabled (and (not (= cache 0))
                              (= (attr-get-bool (cell-attrs cell) "cache" 0) 1))]
       (if (= (attr-get-bool (cell-attrs cell) "eval" 1) 0)
@@ -304,16 +304,16 @@
           (__nbe-fresh-output session cell)))))
 
   ;;; eval-cell -- evaluate one cell, honoring eval=false by skipping it.
-  (defn eval-cell [session : int cell : int cache : int] #{Unsafe} : int
+  (defn eval-cell [session : int cell : int cache : int] #fx{Unsafe} : int
     (__nbe-eval-cell-with-key session cell cache
                               (__nbe-cache-key cell "")))
 
-  (defn __nbe-should-continue? [cell : int output : int] #{Unsafe} : bool
+  (defn __nbe-should-continue? [cell : int output : int] #fx{Unsafe} : bool
     (if (= (cell-output-status output) (output-status-error))
       (__nbe-cstr-eq? (attr-get (cell-attrs cell) "error" "halt") "continue")
       true))
 
-  (defn __nbe-eval-all-rev [session : int cells : int cache : int opts : int acc : int key-map : int] #{Unsafe} : int
+  (defn __nbe-eval-all-rev [session : int cells : int cache : int opts : int acc : int key-map : int] #fx{Unsafe} : int
     (let [_ opts]
       (if (__nbe-list-nil? cells)
         acc
@@ -330,17 +330,17 @@
               (__nbe-eval-all-rev session (__nbe-tail cells) cache opts next-acc next-map)
               next-acc))))))
 
-  (defn __nbe-reverse [lst : int acc : int] #{Unsafe} : int
+  (defn __nbe-reverse [lst : int acc : int] #fx{Unsafe} : int
     (if (__nbe-list-nil? lst)
       acc
       (__nbe-reverse (__nbe-tail lst) (__nbe-cons (__nbe-head lst) acc))))
 
   ;;; eval-all -- evaluate cells in order, halting on error unless error=continue.
-  (defn eval-all [session : int cells : int cache : int opts : int] #{Unsafe} : int
+  (defn eval-all [session : int cells : int cache : int opts : int] #fx{Unsafe} : int
     (__nbe-reverse (__nbe-eval-all-rev session cells cache opts (__nbe-nil-value) (__nbe-nil-value))
                    (__nbe-nil-value)))
 
-  (defn __nbe-find-start [cells : int start-id : cstr] #{Unsafe} : int
+  (defn __nbe-find-start [cells : int start-id : cstr] #fx{Unsafe} : int
     (if (__nbe-list-nil? cells)
       (__nbe-nil-value)
       (if (__nbe-cstr-eq? (cell-id (__nbe-head cells)) start-id)
@@ -348,7 +348,7 @@
         (__nbe-find-start (__nbe-tail cells) start-id))))
 
   ;;; eval-from -- evaluate cells starting from a named cell id.
-  (defn eval-from [session : int cells : int start-id : cstr cache : int opts : int] #{Unsafe} : int
+  (defn eval-from [session : int cells : int start-id : cstr cache : int opts : int] #fx{Unsafe} : int
     (eval-all session (__nbe-find-start cells start-id) cache opts))
 
 ) ;; end defmodule notebook/eval

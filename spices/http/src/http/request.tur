@@ -45,14 +45,14 @@
 
 ;;; __cstr-free -- release a malloc'd JSON fragment returned by `encode`.
 ;;; `request` strdups the body, so the fragment is freed right after.
-(defn __cstr-free [p : cstr] #{Unsafe} : void
+(defn __cstr-free [p : cstr] #fx{Unsafe} : void
   ```c free((void *)(intptr_t)p); ```)
 
 ;;; __hdr-cons -- prepend a `key`/`val` header pair onto a header cons-list.
 ;;; Headers are a cons-list of alternating key/value :cstr nodes terminated
 ;;; by 0; this returns key -> val -> `next`. The key/val pointers are taken
 ;;; as-is (callers pass string literals with static lifetime).
-(defn __hdr-cons [key : cstr val : cstr next : int] #{Unsafe} : int
+(defn __hdr-cons [key : cstr val : cstr next : int] #fx{Unsafe} : int
   ```c
   #include <stdlib.h>
   struct __cons { int64_t value; int64_t next; };

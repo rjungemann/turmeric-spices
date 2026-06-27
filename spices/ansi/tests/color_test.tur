@@ -9,13 +9,13 @@
                              color-bright-blue color-bright-magenta
                              color-bright-cyan color-bright-white])
 
-  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-line [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok",
            (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count : int fails : int] #{Unsafe} : void
+  (defn tap-plan [count : int fails : int] #fx{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -26,10 +26,10 @@
     ```)
 
   (defn bool->fail [ok : bool] : int (if ok 0 1))
-  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
+  (defn run-case [idx : int name : cstr ok : bool] #fx{Unsafe} : int
     (do (tap-line idx name ok) (bool->fail ok)))
 
-  (defn __capture-begin [] #{Unsafe} : void
+  (defn __capture-begin [] #fx{Unsafe} : void
     ```c
     /* __tur_include__: static int g_color_saved_fd = -1; */
     /* __tur_include__: static int g_color_pipe_r = -1; */
@@ -45,7 +45,7 @@
     dup2(g_color_pipe_w, STDOUT_FILENO);
     ```)
 
-  (defn __capture-check [test-id : int] #{Unsafe} : bool
+  (defn __capture-check [test-id : int] #fx{Unsafe} : bool
     ```c
     fflush(stdout);
     if (g_color_saved_fd < 0) return 0;
@@ -88,22 +88,22 @@
     return memcmp(buf, expected, exp_len) == 0;
     ```)
 
-  (defn t-fg4-red       [] #{Unsafe} : bool (do (__capture-begin) (fg4 (color-red))           (__capture-check 1)))
-  (defn t-fg4-br-white  [] #{Unsafe} : bool (do (__capture-begin) (fg4 (color-bright-white))  (__capture-check 2)))
-  (defn t-bg4-black     [] #{Unsafe} : bool (do (__capture-begin) (bg4 (color-black))         (__capture-check 3)))
-  (defn t-bg4-br-black  [] #{Unsafe} : bool (do (__capture-begin) (bg4 (color-bright-black))  (__capture-check 4)))
-  (defn t-fg8-orange    [] #{Unsafe} : bool (do (__capture-begin) (fg8 208)                   (__capture-check 5)))
-  (defn t-bg8-zero      [] #{Unsafe} : bool (do (__capture-begin) (bg8 0)                     (__capture-check 6)))
-  (defn t-fg24-orange   [] #{Unsafe} : bool (do (__capture-begin) (fg24 255 128 0)            (__capture-check 7)))
-  (defn t-bg24-black    [] #{Unsafe} : bool (do (__capture-begin) (bg24 0 0 0)                (__capture-check 8)))
-  (defn t-color-reset   [] #{Unsafe} : bool (do (__capture-begin) (color-reset)               (__capture-check 9)))
-  (defn t-fg4-white     [] #{Unsafe} : bool (do (__capture-begin) (fg4 (color-white))         (__capture-check 10)))
-  (defn t-fg4-br-black  [] #{Unsafe} : bool (do (__capture-begin) (fg4 (color-bright-black))  (__capture-check 11)))
-  (defn t-fg4-clamp-lo  [] #{Unsafe} : bool (do (__capture-begin) (fg4 -1)                    (__capture-check 12)))
-  (defn t-fg4-clamp-hi  [] #{Unsafe} : bool (do (__capture-begin) (fg4 99)                    (__capture-check 13)))
-  (defn t-fg8-clamp-hi  [] #{Unsafe} : bool (do (__capture-begin) (fg8 999)                   (__capture-check 14)))
+  (defn t-fg4-red       [] #fx{Unsafe} : bool (do (__capture-begin) (fg4 (color-red))           (__capture-check 1)))
+  (defn t-fg4-br-white  [] #fx{Unsafe} : bool (do (__capture-begin) (fg4 (color-bright-white))  (__capture-check 2)))
+  (defn t-bg4-black     [] #fx{Unsafe} : bool (do (__capture-begin) (bg4 (color-black))         (__capture-check 3)))
+  (defn t-bg4-br-black  [] #fx{Unsafe} : bool (do (__capture-begin) (bg4 (color-bright-black))  (__capture-check 4)))
+  (defn t-fg8-orange    [] #fx{Unsafe} : bool (do (__capture-begin) (fg8 208)                   (__capture-check 5)))
+  (defn t-bg8-zero      [] #fx{Unsafe} : bool (do (__capture-begin) (bg8 0)                     (__capture-check 6)))
+  (defn t-fg24-orange   [] #fx{Unsafe} : bool (do (__capture-begin) (fg24 255 128 0)            (__capture-check 7)))
+  (defn t-bg24-black    [] #fx{Unsafe} : bool (do (__capture-begin) (bg24 0 0 0)                (__capture-check 8)))
+  (defn t-color-reset   [] #fx{Unsafe} : bool (do (__capture-begin) (color-reset)               (__capture-check 9)))
+  (defn t-fg4-white     [] #fx{Unsafe} : bool (do (__capture-begin) (fg4 (color-white))         (__capture-check 10)))
+  (defn t-fg4-br-black  [] #fx{Unsafe} : bool (do (__capture-begin) (fg4 (color-bright-black))  (__capture-check 11)))
+  (defn t-fg4-clamp-lo  [] #fx{Unsafe} : bool (do (__capture-begin) (fg4 -1)                    (__capture-check 12)))
+  (defn t-fg4-clamp-hi  [] #fx{Unsafe} : bool (do (__capture-begin) (fg4 99)                    (__capture-check 13)))
+  (defn t-fg8-clamp-hi  [] #fx{Unsafe} : bool (do (__capture-begin) (fg8 999)                   (__capture-check 14)))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (let [r1  (run-case 1  "fg4 red"                       (t-fg4-red))
           r2  (run-case 2  "fg4 bright-white"              (t-fg4-br-white))
           r3  (run-case 3  "bg4 black"                     (t-bg4-black))

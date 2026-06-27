@@ -59,7 +59,7 @@
 
   ;; ===== raw int-carried implementation (private) =====
 
-  (defn __img-new-raw [width : int height : int fill : int] #{Unsafe} : int
+  (defn __img-new-raw [width : int height : int fill : int] #fx{Unsafe} : int
     ```c
     struct { int64_t width; int64_t height; uint32_t *pixels; } *b = malloc(sizeof(*b));
     int64_t npix = width * height;
@@ -70,20 +70,20 @@
     return (int64_t)(intptr_t)b;
     ```)
 
-  (defn __img-free-raw [b : int] #{Unsafe} : nil
+  (defn __img-free-raw [b : int] #fx{Unsafe} : nil
     ```c
     struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b;
     if (v->pixels) free(v->pixels);
     free(v);
     ```)
 
-  (defn __img-width-raw [b : int] #{Unsafe} : int
+  (defn __img-width-raw [b : int] #fx{Unsafe} : int
     ```c struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b; return (int)v->width; ```)
 
-  (defn __img-height-raw [b : int] #{Unsafe} : int
+  (defn __img-height-raw [b : int] #fx{Unsafe} : int
     ```c struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b; return (int)v->height; ```)
 
-  (defn __img-get-raw [b : int x : int y : int] #{Unsafe} : int
+  (defn __img-get-raw [b : int x : int y : int] #fx{Unsafe} : int
     ```c
     struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b;
     if (x < 0 || x >= v->width || y < 0 || y >= v->height) {
@@ -94,7 +94,7 @@
     return (int64_t)v->pixels[y * v->width + x];
     ```)
 
-  (defn __img-set-raw [b : int x : int y : int px : int] #{Unsafe} : nil
+  (defn __img-set-raw [b : int x : int y : int px : int] #fx{Unsafe} : nil
     ```c
     struct { int64_t width; int64_t height; uint32_t *pixels; } *v = (void *)(intptr_t)b;
     if (x < 0 || x >= v->width || y < 0 || y >= v->height) {
@@ -108,7 +108,7 @@
   ;; composite `over` onto a copy of `base`: a pixel from `over` with non-zero
   ;; alpha replaces the base pixel, else the base shows through. Runtime shape
   ;; guard (belt-and-suspenders; static sizes are already proven equal here).
-  (defn __img-overlay-raw [a : int b : int] #{Unsafe} : int
+  (defn __img-overlay-raw [a : int b : int] #fx{Unsafe} : int
     ```c
     struct I { int64_t width; int64_t height; uint32_t *pixels; };
     struct I *base = (void *)(intptr_t)a;
@@ -131,7 +131,7 @@
     ```)
 
   ;; multiply the R/G/B channels by `f` (alpha preserved), clamped to 0..255.
-  (defn __img-scale-rgb-raw [b : int f : float] #{Unsafe} : int
+  (defn __img-scale-rgb-raw [b : int f : float] #fx{Unsafe} : int
     ```c
     struct I { int64_t width; int64_t height; uint32_t *pixels; };
     struct I *x = (void *)(intptr_t)b;

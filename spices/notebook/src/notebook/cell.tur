@@ -8,17 +8,17 @@
           cells-assign-ids)
 
   ;; Minimal cons helpers so the module stays self-contained.
-  (defn __cell-nil-value [] #{Unsafe} : int
+  (defn __cell-nil-value [] #fx{Unsafe} : int
     ```c
     return 0;
     ```)
 
-  (defn __cell-list-nil? [lst : int] #{Unsafe} : bool
+  (defn __cell-list-nil? [lst : int] #fx{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn __cell-cons [value : int next : int] #{Unsafe} : int
+  (defn __cell-cons [value : int next : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -26,28 +26,28 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn __cell-head [lst : int] #{Unsafe} : int
+  (defn __cell-head [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
     return cell->head;
     ```)
 
-  (defn __cell-tail [lst : int] #{Unsafe} : int
+  (defn __cell-tail [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
     return cell->tail;
     ```)
 
-  (defn __cell-cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn __cell-cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn __cell-str-concat [a : cstr b : cstr] #{Unsafe} : cstr
+  (defn __cell-str-concat [a : cstr b : cstr] #fx{Unsafe} : cstr
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
@@ -59,19 +59,19 @@
     return out;
     ```)
 
-  (defn __cell-int->cstr [value : int] #{Unsafe} : cstr
+  (defn __cell-int->cstr [value : int] #fx{Unsafe} : cstr
     ```c
     char buf[32];
     snprintf(buf, sizeof(buf), "%lld", (long long)value);
     return strdup(buf);
     ```)
 
-  (defn __reverse-list [lst : int acc : int] #{Unsafe} : int
+  (defn __reverse-list [lst : int acc : int] #fx{Unsafe} : int
     (if (__cell-list-nil? lst)
       acc
       (__reverse-list (__cell-tail lst) (__cell-cons (__cell-head lst) acc))))
 
-  (defn __attr-make [name : cstr value : cstr] #{Unsafe} : int
+  (defn __attr-make [name : cstr value : cstr] #fx{Unsafe} : int
     ```c
     typedef struct { char *name; char *value; } Attr;
     Attr *attr = malloc(sizeof(*attr));
@@ -80,14 +80,14 @@
     return (int64_t)(intptr_t)attr;
     ```)
 
-  (defn attr-name [attr : int] #{Unsafe} : cstr
+  (defn attr-name [attr : int] #fx{Unsafe} : cstr
     ```c
     typedef struct { char *name; char *value; } Attr;
     Attr *a = (Attr *)(intptr_t)attr;
     return a && a->name ? a->name : "";
     ```)
 
-  (defn attr-value [attr : int] #{Unsafe} : cstr
+  (defn attr-value [attr : int] #fx{Unsafe} : cstr
     ```c
     typedef struct { char *name; char *value; } Attr;
     Attr *a = (Attr *)(intptr_t)attr;
@@ -95,7 +95,7 @@
     ```)
 
   ;;; parse-attrs -- parse a Quarto-style attribute block from a fence info string.
-  (defn parse-attrs [s : cstr] #{Unsafe} : int
+  (defn parse-attrs [s : cstr] #fx{Unsafe} : int
     ```c
     typedef struct { char *name; char *value; } Attr;
     typedef struct { int64_t head; int64_t tail; } Cons;
@@ -153,7 +153,7 @@
     ```)
 
   ;;; attr-get -- fetch an attribute value or return the provided default.
-  (defn attr-get [attrs : int name : cstr fallback : cstr] #{Unsafe} : cstr
+  (defn attr-get [attrs : int name : cstr fallback : cstr] #fx{Unsafe} : cstr
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *name; char *value; } Attr;
@@ -171,7 +171,7 @@
     ```)
 
   ;;; attr-get-bool -- parse a boolean attribute into 0 or 1.
-  (defn attr-get-bool [attrs : int name : cstr fallback : int] #{Unsafe} : int
+  (defn attr-get-bool [attrs : int name : cstr fallback : int] #fx{Unsafe} : int
     (let [value (attr-get attrs name "")]
       (if (__cell-cstr-eq? value "")
         fallback
@@ -183,7 +183,7 @@
           0))))
 
   ;;; attr-get-int -- parse an integer attribute with a default fallback.
-  (defn attr-get-int [attrs : int name : cstr fallback : int] #{Unsafe} : int
+  (defn attr-get-int [attrs : int name : cstr fallback : int] #fx{Unsafe} : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *name; char *value; } Attr;
@@ -200,7 +200,7 @@
     ```)
 
   ;;; cell-make -- create a notebook cell handle.
-  (defn cell-make [id : cstr lang : int source : cstr attrs : int start-line : int end-line : int] #{Unsafe} : int
+  (defn cell-make [id : cstr lang : int source : cstr attrs : int start-line : int end-line : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *id;
@@ -220,7 +220,7 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn cell-id [cell : int] #{Unsafe} : cstr
+  (defn cell-id [cell : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *id;
@@ -234,7 +234,7 @@
     return c && c->id ? c->id : "";
     ```)
 
-  (defn cell-lang [cell : int] #{Unsafe} : int
+  (defn cell-lang [cell : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *id;
@@ -248,7 +248,7 @@
     return c ? c->lang : -1;
     ```)
 
-  (defn cell-source [cell : int] #{Unsafe} : cstr
+  (defn cell-source [cell : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *id;
@@ -262,7 +262,7 @@
     return c && c->source ? c->source : "";
     ```)
 
-  (defn cell-attrs [cell : int] #{Unsafe} : int
+  (defn cell-attrs [cell : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *id;
@@ -276,7 +276,7 @@
     return c ? c->attrs : 0;
     ```)
 
-  (defn cell-start-line [cell : int] #{Unsafe} : int
+  (defn cell-start-line [cell : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *id;
@@ -290,7 +290,7 @@
     return c ? c->start_line : 0;
     ```)
 
-  (defn cell-end-line [cell : int] #{Unsafe} : int
+  (defn cell-end-line [cell : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *id;
@@ -304,7 +304,7 @@
     return c ? c->end_line : 0;
     ```)
 
-  (defn __assign-cell-id [cell : int idx : int] #{Unsafe} : int
+  (defn __assign-cell-id [cell : int idx : int] #fx{Unsafe} : int
     (if (__cell-cstr-eq? (cell-id cell) "")
       (cell-make (__cell-str-concat "cell-" (__cell-int->cstr idx))
                  (cell-lang cell)
@@ -315,11 +315,11 @@
       cell))
 
   ;;; cells-assign-ids -- fill in missing cell ids with sequential cell-N names.
-  (defn cells-assign-ids [cells : int] #{Unsafe} : int
+  (defn cells-assign-ids [cells : int] #fx{Unsafe} : int
     (let [rev (__cells-assign-ids-rev cells 1 (__cell-nil-value))]
       (__reverse-list rev (__cell-nil-value))))
 
-  (defn __cells-assign-ids-rev [cells : int idx : int acc : int] #{Unsafe} : int
+  (defn __cells-assign-ids-rev [cells : int idx : int acc : int] #fx{Unsafe} : int
     (if (__cell-list-nil? cells)
       acc
       (__cells-assign-ids-rev (__cell-tail cells)

@@ -24,7 +24,7 @@
   ;;;   (fg4 1)  ; bright-... no, 1 = red.  Use (color-bright-red) for index 9.
   ;;;
   ;;; Since: tur-ansi AN1
-  (defn fg4 [color-idx : int] #{Unsafe} : void
+  (defn fg4 [color-idx : int] #fx{Unsafe} : void
     ```c
     int c = (int)color_idx;
     if (c < 0) c = 0;
@@ -35,7 +35,7 @@
     ```)
 
   ;;; bg4 -- emit a 4-bit background color SGR (0-15).
-  (defn bg4 [color-idx : int] #{Unsafe} : void
+  (defn bg4 [color-idx : int] #fx{Unsafe} : void
     ```c
     int c = (int)color_idx;
     if (c < 0) c = 0;
@@ -49,7 +49,7 @@
   ;;;
   ;;; Parameters:
   ;;;   idx -- 0-255 palette index.  Clamped to [0, 255].
-  (defn fg8 [idx : int] #{Unsafe} : void
+  (defn fg8 [idx : int] #fx{Unsafe} : void
     ```c
     int c = (int)idx;
     if (c < 0) c = 0;
@@ -59,7 +59,7 @@
     ```)
 
   ;;; bg8 -- emit an 8-bit (256-color palette) background SGR.
-  (defn bg8 [idx : int] #{Unsafe} : void
+  (defn bg8 [idx : int] #fx{Unsafe} : void
     ```c
     int c = (int)idx;
     if (c < 0) c = 0;
@@ -72,7 +72,7 @@
   ;;;
   ;;; Parameters:
   ;;;   r, g, b -- 0-255 channels.  Clamped to [0, 255].
-  (defn fg24 [r : int g : int b : int] #{Unsafe} : void
+  (defn fg24 [r : int g : int b : int] #fx{Unsafe} : void
     ```c
     int rr = (int)r, gg = (int)g, bb = (int)b;
     if (rr < 0) rr = 0; if (rr > 255) rr = 255;
@@ -83,7 +83,7 @@
     ```)
 
   ;;; bg24 -- emit a 24-bit (true-color) background SGR.
-  (defn bg24 [r : int g : int b : int] #{Unsafe} : void
+  (defn bg24 [r : int g : int b : int] #fx{Unsafe} : void
     ```c
     int rr = (int)r, gg = (int)g, bb = (int)b;
     if (rr < 0) rr = 0; if (rr > 255) rr = 255;
@@ -96,7 +96,7 @@
   ;;; color-reset -- restore default foreground and background (SGR 39 49).
   ;;;
   ;;; Use style-reset (SGR 0) when you also want to clear bold/italic/etc.
-  (defn color-reset [] #{Unsafe} : void
+  (defn color-reset [] #fx{Unsafe} : void
     ```c
     fputs("\033[39;49m", stdout);
     fflush(stdout);
@@ -106,22 +106,22 @@
   ;; passed positionally to fg4 / bg4 by name without per-spice imports of
   ;; a constant binding form: (fg4 (color-bright-red)) reads cleanly.
 
-  (defn color-black          [] #{Unsafe} : int ```c return 0; ```)
-  (defn color-red            [] #{Unsafe} : int ```c return 1; ```)
-  (defn color-green          [] #{Unsafe} : int ```c return 2; ```)
-  (defn color-yellow         [] #{Unsafe} : int ```c return 3; ```)
-  (defn color-blue           [] #{Unsafe} : int ```c return 4; ```)
-  (defn color-magenta        [] #{Unsafe} : int ```c return 5; ```)
-  (defn color-cyan           [] #{Unsafe} : int ```c return 6; ```)
-  (defn color-white          [] #{Unsafe} : int ```c return 7; ```)
-  (defn color-bright-black   [] #{Unsafe} : int ```c return 8; ```)
-  (defn color-bright-red     [] #{Unsafe} : int ```c return 9; ```)
-  (defn color-bright-green   [] #{Unsafe} : int ```c return 10; ```)
-  (defn color-bright-yellow  [] #{Unsafe} : int ```c return 11; ```)
-  (defn color-bright-blue    [] #{Unsafe} : int ```c return 12; ```)
-  (defn color-bright-magenta [] #{Unsafe} : int ```c return 13; ```)
-  (defn color-bright-cyan    [] #{Unsafe} : int ```c return 14; ```)
-  (defn color-bright-white   [] #{Unsafe} : int ```c return 15; ```)
+  (defn color-black          [] #fx{Unsafe} : int ```c return 0; ```)
+  (defn color-red            [] #fx{Unsafe} : int ```c return 1; ```)
+  (defn color-green          [] #fx{Unsafe} : int ```c return 2; ```)
+  (defn color-yellow         [] #fx{Unsafe} : int ```c return 3; ```)
+  (defn color-blue           [] #fx{Unsafe} : int ```c return 4; ```)
+  (defn color-magenta        [] #fx{Unsafe} : int ```c return 5; ```)
+  (defn color-cyan           [] #fx{Unsafe} : int ```c return 6; ```)
+  (defn color-white          [] #fx{Unsafe} : int ```c return 7; ```)
+  (defn color-bright-black   [] #fx{Unsafe} : int ```c return 8; ```)
+  (defn color-bright-red     [] #fx{Unsafe} : int ```c return 9; ```)
+  (defn color-bright-green   [] #fx{Unsafe} : int ```c return 10; ```)
+  (defn color-bright-yellow  [] #fx{Unsafe} : int ```c return 11; ```)
+  (defn color-bright-blue    [] #fx{Unsafe} : int ```c return 12; ```)
+  (defn color-bright-magenta [] #fx{Unsafe} : int ```c return 13; ```)
+  (defn color-bright-cyan    [] #fx{Unsafe} : int ```c return 14; ```)
+  (defn color-bright-white   [] #fx{Unsafe} : int ```c return 15; ```)
 
   ;; -------------------------------------------------------------------------
   ;; Color typeclass -- U2 collapse of the fg4/bg4/fg8/bg8/fg24/bg24 sextet.

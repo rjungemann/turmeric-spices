@@ -12,7 +12,7 @@
   (import watch/opts   :refer [default-watch-opts])
   (import watch/watch  :refer [watch-open-one watch-close watch-drain])
 
-  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-record [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     /* __tur_include__: static int g_drain_burst_fails = 0; */
     if (!ok) g_drain_burst_fails++;
@@ -20,7 +20,7 @@
            (long long)idx, (const char *)(intptr_t)name);
     ```)
 
-  (defn tap-finish [count : int] #{Unsafe} : int
+  (defn tap-finish [count : int] #fx{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_drain_burst_fails == 0) {
@@ -34,7 +34,7 @@
     ```)
 
   ;; Setup helpers.
-  (defn write-file [path : cstr content : cstr] #{Unsafe} : int
+  (defn write-file [path : cstr content : cstr] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <stdio.h> */
     const char *p = (const char *)(intptr_t)path;
@@ -44,7 +44,7 @@
     if (c) fputs(c, f); fclose(f); return 0;
     ```)
 
-  (defn delete-file [path : cstr] #{Unsafe} : int
+  (defn delete-file [path : cstr] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <unistd.h> */
     return unlink((const char *)(intptr_t)path);
@@ -53,7 +53,7 @@
   ;; Spawn a background pthread that performs three atomic saves at
   ;; (base + 30 ms), (base + 60 ms), and (base + 90 ms).  Each save
   ;; writes a sibling temp file and renames it over the target.
-  (defn schedule-burst [path : cstr] #{Unsafe} : int
+  (defn schedule-burst [path : cstr] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <pthread.h> */
     /* __tur_include__: typedef struct { char *path; } TurWatchBurst; */
@@ -67,12 +67,12 @@
     return 0;
     ```)
 
-  (defn sleep-ms [ms : int] #{Unsafe} : void
+  (defn sleep-ms [ms : int] #fx{Unsafe} : void
     ```c
     if (ms > 0) usleep((useconds_t)ms * 1000u);
     ```)
 
-  (defn cons-len [c : int] #{Unsafe} : int
+  (defn cons-len [c : int] #fx{Unsafe} : int
     ```c
     /* __tur_include__: struct __tur_cons_s; */
     /* __tur_include__: typedef struct __tur_cons_s __tur_cons_cell; */
@@ -82,13 +82,13 @@
     return n;
     ```)
 
-  (defn cons-head [c : int] #{Unsafe} : int
+  (defn cons-head [c : int] #fx{Unsafe} : int
     ```c
     __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
     return p ? p->head : 0;
     ```)
 
-  (defn cons-free-shallow [c : int] #{Unsafe} : void
+  (defn cons-free-shallow [c : int] #fx{Unsafe} : void
     ```c
     __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
     while (p) {
@@ -98,7 +98,7 @@
     }
     ```)
 
-  (defn tmp-path [] #{Unsafe} : cstr
+  (defn tmp-path [] #fx{Unsafe} : cstr
     ```c
     /* __tur_include__: #include <unistd.h> */
     static char buf[256];
@@ -106,7 +106,7 @@
     return (const char *)buf;
     ```)
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (do
       (let [p (tmp-path)]
         (do

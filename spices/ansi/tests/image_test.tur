@@ -5,7 +5,7 @@
                               image-display-protocol image-display-rgba
                               image-placeholder])
 
-  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-record [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     /* __tur_include__: static int g_image_fails = 0; */
     if (!ok) g_image_fails++;
@@ -13,7 +13,7 @@
            (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-finish [count : int] #{Unsafe} : int
+  (defn tap-finish [count : int] #fx{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_image_fails == 0) {
@@ -28,7 +28,7 @@
   ;; Stdout capture machinery (same shape as box/color/style tests but uses a
   ;; larger buffer because Kitty sequences for real files can run to tens of
   ;; kilobytes once chunking lands).
-  (defn __capture-begin [] #{Unsafe} : void
+  (defn __capture-begin [] #fx{Unsafe} : void
     ```c
     /* __tur_include__: static int g_image_saved_fd = -1; */
     /* __tur_include__: static int g_image_pipe_r = -1; */
@@ -47,7 +47,7 @@
     g_image_buf_len = 0;
     ```)
 
-  (defn __capture-end [] #{Unsafe} : void
+  (defn __capture-end [] #fx{Unsafe} : void
     ```c
     fflush(stdout);
     if (g_image_saved_fd < 0) return;
@@ -70,17 +70,17 @@
     ```)
 
   ;; Compare the captured buffer against a literal expected string.
-  (defn __capture-eq? [expected : cstr exp-len : int] #{Unsafe} : bool
+  (defn __capture-eq? [expected : cstr exp-len : int] #fx{Unsafe} : bool
     ```c
     if (g_image_buf_len != (size_t)exp_len) return 0;
     return memcmp(g_image_buf, expected, (size_t)exp_len) == 0 ? 1 : 0;
     ```)
 
-  (defn __capture-len [] #{Unsafe} : int
+  (defn __capture-len [] #fx{Unsafe} : int
     ```c return (int64_t)g_image_buf_len; ```)
 
   ;; Boolean helpers that drive the captured-buffer checks via test-id.
-  (defn __check [test-id : int] #{Unsafe} : bool
+  (defn __check [test-id : int] #fx{Unsafe} : bool
     ```c
     const char *exp = "";
     size_t elen = 0;
@@ -105,7 +105,7 @@
 
   ;; Write a tiny temp file with known contents so we can predict the encoded
   ;; output exactly.  "Man" (3 bytes) -> base64 "TWFu".
-  (defn __make-tmp-file [] #{Unsafe} : cstr
+  (defn __make-tmp-file [] #fx{Unsafe} : cstr
     ```c
     static char path[] = "/tmp/ansi-image-test-XXXXXX";
     static char path_buf[64];
@@ -119,12 +119,12 @@
     return strdup(path_buf);
     ```)
 
-  (defn __unlink [p : cstr] #{Unsafe} : void
+  (defn __unlink [p : cstr] #fx{Unsafe} : void
     ```c unlink((const char *)p); ```)
 
   ;; Verify the Kitty path-based output equals the expected APC sequence
   ;; wrapping b64("Man") = "TWFu".
-  (defn __check-kitty-file [] #{Unsafe} : bool
+  (defn __check-kitty-file [] #fx{Unsafe} : bool
     ```c
     const char *exp = "\033_Gf=100,a=T,m=0;TWFu\033\\";
     size_t elen = strlen(exp);
@@ -133,7 +133,7 @@
     ```)
 
   ;; Verify the iTerm2 path-based output for "Man" (3 bytes).
-  (defn __check-iterm-file [] #{Unsafe} : bool
+  (defn __check-iterm-file [] #fx{Unsafe} : bool
     ```c
     const char *exp =
       "\033]1337;File=inline=1;size=3;preserveAspectRatio=1:TWFu\a";
@@ -144,7 +144,7 @@
 
   ;; Build a base64-style string of length 5000 (>4096) so chunking splits it
   ;; into exactly two chunks, then verify the framing.
-  (defn __check-base64-chunking [] #{Unsafe} : bool
+  (defn __check-base64-chunking [] #fx{Unsafe} : bool
     ```c
     /* Expected framing:
          "\033_Gf=100,a=T,m=1;" (17) + (4096 'A') + "\033\\" (2)
@@ -166,7 +166,7 @@
     return 1;
     ```)
 
-  (defn __big-b64 [] #{Unsafe} : cstr
+  (defn __big-b64 [] #fx{Unsafe} : cstr
     ```c
     char *buf = (char *)malloc(5001);
     memset(buf, 'A', 5000);
@@ -174,48 +174,48 @@
     return buf;
     ```)
 
-  (defn run-placeholder [] #{Unsafe} : bool
+  (defn run-placeholder [] #fx{Unsafe} : bool
     (do (__capture-begin) (image-placeholder "foo.png") (__capture-end) (__check 1)))
 
-  (defn run-placeholder-empty [] #{Unsafe} : bool
+  (defn run-placeholder-empty [] #fx{Unsafe} : bool
     (do (__capture-begin) (image-placeholder "") (__capture-end) (__check 2)))
 
-  (defn run-b64-short [] #{Unsafe} : bool
+  (defn run-b64-short [] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-base64 "TWFu") (__capture-end) (__check 3)))
 
-  (defn run-b64-empty [] #{Unsafe} : bool
+  (defn run-b64-empty [] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-base64 "") (__capture-end) (__check 4)))
 
-  (defn run-proto-zero [] #{Unsafe} : bool
+  (defn run-proto-zero [] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-protocol 0 "missing.png") (__capture-end) (__check 5)))
 
-  (defn run-proto-sixel [] #{Unsafe} : bool
+  (defn run-proto-sixel [] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-protocol 3 "missing.png") (__capture-end) (__check 6)))
 
-  (defn run-proto-missing [] #{Unsafe} : bool
+  (defn run-proto-missing [] #fx{Unsafe} : bool
     (do (__capture-begin)
         (image-display-protocol 1 "/this/path/does/not/exist.png")
         (__capture-end) (__check 7)))
 
-  (defn run-kitty-file [path : cstr] #{Unsafe} : bool
+  (defn run-kitty-file [path : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-protocol 1 path) (__capture-end) (__check-kitty-file)))
 
-  (defn run-iterm-file [path : cstr] #{Unsafe} : bool
+  (defn run-iterm-file [path : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-protocol 2 path) (__capture-end) (__check-iterm-file)))
 
-  (defn run-b64-chunking [big : cstr] #{Unsafe} : bool
+  (defn run-b64-chunking [big : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-base64 big) (__capture-end) (__check-base64-chunking)))
 
   ;; Allocate a small RGBA buffer with hand-picked pixel values so the sixel
   ;; quantization is deterministic and the expected output is hand-computable.
-  (defn __rgba-red-1x1 [] #{Unsafe} : cstr
+  (defn __rgba-red-1x1 [] #fx{Unsafe} : cstr
     ```c
     unsigned char *b = (unsigned char *)malloc(4);
     b[0] = 255; b[1] = 0; b[2] = 0; b[3] = 255;
     return (char *)b;
     ```)
 
-  (defn __rgba-red-green-2x1 [] #{Unsafe} : cstr
+  (defn __rgba-red-green-2x1 [] #fx{Unsafe} : cstr
     ```c
     unsigned char *b = (unsigned char *)malloc(8);
     b[0] = 255; b[1] = 0; b[2] = 0; b[3] = 255;
@@ -223,7 +223,7 @@
     return (char *)b;
     ```)
 
-  (defn __rgba-red-5x1 [] #{Unsafe} : cstr
+  (defn __rgba-red-5x1 [] #fx{Unsafe} : cstr
     ```c
     unsigned char *b = (unsigned char *)malloc(20);
     for (int i = 0; i < 5; i++) {
@@ -235,7 +235,7 @@
   ;; 7x1 image with the first 5 pixels red, last 2 green: triggers RLE for the
   ;; red run (>=4) but per-character emission for the green run (<4) AND tests
   ;; the multi-color band path.
-  (defn __rgba-rrrrrgg-7x1 [] #{Unsafe} : cstr
+  (defn __rgba-rrrrrgg-7x1 [] #fx{Unsafe} : cstr
     ```c
     unsigned char *b = (unsigned char *)malloc(28);
     for (int i = 0; i < 7; i++) {
@@ -255,7 +255,7 @@
   ;;
   ;;   pure red   (255,0,0)   -> idx 180  -> #180;2;100;0;0
   ;;   pure green (0,255,0)   -> idx 30   -> #30;2;0;100;0
-  (defn __check-rgba [test-id : int] #{Unsafe} : bool
+  (defn __check-rgba [test-id : int] #fx{Unsafe} : bool
     ```c
     const char *exp = "";
     size_t elen = 0;
@@ -289,22 +289,22 @@
     return memcmp(g_image_buf, exp, elen) == 0 ? 1 : 0;
     ```)
 
-  (defn run-rgba-1x1 [buf : cstr] #{Unsafe} : bool
+  (defn run-rgba-1x1 [buf : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-rgba 1 1 buf) (__capture-end) (__check-rgba 1)))
 
-  (defn run-rgba-2x1 [buf : cstr] #{Unsafe} : bool
+  (defn run-rgba-2x1 [buf : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-rgba 2 1 buf) (__capture-end) (__check-rgba 2)))
 
-  (defn run-rgba-5x1-rle [buf : cstr] #{Unsafe} : bool
+  (defn run-rgba-5x1-rle [buf : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-rgba 5 1 buf) (__capture-end) (__check-rgba 3)))
 
-  (defn run-rgba-mixed-rle [buf : cstr] #{Unsafe} : bool
+  (defn run-rgba-mixed-rle [buf : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-rgba 7 1 buf) (__capture-end) (__check-rgba 4)))
 
-  (defn run-rgba-zero [buf : cstr] #{Unsafe} : bool
+  (defn run-rgba-zero [buf : cstr] #fx{Unsafe} : bool
     (do (__capture-begin) (image-display-rgba 0 0 buf) (__capture-end) (__check-rgba 5)))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (do
       (tap-record 1 "image-placeholder writes [image: path]"        (run-placeholder))
       (tap-record 2 "image-placeholder handles empty path"          (run-placeholder-empty))

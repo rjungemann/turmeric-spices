@@ -23,7 +23,7 @@
   ;;;   path -- the path string to embed in the placeholder.  May be empty.
   ;;;
   ;;; Since: tur-ansi AN4
-  (defn image-placeholder [path : cstr] #{Unsafe} : void
+  (defn image-placeholder [path : cstr] #fx{Unsafe} : void
     ```c
     const char *p = (const char *)path;
     if (!p) p = "";
@@ -41,7 +41,7 @@
   ;;; is empty or null.
   ;;;
   ;;; Since: tur-ansi AN4
-  (defn image-display-base64 [b64 : cstr] #{Unsafe} : void
+  (defn image-display-base64 [b64 : cstr] #fx{Unsafe} : void
     ```c
     const char *s = (const char *)b64;
     if (!s || !s[0]) return;
@@ -72,7 +72,7 @@
   ;; of the encoded bytes, or NULL on allocation failure.  Both are defined as
   ;; static helpers in this file via __tur_include__.
   ;;
-  (defn __image-init [] #{Unsafe} : void
+  (defn __image-init [] #fx{Unsafe} : void
     ```c
     /* __tur_include__: #include <stdio.h> */
     /* __tur_include__: #include <stdlib.h> */
@@ -138,7 +138,7 @@
   ;;; back to the placeholder.  A missing file always falls back too.
   ;;;
   ;;; Since: tur-ansi AN4
-  (defn image-display-protocol [proto : int path : cstr] #{Unsafe} : void
+  (defn image-display-protocol [proto : int path : cstr] #fx{Unsafe} : void
     ```c
     const char *p = (const char *)path;
     int pr = (int)proto;
@@ -202,7 +202,7 @@
   ;;;   (image-display "logo.png")  ; => emits Kitty/iTerm2 APC/OSC or [image: logo.png]
   ;;;
   ;;; Since: tur-ansi AN4
-  (defn image-display [path : cstr] #{Unsafe} : void
+  (defn image-display [path : cstr] #fx{Unsafe} : void
     ```c
     /* Inline the term-image-protocol detection so this module does not have
        to import ansi/term (which would create a needless dep cycle when
@@ -271,7 +271,7 @@
   ;;; treated as no-ops.  A null rgba pointer is also a no-op.
   ;;;
   ;;; Since: tur-ansi v0.1.2
-  (defn image-display-rgba [w : int h : int rgba : cstr] #{Unsafe} : void
+  (defn image-display-rgba [w : int h : int rgba : cstr] #fx{Unsafe} : void
     ```c
     int64_t W = w, H = h;
     const unsigned char *src = (const unsigned char *)rgba;

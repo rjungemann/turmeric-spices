@@ -24,7 +24,7 @@
 ;; ecs/tag's __ecs_tag (same word array + bit-count metadata) so that
 ;; future helpers can be shared if desired.
 
-(defn __sized-tag-new-raw [k : int] #{Unsafe} : int
+(defn __sized-tag-new-raw [k : int] #fx{Unsafe} : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -38,14 +38,14 @@
   return (int64_t)(intptr_t)t;
   ```)
 
-(defn __sized-tag-cap-raw [t : int] #{Unsafe} : int
+(defn __sized-tag-cap-raw [t : int] #fx{Unsafe} : int
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
   return (int64_t)tg->cap_bits;
   ```)
 
-(defn __sized-tag-set!-raw [t : int idx : int] #{Unsafe} : nil
+(defn __sized-tag-set!-raw [t : int idx : int] #fx{Unsafe} : nil
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -57,7 +57,7 @@
   tg->words[(size_t)idx >> 6] |= ((uint64_t)1) << ((size_t)idx & 63);
   ```)
 
-(defn __sized-tag-clear!-raw [t : int idx : int] #{Unsafe} : nil
+(defn __sized-tag-clear!-raw [t : int idx : int] #fx{Unsafe} : nil
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -65,7 +65,7 @@
   tg->words[(size_t)idx >> 6] &= ~(((uint64_t)1) << ((size_t)idx & 63));
   ```)
 
-(defn __sized-tag-has?-raw [t : int idx : int] #{Unsafe} : bool
+(defn __sized-tag-has?-raw [t : int idx : int] #fx{Unsafe} : bool
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -73,7 +73,7 @@
   return (tg->words[(size_t)idx >> 6] >> ((size_t)idx & 63)) & 1;
   ```)
 
-(defn __sized-tag-count-raw [t : int] #{Unsafe} : int
+(defn __sized-tag-count-raw [t : int] #fx{Unsafe} : int
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -84,7 +84,7 @@
   return total;
   ```)
 
-(defn __sized-tag-free-raw [t : int] #{Unsafe} : nil
+(defn __sized-tag-free-raw [t : int] #fx{Unsafe} : nil
   ```c
   #include <stdlib.h>
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;

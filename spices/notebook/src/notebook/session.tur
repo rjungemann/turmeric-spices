@@ -28,7 +28,7 @@
   (defn output-status-skipped [] : int 2)
 
   (defn cell-output-make [cell-id : cstr status : int stdout : cstr value-repr-text : cstr
-                          error-msg-text : cstr elapsed-ms-value : int image-paths-list : int] #{Unsafe} : int
+                          error-msg-text : cstr elapsed-ms-value : int image-paths-list : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *cell_id;
@@ -50,7 +50,7 @@
     return (int64_t)(intptr_t)out;
     ```)
 
-  (defn cell-output-cell-id [output : int] #{Unsafe} : cstr
+  (defn cell-output-cell-id [output : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *cell_id;
@@ -65,7 +65,7 @@
     return out && out->cell_id ? out->cell_id : "";
     ```)
 
-  (defn cell-output-status [output : int] #{Unsafe} : int
+  (defn cell-output-status [output : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *cell_id;
@@ -80,7 +80,7 @@
     return out ? out->status : 1;
     ```)
 
-  (defn cell-output-stdout [output : int] #{Unsafe} : cstr
+  (defn cell-output-stdout [output : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *cell_id;
@@ -95,7 +95,7 @@
     return out && out->stdout_text ? out->stdout_text : "";
     ```)
 
-  (defn cell-output-value-repr [output : int] #{Unsafe} : cstr
+  (defn cell-output-value-repr [output : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *cell_id;
@@ -110,7 +110,7 @@
     return out && out->value_repr ? out->value_repr : "";
     ```)
 
-  (defn cell-output-error-msg [output : int] #{Unsafe} : cstr
+  (defn cell-output-error-msg [output : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *cell_id;
@@ -125,7 +125,7 @@
     return out && out->error_msg ? out->error_msg : "";
     ```)
 
-  (defn cell-output-elapsed-ms [output : int] #{Unsafe} : int
+  (defn cell-output-elapsed-ms [output : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *cell_id;
@@ -140,7 +140,7 @@
     return out ? out->elapsed_ms : 0;
     ```)
 
-  (defn cell-output-image-paths [output : int] #{Unsafe} : int
+  (defn cell-output-image-paths [output : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *cell_id;
@@ -156,7 +156,7 @@
     ```)
 
   ;;; session-open -- create a fresh libturi-backed notebook session.
-  (defn session-open [] #{Unsafe} : int
+  (defn session-open [] #fx{Unsafe} : int
     ```c
     typedef struct {
       TuriEnv *env;
@@ -172,7 +172,7 @@
     ```)
 
   ;;; session-close -- free a notebook session and its embedded environment.
-  (defn session-close [session : int] #{Unsafe} : void
+  (defn session-close [session : int] #fx{Unsafe} : void
     ```c
     typedef struct {
       TuriEnv *env;
@@ -184,7 +184,7 @@
     ```)
 
   ;;; session-reset -- replace the current environment with a fresh one.
-  (defn session-reset [session : int] #{Unsafe} : void
+  (defn session-reset [session : int] #fx{Unsafe} : void
     ```c
     typedef struct {
       TuriEnv *env;
@@ -196,7 +196,7 @@
     ```)
 
   ;;; session-eval -- evaluate one cell source string in the current session.
-  (defn session-eval [session : int source : cstr lang : int] #{Unsafe} : int
+  (defn session-eval [session : int source : cstr lang : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       TuriEnv *env;

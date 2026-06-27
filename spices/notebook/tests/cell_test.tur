@@ -6,24 +6,24 @@
                                 cell-start-line cell-end-line
                                 cells-assign-ids])
 
-  (defn test-list-nil? [lst : int] #{Unsafe} : bool
+  (defn test-list-nil? [lst : int] #fx{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn test-head [lst : int] #{Unsafe} : int
+  (defn test-head [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->head : 0;
     ```)
 
-  (defn test-tail [lst : int] #{Unsafe} : int
+  (defn test-tail [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->tail : 0;
     ```)
 
-  (defn test-cons [value : int next : int] #{Unsafe} : int
+  (defn test-cons [value : int next : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -31,17 +31,17 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-line [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count : int fails : int] #{Unsafe} : void
+  (defn tap-plan [count : int fails : int] #fx{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -54,12 +54,12 @@
   (defn bool->fail [ok : bool] : int
     (if ok 0 1))
 
-  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
+  (defn run-case [idx : int name : cstr ok : bool] #fx{Unsafe} : int
     (do
       (tap-line idx name ok)
       (bool->fail ok)))
 
-  (defn test-attrs [] #{Unsafe} : bool
+  (defn test-attrs [] #fx{Unsafe} : bool
     (let [attrs (parse-attrs "turmeric {id=load eval=false cache=true depends=a,b retries=3}")
           a1 (test-head attrs)
           a2 (test-head (test-tail attrs))]
@@ -71,7 +71,7 @@
                                (and (not (test-list-nil? attrs))
                                     (not (= a1 a2))))))))))
 
-  (defn test-cell-make [] #{Unsafe} : bool
+  (defn test-cell-make [] #fx{Unsafe} : bool
     (let [attrs (parse-attrs "turmeric {id=demo}")
           cell (cell-make "demo" 0 "(+ 1 2)" attrs 10 12)]
       (and (cstr-eq? (cell-id cell) "demo")
@@ -81,7 +81,7 @@
                           (and (= (cell-end-line cell) 12)
                                (= (cell-attrs cell) attrs))))))))
 
-  (defn test-assign-ids [] #{Unsafe} : bool
+  (defn test-assign-ids [] #fx{Unsafe} : bool
     (let [cells (cells-assign-ids
                   (test-cons (cell-make "" 0 "a" 0 1 3)
                     (test-cons (cell-make "keep" 1 "b" 0 5 7)
@@ -93,7 +93,7 @@
            (and (cstr-eq? (cell-id c2) "keep")
                 (cstr-eq? (cell-id c3) "cell-3")))))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (let [f1 (run-case 1 "parses fence attributes" (test-attrs))
           f2 (run-case 2 "builds cell handles" (test-cell-make))
           f3 (run-case 3 "assigns missing cell ids" (test-assign-ids))]

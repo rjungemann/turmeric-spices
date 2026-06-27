@@ -31,7 +31,7 @@
 (defn cur-close  [s : Cur]  : nil ```c (void)s; ```)
 (defn conn-close [c : Conn] : nil ```c (void)c; ```)
 
-(defn tap [idx : int name : cstr ok : bool] #{Unsafe} : int
+(defn tap [idx : int name : cstr ok : bool] #fx{Unsafe} : int
   ```c
   printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
   return ok ? 0 : 1;
@@ -45,7 +45,7 @@
       (let [stepped (cur-step s)]
         (do (cur-close s) (conn-close c) stepped)))))
 
-(defn main [] #{Unsafe} : int
+(defn main [] #fx{Unsafe} : int
   (let [r1 (tap 1 "nested borrow/consume lifecycle returns cur value" (= (lifecycle) 5))]
     (do
       (println "1..1")

@@ -44,7 +44,7 @@
 
   ;; ===== raw int-carried implementation (private) =====
 
-  (defn __abuf-new-raw [frames : int chans : int] #{Unsafe} : int
+  (defn __abuf-new-raw [frames : int chans : int] #fx{Unsafe} : int
     ```c
     struct { int64_t frames; int64_t chans; float *data; } *b = malloc(sizeof(*b));
     int64_t nsamp = frames * chans;
@@ -54,20 +54,20 @@
     return (int64_t)(intptr_t)b;
     ```)
 
-  (defn __abuf-free-raw [b : int] #{Unsafe} : nil
+  (defn __abuf-free-raw [b : int] #fx{Unsafe} : nil
     ```c
     struct { int64_t frames; int64_t chans; float *data; } *v = (void *)(intptr_t)b;
     if (v->data) free(v->data);
     free(v);
     ```)
 
-  (defn __abuf-frames-raw [b : int] #{Unsafe} : int
+  (defn __abuf-frames-raw [b : int] #fx{Unsafe} : int
     ```c struct { int64_t frames; int64_t chans; float *data; } *v = (void *)(intptr_t)b; return (int)v->frames; ```)
 
-  (defn __abuf-chans-raw [b : int] #{Unsafe} : int
+  (defn __abuf-chans-raw [b : int] #fx{Unsafe} : int
     ```c struct { int64_t frames; int64_t chans; float *data; } *v = (void *)(intptr_t)b; return (int)v->chans; ```)
 
-  (defn __abuf-get-raw [b : int frame : int chan : int] #{Unsafe} : float
+  (defn __abuf-get-raw [b : int frame : int chan : int] #fx{Unsafe} : float
     ```c
     struct { int64_t frames; int64_t chans; float *data; } *v = (void *)(intptr_t)b;
     if (frame < 0 || frame >= v->frames || chan < 0 || chan >= v->chans) {
@@ -78,7 +78,7 @@
     return v->data[frame * v->chans + chan];
     ```)
 
-  (defn __abuf-set-raw [b : int frame : int chan : int x : float] #{Unsafe} : nil
+  (defn __abuf-set-raw [b : int frame : int chan : int x : float] #fx{Unsafe} : nil
     ```c
     struct { int64_t frames; int64_t chans; float *data; } *v = (void *)(intptr_t)b;
     if (frame < 0 || frame >= v->frames || chan < 0 || chan >= v->chans) {
@@ -92,7 +92,7 @@
   ;; sample-wise a + b into a fresh buffer. Runtime shape guard (belt-and-
   ;; suspenders; when both operands carry static sizes the elaborator has
   ;; already proven the shapes equal).
-  (defn __abuf-mix-raw [a : int b : int] #{Unsafe} : int
+  (defn __abuf-mix-raw [a : int b : int] #fx{Unsafe} : int
     ```c
     struct B { int64_t frames; int64_t chans; float *data; };
     struct B *x = (void *)(intptr_t)a;
@@ -111,7 +111,7 @@
     return (int64_t)(intptr_t)o;
     ```)
 
-  (defn __abuf-gain-raw [b : int g : float] #{Unsafe} : int
+  (defn __abuf-gain-raw [b : int g : float] #fx{Unsafe} : int
     ```c
     struct B { int64_t frames; int64_t chans; float *data; };
     struct B *x = (void *)(intptr_t)b;
@@ -123,7 +123,7 @@
     return (int64_t)(intptr_t)o;
     ```)
 
-  (defn __abuf-peak-raw [b : int] #{Unsafe} : float
+  (defn __abuf-peak-raw [b : int] #fx{Unsafe} : float
     ```c
     struct B { int64_t frames; int64_t chans; float *data; };
     struct B *x = (void *)(intptr_t)b;

@@ -8,13 +8,13 @@
 (defmodule ansi/tests/color-class
   (import ansi/color)
 
-  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-line [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok",
            (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count : int fails : int] #{Unsafe} : void
+  (defn tap-plan [count : int fails : int] #fx{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -25,10 +25,10 @@
     ```)
 
   (defn bool->fail [ok : bool] : int (if ok 0 1))
-  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
+  (defn run-case [idx : int name : cstr ok : bool] #fx{Unsafe} : int
     (do (tap-line idx name ok) (bool->fail ok)))
 
-  (defn __capture-begin [] #{Unsafe} : void
+  (defn __capture-begin [] #fx{Unsafe} : void
     ```c
     /* __tur_include__: static int g_cc_saved_fd = -1; */
     /* __tur_include__: static int g_cc_pipe_r = -1; */
@@ -44,7 +44,7 @@
     dup2(g_cc_pipe_w, STDOUT_FILENO);
     ```)
 
-  (defn __capture-check [test-id : int] #{Unsafe} : bool
+  (defn __capture-check [test-id : int] #fx{Unsafe} : bool
     ```c
     fflush(stdout);
     if (g_cc_saved_fd < 0) return 0;
@@ -80,15 +80,15 @@
     return memcmp(buf, expected, exp_len) == 0;
     ```)
 
-  (defn t-fg-c4-red    [] #{Unsafe} : bool (do (__capture-begin) (fg (color4 (color-red)))          (__capture-check 1)))
-  (defn t-bg-c4-black  [] #{Unsafe} : bool (do (__capture-begin) (bg (color4 (color-black)))        (__capture-check 2)))
-  (defn t-fg-c4-brwht  [] #{Unsafe} : bool (do (__capture-begin) (fg (color4 (color-bright-white))) (__capture-check 3)))
-  (defn t-fg-c8-orange [] #{Unsafe} : bool (do (__capture-begin) (fg (color8 208))                  (__capture-check 4)))
-  (defn t-bg-c8-zero   [] #{Unsafe} : bool (do (__capture-begin) (bg (color8 0))                    (__capture-check 5)))
-  (defn t-fg-c24-orng  [] #{Unsafe} : bool (do (__capture-begin) (fg (rgb 255 128 0))               (__capture-check 6)))
-  (defn t-bg-c24-black [] #{Unsafe} : bool (do (__capture-begin) (bg (rgb 0 0 0))                    (__capture-check 7)))
+  (defn t-fg-c4-red    [] #fx{Unsafe} : bool (do (__capture-begin) (fg (color4 (color-red)))          (__capture-check 1)))
+  (defn t-bg-c4-black  [] #fx{Unsafe} : bool (do (__capture-begin) (bg (color4 (color-black)))        (__capture-check 2)))
+  (defn t-fg-c4-brwht  [] #fx{Unsafe} : bool (do (__capture-begin) (fg (color4 (color-bright-white))) (__capture-check 3)))
+  (defn t-fg-c8-orange [] #fx{Unsafe} : bool (do (__capture-begin) (fg (color8 208))                  (__capture-check 4)))
+  (defn t-bg-c8-zero   [] #fx{Unsafe} : bool (do (__capture-begin) (bg (color8 0))                    (__capture-check 5)))
+  (defn t-fg-c24-orng  [] #fx{Unsafe} : bool (do (__capture-begin) (fg (rgb 255 128 0))               (__capture-check 6)))
+  (defn t-bg-c24-black [] #fx{Unsafe} : bool (do (__capture-begin) (bg (rgb 0 0 0))                    (__capture-check 7)))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (let [r1 (run-case 1 "fg (color4 red) = CSI 31m"          (t-fg-c4-red))
           r2 (run-case 2 "bg (color4 black) = CSI 40m"        (t-bg-c4-black))
           r3 (run-case 3 "fg (color4 bright-white) = CSI 97m" (t-fg-c4-brwht))

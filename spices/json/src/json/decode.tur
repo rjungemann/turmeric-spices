@@ -47,7 +47,7 @@
 ;;; Example:
 ;;;   (let [d (unsafe (json-parse-doc "{\"x\":1}"))]
 ;;;     (unsafe (json-doc-free d)))
-(defn json-parse-doc [s : cstr] #{Unsafe} : int
+(defn json-parse-doc [s : cstr] #fx{Unsafe} : int
   ```c
   #include <yyjson.h>
   if (!s) return (int64_t)0;
@@ -57,7 +57,7 @@
 
 ;;; json-doc-free -- release a yyjson document and its arena.
 ;;; All value handles derived from this doc become invalid afterward.
-(defn json-doc-free [doc : int] #{Unsafe} : nil
+(defn json-doc-free [doc : int] #fx{Unsafe} : nil
   ```c
   #include <yyjson.h>
   yyjson_doc *d = (yyjson_doc *)(intptr_t)doc;
@@ -66,7 +66,7 @@
 
 ;;; json-doc-root -- return the root value handle of the document, or 0
 ;;; if the doc is invalid.
-(defn json-doc-root [doc : int] #{Unsafe} : int
+(defn json-doc-root [doc : int] #fx{Unsafe} : int
   ```c
   #include <yyjson.h>
   yyjson_doc *d = (yyjson_doc *)(intptr_t)doc;
@@ -78,7 +78,7 @@
 ;;; field's value handle, or 0 if `val` is not an object or the key is
 ;;; missing. The doc parameter is accepted for API symmetry and is unused
 ;;; -- yyjson values carry their own provenance.
-(defn json-obj-get [doc : int val : int key : cstr] #{Unsafe} : int
+(defn json-obj-get [doc : int val : int key : cstr] #fx{Unsafe} : int
   ```c
   #include <yyjson.h>
   (void)doc;

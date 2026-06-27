@@ -24,13 +24,13 @@
   ;; that read .kind directly via inline-C.  Do not renumber.
   ;; --------------------------------------------------------------------
 
-  (defn watch-kind-none     [] #{} : int ```c return 0; ```)
-  (defn watch-kind-write    [] #{} : int ```c return 1; ```)
-  (defn watch-kind-create   [] #{} : int ```c return 2; ```)
-  (defn watch-kind-delete   [] #{} : int ```c return 3; ```)
-  (defn watch-kind-rename   [] #{} : int ```c return 4; ```)
-  (defn watch-kind-attrib   [] #{} : int ```c return 5; ```)
-  (defn watch-kind-overflow [] #{} : int ```c return 6; ```)
+  (defn watch-kind-none     [] #fx{} : int ```c return 0; ```)
+  (defn watch-kind-write    [] #fx{} : int ```c return 1; ```)
+  (defn watch-kind-create   [] #fx{} : int ```c return 2; ```)
+  (defn watch-kind-delete   [] #fx{} : int ```c return 3; ```)
+  (defn watch-kind-rename   [] #fx{} : int ```c return 4; ```)
+  (defn watch-kind-attrib   [] #fx{} : int ```c return 5; ```)
+  (defn watch-kind-overflow [] #fx{} : int ```c return 6; ```)
 
   ;; --------------------------------------------------------------------
   ;; Event struct.  Heap-allocated; freed by watch-event-free.
@@ -38,7 +38,7 @@
 
   ;;; watch-event-make -- allocate a new event record.
   (defn watch-event-make [root : cstr path : cstr full-path : cstr
-                          kind : int is-dir : int cookie : int] #{Unsafe} : int
+                          kind : int is-dir : int cookie : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -59,7 +59,7 @@
     ```)
 
   ;;; watch-event-free -- release an event handle.  Safe on 0.
-  (defn watch-event-free [event : int] #{Unsafe} : void
+  (defn watch-event-free [event : int] #fx{Unsafe} : void
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -74,7 +74,7 @@
     ```)
 
   ;;; watch-event-root -- registered root that produced the event.
-  (defn watch-event-root [event : int] #{Unsafe} : cstr
+  (defn watch-event-root [event : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -85,7 +85,7 @@
     ```)
 
   ;;; watch-event-path -- path relative to root.
-  (defn watch-event-path [event : int] #{Unsafe} : cstr
+  (defn watch-event-path [event : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -96,7 +96,7 @@
     ```)
 
   ;;; watch-event-full-path -- absolute path on disk.
-  (defn watch-event-full-path [event : int] #{Unsafe} : cstr
+  (defn watch-event-full-path [event : int] #fx{Unsafe} : cstr
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -107,7 +107,7 @@
     ```)
 
   ;;; watch-event-kind -- normalized watch-kind-* value.
-  (defn watch-event-kind [event : int] #{Unsafe} : int
+  (defn watch-event-kind [event : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -118,7 +118,7 @@
     ```)
 
   ;;; watch-event-is-dir -- 1 if the affected path is a directory, else 0.
-  (defn watch-event-is-dir [event : int] #{Unsafe} : int
+  (defn watch-event-is-dir [event : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -129,7 +129,7 @@
     ```)
 
   ;;; watch-event-cookie -- rename correlation cookie or 0.
-  (defn watch-event-cookie [event : int] #{Unsafe} : int
+  (defn watch-event-cookie [event : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *root; char *path; char *full_path;
@@ -140,7 +140,7 @@
     ```)
 
   ;;; watch-kind->cstr -- short human label for a kind value.
-  (defn watch-kind->cstr [kind : int] #{Unsafe} : cstr
+  (defn watch-kind->cstr [kind : int] #fx{Unsafe} : cstr
     ```c
     static const char *names[] = {
       "none", "write", "create", "delete", "rename", "attrib", "overflow"

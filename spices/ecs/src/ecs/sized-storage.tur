@@ -30,7 +30,7 @@
 
 ;; ===== Raw int-carried implementation (private) =====
 
-(defn __sized-dense-new-raw [k : int] #{Unsafe} : int
+(defn __sized-dense-new-raw [k : int] #fx{Unsafe} : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -45,21 +45,21 @@
   return (int64_t)(intptr_t)s;
   ```)
 
-(defn __sized-dense-len-raw [s : int] #{Unsafe} : int
+(defn __sized-dense-len-raw [s : int] #fx{Unsafe} : int
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
   return (int64_t)st->len;
   ```)
 
-(defn __sized-dense-cap-raw [s : int] #{Unsafe} : int
+(defn __sized-dense-cap-raw [s : int] #fx{Unsafe} : int
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
   return (int64_t)st->cap;
   ```)
 
-(defn __sized-dense-set!-raw [A] [s : int idx : int val : A] #{Unsafe} : nil
+(defn __sized-dense-set!-raw [A] [s : int idx : int val : A] #fx{Unsafe} : nil
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
@@ -77,14 +77,14 @@
   if ((size_t)idx + 1 > st->len) st->len = (size_t)idx + 1;
   ```)
 
-(defn __sized-dense-get-raw [A] [s : int idx : int] #{Unsafe} : A
+(defn __sized-dense-get-raw [A] [s : int idx : int] #fx{Unsafe} : A
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
   return ((__TUR_TY_A__ *)st->data)[idx];
   ```)
 
-(defn __sized-dense-has?-raw [s : int idx : int] #{Unsafe} : bool
+(defn __sized-dense-has?-raw [s : int idx : int] #fx{Unsafe} : bool
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
@@ -92,7 +92,7 @@
   return st->present[idx] != 0;
   ```)
 
-(defn __sized-dense-free-raw [s : int] #{Unsafe} : nil
+(defn __sized-dense-free-raw [s : int] #fx{Unsafe} : nil
   ```c
   #include <stdlib.h>
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;

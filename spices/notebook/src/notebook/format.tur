@@ -12,17 +12,17 @@
           nodes->str nodes-update-cell)
 
   ;; Minimal cons helpers so the module stays self-contained.
-  (defn __fmt-nil-value [] #{Unsafe} : int
+  (defn __fmt-nil-value [] #fx{Unsafe} : int
     ```c
     return 0;
     ```)
 
-  (defn __fmt-list-nil? [lst : int] #{Unsafe} : bool
+  (defn __fmt-list-nil? [lst : int] #fx{Unsafe} : bool
     ```c
     return lst == 0;
     ```)
 
-  (defn __fmt-cons [value : int next : int] #{Unsafe} : int
+  (defn __fmt-cons [value : int next : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -30,14 +30,14 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn __fmt-head [lst : int] #{Unsafe} : int
+  (defn __fmt-head [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "head: empty list\n"); exit(1); }
     return cell->head;
     ```)
 
-  (defn __fmt-tail [lst : int] #{Unsafe} : int
+  (defn __fmt-tail [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     if (!cell) { fprintf(stderr, "tail: empty list\n"); exit(1); }
@@ -51,24 +51,24 @@
   ;; share private __rmd-result-* helpers that read the layout as :int;
   ;; tightening parse-string / parse-file to (Result int int) is a
   ;; downstream sweep beyond this migration's scope.
-  (defn __ok [value : int] #{Unsafe} : int
+  (defn __ok [value : int] #fx{Unsafe} : int
     ```c
     return tur_ok_int(value);
     ```)
 
-  (defn __err [value : int] #{Unsafe} : int
+  (defn __err [value : int] #fx{Unsafe} : int
     ```c
     return tur_err_int(value);
     ```)
 
-  (defn __fmt-cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn __fmt-cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn __fmt-str-concat [a : cstr b : cstr] #{Unsafe} : cstr
+  (defn __fmt-str-concat [a : cstr b : cstr] #fx{Unsafe} : cstr
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
@@ -80,17 +80,17 @@
     return out;
     ```)
 
-  (defn __fmt-cstr-as-int [value : cstr] #{Unsafe} : int
+  (defn __fmt-cstr-as-int [value : cstr] #fx{Unsafe} : int
     ```c
     return (int64_t)(intptr_t)value;
     ```)
 
-  (defn __fmt-int-as-cstr [value : int] #{Unsafe} : cstr
+  (defn __fmt-int-as-cstr [value : int] #fx{Unsafe} : cstr
     ```c
     return (const char *)(intptr_t)value;
     ```)
 
-  (defn __fmt-slurp [path : cstr] #{Unsafe} : cstr
+  (defn __fmt-slurp [path : cstr] #fx{Unsafe} : cstr
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     FILE *fp = fopen(p, "rb");
@@ -107,18 +107,18 @@
     return (const char *)(intptr_t)buf;
     ```)
 
-  (defn __fmt-cstr-free [s : cstr] #{Unsafe} : void
+  (defn __fmt-cstr-free [s : cstr] #fx{Unsafe} : void
     ```c
     void *p = (void *)(intptr_t)s;
     if (p) free(p);
     ```)
 
-  (defn __fmt-cstr-null? [s : cstr] #{Unsafe} : bool
+  (defn __fmt-cstr-null? [s : cstr] #fx{Unsafe} : bool
     ```c
     return ((const void *)(intptr_t)s) == NULL;
     ```)
 
-  (defn __fmt-node-make [tag : int prose : int cell : int] #{Unsafe} : int
+  (defn __fmt-node-make [tag : int prose : int cell : int] #fx{Unsafe} : int
     ```c
     typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
     NotebookNode *node = malloc(sizeof(*node));
@@ -128,14 +128,14 @@
     return (int64_t)(intptr_t)node;
     ```)
 
-  (defn __node-prose-make [prose : int] #{Unsafe} : int
+  (defn __node-prose-make [prose : int] #fx{Unsafe} : int
     (__fmt-node-make 0 prose 0))
 
-  (defn __node-cell-make [cell : int] #{Unsafe} : int
+  (defn __node-cell-make [cell : int] #fx{Unsafe} : int
     (__fmt-node-make 1 0 cell))
 
   ;;; node-tag -- return 0 for prose nodes and 1 for cell nodes.
-  (defn node-tag [node : int] #{Unsafe} : int
+  (defn node-tag [node : int] #fx{Unsafe} : int
     ```c
     typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
     NotebookNode *n = (NotebookNode *)(intptr_t)node;
@@ -143,7 +143,7 @@
     ```)
 
   ;;; node-prose -- extract the md-node handle from a prose node.
-  (defn node-prose [node : int] #{Unsafe} : int
+  (defn node-prose [node : int] #fx{Unsafe} : int
     ```c
     typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
     NotebookNode *n = (NotebookNode *)(intptr_t)node;
@@ -151,14 +151,14 @@
     ```)
 
   ;;; node-cell -- extract the cell handle from a cell node.
-  (defn node-cell [node : int] #{Unsafe} : int
+  (defn node-cell [node : int] #fx{Unsafe} : int
     ```c
     typedef struct { int64_t tag; int64_t prose; int64_t cell; } NotebookNode;
     NotebookNode *n = (NotebookNode *)(intptr_t)node;
     return n ? n->cell : 0;
     ```)
 
-  (defn __lang-from-info [info : cstr] #{Unsafe} : int
+  (defn __lang-from-info [info : cstr] #fx{Unsafe} : int
     ```c
     const char *s = info ? (const char *)(intptr_t)info : "";
     size_t n = strlen(s);
@@ -173,18 +173,18 @@
     return -1;
     ```)
 
-  (defn __lang-label [lang : int] #{Unsafe} : cstr
+  (defn __lang-label [lang : int] #fx{Unsafe} : cstr
     (if (= lang 0)
       "turmeric"
       "sweet-exp"))
 
-  (defn __span-start [span : int] #{Unsafe} : int
+  (defn __span-start [span : int] #fx{Unsafe} : int
     (__fmt-head span))
 
-  (defn __span-end [span : int] #{Unsafe} : int
+  (defn __span-end [span : int] #fx{Unsafe} : int
     (__fmt-head (__fmt-tail span)))
 
-  (defn __inject-no-check-attr [info : cstr attrs : int] #{Unsafe} : int
+  (defn __inject-no-check-attr [info : cstr attrs : int] #fx{Unsafe} : int
     ```c
     const char *s = info ? (const char *)(intptr_t)info : "";
     const char *brace = strchr(s, '{');
@@ -210,7 +210,7 @@
     return attrs;
     ```)
 
-  (defn __block->node [block : int] #{Unsafe} : int
+  (defn __block->node [block : int] #fx{Unsafe} : int
     (if (and (= (md-node-tag block) (md-tag-code-block))
              (>= (__lang-from-info (md-node-info block)) 0))
       (let [info (md-node-info block)
@@ -226,18 +226,18 @@
         (__node-cell-make cell))
       (__node-prose-make block)))
 
-  (defn __blocks->nodes [blocks : int] #{Unsafe} : int
+  (defn __blocks->nodes [blocks : int] #fx{Unsafe} : int
     (if (__fmt-list-nil? blocks)
       (__fmt-nil-value)
       (__fmt-cons (__block->node (__fmt-head blocks))
                   (__blocks->nodes (__fmt-tail blocks)))))
 
   ;;; parse-string -- parse notebook markdown into prose and cell nodes.
-  (defn parse-string [s : cstr] #{Unsafe} : int
+  (defn parse-string [s : cstr] #fx{Unsafe} : int
     (__ok (__blocks->nodes (md-node-children (md-parse s)))))
 
   ;;; parse-file -- read a notebook file from disk and parse it.
-  (defn parse-file [path : cstr] #{Unsafe} : int
+  (defn parse-file [path : cstr] #fx{Unsafe} : int
     (let [src (__fmt-slurp path)]
     (if (__fmt-cstr-null? src)
         (__err 0)
@@ -246,7 +246,7 @@
           (__fmt-cstr-free src)
             parsed)))))
 
-  (defn __render-attr-list [attrs : int] #{Unsafe} : cstr
+  (defn __render-attr-list [attrs : int] #fx{Unsafe} : cstr
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *name; char *value; } Attr;
@@ -278,14 +278,14 @@
     return out;
     ```)
 
-  (defn __render-attrs [attrs : int] #{Unsafe} : cstr
+  (defn __render-attrs [attrs : int] #fx{Unsafe} : cstr
     (if (__fmt-list-nil? attrs)
       ""
       (__fmt-str-concat
         " {"
         (__fmt-str-concat (__render-attr-list attrs) "}"))))
 
-  (defn __render-node [node : int] #{Unsafe} : cstr
+  (defn __render-node [node : int] #fx{Unsafe} : cstr
     (if (= (node-tag node) 0)
       (md-emit (node-prose node))
       (let [cell (node-cell node)]
@@ -296,7 +296,7 @@
                                               (__fmt-str-concat "\n"
                                                                 (__fmt-str-concat (cell-source cell) "\n```"))))))))
 
-  (defn __nodes->str-int [nodes : int] #{Unsafe} : int
+  (defn __nodes->str-int [nodes : int] #fx{Unsafe} : int
     (if (__fmt-list-nil? nodes)
       (__fmt-cstr-as-int "")
       (let [cur (__render-node (__fmt-head nodes))]
@@ -307,10 +307,10 @@
                               (__fmt-str-concat "\n\n" (__fmt-int-as-cstr (__nodes->str-int (__fmt-tail nodes))))))))))
 
   ;;; nodes->str -- serialize notebook nodes back to normalized markdown.
-  (defn nodes->str [nodes : int] #{Unsafe} : cstr
+  (defn nodes->str [nodes : int] #fx{Unsafe} : cstr
     (__fmt-int-as-cstr (__nodes->str-int nodes)))
 
-  (defn __copy-cell-with-source [cell : int source : cstr] #{Unsafe} : int
+  (defn __copy-cell-with-source [cell : int source : cstr] #fx{Unsafe} : int
     (cell-make (cell-id cell)
                (cell-lang cell)
                source
@@ -318,7 +318,7 @@
                (cell-start-line cell)
                (cell-end-line cell)))
 
-  (defn __replace-node-if-match [node : int cell-id-want : cstr new-source : cstr] #{Unsafe} : int
+  (defn __replace-node-if-match [node : int cell-id-want : cstr new-source : cstr] #fx{Unsafe} : int
     (if (= (node-tag node) 1)
       (let [cell (node-cell node)]
         (if (__fmt-cstr-eq? (cell-id cell) cell-id-want)
@@ -326,7 +326,7 @@
           node))
       node))
 
-  (defn __node-list-has-cell? [nodes : int cell-id-want : cstr] #{Unsafe} : bool
+  (defn __node-list-has-cell? [nodes : int cell-id-want : cstr] #fx{Unsafe} : bool
     (if (__fmt-list-nil? nodes)
       false
       (if (and (= (node-tag (__fmt-head nodes)) 1)
@@ -334,14 +334,14 @@
         true
         (__node-list-has-cell? (__fmt-tail nodes) cell-id-want))))
 
-  (defn __replace-node-list [nodes : int cell-id-want : cstr new-source : cstr] #{Unsafe} : int
+  (defn __replace-node-list [nodes : int cell-id-want : cstr new-source : cstr] #fx{Unsafe} : int
     (if (__fmt-list-nil? nodes)
       (__fmt-nil-value)
       (__fmt-cons (__replace-node-if-match (__fmt-head nodes) cell-id-want new-source)
                   (__replace-node-list (__fmt-tail nodes) cell-id-want new-source))))
 
   ;;; nodes-update-cell -- replace the source of a named cell in an immutable node list.
-  (defn nodes-update-cell [nodes : int cell-id-want : cstr new-source : cstr] #{Unsafe} : int
+  (defn nodes-update-cell [nodes : int cell-id-want : cstr new-source : cstr] #fx{Unsafe} : int
     (if (__node-list-has-cell? nodes cell-id-want)
       (__ok (__replace-node-list nodes cell-id-want new-source))
       (__err 0)))

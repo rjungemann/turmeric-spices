@@ -11,7 +11,7 @@
   ;; (+ ...) tree.  tap-record prints one TAP line and bumps the counter
   ;; on failure; tap-finish prints the plan + summary and returns 0/1.
 
-  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-record [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     /* __tur_include__: static int g_keys_fails = 0; */
     if (!ok) g_keys_fails++;
@@ -19,7 +19,7 @@
            (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-finish [count : int] #{Unsafe} : int
+  (defn tap-finish [count : int] #fx{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_keys_fails == 0) {
@@ -40,7 +40,7 @@
 
   ;; Literal byte sequence for a decode test-id.  Every fixture is
   ;; NUL-free, so `strlen` recovers the original length the parser needs.
-  (defn decode-bytes [test-id : int] #{Unsafe} : cstr
+  (defn decode-bytes [test-id : int] #fx{Unsafe} : cstr
     ```c
     switch ((int)test_id) {
       case 1:  return (const char *)"\x1b[A";
@@ -89,7 +89,7 @@
 
   ;; Expected encoded byte sequence for an encode test-id.  Also NUL-free,
   ;; so a plain strcmp against the encoder output is exact.
-  (defn encode-expected [test-id : int] #{Unsafe} : cstr
+  (defn encode-expected [test-id : int] #fx{Unsafe} : cstr
     ```c
     switch ((int)test_id) {
       case 1:  return (const char *)"\x1b[A";
@@ -118,11 +118,11 @@
     ```)
 
   ;; strlen as a Turmeric-callable int (the fixtures carry no embedded NUL).
-  (defn cstr-len [s : cstr] #{Unsafe} : int ```c return (int64_t)strlen((const char *)s); ```)
+  (defn cstr-len [s : cstr] #fx{Unsafe} : int ```c return (int64_t)strlen((const char *)s); ```)
 
   ;; Compare `got` (malloc'd by the function-under-test) against a static
   ;; expected literal, then free `got`.  Returns whether they matched.
-  (defn streq-free [got : cstr expected : cstr] #{Unsafe} : bool
+  (defn streq-free [got : cstr expected : cstr] #fx{Unsafe} : bool
     ```c
     int ok = strcmp((const char *)got, (const char *)expected) == 0;
     free((void *)got);
@@ -131,30 +131,30 @@
 
   ;; Decode a literal byte sequence (selected by test-id) via the real
   ;; `parse-key-bytes` and compare the resulting key name against expected.
-  (defn decode-test [test-id : int expected : cstr] #{Unsafe} : bool
+  (defn decode-test [test-id : int expected : cstr] #fx{Unsafe} : bool
     (let [bytes (decode-bytes test-id)]
       (streq-free (parse-key-bytes bytes (cstr-len bytes)) expected)))
 
   ;; Encode a key name via the real `key-name->bytes` and compare against
   ;; the expected byte sequence for this test-id.
-  (defn encode-test [test-id : int name : cstr] #{Unsafe} : bool
+  (defn encode-test [test-id : int name : cstr] #fx{Unsafe} : bool
     (streq-free (key-name->bytes name) (encode-expected test-id)))
 
-  (defn mod-check [name : cstr ctrl : int shift : int alt : int] #{Unsafe} : bool
+  (defn mod-check [name : cstr ctrl : int shift : int alt : int] #fx{Unsafe} : bool
     (and (= (key-ctrl? name) ctrl)
          (and (= (key-shift? name) shift)
               (= (key-alt? name) alt))))
 
-  (defn run-decode [idx : int label : cstr tid : int expected : cstr] #{Unsafe} : void
+  (defn run-decode [idx : int label : cstr tid : int expected : cstr] #fx{Unsafe} : void
     (tap-record idx label (decode-test tid expected)))
 
-  (defn run-encode [idx : int label : cstr tid : int name : cstr] #{Unsafe} : void
+  (defn run-encode [idx : int label : cstr tid : int name : cstr] #fx{Unsafe} : void
     (tap-record idx label (encode-test tid name)))
 
-  (defn run-mod [idx : int label : cstr name : cstr c : int s : int a : int] #{Unsafe} : void
+  (defn run-mod [idx : int label : cstr name : cstr c : int s : int a : int] #fx{Unsafe} : void
     (tap-record idx label (mod-check name c s a)))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (do
       ;; Decode tests
       (run-decode  1 "decode CSI A -> <Up>"           1 "<Up>")

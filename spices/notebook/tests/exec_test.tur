@@ -3,17 +3,17 @@
 (defmodule notebook/tests/exec
   (import notebook/cli :refer [cli-main])
 
-  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     return strcmp((const char *)a, (const char *)b) == 0;
     ```)
 
-  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-line [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count : int fails : int] #{Unsafe} : void
+  (defn tap-plan [count : int fails : int] #fx{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -23,7 +23,7 @@
     }
     ```)
 
-  (defn test-cons [head : cstr tail : int] #{Unsafe} : int
+  (defn test-cons [head : cstr tail : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *c = malloc(sizeof(*c));
     c->head = (int64_t)(intptr_t)head;
@@ -31,14 +31,14 @@
     return (int64_t)(intptr_t)c;
     ```)
 
-  (defn file-exists? [path : cstr] #{Unsafe} : bool
+  (defn file-exists? [path : cstr] #fx{Unsafe} : bool
     ```c
     FILE *f = fopen((const char *)path, "r");
     if (f) { fclose(f); return 1; }
     return 0;
     ```)
 
-  (defn file-contents [path : cstr] #{Unsafe} : cstr
+  (defn file-contents [path : cstr] #fx{Unsafe} : cstr
     ```c
     FILE *f = fopen((const char *)path, "r");
     if (!f) return "";
@@ -52,17 +52,17 @@
     return buf;
     ```)
 
-  (defn remove-file [path : cstr] #{Unsafe} : void
+  (defn remove-file [path : cstr] #fx{Unsafe} : void
     ```c
     remove((const char *)path);
     ```)
 
-  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
+  (defn run-case [idx : int name : cstr ok : bool] #fx{Unsafe} : int
     (do
       (tap-line idx name ok)
       (if ok 0 1)))
 
-  (defn write-temp-notebook [path : cstr] #{Unsafe} : void
+  (defn write-temp-notebook [path : cstr] #fx{Unsafe} : void
     ```c
     // Write a minimal notebook without raw triple-backticks in the C source
     // Use char arrays to avoid confusing the Turmeric block parser
@@ -72,7 +72,7 @@
     fclose(f);
     ```)
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (let [tmp-nb "/tmp/exec_test_nb.tur.md"
           tmp-new "/tmp/exec_test_new.tur.md"]
       (do

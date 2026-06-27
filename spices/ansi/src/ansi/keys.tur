@@ -24,7 +24,7 @@
   ;;;   "<raw:HH...>" hex so all input is printable.
   ;;;
   ;;; Since: tur-ansi AN2
-  (defn parse-key-bytes [bytes : cstr len : int] #{Unsafe} : cstr
+  (defn parse-key-bytes [bytes : cstr len : int] #fx{Unsafe} : cstr
     ```c
     const unsigned char *b = (const unsigned char *)bytes;
     int n = (int)len;
@@ -191,7 +191,7 @@
   ;;;
   ;;; Note: <C-Space> would produce a null byte, which collides with C
   ;;; string termination; for that one case the result is the empty string.
-  (defn key-name->bytes [name : cstr] #{Unsafe} : cstr
+  (defn key-name->bytes [name : cstr] #fx{Unsafe} : cstr
     ```c
     if (!name || !name[0]) return strdup("");
 
@@ -307,14 +307,14 @@
     ```)
 
   ;;; key=? -- 1 when two normalized key names are equal, 0 otherwise.
-  (defn key=? [a : cstr b : cstr] #{Unsafe} : int
+  (defn key=? [a : cstr b : cstr] #fx{Unsafe} : int
     ```c
     if (!a || !b) return 0;
     return strcmp((const char *)a, (const char *)b) == 0 ? 1 : 0;
     ```)
 
   ;;; key-ctrl? -- 1 when the key name carries a C- modifier prefix.
-  (defn key-ctrl? [k : cstr] #{Unsafe} : int
+  (defn key-ctrl? [k : cstr] #fx{Unsafe} : int
     ```c
     if (!k || k[0] != '<') return 0;
     const char *p = k + 1;
@@ -326,7 +326,7 @@
     ```)
 
   ;;; key-shift? -- 1 when the key name carries an S- modifier prefix.
-  (defn key-shift? [k : cstr] #{Unsafe} : int
+  (defn key-shift? [k : cstr] #fx{Unsafe} : int
     ```c
     if (!k || k[0] != '<') return 0;
     const char *p = k + 1;
@@ -338,7 +338,7 @@
     ```)
 
   ;;; key-alt? -- 1 when the key name carries an M- (Meta/Alt) modifier prefix.
-  (defn key-alt? [k : cstr] #{Unsafe} : int
+  (defn key-alt? [k : cstr] #fx{Unsafe} : int
     ```c
     if (!k || k[0] != '<') return 0;
     const char *p = k + 1;

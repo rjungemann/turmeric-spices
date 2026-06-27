@@ -10,14 +10,14 @@
   ;;; Emits CSI 2J then CSI H so the cursor lands at (1, 1).
   ;;;
   ;;; Since: tur-ansi AN1
-  (defn screen-clear [] #{Unsafe} : void
+  (defn screen-clear [] #fx{Unsafe} : void
     ```c
     fputs("\033[2J\033[H", stdout);
     fflush(stdout);
     ```)
 
   ;;; screen-clear-to-eol -- erase from cursor to end of current line (CSI K).
-  (defn screen-clear-to-eol [] #{Unsafe} : void
+  (defn screen-clear-to-eol [] #fx{Unsafe} : void
     ```c
     fputs("\033[K", stdout);
     fflush(stdout);
@@ -27,7 +27,7 @@
   ;;;
   ;;; The cursor row does not change; column is unspecified by the standard
   ;;; but most terminals leave it where it was.
-  (defn screen-clear-line [] #{Unsafe} : void
+  (defn screen-clear-line [] #fx{Unsafe} : void
     ```c
     fputs("\033[2K", stdout);
     fflush(stdout);
@@ -37,14 +37,14 @@
   ;;;
   ;;; Saves the cursor position and clears the alternate buffer.  Pair with
   ;;; alt-screen-leave at shutdown so the user's scrollback is preserved.
-  (defn alt-screen-enter [] #{Unsafe} : void
+  (defn alt-screen-enter [] #fx{Unsafe} : void
     ```c
     fputs("\033[?1049h", stdout);
     fflush(stdout);
     ```)
 
   ;;; alt-screen-leave -- switch back to the primary screen buffer (DECRST 1049).
-  (defn alt-screen-leave [] #{Unsafe} : void
+  (defn alt-screen-leave [] #fx{Unsafe} : void
     ```c
     fputs("\033[?1049l", stdout);
     fflush(stdout);
@@ -53,7 +53,7 @@
   ;;; scroll-up -- scroll the viewport up n lines (CSI <n> S).
   ;;;
   ;;; Argument <= 0 is a no-op.
-  (defn scroll-up [n : int] #{Unsafe} : void
+  (defn scroll-up [n : int] #fx{Unsafe} : void
     ```c
     if (n < 1) return;
     printf("\033[%lldS", (long long)n);
@@ -61,7 +61,7 @@
     ```)
 
   ;;; scroll-down -- scroll the viewport down n lines (CSI <n> T).
-  (defn scroll-down [n : int] #{Unsafe} : void
+  (defn scroll-down [n : int] #fx{Unsafe} : void
     ```c
     if (n < 1) return;
     printf("\033[%lldT", (long long)n);

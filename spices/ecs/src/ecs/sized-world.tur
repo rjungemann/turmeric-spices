@@ -103,7 +103,7 @@
 ;; demo paths where the ergonomic hit of unwrapping a Result is not
 ;; wanted (sized-world plan Q3 ships both variants).
 
-(defn __sized-state-new-raw [k : int] #{Unsafe} : int
+(defn __sized-state-new-raw [k : int] #fx{Unsafe} : int
   ```c
   #include <stdlib.h>
   typedef struct {
@@ -122,7 +122,7 @@
   return (int64_t)(intptr_t)s;
   ```)
 
-(defn __sized-state-free-raw [s : int] #{Unsafe} : nil
+(defn __sized-state-free-raw [s : int] #fx{Unsafe} : nil
   ```c
   #include <stdlib.h>
   typedef struct {
@@ -138,7 +138,7 @@
   }
   ```)
 
-(defn __sized-state-live-raw [s : int] #{Unsafe} : int
+(defn __sized-state-live-raw [s : int] #fx{Unsafe} : int
   ```c
   typedef struct {
     int64_t next; int64_t live; int64_t cap;
@@ -149,7 +149,7 @@
   return st->live;
   ```)
 
-(defn __sized-state-cap-raw [s : int] #{Unsafe} : int
+(defn __sized-state-cap-raw [s : int] #fx{Unsafe} : int
   ```c
   typedef struct {
     int64_t next; int64_t live; int64_t cap;
@@ -166,7 +166,7 @@
 ;; per-slot generation is held in `gens[slot]` and is read off here
 ;; (not modified) so the spawn site can pack (slot, gen) into the
 ;; returned Entity.
-(defn __sized-state-try-spawn-raw [s : int] #{Unsafe} : int
+(defn __sized-state-try-spawn-raw [s : int] #fx{Unsafe} : int
   ```c
   typedef struct {
     int64_t next; int64_t live; int64_t cap;
@@ -190,7 +190,7 @@
 ;; slot is out of range. Used by `sized-spawn!` to pack the
 ;; freshly-spawned slot's gen into its Entity return, and by
 ;; `sized-alive?` to compare against an Entity handle's gen.
-(defn __sized-state-gen-of-raw [s : int slot : int] #{Unsafe} : int
+(defn __sized-state-gen-of-raw [s : int slot : int] #fx{Unsafe} : int
   ```c
   typedef struct {
     int64_t next; int64_t live; int64_t cap;
@@ -209,7 +209,7 @@
 ;;; checked `dst->cap >= src->cap`; on mismatch this raw helper
 ;;; truncates silently -- the Turmeric wrapper `sized-state-copy-into`
 ;;; below does the cap check first.
-(defn __sized-state-copy-into-raw [src : int dst : int] #{Unsafe} : nil
+(defn __sized-state-copy-into-raw [src : int dst : int] #fx{Unsafe} : nil
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -253,7 +253,7 @@
 (defn sized-cap [s : int] : int
   (unsafe (__sized-state-cap-raw s)))
 
-(defn __sized-state-copy-abort-raw [] #{Unsafe} : nil
+(defn __sized-state-copy-abort-raw [] #fx{Unsafe} : nil
   ```c
   fprintf(stderr, "sized-state-copy-into: dst cap smaller than src cap\n");
   abort();
@@ -330,7 +330,7 @@
       false
       (= gen cur))))
 
-(defn __sized-spawn-bang-abort-raw [] #{Unsafe} : int
+(defn __sized-spawn-bang-abort-raw [] #fx{Unsafe} : int
   ```c
   fprintf(stderr, "sized-spawn!: world full\n");
   abort();
@@ -420,7 +420,7 @@
 (defn sized-despawn [s : int e : int] : bool
   (unsafe (__sized-despawn-raw s (entity-index e) (entity-generation e))))
 
-(defn __sized-despawn-raw [s : int slot : int gen : int] #{Unsafe} : bool
+(defn __sized-despawn-raw [s : int slot : int gen : int] #fx{Unsafe} : bool
   ```c
   #include <stdlib.h>
   typedef struct {

@@ -6,7 +6,7 @@
   (import notebook/render-md :refer [render-opts-make default-render-opts
                                      render-md-string render-md])
 
-  (defn test-cons [value : int next : int] #{Unsafe} : int
+  (defn test-cons [value : int next : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = malloc(sizeof(*cell));
     cell->head = value;
@@ -14,55 +14,55 @@
     return (int64_t)(intptr_t)cell;
     ```)
 
-  (defn test-head [lst : int] #{Unsafe} : int
+  (defn test-head [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->head : 0;
     ```)
 
-  (defn test-tail [lst : int] #{Unsafe} : int
+  (defn test-tail [lst : int] #fx{Unsafe} : int
     ```c
     struct { int64_t head; int64_t tail; } *cell = (void*)(intptr_t)lst;
     return cell ? cell->tail : 0;
     ```)
 
-  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn cstr-contains? [haystack : cstr needle : cstr] #{Unsafe} : bool
+  (defn cstr-contains? [haystack : cstr needle : cstr] #fx{Unsafe} : bool
     ```c
     const char *h = haystack ? (const char *)(intptr_t)haystack : "";
     const char *n = needle ? (const char *)(intptr_t)needle : "";
     return strstr(h, n) != NULL;
     ```)
 
-  (defn test-ok? [r : int] #{Unsafe} : bool
+  (defn test-ok? [r : int] #fx{Unsafe} : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
     return res && res->is_ok;
     ```)
 
-  (defn test-ok-val [r : int] #{Unsafe} : int
+  (defn test-ok-val [r : int] #fx{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
     return res ? res->ok_val : 0;
     ```)
 
-  (defn int-as-cstr [value : int] #{Unsafe} : cstr
+  (defn int-as-cstr [value : int] #fx{Unsafe} : cstr
     ```c
     return (const char *)(intptr_t)value;
     ```)
 
-  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-line [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count : int fails : int] #{Unsafe} : void
+  (defn tap-plan [count : int fails : int] #fx{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) {
@@ -75,12 +75,12 @@
   (defn bool->fail [ok : bool] : int
     (if ok 0 1))
 
-  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
+  (defn run-case [idx : int name : cstr ok : bool] #fx{Unsafe} : int
     (do
       (tap-line idx name ok)
       (bool->fail ok)))
 
-  (defn __write-file [path : cstr s : cstr] #{Unsafe} : int
+  (defn __write-file [path : cstr s : cstr] #fx{Unsafe} : int
     ```c
     const char *p = (const char *)(intptr_t)path;
     const char *bs = s ? (const char *)(intptr_t)s : "";
@@ -92,7 +92,7 @@
     return wrote == len ? 1 : 0;
     ```)
 
-  (defn __slurp [path : cstr] #{Unsafe} : cstr
+  (defn __slurp [path : cstr] #fx{Unsafe} : cstr
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     FILE *fp = fopen(p, "rb");
@@ -107,7 +107,7 @@
     return buf;
     ```)
 
-  (defn temp-dir [label : cstr] #{Unsafe} : cstr
+  (defn temp-dir [label : cstr] #fx{Unsafe} : cstr
     ```c
     char buf[256];
     snprintf(buf, sizeof(buf), "/tmp/%s-%lld-%d", (const char *)label, (long long)time(NULL), (int)getpid());
@@ -115,7 +115,7 @@
     return strdup(buf);
     ```)
 
-  (defn path-join [a : cstr b : cstr] #{Unsafe} : cstr
+  (defn path-join [a : cstr b : cstr] #fx{Unsafe} : cstr
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
@@ -125,7 +125,7 @@
     return out;
     ```)
 
-  (defn test-render-md-string [] #{Unsafe} : bool
+  (defn test-render-md-string [] #fx{Unsafe} : bool
     (let [parsed (parse-string "# Title\n\n```turmeric {id=calc}\n(+ 1 2)\n```")
           nodes (test-ok-val parsed)
           outputs (test-cons (cell-output-make "calc" 0 "" "3" "" 12 0) 0)
@@ -135,7 +135,7 @@
                 (and (cstr-contains? rendered "```output")
                      (cstr-contains? rendered ";; => 3"))))))
 
-  (defn test-hide-source-and-output [] #{Unsafe} : bool
+  (defn test-hide-source-and-output [] #fx{Unsafe} : bool
     (let [parsed (parse-string "```turmeric {id=calc echo=false output=false}\n(+ 1 2)\n```")
           nodes (test-ok-val parsed)
           outputs (test-cons (cell-output-make "calc" 0 "" "3" "" 4 0) 0)
@@ -143,7 +143,7 @@
           rendered (render-md-string nodes outputs opts)]
       (cstr-eq? rendered "")))
 
-  (defn test-render-md-writes-file [] #{Unsafe} : bool
+  (defn test-render-md-writes-file [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-render-md")
           src (path-join dir "sample.tur.md")
           outdir (path-join dir "site")
@@ -157,7 +157,7 @@
                 (and (cstr-contains? text "# Demo")
                      (cstr-contains? text ";; => 42"))))))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (let [f1 (run-case 1 "renders markdown strings with output fences" (test-render-md-string))
           f2 (run-case 2 "omits hidden source and suppressed output blocks" (test-hide-source-and-output))
           f3 (run-case 3 "writes rendered markdown beside or under output dirs" (test-render-md-writes-file))]

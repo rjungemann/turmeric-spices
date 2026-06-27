@@ -6,19 +6,19 @@
   (import notebook/keys :refer [default-keybindings load-keybindings action-dispatch])
   (import notebook/tui :refer [tui-opts-make tui-run tui-run-nodes])
 
-  (defn test-ok? [r : int] #{Unsafe} : bool
+  (defn test-ok? [r : int] #fx{Unsafe} : bool
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
     return res && res->is_ok;
     ```)
 
-  (defn test-ok-val [r : int] #{Unsafe} : int
+  (defn test-ok-val [r : int] #fx{Unsafe} : int
     ```c
     struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)(intptr_t)r;
     return res ? res->ok_val : 0;
     ```)
 
-  (defn binding-action [bindings : int key : cstr] #{Unsafe} : cstr
+  (defn binding-action [bindings : int key : cstr] #fx{Unsafe} : cstr
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *key; char *action; } NotebookKeyBinding;
@@ -32,26 +32,26 @@
     return "";
     ```)
 
-  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
     return strcmp(sa, sb) == 0;
     ```)
 
-  (defn cstr-contains? [haystack : cstr needle : cstr] #{Unsafe} : bool
+  (defn cstr-contains? [haystack : cstr needle : cstr] #fx{Unsafe} : bool
     ```c
     const char *hay = haystack ? (const char *)(intptr_t)haystack : "";
     const char *need = needle ? (const char *)(intptr_t)needle : "";
     return need[0] != '\0' && strstr(hay, need) != NULL;
     ```)
 
-  (defn tap-line [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-line [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
     ```)
 
-  (defn tap-plan [count : int fails : int] #{Unsafe} : void
+  (defn tap-plan [count : int fails : int] #fx{Unsafe} : void
     ```c
     printf("1..%lld\n", (long long)count);
     if (fails == 0) fprintf(stderr, "# All %lld notebook tui tests passed.\n", (long long)count);
@@ -61,12 +61,12 @@
   (defn bool->fail [ok : bool] : int
     (if ok 0 1))
 
-  (defn run-case [idx : int name : cstr ok : bool] #{Unsafe} : int
+  (defn run-case [idx : int name : cstr ok : bool] #fx{Unsafe} : int
     (do
       (tap-line idx name ok)
       (bool->fail ok)))
 
-  (defn temp-dir [label : cstr] #{Unsafe} : cstr
+  (defn temp-dir [label : cstr] #fx{Unsafe} : cstr
     ```c
     char buf[256];
     snprintf(buf, sizeof(buf), "/tmp/%s-%lld-%d", (const char *)label, (long long)time(NULL), (int)getpid());
@@ -74,7 +74,7 @@
     return strdup(buf);
     ```)
 
-  (defn path-join [a : cstr b : cstr] #{Unsafe} : cstr
+  (defn path-join [a : cstr b : cstr] #fx{Unsafe} : cstr
     ```c
     const char *sa = a ? (const char *)(intptr_t)a : "";
     const char *sb = b ? (const char *)(intptr_t)b : "";
@@ -84,7 +84,7 @@
     return out;
     ```)
 
-  (defn write-file [path : cstr s : cstr] #{Unsafe} : bool
+  (defn write-file [path : cstr s : cstr] #fx{Unsafe} : bool
     ```c
     const char *dst = path ? (const char *)(intptr_t)path : "";
     const char *src = s ? (const char *)(intptr_t)s : "";
@@ -96,7 +96,7 @@
     return wrote == want;
     ```)
 
-  (defn slurp [path : cstr] #{Unsafe} : cstr
+  (defn slurp [path : cstr] #fx{Unsafe} : cstr
     ```c
     const char *p = path ? (const char *)(intptr_t)path : "";
     FILE *fp = fopen(p, "rb");
@@ -111,7 +111,7 @@
     return buf;
     ```)
 
-  (defn set-test-keys [keys : cstr] #{Unsafe} : void
+  (defn set-test-keys [keys : cstr] #fx{Unsafe} : void
     ```c
     /* tur-ansi reads $TUR_ANSI_TEST_KEYS; keep $TURNB_TEST_KEYS in sync for
        any notebook-internal code still reaching for the old name. */
@@ -119,43 +119,43 @@
     setenv("TURNB_TEST_KEYS",   (const char *)(intptr_t)keys, 1);
     ```)
 
-  (defn clear-test-keys [] #{Unsafe} : void
+  (defn clear-test-keys [] #fx{Unsafe} : void
     ```c
     unsetenv("TUR_ANSI_TEST_KEYS");
     unsetenv("TURNB_TEST_KEYS");
     ```)
 
-  (defn set-test-editor-text [s : cstr] #{Unsafe} : void
+  (defn set-test-editor-text [s : cstr] #fx{Unsafe} : void
     ```c
     setenv("TURNB_TEST_EDITOR_TEXT", (const char *)(intptr_t)s, 1);
     ```)
 
-  (defn clear-test-editor-text [] #{Unsafe} : void
+  (defn clear-test-editor-text [] #fx{Unsafe} : void
     ```c
     unsetenv("TURNB_TEST_EDITOR_TEXT");
     ```)
 
-  (defn set-test-search-query [s : cstr] #{Unsafe} : void
+  (defn set-test-search-query [s : cstr] #fx{Unsafe} : void
     ```c
     setenv("TURNB_TEST_SEARCH_QUERY", (const char *)(intptr_t)s, 1);
     ```)
 
-  (defn clear-test-search-query [] #{Unsafe} : void
+  (defn clear-test-search-query [] #fx{Unsafe} : void
     ```c
     unsetenv("TURNB_TEST_SEARCH_QUERY");
     ```)
 
-  (defn set-test-trace [path : cstr] #{Unsafe} : void
+  (defn set-test-trace [path : cstr] #fx{Unsafe} : void
     ```c
     setenv("TURNB_TEST_TRACE", (const char *)(intptr_t)path, 1);
     ```)
 
-  (defn clear-test-trace [] #{Unsafe} : void
+  (defn clear-test-trace [] #fx{Unsafe} : void
     ```c
     unsetenv("TURNB_TEST_TRACE");
     ```)
 
-  (defn fake-state-make [cell_count : int focus : int] #{Unsafe} : int
+  (defn fake-state-make [cell_count : int focus : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *path;
@@ -185,7 +185,7 @@
     return (int64_t)(intptr_t)st;
     ```)
 
-  (defn fake-state-focus [state : int] #{Unsafe} : int
+  (defn fake-state-focus [state : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *path;
@@ -211,7 +211,7 @@
     return st ? st->focus : -1;
     ```)
 
-  (defn fake-state-effect [state : int] #{Unsafe} : int
+  (defn fake-state-effect [state : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *path;
@@ -237,7 +237,7 @@
     return st ? st->pending_effect : -1;
     ```)
 
-  (defn fake-state-quit? [state : int] #{Unsafe} : bool
+  (defn fake-state-quit? [state : int] #fx{Unsafe} : bool
     ```c
     typedef struct {
       char *path;
@@ -263,7 +263,7 @@
     return st ? st->quit_requested != 0 : false;
     ```)
 
-  (defn fake-state-quit-confirm [state : int] #{Unsafe} : int
+  (defn fake-state-quit-confirm [state : int] #fx{Unsafe} : int
     ```c
     typedef struct {
       char *path;
@@ -289,7 +289,7 @@
     return st ? st->quit_confirm : 0;
     ```)
 
-  (defn test-default-keybindings [] #{Unsafe} : bool
+  (defn test-default-keybindings [] #fx{Unsafe} : bool
     (let [bindings (default-keybindings)]
       (and (cstr-eq? (binding-action bindings "j") "cell-next")
            (and (cstr-eq? (binding-action bindings "gg") "cell-top")
@@ -299,7 +299,7 @@
                                (and (cstr-eq? (binding-action bindings "?") "help-toggle")
                                     (cstr-eq? (binding-action bindings "o") "output-toggle")))))))))
 
-  (defn test-load-keybindings [] #{Unsafe} : bool
+  (defn test-load-keybindings [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-keybindings")
           path (path-join dir "keys.txt")
           _ (write-file path "# comment\nx quit\n<Enter> cell-run\n")
@@ -307,7 +307,7 @@
       (and (test-ok? loaded)
            (cstr-eq? (binding-action (test-ok-val loaded) "x") "quit"))))
 
-  (defn test-action-dispatch [] #{Unsafe} : bool
+  (defn test-action-dispatch [] #fx{Unsafe} : bool
     (let [state (fake-state-make 3 1)]
       (do
         (action-dispatch state "cell-prev")
@@ -317,7 +317,7 @@
                   (and (not (fake-state-quit? state))
                        (= (fake-state-quit-confirm state) 0)))))))
 
-  (defn test-tui-run-nodes-scripted [] #{Unsafe} : bool
+  (defn test-tui-run-nodes-scripted [] #fx{Unsafe} : bool
     (let [parsed (parse-string "```turmeric {id=one}\n(+ 1 2)\n```\n\n```turmeric {id=two}\n(+ 3 4)\n```")
           nodes (test-ok-val parsed)
           opts (tui-opts-make 0 0 1000 "")]
@@ -329,7 +329,7 @@
             (and (test-ok? run)
                  (= (test-ok-val run) 0)))))))
 
-  (defn test-tui-edit-save-and-quit [] #{Unsafe} : bool
+  (defn test-tui-edit-save-and-quit [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-edit-save")
           path (path-join dir "demo.tur.md")
           _ (write-file path "```turmeric {id=one}\n(+ 1 2)\n```")
@@ -346,7 +346,7 @@
                  (and (= (test-ok-val run) 0)
                       (cstr-eq? text "```turmeric {id=one}\n(+ 5 8)\n```"))))))))
 
-  (defn test-tui-dirty-quit-warning [] #{Unsafe} : bool
+  (defn test-tui-dirty-quit-warning [] #fx{Unsafe} : bool
     (let [parsed (parse-string "```turmeric {id=one}\n(+ 1 2)\n```")
           nodes (test-ok-val parsed)
           opts (tui-opts-make 0 0 1000 "")]
@@ -358,7 +358,7 @@
             (and (test-ok? run)
                  (= (test-ok-val run) 1)))))))
 
-  (defn test-tui-search-and-output-toggle [] #{Unsafe} : bool
+  (defn test-tui-search-and-output-toggle [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-search")
           trace (path-join dir "trace.txt")
           _ (write-file trace "")
@@ -381,7 +381,7 @@
                            (and (cstr-contains? logged "status:search: needle")
                                 (cstr-contains? logged "status:hid output"))))))))))
 
-  (defn test-tui-help-overlay [] #{Unsafe} : bool
+  (defn test-tui-help-overlay [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-help")
           trace (path-join dir "trace.txt")
           _ (write-file trace "")
@@ -400,7 +400,7 @@
                  (and (= (test-ok-val run) 0)
                       (cstr-contains? logged "status:help overlay"))))))))
 
-  (defn test-tui-keybinding-overrides [] #{Unsafe} : bool
+  (defn test-tui-keybinding-overrides [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-override")
           trace (path-join dir "trace.txt")
           keyfile (path-join dir "keys.txt")
@@ -423,7 +423,7 @@
                  (and (= (test-ok-val run) 0)
                       (cstr-contains? logged "status:search: needle"))))))))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (let [f1 (run-case 1 "returns the built-in NB10 keybindings" (test-default-keybindings))
           f2 (run-case 2 "loads custom keybindings files" (test-load-keybindings))
           f3 (run-case 3 "dispatches navigation and NB10 search actions" (test-action-dispatch))

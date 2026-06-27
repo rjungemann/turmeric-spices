@@ -15,50 +15,50 @@
                               watch-next watch-tree-dir-count
                               watch-tree-dir-at])
 
-  (defn first-arg [args : int] #{Unsafe} : cstr
+  (defn first-arg [args : int] #fx{Unsafe} : cstr
     ```c
     int64_t *cell = (int64_t *)(intptr_t)args;
     if (!cell) return "";
     return (const char *)(intptr_t)cell[0];
     ```)
 
-  (defn empty-cstr? [s : cstr] #{Unsafe} : bool
+  (defn empty-cstr? [s : cstr] #fx{Unsafe} : bool
     ```c
     const char *p = (const char *)(intptr_t)s;
     return !p || !p[0];
     ```)
 
-  (defn eputs [s : cstr] #{Unsafe} : int
+  (defn eputs [s : cstr] #fx{Unsafe} : int
     ```c
     fputs((const char *)(intptr_t)s, stderr);
     fputc('\n', stderr);
     return 0;
     ```)
 
-  (defn print-line2 [a : cstr b : cstr] #{Unsafe} : int
+  (defn print-line2 [a : cstr b : cstr] #fx{Unsafe} : int
     ```c
     printf("%s %s\n", (const char *)(intptr_t)a, (const char *)(intptr_t)b);
     return 0;
     ```)
 
-  (defn print-num [n : int] #{Unsafe} : int
+  (defn print-num [n : int] #fx{Unsafe} : int
     ```c printf("%lld\n", (long long)n); return 0; ```)
 
-  (defn print-roster-at [w : int i : int n : int] #{Unsafe} : int
+  (defn print-roster-at [w : int i : int n : int] #fx{Unsafe} : int
     (if (>= i n)
       0
       (do
         (print-line2 "  -" (watch-tree-dir-at w i))
         (print-roster-at w (+ i 1) n))))
 
-  (defn print-roster [w : int] #{Unsafe} : int
+  (defn print-roster [w : int] #fx{Unsafe} : int
     (let [n (watch-tree-dir-count w)]
       (do
         (print-line2 "registered" "directories:")
         (print-num n)
         (print-roster-at w 0 n))))
 
-  (defn loop-forever [w : int] #{Unsafe} : int
+  (defn loop-forever [w : int] #fx{Unsafe} : int
     (let [ev (watch-next w -1)]
       (if (= ev 0)
         0
@@ -68,7 +68,7 @@
           (watch-event-free ev)
           (loop-forever w)))))
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (let [path (first-arg *args*)]
       (if (empty-cstr? path)
         (do (eputs "usage: watch-tree <dir>") 1)

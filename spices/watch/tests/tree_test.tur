@@ -22,7 +22,7 @@
                               watch-next watch-tree-dir-count
                               watch-tree-dir-at watch-refresh])
 
-  (defn tap-record [idx : int name : cstr ok : bool] #{Unsafe} : void
+  (defn tap-record [idx : int name : cstr ok : bool] #fx{Unsafe} : void
     ```c
     /* __tur_include__: static int g_tree_fails = 0; */
     if (!ok) g_tree_fails++;
@@ -30,7 +30,7 @@
            (long long)idx, (const char *)(intptr_t)name);
     ```)
 
-  (defn tap-finish [count : int] #{Unsafe} : int
+  (defn tap-finish [count : int] #fx{Unsafe} : int
     ```c
     printf("1..%lld\n", (long long)count);
     if (g_tree_fails == 0) {
@@ -44,13 +44,13 @@
 
   ;; Filesystem helpers.
 
-  (defn make-dir [path : cstr] #{Unsafe} : int
+  (defn make-dir [path : cstr] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <sys/stat.h> */
     return mkdir((const char *)(intptr_t)path, 0755);
     ```)
 
-  (defn write-file [path : cstr content : cstr] #{Unsafe} : int
+  (defn write-file [path : cstr content : cstr] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <stdio.h> */
     FILE *f = fopen((const char *)(intptr_t)path, "w");
@@ -60,23 +60,23 @@
     return 0;
     ```)
 
-  (defn delete-file [path : cstr] #{Unsafe} : int
+  (defn delete-file [path : cstr] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <unistd.h> */
     return unlink((const char *)(intptr_t)path);
     ```)
 
-  (defn delete-dir [path : cstr] #{Unsafe} : int
+  (defn delete-dir [path : cstr] #fx{Unsafe} : int
     ```c
     return rmdir((const char *)(intptr_t)path);
     ```)
 
-  (defn sleep-ms [ms : int] #{Unsafe} : void
+  (defn sleep-ms [ms : int] #fx{Unsafe} : void
     ```c
     if (ms > 0) usleep((useconds_t)ms * 1000u);
     ```)
 
-  (defn schedule-atomic-save [path : cstr content : cstr ms : int] #{Unsafe} : int
+  (defn schedule-atomic-save [path : cstr content : cstr ms : int] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <pthread.h> */
     /* __tur_include__: typedef struct { char *path; char *tmp; char *content; int ms; } TurTreeAtomic; */
@@ -95,7 +95,7 @@
     return 0;
     ```)
 
-  (defn tmp-root [] #{Unsafe} : cstr
+  (defn tmp-root [] #fx{Unsafe} : cstr
     ```c
     /* __tur_include__: #include <unistd.h> */
     static char buf[256];
@@ -103,7 +103,7 @@
     return (const char *)buf;
     ```)
 
-  (defn path-join [a : cstr b : cstr] #{Unsafe} : cstr
+  (defn path-join [a : cstr b : cstr] #fx{Unsafe} : cstr
     ```c
     static char buf[1024];
     snprintf(buf, sizeof(buf), "%s/%s",
@@ -112,20 +112,20 @@
     ```)
 
   ;; Strdup so the static path-join buffer doesn't get clobbered between uses.
-  (defn dup [s : cstr] #{Unsafe} : cstr
+  (defn dup [s : cstr] #fx{Unsafe} : cstr
     ```c return (const char *)strdup((const char *)(intptr_t)s); ```)
 
-  (defn free-cstr [s : cstr] #{Unsafe} : void
+  (defn free-cstr [s : cstr] #fx{Unsafe} : void
     ```c free((char *)(intptr_t)s); ```)
 
-  (defn cstr-contains? [haystack : cstr needle : cstr] #{Unsafe} : bool
+  (defn cstr-contains? [haystack : cstr needle : cstr] #fx{Unsafe} : bool
     ```c
     const char *h = (const char *)(intptr_t)haystack;
     const char *n = (const char *)(intptr_t)needle;
     return strstr(h ? h : "", n ? n : "") != NULL;
     ```)
 
-  (defn cstr-eq? [a : cstr b : cstr] #{Unsafe} : bool
+  (defn cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
     const char *sa = (const char *)(intptr_t)a;
     const char *sb = (const char *)(intptr_t)b;
@@ -134,14 +134,14 @@
     ```)
 
   ;; Print the event path to stderr for debugging on failure.
-  (defn dbg-path [ev : int] #{Unsafe} : void
+  (defn dbg-path [ev : int] #fx{Unsafe} : void
     ```c
     const char *p = (const char *)(intptr_t)
         watch__event__watch_hyevent_hypath(ev);
     fprintf(stderr, "# event path: [%s]\n", p ? p : "<null>");
     ```)
 
-  (defn main [] #{Unsafe} : int
+  (defn main [] #fx{Unsafe} : int
     (do
       (let [root  (dup (tmp-root))
             a     (dup (path-join root "a"))

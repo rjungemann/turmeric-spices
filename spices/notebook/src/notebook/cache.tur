@@ -6,13 +6,13 @@
   (defn __nbc-cache-dir-default [] : cstr
     ".turnb-cache")
 
-  (defn __nbc-cstr-empty? [s : cstr] #{Unsafe} : bool
+  (defn __nbc-cstr-empty? [s : cstr] #fx{Unsafe} : bool
     ```c
     const char *src = s ? (const char *)(intptr_t)s : "";
     return src[0] == '\0';
     ```)
 
-  (defn __nbc-cache-make [dir : cstr] #{Unsafe} : int
+  (defn __nbc-cache-make [dir : cstr] #fx{Unsafe} : int
     ```c
     typedef struct { char *dir; } NotebookCache;
     NotebookCache *cache = malloc(sizeof(*cache));
@@ -20,7 +20,7 @@
     return (int64_t)(intptr_t)cache;
     ```)
 
-  (defn __nbc-ensure-dir [dir : cstr] #{Unsafe} : int
+  (defn __nbc-ensure-dir [dir : cstr] #fx{Unsafe} : int
     ```c
     #include <sys/stat.h>
     char *p = strdup(dir ? (const char *)(intptr_t)dir : ".turnb-cache");
@@ -50,7 +50,7 @@
     return ret;
     ```)
 
-  (defn __nbc-path [cache : int key : cstr] #{Unsafe} : cstr
+  (defn __nbc-path [cache : int key : cstr] #fx{Unsafe} : cstr
     ```c
     typedef struct { char *dir; } NotebookCache;
     NotebookCache *c = (NotebookCache *)(intptr_t)cache;
@@ -74,7 +74,7 @@
   ;;;   (cache-open ".turnb-cache")
   ;;;
   ;;; Since: notebook-v0.1.0
-  (defn cache-open [dir : cstr] #{Unsafe} : int
+  (defn cache-open [dir : cstr] #fx{Unsafe} : int
     (let [use-dir (if (__nbc-cstr-empty? dir) (__nbc-cache-dir-default) dir)
           _ (__nbc-ensure-dir use-dir)]
       (__nbc-cache-make use-dir)))
@@ -88,7 +88,7 @@
   ;;;   (cache-close cache)
   ;;;
   ;;; Since: notebook-v0.1.0
-  (defn cache-close [cache : int] #{Unsafe} : void
+  (defn cache-close [cache : int] #fx{Unsafe} : void
     ```c
     typedef struct { char *dir; } NotebookCache;
     NotebookCache *c = (NotebookCache *)(intptr_t)cache;
@@ -110,7 +110,7 @@
   ;;;   (cache-get cache "abc123")
   ;;;
   ;;; Since: notebook-v0.1.0
-  (defn cache-get [cache : int key : cstr] #{Unsafe} : int
+  (defn cache-get [cache : int key : cstr] #fx{Unsafe} : int
     ```c
     typedef struct { char *dir; } NotebookCache;
     typedef struct { int64_t head; int64_t tail; } Cons;
@@ -227,7 +227,7 @@
   ;;;   (cache-put cache key output)
   ;;;
   ;;; Since: notebook-v0.1.0
-  (defn cache-put [cache : int key : cstr output : int] #{Unsafe} : void
+  (defn cache-put [cache : int key : cstr output : int] #fx{Unsafe} : void
     ```c
     typedef struct { char *dir; } NotebookCache;
     typedef struct { int64_t head; int64_t tail; } Cons;
@@ -310,7 +310,7 @@
   ;;;   (cache-clear cache)
   ;;;
   ;;; Since: notebook-v0.1.0
-  (defn cache-clear [cache : int] #{Unsafe} : void
+  (defn cache-clear [cache : int] #fx{Unsafe} : void
     ```c
     typedef struct { char *dir; } NotebookCache;
     NotebookCache *c = (NotebookCache *)(intptr_t)cache;

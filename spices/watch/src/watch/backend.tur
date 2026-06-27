@@ -38,7 +38,7 @@
 
   ;;; backend-supported? -- 1 if the current build target has a real
   ;;; backend (Linux/inotify or Darwin/kqueue), 0 otherwise.
-  (defn backend-supported? [] #{Unsafe} : int
+  (defn backend-supported? [] #fx{Unsafe} : int
     ```c
     #if defined(__linux__) || defined(__APPLE__)
     return 1;
@@ -55,7 +55,7 @@
   ;;;            forward every event from dir to the caller)
   ;;;
   ;;; Returns: opaque handle, or 0 on failure.
-  (defn backend-open [dir : cstr base : cstr] #{Unsafe} : int
+  (defn backend-open [dir : cstr base : cstr] #fx{Unsafe} : int
     ```c
     /* __tur_include__: #include <sys/stat.h> */
     /* __tur_include__: #include <fcntl.h> */
@@ -122,7 +122,7 @@
     ```)
 
   ;;; backend-close -- release backend handle.  Safe on 0.
-  (defn backend-close [handle : int] #{Unsafe} : void
+  (defn backend-close [handle : int] #fx{Unsafe} : void
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     if (!w) return;
@@ -149,7 +149,7 @@
   ;;;    1 the OS queue has events ready (call backend-drain next)
   ;;;    0 the timeout expired with no events
   ;;;   -1 a fatal backend error occurred
-  (defn backend-wait [handle : int timeout-ms : int] #{Unsafe} : int
+  (defn backend-wait [handle : int timeout-ms : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     if (!w) return -1;
@@ -195,7 +195,7 @@
   ;;;
   ;;; Overflow is stored on the handle; query via backend-last-overflow?.
   ;;; Calling this function clears ev_n and overflow before draining.
-  (defn backend-drain-into [handle : int] #{Unsafe} : int
+  (defn backend-drain-into [handle : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     if (!w) return -1;
@@ -271,12 +271,12 @@
   ;;; need to know whether the backend fired.  Returns the event count (>= 0)
   ;;; or -1 on a fatal error.  Overflow is recorded on the handle separately;
   ;;; check with backend-last-overflow?.
-  (defn backend-drain [handle : int] #{Unsafe} : int
+  (defn backend-drain [handle : int] #fx{Unsafe} : int
     (backend-drain-into handle))
 
   ;;; backend-event-count -- number of events stored in evbuf after a drain.
   ;;; Returns 0 if handle is null.
-  (defn backend-event-count [handle : int] #{Unsafe} : int
+  (defn backend-event-count [handle : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     return w ? (int64_t)w->ev_n : 0;
@@ -285,7 +285,7 @@
   ;;; backend-event-name-at -- filename from the i-th buffered event.
   ;;; On Linux: the name field from the inotify_event (may be "" for self-events).
   ;;; On Darwin: always "" (snapshot diff provides names in the tree layer).
-  (defn backend-event-name-at [handle : int idx : int] #{Unsafe} : cstr
+  (defn backend-event-name-at [handle : int idx : int] #fx{Unsafe} : cstr
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     int i = (int)idx;
@@ -296,7 +296,7 @@
   ;;; backend-event-mask-at -- OS event flags from the i-th buffered event.
   ;;; On Linux: inotify mask (IN_CREATE, IN_DELETE, IN_MODIFY, IN_MOVED_TO, …).
   ;;; On Darwin: combined NOTE_* vnode flags from the fired kevent.
-  (defn backend-event-mask-at [handle : int idx : int] #{Unsafe} : int
+  (defn backend-event-mask-at [handle : int idx : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     int i = (int)idx;
@@ -306,7 +306,7 @@
 
   ;;; backend-event-cookie-at -- inotify rename cookie from the i-th event.
   ;;; Non-zero only for IN_MOVED_FROM / IN_MOVED_TO pairs on Linux.
-  (defn backend-event-cookie-at [handle : int idx : int] #{Unsafe} : int
+  (defn backend-event-cookie-at [handle : int idx : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     int i = (int)idx;
@@ -316,7 +316,7 @@
 
   ;;; backend-event-is-dir-at -- 1 if the i-th event's target is a directory.
   ;;; On Linux: from IN_ISDIR flag.  On Darwin: always 0 (snapshot diff fills it).
-  (defn backend-event-is-dir-at [handle : int idx : int] #{Unsafe} : int
+  (defn backend-event-is-dir-at [handle : int idx : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     int i = (int)idx;
@@ -326,7 +326,7 @@
 
   ;;; backend-last-overflow? -- 1 if the most recent drain saw an overflow.
   ;;; Reading clears the flag so subsequent drains start fresh.
-  (defn backend-last-overflow? [handle : int] #{Unsafe} : int
+  (defn backend-last-overflow? [handle : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     if (!w) return 0;
@@ -336,14 +336,14 @@
     ```)
 
   ;;; backend-dir -- registered directory (read-only borrow).
-  (defn backend-dir [handle : int] #{Unsafe} : cstr
+  (defn backend-dir [handle : int] #fx{Unsafe} : cstr
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     return (const char *)(w ? w->dir : "");
     ```)
 
   ;;; backend-base -- registered basename (read-only borrow; "" for dir-only).
-  (defn backend-base [handle : int] #{Unsafe} : cstr
+  (defn backend-base [handle : int] #fx{Unsafe} : cstr
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     return (const char *)(w ? w->base : "");
@@ -352,7 +352,7 @@
   ;;; backend-fd -- the OS file descriptor underlying the backend, suitable
   ;;; for passing to poll(2) when combining multiple watchers.  Returns -1
   ;;; when the handle is null or the platform has no backend.
-  (defn backend-fd [handle : int] #{Unsafe} : int
+  (defn backend-fd [handle : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     if (!w) return -1;

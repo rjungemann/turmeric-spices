@@ -169,7 +169,7 @@
 ;; Runtime helper: join a cons-list of element fragments into `[e1,e2,...]`.
 ;; Each list node's head is a malloc'd cstr fragment (from `encode`); they are
 ;; freed as they are consumed, mirroring __json-obj-build.
-(defn __json-arr-build [lst : int] #{Unsafe} : cstr
+(defn __json-arr-build [lst : int] #fx{Unsafe} : cstr
   ```c
   typedef struct __c { int64_t head; int64_t tail; } cons_t;
   size_t total = 2; /* [ ] */
@@ -237,7 +237,7 @@
 ;; fragment buffer it consumes -- each `(encode ...)` call returns malloc'd
 ;; memory the caller is expected to free. Keys must be static string literals
 ;; (the macro guarantees this from `symbol-name`), so they are NOT freed.
-(defn __json-obj-build [lst : int] #{Unsafe} : cstr
+(defn __json-obj-build [lst : int] #fx{Unsafe} : cstr
   ```c
   typedef struct __c { int64_t head; int64_t tail; } cons_t;
   cons_t *p = (cons_t *)(intptr_t)lst;
@@ -290,7 +290,7 @@
 ;; built with constructor `Click` encodes as `{"Click": {...fields...}}`.
 ;; Frees the `inner` buffer it consumes (each arm's `__json-obj-build`
 ;; result is malloc'd and owned here); the static tag literal is not freed.
-(defn __json-tag [name : cstr inner : cstr] #{Unsafe} : cstr
+(defn __json-tag [name : cstr inner : cstr] #fx{Unsafe} : cstr
   ```c
   size_t kn = name ? strlen((const char *)name) : 0;
   size_t vn = inner ? strlen((const char *)inner) : 4 /* "null" */;
@@ -411,7 +411,7 @@
 ;;; __json-absent? -- true when a value slot is missing (null handle, e.g. a
 ;;; field absent from the object) or an explicit JSON `null`. Both decode to
 ;;; `none` for an optional field.
-(defn __json-absent? [val : int] #{Unsafe} : bool
+(defn __json-absent? [val : int] #fx{Unsafe} : bool
   ```c
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
@@ -437,7 +437,7 @@
       (ok (some (ok-val (:: (decode doc val) (Result A cstr))))))))
 
 ;;; __json-is-arr? -- true when the value is a JSON array.
-(defn __json-is-arr? [val : int] #{Unsafe} : bool
+(defn __json-is-arr? [val : int] #fx{Unsafe} : bool
   ```c
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
@@ -445,7 +445,7 @@
   ```)
 
 ;;; __json-arr-size -- element count of a JSON array value.
-(defn __json-arr-size [val : int] #{Unsafe} : int
+(defn __json-arr-size [val : int] #fx{Unsafe} : int
   ```c
   #include <yyjson.h>
   return (int)yyjson_arr_size((yyjson_val *)(intptr_t)val);
@@ -453,7 +453,7 @@
 
 ;;; __json-arr-get -- the i-th element value of a JSON array, as a yyjson_val
 ;;; handle (carried as :int), to feed back into `decode`.
-(defn __json-arr-get [val : int  i : int] #{Unsafe} : int
+(defn __json-arr-get [val : int  i : int] #fx{Unsafe} : int
   ```c
   #include <yyjson.h>
   return (int64_t)(intptr_t)yyjson_arr_get((yyjson_val *)(intptr_t)val, (size_t)i);
@@ -843,7 +843,7 @@
 (defopaque DecodeErrors :int)
 
 ;; Growable error buffer: each entry is {path, expected, got}, all owned cstrs.
-(defn __errs-new [] #{Unsafe} : int
+(defn __errs-new [] #fx{Unsafe} : int
   ```c
   struct __jderr  { char *path; char *expected; char *got; };
   struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
@@ -852,7 +852,7 @@
   return (int64_t)(intptr_t)e;
   ```)
 
-(defn __errs-push [errs : int path : cstr expected : cstr got : cstr] #{Unsafe} : nil
+(defn __errs-push [errs : int path : cstr expected : cstr got : cstr] #fx{Unsafe} : nil
   ```c
   struct __jderr  { char *path; char *expected; char *got; };
   struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
@@ -867,7 +867,7 @@
   e->count++;
   ```)
 
-(defn __errs-count [errs : int] #{Unsafe} : int
+(defn __errs-count [errs : int] #fx{Unsafe} : int
   ```c
   struct __jderr  { char *path; char *expected; char *got; };
   struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
@@ -875,7 +875,7 @@
   return (int)e->count;
   ```)
 
-(defn __errs-path [errs : int i : int] #{Unsafe} : cstr
+(defn __errs-path [errs : int i : int] #fx{Unsafe} : cstr
   ```c
   struct __jderr  { char *path; char *expected; char *got; };
   struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
@@ -883,7 +883,7 @@
   return (i >= 0 && i < e->count) ? e->items[i].path : (char *)"";
   ```)
 
-(defn __errs-expected [errs : int i : int] #{Unsafe} : cstr
+(defn __errs-expected [errs : int i : int] #fx{Unsafe} : cstr
   ```c
   struct __jderr  { char *path; char *expected; char *got; };
   struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
@@ -891,7 +891,7 @@
   return (i >= 0 && i < e->count) ? e->items[i].expected : (char *)"";
   ```)
 
-(defn __errs-got [errs : int i : int] #{Unsafe} : cstr
+(defn __errs-got [errs : int i : int] #fx{Unsafe} : cstr
   ```c
   struct __jderr  { char *path; char *expected; char *got; };
   struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
@@ -899,7 +899,7 @@
   return (i >= 0 && i < e->count) ? e->items[i].got : (char *)"";
   ```)
 
-(defn __errs-free [errs : int] #{Unsafe} : nil
+(defn __errs-free [errs : int] #fx{Unsafe} : nil
   ```c
   struct __jderr  { char *path; char *expected; char *got; };
   struct __jderrs { int64_t count; int64_t cap; struct __jderr *items; };
@@ -915,7 +915,7 @@
 ;; Name the JSON type actually present at a value handle (or "missing" for an
 ;; absent field), for the `got` slot of an error -- vocabulary aligned with
 ;; stdlib/schema.tur (string / int / float / bool / null).
-(defn __jtype-name [val : int] #{Unsafe} : cstr
+(defn __jtype-name [val : int] #fx{Unsafe} : cstr
   ```c
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
@@ -931,26 +931,26 @@
   ```)
 
 ;; Primitive type predicates over a value handle (false for a 0/missing handle).
-(defn __jis-int? [val : int] #{Unsafe} : bool
+(defn __jis-int? [val : int] #fx{Unsafe} : bool
   ```c
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
   return v && (yyjson_is_int(v) || yyjson_is_uint(v) || yyjson_is_sint(v));
   ```)
-(defn __jis-str? [val : int] #{Unsafe} : bool
+(defn __jis-str? [val : int] #fx{Unsafe} : bool
   ```c
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
   return v && yyjson_is_str(v);
   ```)
-(defn __jis-bool? [val : int] #{Unsafe} : bool
+(defn __jis-bool? [val : int] #fx{Unsafe} : bool
   ```c
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;
   return v && yyjson_is_bool(v);
   ```)
 ;; floats accept any JSON number (int widens to double), matching Decode [float].
-(defn __jis-num? [val : int] #{Unsafe} : bool
+(defn __jis-num? [val : int] #fx{Unsafe} : bool
   ```c
   #include <yyjson.h>
   yyjson_val *v = (yyjson_val *)(intptr_t)val;

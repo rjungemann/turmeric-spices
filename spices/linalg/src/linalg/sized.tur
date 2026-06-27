@@ -49,7 +49,7 @@
 
   ;; ===== raw int-carried implementation (private) =====
 
-  (defn __lavecn-new-zeroed-raw [k : int] #{Unsafe} : int
+  (defn __lavecn-new-zeroed-raw [k : int] #fx{Unsafe} : int
     ```c
     struct { int64_t len; double *data; } *b = malloc(sizeof(*b));
     b->len  = k;
@@ -57,17 +57,17 @@
     return (int64_t)(intptr_t)b;
     ```)
 
-  (defn __lavecn-free-raw [b : int] #{Unsafe} : nil
+  (defn __lavecn-free-raw [b : int] #fx{Unsafe} : nil
     ```c
     struct { int64_t len; double *data; } *v = (void *)(intptr_t)b;
     if (v->data) free(v->data);
     free(v);
     ```)
 
-  (defn __lavecn-len-raw [b : int] #{Unsafe} : int
+  (defn __lavecn-len-raw [b : int] #fx{Unsafe} : int
     ```c struct { int64_t len; double *data; } *v = (void *)(intptr_t)b; return (int)v->len; ```)
 
-  (defn __lavecn-get-raw [b : int i : int] #{Unsafe} : float
+  (defn __lavecn-get-raw [b : int i : int] #fx{Unsafe} : float
     ```c
     struct { int64_t len; double *data; } *v = (void *)(intptr_t)b;
     if (i < 0 || i >= v->len) {
@@ -78,7 +78,7 @@
     return v->data[i];
     ```)
 
-  (defn __lavecn-set-raw [b : int i : int x : float] #{Unsafe} : nil
+  (defn __lavecn-set-raw [b : int i : int x : float] #fx{Unsafe} : nil
     ```c
     struct { int64_t len; double *data; } *v = (void *)(intptr_t)b;
     if (i < 0 || i >= v->len) {
@@ -89,7 +89,7 @@
     v->data[i] = x;
     ```)
 
-  (defn __lavecn-dot-raw [a : int b : int] #{Unsafe} : float
+  (defn __lavecn-dot-raw [a : int b : int] #fx{Unsafe} : float
     ```c
     struct { int64_t len; double *data; } *x = (void *)(intptr_t)a;
     struct { int64_t len; double *data; } *y = (void *)(intptr_t)b;
@@ -99,7 +99,7 @@
     ```)
 
   ;; element-wise a (op) b into a fresh buffer; sign = +1 add, -1 sub.
-  (defn __lavecn-zip-raw [a : int b : int sign : float] #{Unsafe} : int
+  (defn __lavecn-zip-raw [a : int b : int sign : float] #fx{Unsafe} : int
     ```c
     struct { int64_t len; double *data; } *x = (void *)(intptr_t)a;
     struct { int64_t len; double *data; } *y = (void *)(intptr_t)b;
@@ -110,7 +110,7 @@
     return (int64_t)(intptr_t)o;
     ```)
 
-  (defn __lavecn-scale-raw [b : int s : float] #{Unsafe} : int
+  (defn __lavecn-scale-raw [b : int s : float] #fx{Unsafe} : int
     ```c
     struct { int64_t len; double *data; } *x = (void *)(intptr_t)b;
     struct { int64_t len; double *data; } *o = malloc(sizeof(*o));
@@ -120,7 +120,7 @@
     return (int64_t)(intptr_t)o;
     ```)
 
-  (defn __lavecn-norm-raw [b : int] #{Unsafe} : float
+  (defn __lavecn-norm-raw [b : int] #fx{Unsafe} : float
     ```c
     #include <math.h>
     struct { int64_t len; double *data; } *x = (void *)(intptr_t)b;
@@ -183,7 +183,7 @@
 
   ;; ===== raw int-carried implementation (private) =====
 
-  (defn __lamat-new-zeroed-raw [r : int c : int] #{Unsafe} : int
+  (defn __lamat-new-zeroed-raw [r : int c : int] #fx{Unsafe} : int
     ```c
     struct { int64_t rows; int64_t cols; double *data; } *b = malloc(sizeof(*b));
     int64_t nelem = r * c;
@@ -192,20 +192,20 @@
     return (int64_t)(intptr_t)b;
     ```)
 
-  (defn __lamat-free-raw [b : int] #{Unsafe} : nil
+  (defn __lamat-free-raw [b : int] #fx{Unsafe} : nil
     ```c
     struct { int64_t rows; int64_t cols; double *data; } *m = (void *)(intptr_t)b;
     if (m->data) free(m->data);
     free(m);
     ```)
 
-  (defn __lamat-rows-raw [b : int] #{Unsafe} : int
+  (defn __lamat-rows-raw [b : int] #fx{Unsafe} : int
     ```c struct { int64_t rows; int64_t cols; double *data; } *m = (void *)(intptr_t)b; return (int)m->rows; ```)
 
-  (defn __lamat-cols-raw [b : int] #{Unsafe} : int
+  (defn __lamat-cols-raw [b : int] #fx{Unsafe} : int
     ```c struct { int64_t rows; int64_t cols; double *data; } *m = (void *)(intptr_t)b; return (int)m->cols; ```)
 
-  (defn __lamat-get-raw [b : int i : int j : int] #{Unsafe} : float
+  (defn __lamat-get-raw [b : int i : int j : int] #fx{Unsafe} : float
     ```c
     struct { int64_t rows; int64_t cols; double *data; } *m = (void *)(intptr_t)b;
     if (i < 0 || i >= m->rows || j < 0 || j >= m->cols) {
@@ -216,7 +216,7 @@
     return m->data[i * m->cols + j];
     ```)
 
-  (defn __lamat-set-raw [b : int i : int j : int x : float] #{Unsafe} : nil
+  (defn __lamat-set-raw [b : int i : int j : int x : float] #fx{Unsafe} : nil
     ```c
     struct { int64_t rows; int64_t cols; double *data; } *m = (void *)(intptr_t)b;
     if (i < 0 || i >= m->rows || j < 0 || j >= m->cols) {
@@ -230,7 +230,7 @@
   ;; element-wise a (op) b into a fresh matrix; sign = +1 add, -1 sub.
   ;; Runtime shape guard (belt-and-suspenders until the static two-index check
   ;; lands; with it, the shapes are already proven equal here).
-  (defn __lamat-zip-raw [a : int b : int sign : float] #{Unsafe} : int
+  (defn __lamat-zip-raw [a : int b : int sign : float] #fx{Unsafe} : int
     ```c
     struct M { int64_t rows; int64_t cols; double *data; };
     struct M *x = (void *)(intptr_t)a;
@@ -249,7 +249,7 @@
     return (int64_t)(intptr_t)o;
     ```)
 
-  (defn __lamat-scale-raw [b : int s : float] #{Unsafe} : int
+  (defn __lamat-scale-raw [b : int s : float] #fx{Unsafe} : int
     ```c
     struct M { int64_t rows; int64_t cols; double *data; };
     struct M *x = (void *)(intptr_t)b;
@@ -262,7 +262,7 @@
     ```)
 
   ;; (m x k) * (k x n) -> (m x n). Runtime guard on the shared inner dimension.
-  (defn __lamat-mul-raw [a : int b : int] #{Unsafe} : int
+  (defn __lamat-mul-raw [a : int b : int] #fx{Unsafe} : int
     ```c
     struct M { int64_t rows; int64_t cols; double *data; };
     struct M *x = (void *)(intptr_t)a;
@@ -287,7 +287,7 @@
     ```)
 
   ;; (m x n) -> (n x m).
-  (defn __lamat-transpose-raw [b : int] #{Unsafe} : int
+  (defn __lamat-transpose-raw [b : int] #fx{Unsafe} : int
     ```c
     struct M { int64_t rows; int64_t cols; double *data; };
     struct M *x = (void *)(intptr_t)b;

@@ -23,7 +23,7 @@
 (defn handle-peek [^borrow h : Handle] : int ```c return (int64_t)h; ```)
 (defn handle-close [h : Handle] : nil ```c (void)h; ```)
 
-(defn tap [idx : int name : cstr ok : bool] #{Unsafe} : int
+(defn tap [idx : int name : cstr ok : bool] #fx{Unsafe} : int
   ```c
   printf("%s %lld - %s\n", ok ? "ok" : "not ok", (long long)idx, (const char *)name);
   return ok ? 0 : 1;
@@ -36,7 +36,7 @@
           b (handle-peek h)]
       (do (handle-close h) (+ a b)))))
 
-(defn main [] #{Unsafe} : int
+(defn main [] #fx{Unsafe} : int
   (let [r1 (tap 1 "borrow-twice-then-consume yields handle value" (= (lifecycle-ok) 14))]
     (do
       (println "1..1")

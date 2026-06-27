@@ -36,8 +36,8 @@
 ;;; not to the inner :float thunk signature. Trying to spell the
 ;;; higher-order shape directly would mis-declare the call site.
 (defn __apply-sf
-  [^fat sf  : (fn [ptr<void>] #{} ptr<void>)
-   ^fat sig : (fn [float]     #{} float)] : ptr<void>
+  [^fat sf  : (fn [ptr<void>] #fx{} ptr<void>)
+   ^fat sig : (fn [float]     #fx{} float)] : ptr<void>
   (sf sig))
 
 ;;; __chain-loop -- threading recursion for effects-chain.
@@ -49,7 +49,7 @@
 ;;; unification.
 (defn __chain-loop
   [effects  : int
-   ^fat sig : (fn [float] #{} float)
+   ^fat sig : (fn [float] #fx{} float)
    i : int
    n : int] : ptr<void>
   (if (>= i n)
@@ -79,7 +79,7 @@
 ;;;                              (sine 440.0 0.0))]
 ;;;     chain)
 (defn effects-chain
-  [effects : int ^fat input : (fn [float] #{} float)] : ptr<void>
+  [effects : int ^fat input : (fn [float] #fx{} float)] : ptr<void>
   (__chain-loop effects input 0 (__vec-len-i effects)))
 
 ) ;; end defmodule signal/compose

@@ -144,7 +144,7 @@
 ;;;   ((mix 0.5) (pair-signals (sine 440.0 0.0) (sine 660.0 0.0)))
 (defn mix [alpha :float]
   (let [av alpha]
-    (fn [^fat prod-sig : (fn [float] #{} ptr<void>)]
+    (fn [^fat prod-sig : (fn [float] #fx{} ptr<void>)]
       (fn [t :float] :float
         (let [p (prod-sig t)
               x (__pair-fst-f p)
@@ -153,7 +153,7 @@
 
 ;;; add -- sum a Pair signal sample-wise.
 (defn add []
-  (fn [^fat prod-sig : (fn [float] #{} ptr<void>)]
+  (fn [^fat prod-sig : (fn [float] #fx{} ptr<void>)]
     (fn [t :float] :float
       (let [p (prod-sig t)]
         (+ (__pair-fst-f p) (__pair-snd-f p))))))
@@ -163,7 +163,7 @@
 ;;; Example:
 ;;;   ((multiply) (pair-signals lfo carrier))
 (defn multiply []
-  (fn [^fat prod-sig : (fn [float] #{} ptr<void>)]
+  (fn [^fat prod-sig : (fn [float] #fx{} ptr<void>)]
     (fn [t :float] :float
       (let [p (prod-sig t)]
         (* (__pair-fst-f p) (__pair-snd-f p))))))
