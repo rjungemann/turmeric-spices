@@ -1,0 +1,94 @@
+;;; json/ownstr -- owned String surface for the json spice.
+;;;
+;;; The owned counterpart of a borrowed `cstr`: a `String` OWNS its bytes (a
+;;; refcounted, immutable heap payload). `encode-string` returns a serialized
+;;; document as an owned `String` so the free obligation lives in the type
+;;; instead of the Encode class's "malloc'd fragment; caller frees" comment.
+;;;
+;;; Self-contained, ABI-identical mirror of stdlib `String`: it declares
+;;; `(defopaque String :ptr<void>)` and thin `extern` wrappers over the same
+;;; `tur_string_*` runtime, and carries the `tur_string.c` autolink marker so the
+;;; runtime links. stdlib's String cannot yet be pulled into a shared spice
+;;; module's signatures via `(load "stdlib/string.tur")` (a reentrant
+;;; typeclass-show load-ordering bug -- see the turmeric report
+;;; docs/reported/compiled-string-return-int-conversion.md); when that is fixed
+;;; this collapses back onto stdlib `String`.
+;;;
+;;; Since: 0.3.0
+
+(defmodule json/ownstr
+  (export String adopt-cstr to-cstr release str-len ownstr-autolink)
+
+;;; String -- an owned, refcounted, immutable string (ABI: ptr<void>).
+(defopaque String :ptr<void>)
+
+;;; ownstr-autolink -- internal: pull src/runtime/tur_string.c into the link.
+(defn ownstr-autolink [] : int
+  ```c
+  /* __tur_autolink__: src/runtime/tur_string.c -Isrc/runtime */
+  return 0;
+  ```)
+
+;;; adopt-cstr -- take ownership of a freshly heap-allocated cstr as a String.
+;;;
+;;; Copies the bytes of `s` into a fresh owned String and FREES `s`. `s` must be
+;;; a heap buffer the caller owns; never pass a literal or a borrowed cstr.
+;;;
+;;; Parameters:
+;;;   s -- a freshly heap-allocated NUL-terminated cstr; consumed (freed)
+;;;
+;;; Returns:
+;;;   String -- a new owned String holding a copy of s's bytes.
+;;;
+;;; Since: 0.3.0
+(defn adopt-cstr [s : cstr] : String
+  ```c
+  extern void *tur_string_adopt_cstr(const char *);
+  return (int64_t)(intptr_t)tur_string_adopt_cstr((const char *)s);
+  ```)
+
+;;; to-cstr -- borrow the String's NUL-terminated bytes (O(1), no copy).
+;;;
+;;; Valid only while the String is retained; do not use after release.
+;;;
+;;; Parameters:
+;;;   s -- the String to borrow from
+;;;
+;;; Returns:
+;;;   cstr -- a borrowed view of the same bytes.
+;;;
+;;; Since: 0.3.0
+(defn to-cstr [s : String] : cstr
+  ```c
+  extern const char *tur_string_cstr(void *);
+  return (const char *)tur_string_cstr((void *)(intptr_t)s);
+  ```)
+
+;;; release -- decrement the refcount; free the payload at zero.
+;;;
+;;; Parameters:
+;;;   s -- the String whose owning handle is being dropped
+;;;
+;;; Since: 0.3.0
+(defn release [s : String] : void
+  ```c
+  extern void tur_string_release(void *);
+  tur_string_release((void *)(intptr_t)s);
+  ```)
+
+;;; str-len -- byte length of the String (not counting the NUL).
+;;;
+;;; Parameters:
+;;;   s -- the String to measure
+;;;
+;;; Returns:
+;;;   int -- the byte length.
+;;;
+;;; Since: 0.3.0
+(defn str-len [s : String] : int
+  ```c
+  extern int64_t tur_string_len(void *);
+  return tur_string_len((void *)(intptr_t)s);
+  ```)
+
+) ;; end defmodule json/ownstr

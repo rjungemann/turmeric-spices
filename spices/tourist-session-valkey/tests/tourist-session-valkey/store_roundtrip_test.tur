@@ -13,7 +13,8 @@
   (import session/store :refer [Store store-save store-load store-delete])
   (import session/data  :refer [SessMap sessmap-new sessmap-set! sessmap-get
                                 sessmap-free])
-  (import session/id    :refer [session-id-new])
+  (import session/id     :refer [session-id-new])
+  (import session/ownstr :refer [to-cstr release])
   (import valkey/client :refer [Client client-connect client-of client-close])
 
 (defn cok? [r : ptr<void>] : bool
@@ -43,20 +44,24 @@
 
 ;; runs the real round-trip; consumes the linear Client.
 (defn run-roundtrip [c : Client] : int
+  ;; session-id-new returns an owned String (v0.3.0); borrow it as the store
+  ;; key (the store copies it in) and release it once the round-trip is done.
   (let [store (valkey-store-new c "turtestsess" 60)
         m     (sessmap-new)
-        id    (session-id-new)]
+        id    (session-id-new)
+        idc   (to-cstr id)]
     (do
       (sessmap-set! m "user_id" "777")
-      (store-save store id m 60)
-      (let [loaded (store-load store id)
+      (store-save store idc m 60)
+      (let [loaded (store-load store idc)
             ok1    (loaded-has? loaded "user_id" "777")]
         (when (not= loaded 0) (sessmap-free (:: loaded :SessMap)))
-        (store-delete store id)
-        (let [after (store-load store id)
+        (store-delete store idc)
+        (let [after (store-load store idc)
               ok2   (= after 0)]
           (when (not= after 0) (sessmap-free (:: after :SessMap)))
           (sessmap-free m)
+          (release id)
           (client-close c)
           (describe "tourist-session-valkey/store"
             (it "round-trips a session map through Valkey"

@@ -5,7 +5,9 @@
 ;; single point of extension.
 
 (defmodule frame/print
-  (export print-frame frame->str frame-describe)
+  (export print-frame frame->str frame->string frame-describe)
+
+  (import frame/ownstr  :refer [String adopt-cstr])
 
   (import frame/type    :refer [type-int64 type-float64 type-utf8])
   (import frame/schema  :refer [field schema schema-field-at])
@@ -536,6 +538,26 @@
         (__ds-fill f sch ncols (+ c 1)
                    b-var b-count b-mean b-std
                    b-min b-q25 b-med b-q75 b-max)))))
+
+;;; frame->string -- owned-String sibling of frame->str.
+;;;
+;;; Renders the same table as frame->str but returns an owned String (release it,
+;;; or hand it to a consumer that takes ownership) instead of a malloc'd cstr the
+;;; caller must remember to free. Prefer this when the rendered text is stored or
+;;; returned; frame->str stays for the print-then-drop path.
+;;;
+;;; Parameters:
+;;;   f -- frame handle
+;;;
+;;; Returns:
+;;;   String -- owned rendered table.
+;;;
+;;; Example:
+;;;   (let [s (frame->string f)] ... (release s))
+;;;
+;;; Since: FR-string (0.x)
+(defn frame->string [f : int] : String
+  (adopt-cstr (frame->str f)))
 
 ;;; describe -- pandas-style summary table for numeric columns.
 ;;;

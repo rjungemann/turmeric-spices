@@ -1,0 +1,108 @@
+;;; session/ownstr -- owned String surface for the session spice.
+;;;
+;;; The owned counterpart of a borrowed `cstr`: a `String` OWNS its bytes (a
+;;; refcounted, immutable heap payload). It is the type to return when a string
+;;; is a freshly allocated buffer the caller must not forget to free -- a
+;;; session ID, a signed cookie value, a recovered ID -- so the ownership shows
+;;; up in the type instead of a "caller frees the result" comment.
+;;;
+;;; Why a spice-local String instead of stdlib `String`: stdlib's String cannot
+;;; currently be pulled into a *shared* spice module's signatures --
+;;; `(load "stdlib/string.tur")` in a module that another module imports trips a
+;;; reentrant typeclass-show load-ordering bug (see the turmeric report
+;;; docs/reported/compiled-string-return-int-conversion.md). This module sidesteps
+;;; that: it declares an ABI-identical `(defopaque String :ptr<void>)` and thin
+;;; `extern` wrappers over the same `tur_string_*` runtime that backs stdlib
+;;; String, and carries the `tur_string.c` autolink marker so the runtime is
+;;; linked. The bytes are the real refcounted runtime payload; only the nominal
+;;; tur type is spice-local. When the load-ordering fix lands, this collapses
+;;; back onto stdlib `String`.
+;;;
+;;; Since: v0.3.0
+
+(defmodule session/ownstr
+  (export String adopt-cstr to-cstr release str-len ownstr-autolink)
+
+;;; String -- an owned, refcounted, immutable string (ABI: ptr<void>).
+(defopaque String :ptr<void>)
+
+;;; ownstr-autolink -- internal: pull src/runtime/tur_string.c into the link.
+;;;
+;;; The `__tur_autolink__` marker in the emitted C tells `tur build`/`tur run`
+;;; to compile and link the String runtime alongside the generated code, so the
+;;; `tur_string_*` externs below resolve without a `(load "stdlib/string.tur")`.
+(defn ownstr-autolink [] : int
+  ```c
+  /* __tur_autolink__: src/runtime/tur_string.c -Isrc/runtime */
+  return 0;
+  ```)
+
+;;; adopt-cstr -- take ownership of a freshly heap-allocated cstr as a String.
+;;;
+;;; Copies the bytes of `s` into a fresh owned String and FREES `s`. This is the
+;;; adoption bridge for the inline-C helpers that return a malloc'd cstr: wrap
+;;; such a call in adopt-cstr and the result is a real owned String, leak-free.
+;;;
+;;; WARNING: `s` must be a heap buffer the caller owns; never pass a literal or
+;;; a borrowed cstr (freeing that is undefined behavior).
+;;;
+;;; Parameters:
+;;;   s -- a freshly heap-allocated NUL-terminated cstr; consumed (freed)
+;;;
+;;; Returns:
+;;;   String -- a new owned String holding a copy of s's bytes.
+;;;
+;;; Since: v0.3.0
+(defn adopt-cstr [s : cstr] : String
+  ```c
+  extern void *tur_string_adopt_cstr(const char *);
+  return (int64_t)(intptr_t)tur_string_adopt_cstr((const char *)s);
+  ```)
+
+;;; to-cstr -- borrow the String's NUL-terminated bytes (O(1), no copy).
+;;;
+;;; The returned cstr points into the String's payload and is valid only while
+;;; the String is retained; do not use it after the String is released. Use it
+;;; to hand owned bytes to a borrow boundary (a store key, an inline-C builder).
+;;;
+;;; Parameters:
+;;;   s -- the String to borrow from
+;;;
+;;; Returns:
+;;;   cstr -- a borrowed view of the same bytes.
+;;;
+;;; Since: v0.3.0
+(defn to-cstr [s : String] : cstr
+  ```c
+  extern const char *tur_string_cstr(void *);
+  return (const char *)tur_string_cstr((void *)(intptr_t)s);
+  ```)
+
+;;; release -- decrement the refcount; free the payload at zero.
+;;;
+;;; Parameters:
+;;;   s -- the String whose owning handle is being dropped
+;;;
+;;; Since: v0.3.0
+(defn release [s : String] : void
+  ```c
+  extern void tur_string_release(void *);
+  tur_string_release((void *)(intptr_t)s);
+  ```)
+
+;;; str-len -- byte length of the String (not counting the NUL).
+;;;
+;;; Parameters:
+;;;   s -- the String to measure
+;;;
+;;; Returns:
+;;;   int -- the byte length.
+;;;
+;;; Since: v0.3.0
+(defn str-len [s : String] : int
+  ```c
+  extern int64_t tur_string_len(void *);
+  return tur_string_len((void *)(intptr_t)s);
+  ```)
+
+) ;; end defmodule session/ownstr

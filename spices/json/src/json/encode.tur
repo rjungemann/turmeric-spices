@@ -15,6 +15,7 @@
   (export derive-json derive-json-encode derive-json-decode
           derive-json-opaque derive-json-opaque-encode derive-json-opaque-decode
           derive-json-sum derive-json-sum-encode derive-json-sum-decode
+          encode-string
           decode-list
           __json-chain __json-obj-build __json-tag
           __decode-field __decode-fields __decode-make-struct
@@ -30,6 +31,7 @@
           decode-error-got decode-errors-free)
 
 (import json/decode :refer [json-obj-get])
+(import json/ownstr :refer [String adopt-cstr])
 
 ;;; Encode -- typeclass for serializing a Turmeric value to a JSON
 ;;; fragment.  The fragment is a self-contained JSON value (number,
@@ -138,6 +140,31 @@
   memcpy(buf, tmp, n + 1);
   return buf;
   ```))
+
+;;; encode-string -- serialize any Encodable value to an owned String.
+;;;
+;;; The owned-return counterpart of `encode`: where `encode` hands back a
+;;; malloc'd cstr fragment the caller must free, `encode-string` returns a
+;;; `String` that owns its bytes (release it, or hand it to a consumer that
+;;; takes ownership). Reach for it when the serialized document is stored or
+;;; returned; keep `encode` for the compose-then-free fragment path.
+;;;
+;;; (Defined after the base Encode instances: a polymorphic wrapper over a
+;;; typeclass method must follow at least one instance of that class, or method
+;;; resolution fails with "no typeclass method found".)
+;;;
+;;; Parameters:
+;;;   x -- any value whose type has an Encode instance
+;;;
+;;; Returns:
+;;;   String -- owned serialized JSON.
+;;;
+;;; Example:
+;;;   (let [s (encode-string 42)] ... (release s))   ;; owned "42"
+;;;
+;;; Since: 0.3.0
+(defn encode-string [^Encode A] [x : A] : String
+  (adopt-cstr (encode x)))
 
 ;;; __json-null-frag -- the JSON `null` literal as a fresh malloc'd cstr, so
 ;;; callers can free it uniformly like any other Encode fragment.

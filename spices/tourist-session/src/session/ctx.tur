@@ -26,6 +26,7 @@
   (import session/id     :refer [session-id-new])
   (import session/cookie :refer [cookie-find cookie-unsign])
   (import session/store  :refer [store-load])
+  (import session/ownstr :refer [String to-cstr release])
   (import session/state  :refer [session-get-store session-config-ptr
                                  cfg-cookie-name cfg-signing-key])
   (import tourist/param  :refer [ctx-attr-set!])
@@ -36,18 +37,20 @@
           session-existing sess-id sess-map sess-dirty? sess-destroy?
           sess-new? sess-rotate-from sess-free)
 
-;; struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+;; struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+;;   id          -- an owned session/ownstr String handle (freed via ownstr/release)
+;;   rotate_from -- a malloc'd cstr copy of the pre-rotate id (freed via free)
 
 (def __SESS-KEY "__tursess")
 
 ;; -- session-state heap struct ---------------------------------------------
 
-(defn __sess-new [id : cstr map : SessMap is-new : int] : int
+(defn __sess-new [id : String map : SessMap is-new : int] : int
   ```c
   #include <stdlib.h>
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   struct __sess *s = malloc(sizeof(*s));
-  s->id      = (char *)(intptr_t)id;
+  s->id      = (int64_t)id;   /* owned ownstr String handle */
   s->map     = (int64_t)map;
   s->dirty   = 0;
   s->destroy = 0;
@@ -57,49 +60,53 @@
   ```)
 
 ;;; sess-id -- session ID string held by a session-state struct (borrowed).
+;;;
+;;; Borrows the bytes of the struct's owned String id; the returned cstr is
+;;; valid until the struct is freed by sess-free.
 (defn sess-id [p : int] : cstr
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
-  return (const char *)((struct __sess *)(intptr_t)p)->id;
+  extern const char *tur_string_cstr(void *);
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  return (const char *)tur_string_cstr((void *)(intptr_t)((struct __sess *)(intptr_t)p)->id);
   ```)
 
 ;;; sess-map -- SessMap handle held by a session-state struct.
 (defn sess-map [p : int] : SessMap
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   return ((struct __sess *)(intptr_t)p)->map;
   ```)
 
 ;;; sess-dirty? -- 1 if the session was written since load.
 (defn sess-dirty? [p : int] : int
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   return ((struct __sess *)(intptr_t)p)->dirty;
   ```)
 
 ;;; sess-destroy? -- 1 if session-destroy! was called.
 (defn sess-destroy? [p : int] : int
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   return ((struct __sess *)(intptr_t)p)->destroy;
   ```)
 
 ;;; sess-new? -- 1 if a fresh session ID was minted (no valid cookie present).
 (defn sess-new? [p : int] : int
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   return ((struct __sess *)(intptr_t)p)->is_new;
   ```)
 
 (defn __sess-set-dirty! [p : int] : void
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   ((struct __sess *)(intptr_t)p)->dirty = 1;
   ```)
 
 (defn __sess-set-destroy! [p : int] : void
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   ((struct __sess *)(intptr_t)p)->destroy = 1;
   ```)
 
@@ -109,7 +116,7 @@
 ;;; it can delete the stale store entry after saving under the new ID.
 (defn sess-rotate-from [p : int] : cstr
   ```c
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   return (const char *)((struct __sess *)(intptr_t)p)->rotate_from;
   ```)
 
@@ -122,20 +129,20 @@
   ```c
   #include <stdlib.h>
   #include <string.h>
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   struct __sess *s = (struct __sess *)(intptr_t)p;
   if (s->rotate_from == 0)
     s->rotate_from = strdup((const char *)oldid);
   ```)
 
-;;; __sess-set-id! -- replace the session ID, freeing the old buffer.
-(defn __sess-set-id! [p : int newid : cstr] : void
+;;; __sess-set-id! -- replace the session ID, releasing the old owned String.
+(defn __sess-set-id! [p : int newid : String] : void
   ```c
-  #include <stdlib.h>
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  extern void tur_string_release(void *);
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   struct __sess *s = (struct __sess *)(intptr_t)p;
-  free(s->id);
-  s->id = (char *)(intptr_t)newid;
+  tur_string_release((void *)(intptr_t)s->id);
+  s->id = (int64_t)newid;
   ```)
 
 ;;; sess-free -- free the session-state struct, its id, and its map.
@@ -146,11 +153,12 @@
   ```c
   #include <stdlib.h>
   extern void session__data__sessmap_hyfree(int64_t);
-  struct __sess { char *id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
+  extern void tur_string_release(void *);
+  struct __sess { int64_t id; int64_t map; int64_t dirty; int64_t destroy; int64_t is_new; char *rotate_from; };
   if (p == 0) return;
   struct __sess *s = (struct __sess *)(intptr_t)p;
   session__data__sessmap_hyfree(s->map);
-  free(s->id);
+  tur_string_release((void *)(intptr_t)s->id);
   free(s->rotate_from);
   free(s);
   ```)
@@ -268,18 +276,18 @@
 
 ;;; __session-init-with-id -- load a verified session ID from the store.
 ;;;
-;;; Takes ownership of `id` (the unsigned session ID). On a hit the id becomes
-;;; the session-state's own id; on a miss it is freed and a fresh session is
-;;; minted.
-(defn __session-init-with-id [ctx : Ctx id : cstr] : int
+;;; Takes ownership of `id` (the unsigned session ID String). On a hit the id
+;;; becomes the session-state's own id; on a miss it is released and a fresh
+;;; session is minted.
+(defn __session-init-with-id [ctx : Ctx id : String] : int
   (let [store  (session-get-store)
-        loaded (store-load store id)]
+        loaded (store-load store (to-cstr id))]
     (if (not= loaded 0)
       (__session-attach ctx id (:: loaded :SessMap) 0)
       (let [p (__session-attach ctx (session-id-new) (sessmap-new) 1)]
-        (do (__cstr-free id) p)))))
+        (do (release id) p)))))
 
-(defn __session-attach [ctx : Ctx id : cstr map : SessMap is-new : int] : int
+(defn __session-attach [ctx : Ctx id : String map : SessMap is-new : int] : int
   (let [p (__sess-new id map is-new)]
     (do (ctx-attr-set! ctx __SESS-KEY p) p)))
 

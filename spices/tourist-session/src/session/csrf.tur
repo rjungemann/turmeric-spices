@@ -15,9 +15,10 @@
 ;;;
 ;;; Since: v0.2.0
 (defmodule session/csrf
-  (import session/ctx  :refer [session-get session-set!])
-  (import session/id   :refer [session-id-new])
-  (import session/hmac :refer [ct-eq?])
+  (import session/ctx    :refer [session-get session-set!])
+  (import session/id     :refer [session-id-new])
+  (import session/ownstr :refer [to-cstr release])
+  (import session/hmac   :refer [ct-eq?])
   (import tourist/types      :refer [Ctx])
   (import httpd/types        :refer [Response])
   (import httpd/response     :refer [response])
@@ -182,10 +183,12 @@
   (let [r (session-get ctx __CSRF-KEY)]
     (if (.is-ok r)
       (.ok-val r)
+      ;; session-id-new returns an owned String; session-set! copies its bytes
+      ;; into the map, then we release the String.
       (let [tok (session-id-new)]
         (do
-          (session-set! ctx __CSRF-KEY tok)   ;; copies tok into the map
-          (__cstr-free tok)
+          (session-set! ctx __CSRF-KEY (to-cstr tok))   ;; copies tok into the map
+          (release tok)
           (.ok-val (session-get ctx __CSRF-KEY)))))))
 
 ;;; csrf-check -- constant-time compare a submitted token to the session's.

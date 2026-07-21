@@ -11,7 +11,8 @@
 ;;; Since: v0.1.0
 
 (defmodule session/cookie
-  (import session/hmac :refer [hmac-sign ct-eq?])
+  (import session/hmac   :refer [hmac-sign ct-eq?])
+  (import session/ownstr :refer [String adopt-cstr])
   (export cookie-find cookie-build cookie-build-expired
           cookie-sign cookie-unsign)
 
@@ -222,23 +223,23 @@
 ;;; cookie-sign -- compute the cookie value to emit for a session ID.
 ;;;
 ;;; With signing off (empty key) this is just a copy of the ID. With a key set
-;;; it is "<id>.<base64url-hmac>". Always returns a freshly allocated string the
-;;; caller frees.
+;;; it is "<id>.<base64url-hmac>". Always returns a fresh owned String (release
+;;; it, or hand it to a consumer that borrows it).
 ;;;
 ;;; Parameters:
-;;;   signing-key -- HMAC key, or "" to disable signing
-;;;   id          -- the session ID
+;;;   signing-key -- HMAC key, or "" to disable signing (borrowed)
+;;;   id          -- the session ID (borrowed)
 ;;;
 ;;; Returns:
-;;;   :cstr -- caller-owned cookie value.
+;;;   String -- owned cookie value.
 ;;;
-;;; Since: v0.2.0
-(defn cookie-sign [signing-key : cstr id : cstr] : cstr
+;;; Since: v0.2.0 (owned String return since v0.3.0)
+(defn cookie-sign [signing-key : cstr id : cstr] : String
   (if (__empty? signing-key)
-    (__cstr-dup id)
+    (adopt-cstr (__cstr-dup id))
     (let [mac (hmac-sign signing-key id)
           out (__join-dot id mac)]
-      (do (__cstr-free mac) out))))
+      (do (__cstr-free mac) (adopt-cstr out)))))
 
 ;;; cookie-unsign -- recover the session ID from a (possibly signed) value.
 ;;;
@@ -250,27 +251,29 @@
 ;;; cookie.
 ;;;
 ;;; Parameters:
-;;;   signing-key -- HMAC key, or "" to disable verification
-;;;   value       -- the raw cookie value as received
+;;;   signing-key -- HMAC key, or "" to disable verification (borrowed)
+;;;   value       -- the raw cookie value as received (borrowed)
 ;;;
 ;;; Returns:
-;;;   (Result cstr cstr) -- ok(id) with a freshly allocated ID (caller frees),
-;;;                         or err(reason) on a missing/bad signature.
+;;;   (Result String cstr) -- ok(id) with a fresh owned ID String (release it,
+;;;                           or hand it to a consumer that takes ownership), or
+;;;                           err(reason) -- a borrowed static reason -- on a
+;;;                           missing/bad signature.
 ;;;
-;;; Since: v0.2.0
-(defn cookie-unsign [signing-key : cstr value : cstr] : (Result cstr cstr)
+;;; Since: v0.2.0 (owned String ok-value since v0.3.0)
+(defn cookie-unsign [signing-key : cstr value : cstr] : (Result String cstr)
   (if (__empty? signing-key)
-    (:: (ok (__cstr-dup value)) (Result cstr cstr))
+    (:: (ok (adopt-cstr (__cstr-dup value))) (Result String cstr))
     (let [di (__last-dot value)]
       (if (< di 0)
-        (:: (err "unsigned") (Result cstr cstr))
+        (:: (err "unsigned") (Result String cstr))
         (let [id  (__substr-dup value 0 di)
               mac (__substr-dup value (+ di 1) -1)
               exp (hmac-sign signing-key id)]
           (if (ct-eq? mac exp)
             (do (__cstr-free mac) (__cstr-free exp)
-                (:: (ok id) (Result cstr cstr)))
+                (:: (ok (adopt-cstr id)) (Result String cstr)))
             (do (__cstr-free mac) (__cstr-free exp) (__cstr-free id)
-                (:: (err "badmac") (Result cstr cstr)))))))))
+                (:: (err "badmac") (Result String cstr)))))))))
 
 ) ;; end defmodule session/cookie

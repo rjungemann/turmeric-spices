@@ -75,11 +75,17 @@
     int64_t max_age; int64_t secure; int64_t http_only; int64_t rolling;
   };
   struct __sess_cfg *c = malloc(sizeof(*c));
-  c->cookie_name = strdup((const char *)cookie_name);
-  c->path        = strdup((const char *)path);
-  c->domain      = strdup((const char *)domain);
-  c->same_site   = strdup((const char *)same_site);
-  c->signing_key = strdup((const char *)signing_key);
+  /* Own a process-lifetime heap copy of each string field so the server-
+   * lifetime config never borrows a caller buffer (a computed/freed
+   * signing-key would otherwise dangle across every later request -- the
+   * security-sensitive capture the String-adoption audit flagged). The copy
+   * is NULL-preserving, mirroring the stdlib httpd-cors-own-str precedent, so
+   * a NULL field stays NULL instead of tripping strdup(NULL) UB. */
+  c->cookie_name = cookie_name ? strdup((const char *)cookie_name) : (char *)0;
+  c->path        = path        ? strdup((const char *)path)        : (char *)0;
+  c->domain      = domain      ? strdup((const char *)domain)      : (char *)0;
+  c->same_site   = same_site   ? strdup((const char *)same_site)   : (char *)0;
+  c->signing_key = signing_key ? strdup((const char *)signing_key) : (char *)0;
   c->max_age     = max_age;
   c->secure      = secure_qu;
   c->http_only   = http_only_qu;

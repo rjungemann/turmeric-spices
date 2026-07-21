@@ -31,6 +31,7 @@
                                  cfg-rolling? cfg-signing-key])
   (import session/config :refer [SessionConfig])
   (import session/cookie :refer [cookie-build cookie-build-expired cookie-sign])
+  (import session/ownstr :refer [to-cstr release])
   (import session/ctx    :refer [session-existing sess-id sess-map sess-dirty?
                                  sess-destroy? sess-new? sess-rotate-from
                                  sess-free])
@@ -80,6 +81,9 @@
         (store-delete store id)
         (__add-cookie! ctx (cookie-build-expired name path dom)))
       (when (__should-persist? p cfgp)
+        ;; cookie-sign returns an owned String; borrow its bytes for
+        ;; cookie-build (which copies into its own Set-Cookie buffer) and
+        ;; release the String afterwards.
         (let [val (cookie-sign (cfg-signing-key cfgp) id)]
           (do
             (store-save store id (sess-map p) (cfg-max-age cfgp))
@@ -88,11 +92,11 @@
             ;; failure cannot fail the request; the worst case is an orphan
             ;; record that expires on its own TTL.
             (__flush-rotate-delete store p)
-            (__add-cookie! ctx (cookie-build name val path dom
+            (__add-cookie! ctx (cookie-build name (to-cstr val) path dom
                                              (cfg-max-age cfgp) (cfg-secure? cfgp)
                                              (cfg-http-only? cfgp)
                                              (cfg-same-site cfgp)))
-            (__cstr-free val)))))))
+            (release val)))))))
 
 ;;; __flush-rotate-delete -- delete the pre-rotate store entry, if any.
 (defn __flush-rotate-delete [store : Store p : int] : void
