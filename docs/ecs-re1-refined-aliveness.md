@@ -50,10 +50,14 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
 
 ## Remaining RE1 work
 
-- **Harness integration.** The spice test runner has no `--enable=refined
-  --strict-refine` flag mechanism (RE1 is the first refined ecs test), so the
-  two fixtures above are verified manually, not yet auto-run. Add a per-test
-  refined-flags directive to the ecs test setup.
+- **Harness integration -- DONE (2026-07-26).** `tur test` gained per-test
+  directives (`;; tur-test-flags: --strict-refine`,
+  `;; tur-test-expect-error: TUR-W0372`). The RE1 tests are now flat in `tests/`
+  and auto-run under `tur test tests`: `tur test` reports 4 passed -- the two
+  positives ENFORCE `1 proven` (strict makes an unproven crossing a hard error),
+  the two negatives are checked expect-error tests. Files:
+  `tests/refined-alive-frozen.tur`, `tests/refined-module-alive-frozen.tur`,
+  `tests/refined-alive-no-region.tur`, `tests/refined-module-no-region.tur`.
 - **Promotion to a shipped accessor family.** These fixtures use a self-contained
   `GameWorld` facade. Promoting to a real `ecs` module means a facade that owns a
   `WorldState` + storages and re-exports `alive?`/`despawn!`/`get!` with the
