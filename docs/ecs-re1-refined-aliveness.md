@@ -28,9 +28,9 @@ lets the guard discharge soundly.
 
 Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
 
-- `spices/ecs/tests/refined/alive-frozen.tur` -- guard + read inside `frozen`:
+- `spices/ecs/tests/refined-alive-frozen.tur` -- guard + read inside `frozen`:
   **refine: 1 proven**, runs -> `42`.
-- `spices/ecs/tests/errors/refined-alive-no-region.tur` -- the same read with NO
+- `spices/ecs/tests/refined-alive-no-region.tur` -- the same read with NO
   region: **1 unknown -> TUR-W0372**. So `#reads` + `frozen` is load-bearing
   here, not inert.
 - `spices/ecs/tests/errors/frozen-despawn-in-region.tur` (pre-existing) -- a
@@ -50,20 +50,26 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
 
 ## Remaining RE1 work
 
-- **Harness integration -- tooling built; auto-run BLOCKED (2026-07-26).**
+- **Harness integration -- DONE; auto-run UNBLOCKED (2026-07-26).**
   `tur test` gained per-test directives (`;; tur-test-flags: --strict-refine`,
-  `;; tur-test-expect-error: TUR-W0372`) -- a general, reusable feature. BUT
-  auto-running the refined tests through `tur test <dir>` surfaced a serious
-  compiler bug: compiling multiple refined files in one process corrupts memory
-  and crashes nondeterministically (turmeric
-  `docs/reported/refined-multi-compile-memory-corruption.md`). So the refined
-  tests live in `tests/refined/` (a subdir `tur test tests` does not descend
-  into) and are verified INDIVIDUALLY (`tur run`/`tur check` per file), not
-  auto-run. See `tests/refined/README.md`.
+  `;; tur-test-expect-error: TUR-W0372`) -- a general, reusable feature.
+  Auto-running the refined tests initially surfaced a serious compiler bug
+  (compiling multiple refined files in one process crashed
+  nondeterministically), which is now ROOT-CAUSED AND FIXED on the turmeric
+  side: an uninitialized `TypeClassMethod.refine_class_binding` memo field
+  read recycled arena junk on the second in-process compile (resolved report:
+  turmeric `docs/archive/refined-multi-compile-memory-corruption.md`; found
+  via the executed arena debug-poisoning/guard plan). A second crash of the
+  same class (defdata error path leaving junk ctor slots -- what crashed the
+  full ecs suite runner on the known sized-* skew failures) was fixed the
+  same day. The refined tests now live FLAT in `tests/` and auto-run with
+  everything else: `tur test tests` completes with all 6 refined tests
+  passing (suite tally 64 tests / 41 passed / 23 failed -- the 23 are the
+  pre-existing `(Storage T)` skew set, none refined).
 
 - **RE1 (c) -- for-each aliveness refinement, PROVEN.** A refined LOOP whose
   body's `rgworld-get-x!` discharges per-entity works:
-  `tests/refined/refined-loop-alive.tur` -- 1 proven, runs -> 40, correctly skips
+  `tests/refined-loop-alive.tur` -- 1 proven, runs -> 40, correctly skips
   a despawned entity. It uses tail recursion (TCO'd) + a re-borrow of `w` inside
   the recursive helper + the `alive?` guard (the `while`+`set!` form is blocked
   by the loop counter's `set!` tripping the crossing path-cond collector's
@@ -91,8 +97,8 @@ backing liveness/component handles and the raw unwrap are PRIVATE.
 Validated cross-module (the accessor + measure live in the module; the importer
 guards in ITS OWN `frozen` region):
 
-- `tests/refined/module-alive-frozen.tur` -- **1 proven**, runs -> `42`.
-- `tests/errors/refined-module-no-region.tur` -- no region -> **TUR-W0372**.
+- `tests/refined-module-alive-frozen.tur` -- **1 proven**, runs -> `42`.
+- `tests/refined-module-no-region.tur` -- no region -> **TUR-W0372**.
 
 **Trust boundary (also on the module docstring).** `RGWorld` is an opaque affine
 handle, so a `frozen` borrow locks out its `^unique ^mut` mutators (`TUR-E0200`)
