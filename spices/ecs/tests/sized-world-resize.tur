@@ -48,13 +48,13 @@
 
 (import ecs/sized-storage :refer [SizedDense sized-dense-set!
                                    sized-dense-get])
-(import ecs/sized-world   :refer [sized-defworld
+(import ecs/sized-world   :refer [WorldState sized-defworld
                                    sized-defworld-copy-into
                                    sized-defworld-world-resize
                                    sized-spawn! sized-despawn
                                    sized-alive? sized-live])
 (import ecs/sized-query   :refer [sized-for-each])
-(import ecs/entity        :refer [entity-index])
+(import ecs/entity        :refer [entity-index slot->int])
 
 (defopaque Pos :int)
 
@@ -70,10 +70,10 @@
             e2 (sized-spawn! (.state src))
             e3 (sized-spawn! (.state src))]
         (do
-          (sized-dense-set! (.Pos src) (entity-index e0) (:: 0  :Pos))
-          (sized-dense-set! (.Pos src) (entity-index e1) (:: 10 :Pos))
-          (sized-dense-set! (.Pos src) (entity-index e2) (:: 20 :Pos))
-          (sized-dense-set! (.Pos src) (entity-index e3) (:: 30 :Pos))
+          (sized-dense-set! (.Pos src) (slot->int (entity-index e0)) (:: 0  :Pos))
+          (sized-dense-set! (.Pos src) (slot->int (entity-index e1)) (:: 10 :Pos))
+          (sized-dense-set! (.Pos src) (slot->int (entity-index e2)) (:: 20 :Pos))
+          (sized-dense-set! (.Pos src) (slot->int (entity-index e3)) (:: 30 :Pos))
           ;; Despawn e1 -- bumps gens[1] in src, so e1 must stay dead in
           ;; the resized world even though we never touch its gens.
           (sized-despawn (.state src) e1)

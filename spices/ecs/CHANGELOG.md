@@ -4,6 +4,40 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **RE0 -- real handle types at the ECS API surface (retire `:int`
+  stand-ins)** -- per `docs/upcoming/v1/ecs-refinement-typed-apis-plan.md`
+  (phase RE0). The entity-bookkeeping surface no longer erases distinct
+  kinds of value to a bare `:int`:
+  - `ecs/entity` gains `Slot` and `Generation` `defopaque` newtypes
+    alongside `Entity`. `entity-new` takes `(Slot, Generation)` and
+    returns `Entity`; `entity-index` returns `Slot`; `entity-generation`
+    returns `Generation`; `entity=?` takes `Entity` on both sides;
+    `ENTITY_NIL` is an `Entity`. `slot->int` / `generation->int` recover
+    the raw machine integer for the terminal cases (printing, indexing an
+    int-keyed storage), and `slot-new` / `generation-new` tag a raw int.
+  - `ecs/sized-world` gains a `WorldState` `defopaque` for the malloc'd
+    control block: `sized-state-new` returns `WorldState`; every public
+    `s : int` state-cell parameter (`sized-state-free`, `sized-live`,
+    `sized-cap`, `sized-state-copy-into`, `sized-spawn!`, `sized-spawn`,
+    `sized-despawn`, `sized-alive?`, `sized-slot-generation`) is now
+    `WorldState`, and the `state` field emitted by `sized-defworld` /
+    `sized-defworld-mono` is `WorldState`. `sized-spawn!` returns
+    `Entity`; `sized-spawn` returns `(Result Entity WorldFull)`;
+    `sized-despawn` / `sized-alive?` take `Entity`; `sized-slot-generation`
+    takes `Slot` and returns `Generation`. The `__sized-state-*-raw`
+    inline-C helpers stay `:int` internally; the typed wrappers unwrap at
+    the boundary via `worldstate->int`.
+  - `ecs/world`: `world-alloc-entity!` returns `Entity`; `world-despawn!`
+    takes `Entity`. (The world's `gens` vector is still an `:int`
+    carrier, and the `defcomponent-accessors` slot parameter is still a
+    bare `:int` storage index -- lifting the storage layer to `Slot` is a
+    separate change.)
+  - Negative regression: `tests/errors/slot-not-entity.tur` -- a `Slot`
+    passed where an `Entity` is required fails to elaborate
+    (`TUR-E0001: expected Entity, got Slot`).
+
 ### Added
 
 - **Cross-world followups (CAP-V0, CLAUSE-V0, GEN-V0, MULTI-MIR-V0,

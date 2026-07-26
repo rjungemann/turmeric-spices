@@ -28,9 +28,9 @@
 (defmodule sized_world_spawn_test
   (export)
 
-(import ecs/entity        :refer [entity-index])
+(import ecs/entity        :refer [entity-index slot->int])
 (import ecs/sized-storage :refer [SizedDense])
-(import ecs/sized-world   :refer [sized-defworld
+(import ecs/sized-world   :refer [WorldState sized-defworld
                                    sized-spawn! sized-despawn
                                    sized-live sized-cap])
 
@@ -50,10 +50,10 @@
             e2 (sized-spawn! (.state w))
             e3 (sized-spawn! (.state w))]
         (do
-          (println (entity-index e0))                  ;; 0
-          (println (entity-index e1))                  ;; 1
-          (println (entity-index e2))                  ;; 2
-          (println (entity-index e3))                  ;; 3
+          (println (slot->int (entity-index e0)))      ;; 0
+          (println (slot->int (entity-index e1)))      ;; 1
+          (println (slot->int (entity-index e2)))      ;; 2
+          (println (slot->int (entity-index e3)))      ;; 3
           (println (sized-live (.state w)))            ;; 4
           ;; The pre-check pattern callers should use today:
           (println (= (sized-live (.state w))
