@@ -1,0 +1,108 @@
+;;; ecs/freeze -- B1: a linear despawn capability + frozen-region combinator.
+;;;
+;;; Realizes phase **B1** of the stateful-refinement plan
+;;; (`turmeric/docs/upcoming/v1/refine-stateful-measures-plan.md`, gap C2):
+;;; a **declared, checked** gate on world mutation, built from the SHIPPED
+;;; substructural machinery (a linear capability) rather than a new effect
+;;; row. RM-S0 established that the linear caps `ecs/cap` already ships express
+;;; exactly the "a mutator is uncallable inside a frozen region" property that
+;;; Candidate B needs -- the same mechanism `defsystem` uses to make "writing a
+;;; component you did not declare" a compile error -- so B1 needs no VC work and
+;;; no new language row.
+;;;
+;;; The shape:
+;;;
+;;;   - `DespawnCap<W>` is a `:linear` authority to despawn from world `W`. A
+;;;     despawn is gated on holding one (see the cap-gated despawn pattern in
+;;;     `tests/freeze-region.tur`).
+;;;   - `with-frozen` runs a body in a region that has *borrowed* the cap away.
+;;;     While borrowed, the cap cannot be consumed, so any cap-gated despawn
+;;;     inside the body fails to elaborate (`TUR-E0101`) -- a compile error, not
+;;;     a runtime check. After the region returns, the cap is usable again.
+;;;
+;;; **Non-forgeability is a usage discipline at B1.** The freeze is only as
+;;; airtight as the caps are scarce: mint `DespawnCap<W>` once, at world
+;;; construction, and thread it; do not expose the minter to frame code or
+;;; re-mint mid-frame. B2 formalizes the region as a language form whose entry
+;;; owns the world's unique cap; B3 links "the cap is frozen in this scope" to
+;;; "a measure over `W` is congruent here" (the actual refinement payoff), gated
+;;; behind `--enable=refined`. B1 stands on its own: it is a substructural
+;;; feature with no refinement interaction.
+;;;
+;;; Since: B1 (RM-S2)
+
+(defmodule ecs/freeze
+  (export DespawnCap mint-despawn-cap with-frozen)
+
+;;; DespawnCap<W> -- linear authority to despawn entities from world `W`.
+;;;
+;;; Phantom `W` ties the capability to one world type, so a
+;;; `DespawnCap<GameWorld>` cannot gate a despawn on some other world. Linear:
+;;; a cap-gated despawn consumes it and threads a fresh one back, so exactly
+;;; one despawn authority is live at a time and a frozen region that borrows it
+;;; away leaves none in scope.
+;;;
+;;; Since: B1
+(defopaque DespawnCap [W] :int :linear)
+
+;;; mint-despawn-cap -- create the despawn authority for a world.
+;;;
+;;; Intended to be called ONCE, at world construction, and threaded from there;
+;;; re-minting mid-frame defeats the freeze (the region borrows one cap, but a
+;;; fresh mint is a second authority the region never froze). The runtime value
+;;; is an unused placeholder -- the capability lives entirely in the type
+;;; system, like `ecs/cap`'s `WriteCap`.
+;;;
+;;; Parameters:
+;;;   (none)
+;;;
+;;; Returns:
+;;;   A fresh `^linear` `DespawnCap<W>`; `W` is inferred from the call site's
+;;;   expected type or ascription.
+;;;
+;;; Example:
+;;;   (let [dc (:: (mint-despawn-cap) (DespawnCap GameWorld))] ...)
+;;;
+;;; Since: B1
+(defn mint-despawn-cap [W] [] : (DespawnCap W)
+  ```c
+  return (int64_t)0;
+  ```)
+
+;;; with-frozen -- run `body` in a region that has borrowed the despawn cap.
+;;;
+;;; The cap is passed `^borrow`, so for the duration of `body` it is not
+;;; consumable -- any cap-gated despawn reached from `body` (which would have to
+;;; consume a `DespawnCap<W>`) fails to elaborate. The body therefore runs
+;;; against a world that provably cannot despawn, which is the region B3 will
+;;; treat as a congruence window. After `with-frozen` returns, the caller's cap
+;;; is usable again (the borrow has ended).
+;;;
+;;; **Monomorphic body result (`: int`) -- deliberate, B1-only.** The natural
+;;; signature is polymorphic in the body's result, `[W R] ... body : (fn [] R)`,
+;;; but a capturing closure invoked through a HOF whose result is a *type
+;;; variable* currently miscompiles to a runtime crash (SIGBUS) -- a codegen
+;;; bug unrelated to freezing, filed at
+;;; `docs/reported/poly-result-hof-capturing-closure-sigbus.md`. A concrete
+;;; `int` result compiles and runs. A read-only region returning `int` (a
+;;; count, a found index, a 0/1 result) covers the B1 demonstration; the
+;;; general form waits on that codegen fix (or on B2 making the region a
+;;; first-class language form rather than a HOF). Keep `W` polymorphic -- only
+;;; the *result* tyvar triggers the bug, and the cap's `W` must stay generic.
+;;;
+;;; Parameters:
+;;;   tok  -- the world's despawn cap, borrowed for the region
+;;;   body -- a thunk run inside the frozen region, returning an `int`
+;;;
+;;; Returns:
+;;;   Whatever `body` returns.
+;;;
+;;; Example:
+;;;   (with-frozen dc (fn [] : int (read-count w)))
+;;;
+;;; Since: B1
+(defn with-frozen [W]
+                  [^borrow tok : (DespawnCap W) body : (fn [] int)] : int
+  (body))
+
+) ;; end defmodule ecs/freeze

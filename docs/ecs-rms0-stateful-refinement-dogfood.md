@@ -212,3 +212,39 @@ TUR_REFINE_STATS=1 "$TUR" --enable=refined run <file>.tur
 ```
 
 Observed: A.1 -> `1 proven`; A.2 -> `1 unknown`; A.3 -> `1 unknown`.
+
+---
+
+## Update -- B1 landed (Candidate B, first slice)
+
+Decision: build Candidate B. **B1 -- the declared, checked mutation gate --
+ships as `ecs/freeze`, and needs no new compiler feature.** Probing the shipped
+substructural machinery showed it already expresses the frozen-region property:
+
+- `DespawnCap<W>` is a `:linear` capability (same shape as `ecs/cap`'s
+  `WriteCap`). A despawn is gated on consuming one.
+- `with-frozen` borrows the cap for a region body. While borrowed the cap is
+  not consumable, so a cap-gated despawn inside the region **fails to
+  elaborate** -- `TUR-E0101: linear value used after being consumed`. A compile
+  error, not a runtime check, and it is the type system's, not a library's.
+
+Tests: `tests/freeze-region.tur` (positive: freeze, read, despawn allowed
+after) and `tests/errors/freeze-despawn-in-region.tur` (negative: despawn in
+region rejected). This is the plan's RM-S2 item 1 realized as a linear cap
+rather than an effect row -- lower-risk, and it hands B3 a concrete type-level
+fact (cap frozen here) to key congruence off.
+
+Two caveats carried into B2:
+
+1. **Non-forgeability is a usage discipline at B1.** The freeze is only as tight
+   as the cap is scarce: mint `DespawnCap<W>` once at world construction and
+   thread it. B2's region *form* makes this structural (its entry owns the
+   world's unique cap).
+2. **The ergonomic region HOF hit a codegen bug.** The natural polymorphic
+   `with-frozen [W R] ... body : (fn [] R) : R` SIGBUSes when the region body is
+   a *capturing* closure (the common case), because a HOF with a **type-variable
+   result** miscompiles captured closures -- filed at
+   `turmeric/docs/reported/poly-result-hof-capturing-closure-sigbus.md`. Worked
+   around by fixing the body result to `int`. B2 should make the region a
+   first-class language form (not a polymorphic HOF), or that bug must be fixed
+   first.

@@ -1,0 +1,35 @@
+;; B1 (RM-S2) negative: a cap-gated despawn INSIDE a frozen region must fail to
+;; elaborate. `with-frozen` borrows the world's linear DespawnCap for the
+;; region body, so the body cannot consume it -- and a despawn that needs to
+;; consume a DespawnCap is therefore uncallable inside the region.
+;;
+;; Expected: TUR-E0101 -- linear value used after being consumed (the cap is
+;; borrowed by with-frozen for the region; the body cannot also consume it).
+
+(defmodule freeze_despawn_in_region_test
+  (export)
+
+(import ecs/entity :refer [Entity entity-new slot-new generation-new])
+(import ecs/freeze :refer [DespawnCap mint-despawn-cap with-frozen])
+
+(defstruct World [n : int])
+
+(defn guarded-despawn! [^linear tok : (DespawnCap World) e : Entity]
+                      : (DespawnCap World)
+  ```c
+  (void)e; return tok;
+  ```)
+(defn drop-cap [^linear tok : (DespawnCap World)] : nil
+  ```c
+  (void)tok;
+  ```)
+
+(defn main [] : int
+  (let [dc (:: (mint-despawn-cap) (DespawnCap World))
+        e  (entity-new (slot-new 0) (generation-new 0))]
+    (let [r (with-frozen dc (fn [] : int
+              ;; ERROR: despawn inside the frozen region -- cap unavailable.
+              (do (drop-cap (guarded-despawn! dc e)) 0)))]
+      (do (drop-cap dc) 0))))
+
+) ;; end defmodule freeze_despawn_in_region_test
