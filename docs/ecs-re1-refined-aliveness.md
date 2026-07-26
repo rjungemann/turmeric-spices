@@ -67,8 +67,12 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
   a despawned entity. It uses tail recursion (TCO'd) + a re-borrow of `w` inside
   the recursive helper + the `alive?` guard (the `while`+`set!` form is blocked
   by the loop counter's `set!` tripping the crossing path-cond collector's
-  whole-body `mentions_set` decline -- the C3-adjacent gap). An ergonomic
-  `for-each-alive` macro needs the compiler order-aware-`set!` fix.
+  whole-body `mentions_set` decline). NOTE: local recursion via named-let
+  (`(let go [...] ...)`) or `letrec` also works and discharges, so the recursive
+  form is fully available by hand. An ergonomic `for-each-alive` MACRO is blocked
+  on a separate bug -- a macro that GENERATES a refined guard/crossing does not
+  discharge (turmeric
+  `docs/reported/macro-generated-refined-crossings-do-not-discharge.md`).
 - **Promotion to a shipped accessor family.** These fixtures use a self-contained
   `GameWorld` facade. Promoting to a real `ecs` module means a facade that owns a
   `WorldState` + storages and re-exports `alive?`/`despawn!`/`get!` with the
