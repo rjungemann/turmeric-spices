@@ -1,0 +1,95 @@
+;;; ecs/refined-world -- an aliveness-refined world facade (RE1 / gap C2).
+;;;
+;;; A `RGWorld` owns an opaque liveness array and one component column. Its
+;;; accessor `rgworld-get-x!` will not compile against an entity whose liveness
+;;; has not been established in a `frozen` region: the entity parameter carries
+;;; `#refine{ x : Entity | (rgworld-alive? w x) }`, and `rgworld-alive?` reads
+;;; liveness through the opaque handle (so it is impure and carries `#reads w`).
+;;; `rgworld-despawn!` takes `^unique ^mut w`, so a `frozen` borrow makes it
+;;; uncallable in the region -- which is what lets the guard discharge soundly.
+;;;
+;;; TRUST BOUNDARY (read this). The guarantee -- "no despawn of `w` can happen
+;;; inside `(frozen w ...)`" -- holds for callers that reach `w` only through
+;;; this module's API. It does NOT survive the `::` coercing cast or inline-C:
+;;; `(:: w :int)` unwraps the backing handle and `(:: that-int RGWorld)`
+;;; reconstructs an ALIAS whose `rgworld-despawn!` is not the borrowed `w`, so a
+;;; caller that deliberately does that can despawn inside the region. That is the
+;;; same escape hatch inline-C already is, and the same trusted boundary the
+;;; whole `#reads` feature rests on (a wrong claim costs a lint, and here a
+;;; hand-written `::`/inline-C bypass costs the region's guarantee) -- not a
+;;; guarantee against adversarial code. Turmeric has no way today to make a
+;;; carrier-typed handle non-reconstructable, so the accessor is congruence +
+;;; a compile-time guard for ordinary code, not a capability that survives `::`.
+;;;
+;;; Since: RE1 2026-07-26
+(defmodule ecs/refined-world
+  (export RGWorld rgworld-new rgworld-spawn! rgworld-despawn!
+          rgworld-alive? rgworld-get-x! rgworld-set-x!)
+
+(import ecs/entity :refer [Entity entity-new entity-index entity-generation
+                           slot-new slot->int generation-new generation->int])
+
+;; opaque backing: a malloc'd block of { gens[CAP]; xs[CAP]; next }.
+(defn rgw-alloc [] #fx{} : int
+  ```c
+  int64_t* b = (int64_t*)calloc(129, sizeof(int64_t)); /* 64 gens, 64 xs, 1 next */
+  return (int64_t)(intptr_t)b;
+  ```)
+(defn rgw-gen [ctrl : int idx : int] #fx{} : int
+  ```c
+  int64_t* b = (int64_t*)(intptr_t)ctrl; return b[idx];
+  ```)
+(defn rgw-bump [ctrl : int idx : int] #fx{} : int
+  ```c
+  int64_t* b = (int64_t*)(intptr_t)ctrl; b[idx]++; return 0;
+  ```)
+(defn rgw-xget [ctrl : int idx : int] #fx{} : int
+  ```c
+  int64_t* b = (int64_t*)(intptr_t)ctrl; return b[64 + idx];
+  ```)
+(defn rgw-xset [ctrl : int idx : int v : int] #fx{} : int
+  ```c
+  int64_t* b = (int64_t*)(intptr_t)ctrl; b[64 + idx] = v; return 0;
+  ```)
+(defn rgw-next [ctrl : int] #fx{} : int
+  ```c
+  int64_t* b = (int64_t*)(intptr_t)ctrl; int64_t s = b[128]; b[128] = s + 1; return s;
+  ```)
+
+;; The world is an OPAQUE affine handle: a `frozen` borrow locks out its
+;; `^unique ^mut` mutators (verified: TUR-E0200), and -- being opaque -- callers
+;; can neither read its backing handle nor reconstruct an alias of it, which is
+;; what closes the extract-reconstruct-despawn aliasing hole a plain defstruct
+;; field would open. `rgw-ctrl` (the internal unwrap) is PRIVATE.
+(defopaque RGWorld :int)
+
+(defn rgw-ctrl [w : RGWorld] #fx{} : int
+  ```c
+  return (int64_t)w;
+  ```)
+
+(defn rgworld-new [] : RGWorld
+  (:: (rgw-alloc) RGWorld))
+
+(defn rgworld-spawn! [^unique ^mut w : RGWorld x0 : int] : Entity
+  (let [slot (rgw-next (rgw-ctrl w))
+        _    (rgw-xset (rgw-ctrl w) slot x0)]
+    (entity-new (slot-new slot) (generation-new (rgw-gen (rgw-ctrl w) slot)))))
+
+(defn rgworld-despawn! [^unique ^mut w : RGWorld e : Entity] : int
+  (rgw-bump (rgw-ctrl w) (slot->int (entity-index e))))
+
+;; alive? reads liveness through the opaque handle -> impure -> #reads w.
+(defn rgworld-alive? [^borrow w : RGWorld e : Entity] #reads w : bool
+  (= (rgw-gen (rgw-ctrl w) (slot->int (entity-index e)))
+     (generation->int (entity-generation e))))
+
+;; the refined accessor: its entity must be proven alive.
+(defn rgworld-get-x! [^borrow w : RGWorld
+                      e : #refine{ x : Entity | (rgworld-alive? w x) }] : int
+  (rgw-xget (rgw-ctrl w) (slot->int (entity-index e))))
+
+(defn rgworld-set-x! [^unique ^mut w : RGWorld e : Entity v : int] : int
+  (rgw-xset (rgw-ctrl w) (slot->int (entity-index e)) v))
+
+) ;; end module

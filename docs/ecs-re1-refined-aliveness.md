@@ -60,3 +60,27 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
   encapsulation (private state field) the soundness argument needs.
 - **`for-each` bodies** carrying the aliveness refinement (RE1 item 2) -- the
   highest-value version, deferred.
+
+## Shipped accessor module: `ecs/refined-world` (2026-07-26)
+
+The `GameWorld` facade above is promoted to a real, reusable module,
+`ecs/refined-world` (registered in `build.tur :exports`). It exports `RGWorld`
+plus `rgworld-new` / `rgworld-spawn!` / `rgworld-despawn!` (`^unique ^mut`) /
+`rgworld-alive?` (`#reads`) / `rgworld-get-x!` (refined) / `rgworld-set-x!`. The
+backing liveness/component handles and the raw unwrap are PRIVATE.
+
+Validated cross-module (the accessor + measure live in the module; the importer
+guards in ITS OWN `frozen` region):
+
+- `tests/refined/module-alive-frozen.tur` -- **1 proven**, runs -> `42`.
+- `tests/errors/refined-module-no-region.tur` -- no region -> **TUR-W0372**.
+
+**Trust boundary (also on the module docstring).** `RGWorld` is an opaque affine
+handle, so a `frozen` borrow locks out its `^unique ^mut` mutators (`TUR-E0200`)
+for ordinary code. But `::` is a coercing cast: `(:: w :int)` unwraps the backing
+handle and `(:: int RGWorld)` reconstructs an alias, so a caller that deliberately
+does that -- or uses inline-C -- can despawn inside the region. That is the same
+escape hatch inline-C already is and the same trusted boundary `#reads` rests on;
+a hard adversarial guarantee would need a language feature (module-private
+construction / a `::`-sealed newtype). Filed as
+`turmeric/docs/reported/frozen-region-aliasing-via-coercing-cast.md`.
