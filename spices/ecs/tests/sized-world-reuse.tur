@@ -33,9 +33,9 @@
 (defmodule sized_world_reuse_test
   (export)
 
-(import ecs/entity        :refer [entity-index])
+(import ecs/entity        :refer [Entity entity-index slot->int])
 (import ecs/sized-storage :refer [SizedDense])
-(import ecs/sized-world   :refer [sized-defworld
+(import ecs/sized-world   :refer [WorldState sized-defworld
                                    sized-spawn! sized-despawn
                                    sized-live sized-cap])
 
@@ -50,7 +50,7 @@
 ;; honest after slice 4c. Against a slice-4 world this loop would
 ;; abort on the second iteration: there is no free-list to pop, so
 ;; spawn would advance `next` past `cap`.
-(defn recycle-loop [s : int e : int rounds : int] : int
+(defn recycle-loop [s : WorldState e : Entity rounds : int] : int
   (if (<= rounds 0)
     (sized-live s)
     (recycle-loop s
@@ -65,14 +65,14 @@
           e1 (sized-spawn! (.state w))                  ;; entity-index = 1
           e2 (sized-spawn! (.state w))]                 ;; entity-index = 2
       (do
-        (println (entity-index e0))                     ;; 0
-        (println (entity-index e1))                     ;; 1
-        (println (entity-index e2))                     ;; 2
+        (println (slot->int (entity-index e0)))         ;; 0
+        (println (slot->int (entity-index e1)))         ;; 1
+        (println (slot->int (entity-index e2)))         ;; 2
         (println (sized-live (.state w)))               ;; 3
         (println (sized-despawn (.state w) e1))         ;; true
         (println (sized-live (.state w)))               ;; 2
         (let [e1b (sized-spawn! (.state w))]            ;; reuses slot 1
-          (println (entity-index e1b))                  ;; 1 (slot id reused)
+          (println (slot->int (entity-index e1b)))      ;; 1 (slot id reused)
           (println (sized-live (.state w)))             ;; 3
           ;; Despawn slot-0 and slot-2 to make a two-slot free-list.
           (sized-despawn (.state w) e0)
@@ -83,8 +83,8 @@
           (let [r1 (sized-spawn! (.state w))
                 r0 (sized-spawn! (.state w))]
             (println (sized-live (.state w)))           ;; 3
-            (if (and (= (entity-index r1) 2)
-                     (= (entity-index r0) 0))
+            (if (and (= (slot->int (entity-index r1)) 2)
+                     (= (slot->int (entity-index r0)) 0))
               (do (println "ok") 0)
               (do (println "FAIL") 1))
             ;; Hammer many despawn/spawn cycles to prove the

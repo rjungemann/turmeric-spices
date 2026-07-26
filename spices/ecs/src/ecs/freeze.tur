@@ -1,0 +1,66 @@
+;;; ecs/freeze -- sound frozen-region form for the B-track (gap C2).
+;;;
+;;; `(frozen w body...)` runs `body` while holding an immutable borrow of the
+;;; owned world `w`. Any despawn declared `[^unique ^mut w : World ...]` is then
+;;; **statically uncallable** inside the region: passing `w` as `^unique ^mut`
+;;; while a borrow of it is live is `TUR-E0200` ("active borrow exists"). A
+;;; compile error, not a runtime check -- and, unlike the earlier capability
+;;; sketch, a **sound** one:
+;;;
+;;;   - There is no capability to mint or alias. The despawn authority is the
+;;;     world's own exclusive-mutable access (`^unique ^mut`), which cannot be
+;;;     forged from a shared borrow, so the "mint a second cap inside the
+;;;     region" hole that sank the `DespawnCap` design simply does not exist.
+;;;   - `frozen` cannot despawn *this* world, and despawning some *other* world
+;;;     does not touch `w`. So "no despawn of `w` here" is a real guarantee.
+;;;   - The body is elaborated **inline** (it is a `let` body, not a closure),
+;;;     so the region is visible to the refinement encoder -- the property B3
+;;;     needs to make a measure over `w` congruent inside the region.
+;;;
+;;; This is the design the 2026-07-26 cap-uniqueness investigation arrived at
+;;; (see `turmeric/docs/upcoming/v1/refine-stateful-measures-plan.md`). It
+;;; replaces the `DespawnCap` / `with-frozen` capability sketch (B1/B2), which
+;;; carried an unclosable aliasing hole.
+;;;
+;;; Requirements at the call site:
+;;;   - `w` is an OWNED, `^mut` local -- the caller holds the world by value
+;;;     (`(let [^mut w (make-world ...)] ...)`), not a `^borrow` of someone
+;;;     else's. Exclusive ownership is what makes the borrow meaningful.
+;;;   - despawn is declared `[^unique ^mut w : World ...]`. Read-only accessors
+;;;     stay `[^borrow w : World ...]` and remain callable inside the region
+;;;     (multiple immutable borrows coexist).
+;;;
+;;; Since: B-track (RM-S2), sound-region rework 2026-07-26
+
+(defmodule ecs/freeze
+  (export frozen)
+
+;;; frozen -- run `body...` in a region that holds an immutable borrow of the
+;;; owned world `w`, making any `^unique ^mut`-gated despawn of `w` a compile
+;;; error inside the region.
+;;;
+;;; Expands to a `let` that binds a live borrow of `w` around the body:
+;;;
+;;;   (frozen w
+;;;     (read-count w))          ;; ok; despawn! w here => TUR-E0200
+;;;
+;;; lowers to
+;;;
+;;;   (let [__frozen-borrow (& w)]
+;;;     (read-count w))
+;;;
+;;; The borrow is unused by name but stays active for the `let` body's scope,
+;;; which is what the borrow checker conflicts a `^unique ^mut` pass against.
+;;; The region's value is the value of `body`'s last form (any type -- no HOF,
+;;; so none of the polymorphic-result codegen limitation the capability sketch
+;;; had). After the region the borrow is released and despawn is allowed again.
+;;;
+;;; Nesting is fine: two `frozen` on the same world add two immutable borrows,
+;;; which coexist; on different worlds they are independent.
+;;;
+;;; Since: sound-region rework 2026-07-26
+(defmacro frozen [w & body]
+  `(let [__frozen-borrow (& ~w)]
+     ~@body))
+
+) ;; end defmodule ecs/freeze

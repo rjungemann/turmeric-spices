@@ -27,9 +27,9 @@
 (defmodule sized_world_spawn_result_test
   (export)
 
-(import ecs/entity        :refer [entity-index])
+(import ecs/entity        :refer [entity-index slot->int])
 (import ecs/sized-storage :refer [SizedDense])
-(import ecs/sized-world   :refer [sized-defworld
+(import ecs/sized-world   :refer [WorldState sized-defworld
                                    sized-spawn sized-despawn
                                    sized-live WorldFull])
 
@@ -44,9 +44,9 @@
           r2 (sized-spawn (.state w))]
       (do
         (println (ok? r0))                       ;; true
-        (println (entity-index (ok-val r0)))     ;; 0
+        (println (slot->int (entity-index (ok-val r0))))     ;; 0
         (println (ok? r1))                       ;; true
-        (println (entity-index (ok-val r1)))     ;; 1
+        (println (slot->int (entity-index (ok-val r1))))     ;; 1
         (println (err? r2))                      ;; true (world full)
         (println (sized-live (.state w)))        ;; 2
         ;; Free slot 0; the next spawn recovers without aborting.
@@ -54,7 +54,7 @@
         (let [r3 (sized-spawn (.state w))]
           (do
             (println (ok? r3))                   ;; true
-            (println (entity-index (ok-val r3))) ;; 0 (reused slot)
+            (println (slot->int (entity-index (ok-val r3)))) ;; 0 (reused slot)
             (println (sized-live (.state w)))    ;; 2
             0))))))
 

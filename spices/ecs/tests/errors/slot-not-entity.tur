@@ -1,0 +1,26 @@
+;; RE0 negative regression: a `Slot` is not an `Entity`.
+;;
+;; Before RE0 the ecs surface typed slot indices, generation counters and
+;; packed entity handles all as bare `:int`, so nothing stopped a caller
+;; from feeding a raw slot index into an entity-shaped API -- a refinement
+;; (or any nominal check) on `:int` is a check on everything at once.
+;;
+;; RE0 gives them distinct `defopaque` newtypes. `entity-index` unpacks an
+;; `Entity` to its `Slot`; passing that `Slot` back where an `Entity` is
+;; required must fail to elaborate.
+;;
+;; Expected: TUR-E0001 -- function 'entity=?' arg 2: expected Entity, got Slot.
+
+(defmodule slot_not_entity_test
+  (export)
+
+(import ecs/entity :refer [Entity Slot entity-new entity-index entity=?
+                           slot-new generation-new])
+
+(defn main [] : int
+  (let [e (entity-new (slot-new 0) (generation-new 0))
+        s (entity-index e)]           ;; s : Slot
+    ;; ERROR: entity=? wants an Entity on both sides; `s` is a Slot.
+    (if (entity=? e s) 0 1)))
+
+) ;; end defmodule slot_not_entity_test

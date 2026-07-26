@@ -35,7 +35,7 @@
           sized-defsystem sized-defsystem-scheduled
           sized-state-new sized-state-free sized-state-copy-into
           sized-live sized-cap
-          WorldFull
+          WorldFull WorldState
           sized-spawn! sized-spawn sized-despawn
           sized-alive? sized-slot-generation)
 
@@ -48,7 +48,31 @@
                                    defsystem--with-read-caps
                                    defsystem--with-write-caps
                                    defsystem--consume-write-caps])
-(import ecs/entity        :refer [Entity entity-new entity-index entity-generation])
+(import ecs/entity        :refer [Entity Slot Generation
+                                   entity-new entity-index entity-generation
+                                   slot->int generation->int
+                                   slot-new generation-new])
+
+;;; WorldState -- opaque handle to a sized world's malloc'd control block
+;;; (the `__ecs_state` struct: next / live / cap counters, free-list, and
+;;; per-slot generation array). Rides the int64 carrier like every other
+;;; handle here, but is a distinct newtype so the state cell can no longer
+;;; be confused with a slot index, an entity, or any other int on the
+;;; sized-world surface. The `__sized-state-*-raw` inline-C helpers stay
+;;; `:int` internally (they cast the carrier to `__ecs_state *`); the
+;;; typed wrappers below unwrap `WorldState` to the raw carrier with
+;;; `worldstate->int` at the boundary.
+;;;
+;;; Since: RE0
+(defopaque WorldState :int)
+
+;;; worldstate->int -- recover the raw carrier behind a `WorldState`, for
+;;; handing to the `__sized-state-*-raw` inline-C helpers.
+;;; Since: RE0
+(defn worldstate->int [s : WorldState] : int
+  ```c
+  return (int64_t)s;
+  ```)
 
 ;; Slice 4 shipped the panicking `sized-spawn!`; slice 12 adds the
 ;; design plan's fallible `sized-spawn : ... -> (Result int WorldFull)`
@@ -236,22 +260,22 @@
 ;;; sized-state-new -- allocate a state cell with capacity k.
 ;;; Used internally by the constructor that sized-defworld emits;
 ;;; exposed for callers that want to construct a world by hand.
-(defn sized-state-new [k : int] : int
-  (unsafe (__sized-state-new-raw k)))
+(defn sized-state-new [k : int] : WorldState
+  (:: (unsafe (__sized-state-new-raw k)) :WorldState))
 
 ;;; sized-state-free -- release a state cell.
-(defn sized-state-free [s : int] : nil
-  (unsafe (__sized-state-free-raw s)))
+(defn sized-state-free [s : WorldState] : nil
+  (unsafe (__sized-state-free-raw (worldstate->int s))))
 
 ;;; sized-live -- read the world's current live count from the
 ;;; state cell (callers pass `(.state w)`).
-(defn sized-live [s : int] : int
-  (unsafe (__sized-state-live-raw s)))
+(defn sized-live [s : WorldState] : int
+  (unsafe (__sized-state-live-raw (worldstate->int s))))
 
 ;;; sized-cap -- read the world's static capacity from the state cell.
 ;;; This is the runtime image of the world's type-level `n`.
-(defn sized-cap [s : int] : int
-  (unsafe (__sized-state-cap-raw s)))
+(defn sized-cap [s : WorldState] : int
+  (unsafe (__sized-state-cap-raw (worldstate->int s))))
 
 (defn __sized-state-copy-abort-raw [] #fx{Unsafe} : nil
   ```c
@@ -270,12 +294,14 @@
 ;;; referenced the pre-copy gens that are now overwritten).
 ;;;
 ;;; Since: E2c slice 11
-(defn sized-state-copy-into [src : int dst : int] : nil
-  (let [src-cap (unsafe (__sized-state-cap-raw src))
-        dst-cap (unsafe (__sized-state-cap-raw dst))]
+(defn sized-state-copy-into [src : WorldState dst : WorldState] : nil
+  (let [srci    (worldstate->int src)
+        dsti    (worldstate->int dst)
+        src-cap (unsafe (__sized-state-cap-raw srci))
+        dst-cap (unsafe (__sized-state-cap-raw dsti))]
     (if (< dst-cap src-cap)
       (unsafe (__sized-state-copy-abort-raw))
-      (unsafe (__sized-state-copy-into-raw src dst)))))
+      (unsafe (__sized-state-copy-into-raw srci dsti)))))
 
 ;;; sized-spawn! -- allocate a fresh `Entity` and return its packed
 ;;; (idx, gen) handle. Aborts if the world is at capacity; callers
@@ -293,22 +319,26 @@
 ;;;
 ;;; Since: E2c slice 4 (panicking spawn over bare slot int);
 ;;; slice 4c (Entity-returning)
-(defn sized-spawn! [s : int] : int
-  (let [slot (unsafe (__sized-state-try-spawn-raw s))]
+(defn sized-spawn! [s : WorldState] : Entity
+  (let [si   (worldstate->int s)
+        slot (unsafe (__sized-state-try-spawn-raw si))]
     (if (< slot 0)
-      (unsafe (__sized-spawn-bang-abort-raw))
-      (entity-new slot (unsafe (__sized-state-gen-of-raw s slot))))))
+      (:: (unsafe (__sized-spawn-bang-abort-raw)) :Entity)
+      (entity-new (slot-new slot)
+                  (generation-new (unsafe (__sized-state-gen-of-raw si slot)))))))
 
 ;;; sized-slot-generation -- read the current generation counter
 ;;; for `slot` out of the state cell. Exposed for tests and for
 ;;; callers building hand-rolled aliveness checks on top of the
 ;;; packed Entity.
 ;;;
-;;; Returns -1 if `slot` is outside `[0, cap)`.
+;;; Returns `Generation` -1 if `slot` is outside `[0, cap)`.
 ;;;
 ;;; Since: E2c slice 4c
-(defn sized-slot-generation [s : int slot : int] : int
-  (unsafe (__sized-state-gen-of-raw s slot)))
+;;; RE0: takes a `Slot`, returns a `Generation`.
+(defn sized-slot-generation [s : WorldState slot : Slot] : Generation
+  (generation-new (unsafe (__sized-state-gen-of-raw (worldstate->int s)
+                                                    (slot->int slot)))))
 
 ;;; sized-alive? -- is the Entity handle `e` still valid against
 ;;; the world's state cell?
@@ -322,13 +352,14 @@
 ;;; uniform across both worlds.
 ;;;
 ;;; Since: E2c slice 4c
-(defn sized-alive? [s : int e : int] : bool
+(defn sized-alive? [s : WorldState e : Entity] : bool
   (let [idx (entity-index e)
         gen (entity-generation e)
-        cur (unsafe (__sized-state-gen-of-raw s idx))]
+        cur (unsafe (__sized-state-gen-of-raw (worldstate->int s)
+                                              (slot->int idx)))]
     (if (< cur 0)
       false
-      (= gen cur))))
+      (= (generation->int gen) cur))))
 
 (defn __sized-spawn-bang-abort-raw [] #fx{Unsafe} : int
   ```c
@@ -360,8 +391,8 @@
 ;; cleanly. (Same class of carrier-bridge tail-position limitation Track
 ;; A tracks; the helper split is the spice-side idiom until the
 ;; if-branched form bridges directly.)
-(defn __sized-spawn-ok  [e : int] : (Result int WorldFull) (ok e))
-(defn __sized-spawn-err []        : (Result int WorldFull)
+(defn __sized-spawn-ok  [e : Entity] : (Result Entity WorldFull) (ok e))
+(defn __sized-spawn-err []           : (Result Entity WorldFull)
   (err (:: 0 :WorldFull)))
 
 ;;; sized-spawn -- fallible counterpart of `sized-spawn!`. Allocates a
@@ -388,11 +419,13 @@
 ;;; slot id; the err arm carries a `WorldFull` marker.
 ;;;
 ;;; Since: E2c slice 12
-(defn sized-spawn [s : int] : (Result int WorldFull)
-  (let [slot (unsafe (__sized-state-try-spawn-raw s))]
+(defn sized-spawn [s : WorldState] : (Result Entity WorldFull)
+  (let [si   (worldstate->int s)
+        slot (unsafe (__sized-state-try-spawn-raw si))]
     (if (< slot 0)
       (__sized-spawn-err)
-      (__sized-spawn-ok (entity-new slot (unsafe (__sized-state-gen-of-raw s slot)))))))
+      (__sized-spawn-ok (entity-new (slot-new slot)
+                                    (generation-new (unsafe (__sized-state-gen-of-raw si slot))))))))
 
 ;;; sized-despawn -- free the slot named by Entity `e` for reuse,
 ;;; bump that slot's generation counter, and decrement `live`.
@@ -417,8 +450,10 @@
 ;;;
 ;;; Since: E2c slice 4 (signature-only); slice 4b (free-list reuse);
 ;;; slice 4c (Entity-typed; bumps generation; double-despawn-safe)
-(defn sized-despawn [s : int e : int] : bool
-  (unsafe (__sized-despawn-raw s (entity-index e) (entity-generation e))))
+(defn sized-despawn [s : WorldState e : Entity] : bool
+  (unsafe (__sized-despawn-raw (worldstate->int s)
+                               (slot->int (entity-index e))
+                               (generation->int (entity-generation e)))))
 
 (defn __sized-despawn-raw [s : int slot : int gen : int] #fx{Unsafe} : bool
   ```c
@@ -546,7 +581,7 @@
     `(do
        (defstruct ~name
          [~@(sized-mono-world-fields ~cap-expr ~comps)
-          state : int])
+          state : WorldState])
        (defn ~ctor-name [k : int] : ~name
          (make-struct ~name
                       ~@(sized-mono-ctor-args ~cap-expr ~comps)
@@ -605,7 +640,7 @@
 (defmacro sized-defworld [name comps]
   (let [ctor-name (str->sym (str-append "make-" (symbol-name name)))]
     `(do
-       (defstruct ~name [n] ~@(sized-world-fields comps) (state int))
+       (defstruct ~name [n] ~@(sized-world-fields comps) (state WorldState))
        (defn ~ctor-name [n] [k : int] : (~name n)
          (make-struct ~name
                       ~@(sized-ctor-args comps)
