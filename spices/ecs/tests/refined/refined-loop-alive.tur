@@ -1,0 +1,36 @@
+#lang turmeric refined
+;; tur-test-flags: --strict-refine
+;; RE1 (c): a REFINED LOOP -- the body's aliveness-refined accessor `rgworld-get-x!`
+;; discharges per-entity from an `alive?` guard, inside an iteration. The while+set!
+;; loop form is blocked (the loop counter's `set!` trips the whole-body mentions_set
+;; decline in the crossing path-cond collector -- the C3-adjacent gap noted in the
+;; plan), so this uses the sound shape that works today: TAIL RECURSION (TCO'd, no
+;; set!) + a re-borrow of `w` inside the helper (so `alive?` is congruent there) +
+;; the `alive?` guard (which discharges the crossing). Spawns 3 (x = 10/20/30),
+;; despawns the middle one, sums x over the alive entities.
+;; Expected output: 40
+(defmodule refined_loop_alive (export)
+(import ecs/refined-world :refer [RGWorld rgworld-new rgworld-spawn! rgworld-despawn!
+                                  rgworld-alive? rgworld-get-x!])
+(import ecs/entity :refer [Entity entity-new slot-new generation-new])
+
+(defn ent-at [i : int] : Entity (entity-new (slot-new i) (generation-new 0)))
+
+(defn sum-alive [^borrow w : RGWorld i : int cap : int acc : int] : int
+  (let [__f (& w)]                                  ;; re-borrow -> `w` frozen here
+    (if (< i cap)
+      (let [e (ent-at i)]
+        (if (rgworld-alive? w e)                    ;; guard
+          (sum-alive w (+ i 1) cap (+ acc (rgworld-get-x! w e)))   ;; discharges
+          (sum-alive w (+ i 1) cap acc)))
+      acc)))
+
+(defn main [] : int
+  (let [^mut w  (rgworld-new)
+        e0 (rgworld-spawn! w 10)
+        e1 (rgworld-spawn! w 20)
+        e2 (rgworld-spawn! w 30)]
+    (let [_ (rgworld-despawn! w e1)]
+      (println (sum-alive w 0 3 0))                 ;; 10 + 30 = 40
+      0)))
+)

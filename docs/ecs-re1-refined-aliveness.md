@@ -50,14 +50,25 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
 
 ## Remaining RE1 work
 
-- **Harness integration -- DONE (2026-07-26).** `tur test` gained per-test
-  directives (`;; tur-test-flags: --strict-refine`,
-  `;; tur-test-expect-error: TUR-W0372`). The RE1 tests are now flat in `tests/`
-  and auto-run under `tur test tests`: `tur test` reports 4 passed -- the two
-  positives ENFORCE `1 proven` (strict makes an unproven crossing a hard error),
-  the two negatives are checked expect-error tests. Files:
-  `tests/refined-alive-frozen.tur`, `tests/refined-module-alive-frozen.tur`,
-  `tests/refined-alive-no-region.tur`, `tests/refined-module-no-region.tur`.
+- **Harness integration -- tooling built; auto-run BLOCKED (2026-07-26).**
+  `tur test` gained per-test directives (`;; tur-test-flags: --strict-refine`,
+  `;; tur-test-expect-error: TUR-W0372`) -- a general, reusable feature. BUT
+  auto-running the refined tests through `tur test <dir>` surfaced a serious
+  compiler bug: compiling multiple refined files in one process corrupts memory
+  and crashes nondeterministically (turmeric
+  `docs/reported/refined-multi-compile-memory-corruption.md`). So the refined
+  tests live in `tests/refined/` (a subdir `tur test tests` does not descend
+  into) and are verified INDIVIDUALLY (`tur run`/`tur check` per file), not
+  auto-run. See `tests/refined/README.md`.
+
+- **RE1 (c) -- for-each aliveness refinement, PROVEN.** A refined LOOP whose
+  body's `rgworld-get-x!` discharges per-entity works:
+  `tests/refined/refined-loop-alive.tur` -- 1 proven, runs -> 40, correctly skips
+  a despawned entity. It uses tail recursion (TCO'd) + a re-borrow of `w` inside
+  the recursive helper + the `alive?` guard (the `while`+`set!` form is blocked
+  by the loop counter's `set!` tripping the crossing path-cond collector's
+  whole-body `mentions_set` decline -- the C3-adjacent gap). An ergonomic
+  `for-each-alive` macro needs the compiler order-aware-`set!` fix.
 - **Promotion to a shipped accessor family.** These fixtures use a self-contained
   `GameWorld` facade. Promoting to a real `ecs` module means a facade that owns a
   `WorldState` + storages and re-exports `alive?`/`despawn!`/`get!` with the
