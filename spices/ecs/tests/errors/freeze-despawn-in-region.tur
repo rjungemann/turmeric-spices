@@ -27,9 +27,10 @@
 (defn main [] : int
   (let [dc (:: (mint-despawn-cap) (DespawnCap World))
         e  (entity-new (slot-new 0) (generation-new 0))]
-    (let [r (with-frozen dc (fn [] : int
+    (let [r (with-frozen dc
               ;; ERROR: despawn inside the frozen region -- cap unavailable.
-              (do (drop-cap (guarded-despawn! dc e)) 0)))]
+              (drop-cap (guarded-despawn! dc e))
+              0)]
       (do (drop-cap dc) 0))))
 
 ) ;; end defmodule freeze_despawn_in_region_test

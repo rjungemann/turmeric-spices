@@ -248,3 +248,31 @@ Two caveats carried into B2:
    around by fixing the body result to `int`. B2 should make the region a
    first-class language form (not a polymorphic HOF), or that bug must be fixed
    first.
+
+## Update -- B2 landed (the region form)
+
+`ecs/freeze` now exports a `with-frozen` **macro** -- the region *form*:
+
+```turmeric
+(let [sum (with-frozen dc
+            (let [x (get-a w) y (get-b w)]
+              (+ x y)))]          ;; despawn in here => compile error
+  ...)                            ;; dc is usable again: with-frozen borrows,
+                                  ;; it does not consume
+```
+
+It is sugar over the `with-frozen-fn` borrow combinator (wrapping `body...` in
+the `int`-returning thunk it wants), so the call site reads as a region rather
+than a higher-order call. Entry borrows the cap -- not consumes -- so the cap
+survives the region for a later real despawn; `tests/freeze-region-reuse.tur`
+reads across a multi-statement region, returns a computed int, and despawns
+after.
+
+Why a macro and not yet a first-class special form: the `^borrow` HOF is the
+right mechanism (a *consume* cannot restore the linear cap -- `set!` on a
+consumed linear binding is itself `TUR-E0101`), but its polymorphic form hits
+the codegen crash above, so the region result is pinned to `int` (end a
+side-effect region with a trailing `0`). A `(frozen w ...)` special form -- which
+B3 could key congruence off directly -- is the eventual shape, deferred behind
+the codegen fix or B3's elaborator work rather than built twice. B3 will
+recognize the region at its `^borrow (DespawnCap W)` entry.

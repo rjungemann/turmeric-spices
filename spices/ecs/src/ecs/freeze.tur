@@ -32,7 +32,7 @@
 ;;; Since: B1 (RM-S2)
 
 (defmodule ecs/freeze
-  (export DespawnCap mint-despawn-cap with-frozen)
+  (export DespawnCap mint-despawn-cap with-frozen with-frozen-fn)
 
 ;;; DespawnCap<W> -- linear authority to despawn entities from world `W`.
 ;;;
@@ -69,26 +69,27 @@
   return (int64_t)0;
   ```)
 
-;;; with-frozen -- run `body` in a region that has borrowed the despawn cap.
+;;; with-frozen-fn -- the region primitive: run `body` while the despawn cap is
+;;; borrowed away. Prefer the `with-frozen` macro (below); this is the
+;;; underlying combinator, exported for callers that already hold a thunk.
 ;;;
 ;;; The cap is passed `^borrow`, so for the duration of `body` it is not
 ;;; consumable -- any cap-gated despawn reached from `body` (which would have to
 ;;; consume a `DespawnCap<W>`) fails to elaborate. The body therefore runs
 ;;; against a world that provably cannot despawn, which is the region B3 will
-;;; treat as a congruence window. After `with-frozen` returns, the caller's cap
-;;; is usable again (the borrow has ended).
+;;; treat as a congruence window. After it returns, the caller's cap is usable
+;;; again (the borrow has ended).
 ;;;
-;;; **Monomorphic body result (`: int`) -- deliberate, B1-only.** The natural
-;;; signature is polymorphic in the body's result, `[W R] ... body : (fn [] R)`,
-;;; but a capturing closure invoked through a HOF whose result is a *type
-;;; variable* currently miscompiles to a runtime crash (SIGBUS) -- a codegen
-;;; bug unrelated to freezing, filed at
-;;; `docs/reported/poly-result-hof-capturing-closure-sigbus.md`. A concrete
-;;; `int` result compiles and runs. A read-only region returning `int` (a
-;;; count, a found index, a 0/1 result) covers the B1 demonstration; the
-;;; general form waits on that codegen fix (or on B2 making the region a
-;;; first-class language form rather than a HOF). Keep `W` polymorphic -- only
-;;; the *result* tyvar triggers the bug, and the cap's `W` must stay generic.
+;;; **Monomorphic body result (`: int`) -- deliberate.** The natural signature
+;;; is polymorphic in the body's result, `[W R] ... body : (fn [] R)`, but a
+;;; capturing closure invoked through a HOF whose result is a *type variable*
+;;; currently miscompiles to a runtime crash (SIGBUS) -- a codegen bug unrelated
+;;; to freezing, filed at
+;;; `turmeric/docs/reported/poly-result-hof-capturing-closure-sigbus.md`. A
+;;; concrete `int` result compiles and runs. A read-only region returning `int`
+;;; (a count, a found index, a 0/1 result, or a trailing `0` for a pure
+;;; side-effect pass) covers the cases; the general form waits on that codegen
+;;; fix. Keep `W` polymorphic -- only the *result* tyvar triggers the bug.
 ;;;
 ;;; Parameters:
 ;;;   tok  -- the world's despawn cap, borrowed for the region
@@ -97,12 +98,35 @@
 ;;; Returns:
 ;;;   Whatever `body` returns.
 ;;;
-;;; Example:
-;;;   (with-frozen dc (fn [] : int (read-count w)))
-;;;
 ;;; Since: B1
-(defn with-frozen [W]
-                  [^borrow tok : (DespawnCap W) body : (fn [] int)] : int
+(defn with-frozen-fn [W]
+                     [^borrow tok : (DespawnCap W) body : (fn [] int)] : int
   (body))
+
+;;; with-frozen -- the region FORM. Run `body...` in a scope that has borrowed
+;;; the world's despawn cap, so no despawn can run inside it (a compile error,
+;;; not a runtime check). This is B2: a first-class region whose *entry borrows
+;;; the capability* and whose body B3 will treat as a congruence window --
+;;; inside it a measure over the frozen world is a function of its arguments
+;;; alone, because the world provably cannot be despawned.
+;;;
+;;; Sugar over `with-frozen-fn`: it wraps `body...` in the `int`-returning thunk
+;;; the borrow combinator wants, so the call site reads as a region rather than
+;;; a higher-order call.
+;;;
+;;;   (with-frozen dc
+;;;     (read-count w))          ;; despawn here => compile error; value is int
+;;;
+;;; expands to
+;;;
+;;;   (with-frozen-fn dc (fn [] : int (do (read-count w))))
+;;;
+;;; The body must evaluate to an `int` (see `with-frozen-fn`'s note); end a
+;;; pure side-effect region with a trailing `0`. `cap` is borrowed, not
+;;; consumed, so it is usable again after the region.
+;;;
+;;; Since: B2
+(defmacro with-frozen [cap & body]
+  `(with-frozen-fn ~cap (fn [] : int (do ~@body))))
 
 ) ;; end defmodule ecs/freeze
