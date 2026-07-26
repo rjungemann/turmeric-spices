@@ -29,6 +29,19 @@
 ;;; behind `--enable=refined`. B1 stands on its own: it is a substructural
 ;;; feature with no refinement interaction.
 ;;;
+;;; **KNOWN LIMITATION -- this cap is a stepping-stone, not the sound
+;;; foundation.** The 2026-07-26 cap-uniqueness investigation
+;;; (`turmeric/docs/upcoming/v1/refine-stateful-measures-plan.md`) showed the
+;;; discipline above CANNOT be made structural with a library value: a fresh
+;;; `DespawnCap<W>` can be minted inside a `with-frozen` region and used to
+;;; despawn (the freeze only borrows the one cap it was handed). The sound
+;;; design retires this cap entirely: declare despawn `[^unique ^mut w : World]`
+;;; and gate it with an *inline* `(frozen w ...)` region form, so a despawn is
+;;; uncallable inside a region that borrows `w` (no cap, no minting, no
+;;; regress). That form needs new compiler borrow-scope machinery. Until it
+;;; lands, treat `ecs/freeze` as a demonstration of the region *shape*, not a
+;;; use-after-despawn guarantee.
+;;;
 ;;; Since: B1 (RM-S2)
 
 (defmodule ecs/freeze
