@@ -276,3 +276,38 @@ side-effect region with a trailing `0`). A `(frozen w ...)` special form -- whic
 B3 could key congruence off directly -- is the eventual shape, deferred behind
 the codegen fix or B3's elaborator work rather than built twice. B3 will
 recognize the region at its `^borrow (DespawnCap W)` entry.
+
+## Update -- the sound `frozen` region (cap retired)
+
+The cap-uniqueness investigation (see the turmeric plan) established that the
+`DespawnCap` freeze has an **unclosable aliasing hole**: a fresh cap can be
+minted inside a region and used to despawn. The sound replacement needs **no
+capability and no compiler change**:
+
+```turmeric
+(frozen w                     ;; (let [_ (& w)] ...) -- immutable borrow of w
+  (let [x (get-a w) y (get-b w)]
+    (+ x y)))                 ;; despawn! w here => TUR-E0200
+```
+
+`(frozen w body...)` (an `ecs/freeze` macro) lowers to `(let [_ (& w)]
+body...)`. It holds an immutable borrow of the **owned** world `w` across the
+body, so a despawn declared `[^unique ^mut w : World ...]` is statically
+rejected inside (`TUR-E0200: cannot pass 'w' as ^unique ^mut -- active borrow
+exists`). This is **sound**: there is no cap to mint or alias, and exclusive
+mutable access cannot be forged from a shared borrow. Read-only accessors
+(`[^borrow w]`) coexist with the region borrow and stay callable. The body is a
+plain `let` body -- any result type (no HOF, no `int` limitation, no poly-result
+codegen crash) and *inline*, so the refinement encoder can see it (what B3
+needs).
+
+Requirements: `w` is an owned `^mut` local (a `^borrow` parameter does not
+register a UT2-visible borrow -- verified), and despawn is `[^unique ^mut w]`.
+`ecs/freeze` now exports just `frozen`; `DespawnCap` / `mint-despawn-cap` /
+`with-frozen` are retired. Tests: `tests/frozen-region.tur`,
+`tests/errors/frozen-despawn-in-region.tur`.
+
+This closes B3 blocker 3 (cap uniqueness) and blocker 1's structural obstacle
+(the region body is now inline). What remains for B3: a declared measure-over-`W`
+relation, the encoder logic to recognize the `(& w)` borrow and grant
+congruence, and the pre-existing refine runtime-check fix.

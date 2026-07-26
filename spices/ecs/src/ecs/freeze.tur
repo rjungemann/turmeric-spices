@@ -1,145 +1,66 @@
-;;; ecs/freeze -- B1: a linear despawn capability + frozen-region combinator.
+;;; ecs/freeze -- sound frozen-region form for the B-track (gap C2).
 ;;;
-;;; Realizes phase **B1** of the stateful-refinement plan
-;;; (`turmeric/docs/upcoming/v1/refine-stateful-measures-plan.md`, gap C2):
-;;; a **declared, checked** gate on world mutation, built from the SHIPPED
-;;; substructural machinery (a linear capability) rather than a new effect
-;;; row. RM-S0 established that the linear caps `ecs/cap` already ships express
-;;; exactly the "a mutator is uncallable inside a frozen region" property that
-;;; Candidate B needs -- the same mechanism `defsystem` uses to make "writing a
-;;; component you did not declare" a compile error -- so B1 needs no VC work and
-;;; no new language row.
+;;; `(frozen w body...)` runs `body` while holding an immutable borrow of the
+;;; owned world `w`. Any despawn declared `[^unique ^mut w : World ...]` is then
+;;; **statically uncallable** inside the region: passing `w` as `^unique ^mut`
+;;; while a borrow of it is live is `TUR-E0200` ("active borrow exists"). A
+;;; compile error, not a runtime check -- and, unlike the earlier capability
+;;; sketch, a **sound** one:
 ;;;
-;;; The shape:
+;;;   - There is no capability to mint or alias. The despawn authority is the
+;;;     world's own exclusive-mutable access (`^unique ^mut`), which cannot be
+;;;     forged from a shared borrow, so the "mint a second cap inside the
+;;;     region" hole that sank the `DespawnCap` design simply does not exist.
+;;;   - `frozen` cannot despawn *this* world, and despawning some *other* world
+;;;     does not touch `w`. So "no despawn of `w` here" is a real guarantee.
+;;;   - The body is elaborated **inline** (it is a `let` body, not a closure),
+;;;     so the region is visible to the refinement encoder -- the property B3
+;;;     needs to make a measure over `w` congruent inside the region.
 ;;;
-;;;   - `DespawnCap<W>` is a `:linear` authority to despawn from world `W`. A
-;;;     despawn is gated on holding one (see the cap-gated despawn pattern in
-;;;     `tests/freeze-region.tur`).
-;;;   - `with-frozen` runs a body in a region that has *borrowed* the cap away.
-;;;     While borrowed, the cap cannot be consumed, so any cap-gated despawn
-;;;     inside the body fails to elaborate (`TUR-E0101`) -- a compile error, not
-;;;     a runtime check. After the region returns, the cap is usable again.
+;;; This is the design the 2026-07-26 cap-uniqueness investigation arrived at
+;;; (see `turmeric/docs/upcoming/v1/refine-stateful-measures-plan.md`). It
+;;; replaces the `DespawnCap` / `with-frozen` capability sketch (B1/B2), which
+;;; carried an unclosable aliasing hole.
 ;;;
-;;; **Non-forgeability is a usage discipline at B1.** The freeze is only as
-;;; airtight as the caps are scarce: mint `DespawnCap<W>` once, at world
-;;; construction, and thread it; do not expose the minter to frame code or
-;;; re-mint mid-frame. B2 formalizes the region as a language form whose entry
-;;; owns the world's unique cap; B3 links "the cap is frozen in this scope" to
-;;; "a measure over `W` is congruent here" (the actual refinement payoff), gated
-;;; behind `--enable=refined`. B1 stands on its own: it is a substructural
-;;; feature with no refinement interaction.
+;;; Requirements at the call site:
+;;;   - `w` is an OWNED, `^mut` local -- the caller holds the world by value
+;;;     (`(let [^mut w (make-world ...)] ...)`), not a `^borrow` of someone
+;;;     else's. Exclusive ownership is what makes the borrow meaningful.
+;;;   - despawn is declared `[^unique ^mut w : World ...]`. Read-only accessors
+;;;     stay `[^borrow w : World ...]` and remain callable inside the region
+;;;     (multiple immutable borrows coexist).
 ;;;
-;;; **KNOWN LIMITATION -- this cap is a stepping-stone, not the sound
-;;; foundation.** The 2026-07-26 cap-uniqueness investigation
-;;; (`turmeric/docs/upcoming/v1/refine-stateful-measures-plan.md`) showed the
-;;; discipline above CANNOT be made structural with a library value: a fresh
-;;; `DespawnCap<W>` can be minted inside a `with-frozen` region and used to
-;;; despawn (the freeze only borrows the one cap it was handed). The sound
-;;; design retires this cap entirely: declare despawn `[^unique ^mut w : World]`
-;;; and gate it with an *inline* `(frozen w ...)` region form, so a despawn is
-;;; uncallable inside a region that borrows `w` (no cap, no minting, no
-;;; regress). That form needs new compiler borrow-scope machinery. Until it
-;;; lands, treat `ecs/freeze` as a demonstration of the region *shape*, not a
-;;; use-after-despawn guarantee.
-;;;
-;;; Since: B1 (RM-S2)
+;;; Since: B-track (RM-S2), sound-region rework 2026-07-26
 
 (defmodule ecs/freeze
-  (export DespawnCap mint-despawn-cap with-frozen with-frozen-fn)
+  (export frozen)
 
-;;; DespawnCap<W> -- linear authority to despawn entities from world `W`.
+;;; frozen -- run `body...` in a region that holds an immutable borrow of the
+;;; owned world `w`, making any `^unique ^mut`-gated despawn of `w` a compile
+;;; error inside the region.
 ;;;
-;;; Phantom `W` ties the capability to one world type, so a
-;;; `DespawnCap<GameWorld>` cannot gate a despawn on some other world. Linear:
-;;; a cap-gated despawn consumes it and threads a fresh one back, so exactly
-;;; one despawn authority is live at a time and a frozen region that borrows it
-;;; away leaves none in scope.
+;;; Expands to a `let` that binds a live borrow of `w` around the body:
 ;;;
-;;; Since: B1
-(defopaque DespawnCap [W] :int :linear)
-
-;;; mint-despawn-cap -- create the despawn authority for a world.
+;;;   (frozen w
+;;;     (read-count w))          ;; ok; despawn! w here => TUR-E0200
 ;;;
-;;; Intended to be called ONCE, at world construction, and threaded from there;
-;;; re-minting mid-frame defeats the freeze (the region borrows one cap, but a
-;;; fresh mint is a second authority the region never froze). The runtime value
-;;; is an unused placeholder -- the capability lives entirely in the type
-;;; system, like `ecs/cap`'s `WriteCap`.
+;;; lowers to
 ;;;
-;;; Parameters:
-;;;   (none)
+;;;   (let [__frozen-borrow (& w)]
+;;;     (read-count w))
 ;;;
-;;; Returns:
-;;;   A fresh `^linear` `DespawnCap<W>`; `W` is inferred from the call site's
-;;;   expected type or ascription.
+;;; The borrow is unused by name but stays active for the `let` body's scope,
+;;; which is what the borrow checker conflicts a `^unique ^mut` pass against.
+;;; The region's value is the value of `body`'s last form (any type -- no HOF,
+;;; so none of the polymorphic-result codegen limitation the capability sketch
+;;; had). After the region the borrow is released and despawn is allowed again.
 ;;;
-;;; Example:
-;;;   (let [dc (:: (mint-despawn-cap) (DespawnCap GameWorld))] ...)
+;;; Nesting is fine: two `frozen` on the same world add two immutable borrows,
+;;; which coexist; on different worlds they are independent.
 ;;;
-;;; Since: B1
-(defn mint-despawn-cap [W] [] : (DespawnCap W)
-  ```c
-  return (int64_t)0;
-  ```)
-
-;;; with-frozen-fn -- the region primitive: run `body` while the despawn cap is
-;;; borrowed away. Prefer the `with-frozen` macro (below); this is the
-;;; underlying combinator, exported for callers that already hold a thunk.
-;;;
-;;; The cap is passed `^borrow`, so for the duration of `body` it is not
-;;; consumable -- any cap-gated despawn reached from `body` (which would have to
-;;; consume a `DespawnCap<W>`) fails to elaborate. The body therefore runs
-;;; against a world that provably cannot despawn, which is the region B3 will
-;;; treat as a congruence window. After it returns, the caller's cap is usable
-;;; again (the borrow has ended).
-;;;
-;;; **Monomorphic body result (`: int`) -- deliberate.** The natural signature
-;;; is polymorphic in the body's result, `[W R] ... body : (fn [] R)`, but a
-;;; capturing closure invoked through a HOF whose result is a *type variable*
-;;; currently miscompiles to a runtime crash (SIGBUS) -- a codegen bug unrelated
-;;; to freezing, filed at
-;;; `turmeric/docs/reported/poly-result-hof-capturing-closure-sigbus.md`. A
-;;; concrete `int` result compiles and runs. A read-only region returning `int`
-;;; (a count, a found index, a 0/1 result, or a trailing `0` for a pure
-;;; side-effect pass) covers the cases; the general form waits on that codegen
-;;; fix. Keep `W` polymorphic -- only the *result* tyvar triggers the bug.
-;;;
-;;; Parameters:
-;;;   tok  -- the world's despawn cap, borrowed for the region
-;;;   body -- a thunk run inside the frozen region, returning an `int`
-;;;
-;;; Returns:
-;;;   Whatever `body` returns.
-;;;
-;;; Since: B1
-(defn with-frozen-fn [W]
-                     [^borrow tok : (DespawnCap W) body : (fn [] int)] : int
-  (body))
-
-;;; with-frozen -- the region FORM. Run `body...` in a scope that has borrowed
-;;; the world's despawn cap, so no despawn can run inside it (a compile error,
-;;; not a runtime check). This is B2: a first-class region whose *entry borrows
-;;; the capability* and whose body B3 will treat as a congruence window --
-;;; inside it a measure over the frozen world is a function of its arguments
-;;; alone, because the world provably cannot be despawned.
-;;;
-;;; Sugar over `with-frozen-fn`: it wraps `body...` in the `int`-returning thunk
-;;; the borrow combinator wants, so the call site reads as a region rather than
-;;; a higher-order call.
-;;;
-;;;   (with-frozen dc
-;;;     (read-count w))          ;; despawn here => compile error; value is int
-;;;
-;;; expands to
-;;;
-;;;   (with-frozen-fn dc (fn [] : int (do (read-count w))))
-;;;
-;;; The body must evaluate to an `int` (see `with-frozen-fn`'s note); end a
-;;; pure side-effect region with a trailing `0`. `cap` is borrowed, not
-;;; consumed, so it is usable again after the region.
-;;;
-;;; Since: B2
-(defmacro with-frozen [cap & body]
-  `(with-frozen-fn ~cap (fn [] : int (do ~@body))))
+;;; Since: sound-region rework 2026-07-26
+(defmacro frozen [w & body]
+  `(let [__frozen-borrow (& ~w)]
+     ~@body))
 
 ) ;; end defmodule ecs/freeze
