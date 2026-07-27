@@ -60,13 +60,13 @@
 ;;; emits transitively -- the same way `Component` / `(Storage T)` resolve.
 (import ecs/storage-ops)
 
-;; RE0: real handle types on the entity-bookkeeping surface. The world's
-;; `gens` vector is still passed as an `:int` carrier (callers hand
-;; `(.gens w)`) and the generated accessors still index storage by a bare
-;; `:int` slot (the storage layer is int-keyed; lifting it to `Slot` is a
-;; separate, storage-side change). Only the packed entity handle is lifted
-;; off `:int` here.
+;; RE0: real handle types on the entity-bookkeeping surface. The packed
+;; entity handle is `Entity`, and -- since the RE0 storage-side follow-up
+;; (2026-07-26) -- the generated accessors and the storage layer index by
+;; `Slot`, not a bare `:int`. The world's `gens` vector is still passed as
+;; an `:int` carrier (callers hand `(.gens w)`).
 (import ecs/entity :refer [Entity Slot])
+
 
 ;;; Component -- the associated-type storage class (E2d-P2).
 ;;;
