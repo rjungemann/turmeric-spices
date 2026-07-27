@@ -34,6 +34,7 @@
   (export)
 
 (import ecs/sized-storage :refer [SizedDense])
+(import ecs/xworld        :refer [defworld-box-helpers])
 (import ecs/sized-world   :refer [sized-defworld-mono
                                    sized-defcomponent-accessors-mono
                                    sized-defsystem-scheduled])
@@ -53,31 +54,10 @@
 (def Pos-cid 0)
 (def Hp-cid  1)
 
-;; Heap-box / load / free for GameWorld. The struct is { Pos:i64, Hp:i64,
-;; state:i64 } -- three int64 handles into shared heap storage -- so a
-;; by-value copy after `load-GameWorld` keeps every accessor pointed at
-;; the same underlying dense arrays and state cell. These three helpers
-;; are the per-world boilerplate `sized-defsystem-scheduled` cannot
-;; auto-generate (inline-C text is opaque to the reader; the C struct
-;; name `GameWorld` cannot be spliced from a macro).
-(defn box-GameWorld [w : GameWorld] : int
-  ```c
-  #include <stdlib.h>
-  GameWorld *p = (GameWorld *)malloc(sizeof(GameWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-
-(defn load-GameWorld [wp : int] : GameWorld
-  ```c
-  return *(GameWorld *)(intptr_t)wp;
-  ```)
-
-(defn free-GameWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((GameWorld *)(intptr_t)wp);
-  ```)
+;; Heap-box / load / free for GameWorld via the GEN-V0 macro (worlds are
+;; int64-carried, so the helpers box/unbox the world handle; loads alias
+;; the same underlying dense arrays and state cell).
+(defworld-box-helpers GameWorld)
 
 ;; physics -- writes Pos slot 0. Cap-bound: Pos-write-cap is in scope
 ;; from the macro's `defsystem--with-write-caps` lowering and is

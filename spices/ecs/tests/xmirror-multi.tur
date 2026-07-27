@@ -18,7 +18,8 @@
 
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono])
-(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
+(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono
+                                  defworld-box-helpers])
 (import ecs/xcap          :refer [XWriteCap XReadCap
                                   make-write-cap make-read-cap use-cap!])
 (import ecs/xstage        :refer [BoundXSystem bind-xsystem
@@ -52,39 +53,8 @@
 (def RSprite-cid 1)
 (def RColor-cid  2)
 
-(defn box-SimWorld [w : SimWorld] : int
-  ```c
-  #include <stdlib.h>
-  SimWorld *p = (SimWorld *)malloc(sizeof(SimWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-SimWorld [wp : int] : SimWorld
-  ```c
-  return *(SimWorld *)(intptr_t)wp;
-  ```)
-(defn free-SimWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((SimWorld *)(intptr_t)wp);
-  ```)
-
-(defn box-RenderWorld [w : RenderWorld] : int
-  ```c
-  #include <stdlib.h>
-  RenderWorld *p = (RenderWorld *)malloc(sizeof(RenderWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-RenderWorld [wp : int] : RenderWorld
-  ```c
-  return *(RenderWorld *)(intptr_t)wp;
-  ```)
-(defn free-RenderWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((RenderWorld *)(intptr_t)wp);
-  ```)
+(defworld-box-helpers SimWorld)
+(defworld-box-helpers RenderWorld)
 
 ;; One-line multi-component render extract. Each [Src Dst] pair maps a
 ;; source-world component to a target-world component. Lowers to one

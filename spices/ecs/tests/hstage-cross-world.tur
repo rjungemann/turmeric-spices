@@ -31,6 +31,7 @@
   (export)
 
 (import ecs/sized-storage :refer [SizedDense])
+(import ecs/xworld        :refer [defworld-box-helpers])
 (import ecs/sized-world   :refer [sized-defworld-mono
                                    sized-defcomponent-accessors-mono
                                    sized-defsystem-scheduled])
@@ -57,41 +58,10 @@
 (def Pos-cid 0)
 (def Hp-cid  0)
 
-;; Per-world box/load/free. As in sized-stage.tur these reference the C
-;; struct name verbatim, so they stay user-written.
-(defn box-GameWorld [w : GameWorld] : int
-  ```c
-  #include <stdlib.h>
-  GameWorld *p = (GameWorld *)malloc(sizeof(GameWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-GameWorld [wp : int] : GameWorld
-  ```c
-  return *(GameWorld *)(intptr_t)wp;
-  ```)
-(defn free-GameWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((GameWorld *)(intptr_t)wp);
-  ```)
-
-(defn box-AltWorld [w : AltWorld] : int
-  ```c
-  #include <stdlib.h>
-  AltWorld *p = (AltWorld *)malloc(sizeof(AltWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-AltWorld [wp : int] : AltWorld
-  ```c
-  return *(AltWorld *)(intptr_t)wp;
-  ```)
-(defn free-AltWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((AltWorld *)(intptr_t)wp);
-  ```)
+;; Per-world box/load/free via the GEN-V0 macro (worlds are int64-carried;
+;; the helpers box/unbox the world handle).
+(defworld-box-helpers GameWorld)
+(defworld-box-helpers AltWorld)
 
 ;; physics + physics2 both write Pos in GameWorld; combat writes Hp in
 ;; AltWorld. physics2 runs after physics (separate wave), so Pos ends 99.

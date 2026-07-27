@@ -20,7 +20,8 @@
 
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono])
-(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
+(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono
+                                  defworld-box-helpers])
 (import ecs/xcap          :refer [XWriteCap XReadCap
                                   make-write-cap make-read-cap use-cap!])
 (import ecs/xsystem       :refer [XSystem make-xsystem defxsystem])
@@ -42,41 +43,11 @@
 (def Pos-cid       0)
 (def RenderPos-cid 0)
 
-;; Per-world box/load/free (referenced by the C struct name, like
-;; sized-stage / hstage tests).
-(defn box-SimWorld [w : SimWorld] : int
-  ```c
-  #include <stdlib.h>
-  SimWorld *p = (SimWorld *)malloc(sizeof(SimWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-SimWorld [wp : int] : SimWorld
-  ```c
-  return *(SimWorld *)(intptr_t)wp;
-  ```)
-(defn free-SimWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((SimWorld *)(intptr_t)wp);
-  ```)
-
-(defn box-RenderWorld [w : RenderWorld] : int
-  ```c
-  #include <stdlib.h>
-  RenderWorld *p = (RenderWorld *)malloc(sizeof(RenderWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-RenderWorld [wp : int] : RenderWorld
-  ```c
-  return *(RenderWorld *)(intptr_t)wp;
-  ```)
-(defn free-RenderWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((RenderWorld *)(intptr_t)wp);
-  ```)
+;; Per-world box/load/free via the GEN-V0 macro (the hand-written inline-C
+;; triples this file historically carried assumed a by-value world struct
+;; ABI; worlds are int64-carried now, which the generic helpers match).
+(defworld-box-helpers SimWorld)
+(defworld-box-helpers RenderWorld)
 
 ;; The extract system: read Pos from sim slots 0,1; write RenderPos into
 ;; ren slots 0,1. Worlds in declaration order: slot 0 = sim, slot 1 = ren.
