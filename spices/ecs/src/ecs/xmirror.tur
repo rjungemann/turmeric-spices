@@ -63,6 +63,7 @@
 (defmodule ecs/xmirror
   (export defmirror)
 
+(import ecs/entity  :refer [Slot slot-new])
 (import ecs/xsystem :refer [defxsystem])
 
 ;;; defmirror -- declare a cross-world copy system.
@@ -149,8 +150,9 @@
            :writes-to   ~dstb [~to-comp]
            (let [^mut i 0]
              (while (< i ~count-expr)
-               (~setter ~wcap ~dstb i
-                 (:: (:: (~getter ~rcap ~srcb i) :int) ~to-comp))
+               (let [__sl (slot-new i)]
+                 (~setter ~wcap ~dstb __sl
+                   (:: (:: (~getter ~rcap ~srcb __sl) :int) ~to-comp)))
                (set! i (+ i 1))))))
       ;; ---------------------------------------------------------------
       ;; Multi-component path. Each entry must be a [SrcC DstC] vec;
@@ -197,8 +199,8 @@
                                            (str-append (symbol-name dstb) "-"
                                                        (symbol-name dst-c)
                                                        "-write-cap"))
-                                  stmt   `(~setter ~wcap ~dstb i
-                                            (:: (:: (~getter ~rcap ~srcb i) :int)
+                                  stmt   `(~setter ~wcap ~dstb __sl
+                                            (:: (:: (~getter ~rcap ~srcb __sl) :int)
                                                 ~dst-c))]
                               (cons stmt (stmts-of (rest es))))))]
         (let [src-comps  (src-of entries)
@@ -212,7 +214,8 @@
            :writes-to   ~dstb ~dst-comps
            (let [^mut i 0]
              (while (< i ~count-expr)
-               (do ~@copy-stmts)
+               (let [__sl (slot-new i)]
+                 (do ~@copy-stmts))
                (set! i (+ i 1))))))))))
 
 ) ;; end defmodule ecs/xmirror

@@ -18,7 +18,8 @@
 
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono])
-(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
+(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono
+                                  defworld-box-helpers])
 (import ecs/xcap          :refer [XWriteCap XReadCap
                                   make-write-cap make-read-cap use-cap!])
 (import ecs/xstage        :refer [BoundXSystem bind-xsystem
@@ -52,39 +53,8 @@
 (def RSprite-cid 1)
 (def RColor-cid  2)
 
-(defn box-SimWorld [w : SimWorld] : int
-  ```c
-  #include <stdlib.h>
-  SimWorld *p = (SimWorld *)malloc(sizeof(SimWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-SimWorld [wp : int] : SimWorld
-  ```c
-  return *(SimWorld *)(intptr_t)wp;
-  ```)
-(defn free-SimWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((SimWorld *)(intptr_t)wp);
-  ```)
-
-(defn box-RenderWorld [w : RenderWorld] : int
-  ```c
-  #include <stdlib.h>
-  RenderWorld *p = (RenderWorld *)malloc(sizeof(RenderWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-RenderWorld [wp : int] : RenderWorld
-  ```c
-  return *(RenderWorld *)(intptr_t)wp;
-  ```)
-(defn free-RenderWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((RenderWorld *)(intptr_t)wp);
-  ```)
+(defworld-box-helpers SimWorld)
+(defworld-box-helpers RenderWorld)
 
 ;; One-line multi-component render extract. Each [Src Dst] pair maps a
 ;; source-world component to a target-world component. Lowers to one
@@ -102,23 +72,23 @@
         ;; Seed sim with two slots of (Pos, Sprite, Color). Caps are
         ;; linear, so a fresh one per call. Slot 0:
         pcap0 (:: (make-write-cap Pos-cid)    (XWriteCap SimWorld Pos))]
-    (set-Pos! pcap0 sim 0 (:: 11 :Pos))
+    (set-Pos! pcap0 sim (slot-new 0) (:: 11 :Pos))
     (use-cap! pcap0)
     (let [scap0 (:: (make-write-cap Sprite-cid) (XWriteCap SimWorld Sprite))]
-      (set-Sprite! scap0 sim 0 (:: 101 :Sprite))
+      (set-Sprite! scap0 sim (slot-new 0) (:: 101 :Sprite))
       (use-cap! scap0)
       (let [ccap0 (:: (make-write-cap Color-cid)  (XWriteCap SimWorld Color))]
-        (set-Color! ccap0 sim 0 (:: 201 :Color))
+        (set-Color! ccap0 sim (slot-new 0) (:: 201 :Color))
         (use-cap! ccap0)
         ;; Slot 1:
         (let [pcap1 (:: (make-write-cap Pos-cid)    (XWriteCap SimWorld Pos))]
-          (set-Pos! pcap1 sim 1 (:: 22 :Pos))
+          (set-Pos! pcap1 sim (slot-new 1) (:: 22 :Pos))
           (use-cap! pcap1)
           (let [scap1 (:: (make-write-cap Sprite-cid) (XWriteCap SimWorld Sprite))]
-            (set-Sprite! scap1 sim 1 (:: 102 :Sprite))
+            (set-Sprite! scap1 sim (slot-new 1) (:: 102 :Sprite))
             (use-cap! scap1)
             (let [ccap1 (:: (make-write-cap Color-cid)  (XWriteCap SimWorld Color))]
-              (set-Color! ccap1 sim 1 (:: 202 :Color))
+              (set-Color! ccap1 sim (slot-new 1) (:: 202 :Color))
               (use-cap! ccap1)
               (let [sp (box-SimWorld sim)
                     rp (box-RenderWorld ren)
@@ -133,9 +103,9 @@
                                 (XReadCap RenderWorld RSprite))
                       rcap2 (:: (make-read-cap RColor-cid)
                                 (XReadCap RenderWorld RColor))
-                      p0    (:: (get-RPos    rcap0 ren2 0) :int)
-                      s0    (:: (get-RSprite rcap1 ren2 0) :int)
-                      c0    (:: (get-RColor  rcap2 ren2 0) :int)]
+                      p0    (:: (get-RPos    rcap0 ren2 (slot-new 0)) :int)
+                      s0    (:: (get-RSprite rcap1 ren2 (slot-new 0)) :int)
+                      c0    (:: (get-RColor  rcap2 ren2 (slot-new 0)) :int)]
                   (let [ren3 : RenderWorld (load-RenderWorld rp)
                         rcap3 (:: (make-read-cap RPos-cid)
                                   (XReadCap RenderWorld RPos))
@@ -143,9 +113,9 @@
                                   (XReadCap RenderWorld RSprite))
                         rcap5 (:: (make-read-cap RColor-cid)
                                   (XReadCap RenderWorld RColor))
-                        p1    (:: (get-RPos    rcap3 ren3 1) :int)
-                        s1    (:: (get-RSprite rcap4 ren3 1) :int)
-                        c1    (:: (get-RColor  rcap5 ren3 1) :int)
+                        p1    (:: (get-RPos    rcap3 ren3 (slot-new 1)) :int)
+                        s1    (:: (get-RSprite rcap4 ren3 (slot-new 1)) :int)
+                        c1    (:: (get-RColor  rcap5 ren3 (slot-new 1)) :int)
                         ok    (and (= p0 11)
                                 (and (= s0 101)
                                   (and (= c0 201)

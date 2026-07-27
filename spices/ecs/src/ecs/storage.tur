@@ -34,6 +34,8 @@
           dense-new dense-len dense-set! dense-get
           dense-has? dense-free)
 
+(import ecs/entity :refer [Slot])
+
 ;; (Dense A) is a defopaque whose carrier is :int (the raw C handle). The
 ;; phantom A makes storages for different components distinct at the type
 ;; level; it erases to the int carrier at codegen.
@@ -65,7 +67,7 @@
 ;;; dense-set! -- write a value at entity slot idx, marking it present.
 ;;; Sizes the data array on first use according to sizeof(A).
 ;;; Since: E0
-(defn dense-set! [A] [s : (Dense A) idx : int val : A] : nil
+(defn dense-set! [A] [s : (Dense A) idx : Slot val : A] : nil
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -88,7 +90,7 @@
 
 ;;; dense-has? -- is slot idx populated?
 ;;; Since: E0
-(defn dense-has? [A] [s : (Dense A) idx : int] : bool
+(defn dense-has? [A] [s : (Dense A) idx : Slot] : bool
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;
@@ -103,7 +105,7 @@
 ;;; field is `(Dense Pos)`. Caller must has?-check first; absent slots
 ;;; return unspecified bytes.
 ;;; Since: E0
-(defn dense-get [A] [s : (Dense A) idx : int] : A
+(defn dense-get [A] [s : (Dense A) idx : Slot] : A
   ```c
   typedef struct { void *data; uint8_t *present; size_t len; size_t cap; size_t elem_sz; } __ecs_dense;
   __ecs_dense *st = (__ecs_dense *)(intptr_t)s;

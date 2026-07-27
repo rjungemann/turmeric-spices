@@ -15,6 +15,8 @@
           sized-tag-free
           sized-tag-zip-cap)
 
+(import ecs/entity :refer [Slot])
+
 (defopaque SizedTag [n] :int)
 
 ;; ===== Raw int-carried implementation (private) =====
@@ -107,18 +109,18 @@
 
 ;;; sized-tag-set! -- mark slot idx as tagged. Aborts on out-of-range.
 ;;; Since: E2c
-(defn sized-tag-set! [n] [t : (SizedTag n) idx : int] : nil
-  (unsafe (__sized-tag-set!-raw (:: t :int) idx)))
+(defn sized-tag-set! [n] [t : (SizedTag n) idx : Slot] : nil
+  (unsafe (__sized-tag-set!-raw (:: t :int) (:: idx :int))))
 
 ;;; sized-tag-clear! -- mark slot idx as untagged. No-op out-of-range.
 ;;; Since: E2c
-(defn sized-tag-clear! [n] [t : (SizedTag n) idx : int] : nil
-  (unsafe (__sized-tag-clear!-raw (:: t :int) idx)))
+(defn sized-tag-clear! [n] [t : (SizedTag n) idx : Slot] : nil
+  (unsafe (__sized-tag-clear!-raw (:: t :int) (:: idx :int))))
 
 ;;; sized-tag-has? -- is slot idx tagged?
 ;;; Since: E2c
-(defn sized-tag-has? [n] [t : (SizedTag n) idx : int] : bool
-  (unsafe (__sized-tag-has?-raw (:: t :int) idx)))
+(defn sized-tag-has? [n] [t : (SizedTag n) idx : Slot] : bool
+  (unsafe (__sized-tag-has?-raw (:: t :int) (:: idx :int))))
 
 ;;; sized-tag-count -- popcount across the bitset.
 ;;; Since: E2c

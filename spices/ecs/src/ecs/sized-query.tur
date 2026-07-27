@@ -51,6 +51,7 @@
 
 (import ecs/sized-storage :refer [SizedDense sized-dense-cap
                                    sized-dense-get sized-dense-has?])
+(import ecs/entity        :refer [Slot slot-new])
 (import ecs/sized-tag     :refer [SizedTag sized-tag-has?])
 (import ecs/sized-sparse  :refer [SizedSparse sized-sparse-has?
                                    sized-sparse-get])
@@ -132,9 +133,10 @@
              __cap (sized-dense-cap ~__first-s-name)]
          (while (< __i __cap)
            (do
-             (when (__sfe-has-conj ~comps __i)
-               (let [~__e-bind __i]
-                 (__sfe-value-binds ~comps ~__v-binds __i ~body)))
+             (let [__sfe-sl (slot-new __i)]
+               (when (__sfe-has-conj ~comps __sfe-sl)
+                 (let [~__e-bind __sfe-sl]
+                   (__sfe-value-binds ~comps ~__v-binds __sfe-sl ~body))))
              (set! __i (+ __i 1))))))))
 
 ;;; sized-world-tagged? -- true if entity slot `e` carries the named

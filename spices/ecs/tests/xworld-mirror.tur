@@ -13,7 +13,8 @@
 
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono])
-(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
+(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono
+                                  defworld-box-helpers])
 (import ecs/xcap          :refer [XWriteCap XReadCap
                                   make-write-cap make-read-cap use-cap!])
 (import ecs/xmirror       :refer [defmirror])
@@ -32,24 +33,8 @@
 (def Pos-cid       0)
 (def RenderPos-cid 0)
 
-(defn box-SimWorld [w : SimWorld] : int ```c
-  #include <stdlib.h>
-  SimWorld *p = (SimWorld *)malloc(sizeof(SimWorld)); *p = w;
-  return (int64_t)(intptr_t)p; ```)
-(defn load-SimWorld [wp : int] : SimWorld ```c
-  return *(SimWorld *)(intptr_t)wp; ```)
-(defn free-SimWorld-box [wp : int] : nil ```c
-  #include <stdlib.h>
-  free((SimWorld *)(intptr_t)wp); ```)
-(defn box-RenderWorld [w : RenderWorld] : int ```c
-  #include <stdlib.h>
-  RenderWorld *p = (RenderWorld *)malloc(sizeof(RenderWorld)); *p = w;
-  return (int64_t)(intptr_t)p; ```)
-(defn load-RenderWorld [wp : int] : RenderWorld ```c
-  return *(RenderWorld *)(intptr_t)wp; ```)
-(defn free-RenderWorld-box [wp : int] : nil ```c
-  #include <stdlib.h>
-  free((RenderWorld *)(intptr_t)wp); ```)
+(defworld-box-helpers SimWorld)
+(defworld-box-helpers RenderWorld)
 
 ;; One-line render extract.
 (defmirror mirror-pos
@@ -62,8 +47,8 @@
   (let [sim : SimWorld   (make-SimWorld 8)
         ren : RenderWorld (make-RenderWorld 8)
         scap            (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
-    (set-Pos! scap sim 0 (:: 11 :Pos))
-    (set-Pos! scap sim 1 (:: 22 :Pos))
+    (set-Pos! scap sim (slot-new 0) (:: 11 :Pos))
+    (set-Pos! scap sim (slot-new 1) (:: 22 :Pos))
     (use-cap! scap)
     (let [sp (box-SimWorld sim)
           rp (box-RenderWorld ren)
@@ -73,8 +58,8 @@
       (xstage-run! xs)
       (let [ren2 : RenderWorld (load-RenderWorld rp)
             rcap            (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
-            v0              (:: (get-RenderPos rcap ren2 0) :int)
-            v1              (:: (get-RenderPos rcap ren2 1) :int)]
+            v0              (:: (get-RenderPos rcap ren2 (slot-new 0)) :int)
+            v1              (:: (get-RenderPos rcap ren2 (slot-new 1)) :int)]
         (println v0)
         (println v1)
         (let [ok (and (= v0 11) (= v1 22))]

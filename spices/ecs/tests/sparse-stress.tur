@@ -38,12 +38,12 @@
             (if (= 0 (mod state 2))
               ;; insert
               (do
-                (sparse-set! s idx op)
-                (tag-set! b idx))
+                (sparse-set! s (slot-new idx) op)
+                (tag-set! b (slot-new idx)))
               ;; delete
               (do
-                (sparse-del! s idx)
-                (tag-clear! b idx)))
+                (sparse-del! s (slot-new idx))
+                (tag-clear! b (slot-new idx))))
             (when (not (= (sparse-len s) (tag-count b)))
               (set! bad (+ bad 1))))
           (set! op (+ op 1)))
@@ -51,9 +51,9 @@
         ;; must register as present in the sparse storage.
         (let [^mut k 0]
           (while (< k 2000)
-            (when (and (tag-has? b k) (not (sparse-has? s k)))
+            (when (and (tag-has? b (slot-new k)) (not (sparse-has? s (slot-new k))))
               (set! bad (+ bad 1)))
-            (when (and (not (tag-has? b k)) (sparse-has? s k))
+            (when (and (not (tag-has? b (slot-new k))) (sparse-has? s (slot-new k)))
               (set! bad (+ bad 1)))
             (set! k (+ k 1))))
         (sparse-free s)

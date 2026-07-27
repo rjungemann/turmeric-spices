@@ -22,6 +22,7 @@
           sized-sparse-has? sized-sparse-del! sized-sparse-free
           sized-sparse-zip-domain)
 
+(import ecs/entity :refer [Slot])
 (import ecs/sparse :refer [sparse-new sparse-len sparse-set! sparse-get
                             sparse-has? sparse-del! sparse-free])
 
@@ -45,22 +46,22 @@
 ;;; Caller is responsible for `idx < n`; that bound is not statically
 ;;; checked here (refinement-types-gated, like dense -- see Q4).
 ;;; Since: E2c
-(defn sized-sparse-set! [n A] [s : (SizedSparse n A) idx : int val : A] : nil
+(defn sized-sparse-set! [n A] [s : (SizedSparse n A) idx : Slot val : A] : nil
   (sparse-set! (:: s (Sparse A)) idx val))
 
 ;;; sized-sparse-get -- read the value at idx; caller must has?-check first.
 ;;; Since: E2c
-(defn sized-sparse-get [n A] [s : (SizedSparse n A) idx : int] : A
+(defn sized-sparse-get [n A] [s : (SizedSparse n A) idx : Slot] : A
   (sparse-get (:: s (Sparse A)) idx))
 
 ;;; sized-sparse-has? -- is there an entry at idx?
 ;;; Since: E2c
-(defn sized-sparse-has? [n A] [s : (SizedSparse n A) idx : int] : bool
+(defn sized-sparse-has? [n A] [s : (SizedSparse n A) idx : Slot] : bool
   (sparse-has? (:: s (Sparse A)) idx))
 
 ;;; sized-sparse-del! -- remove the entry at idx; returns false if absent.
 ;;; Since: E2c
-(defn sized-sparse-del! [n A] [s : (SizedSparse n A) idx : int] : bool
+(defn sized-sparse-del! [n A] [s : (SizedSparse n A) idx : Slot] : bool
   (sparse-del! (:: s (Sparse A)) idx))
 
 ;;; sized-sparse-free -- release backing arrays.

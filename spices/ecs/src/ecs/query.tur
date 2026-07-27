@@ -60,6 +60,8 @@
           Query make-query query-world
           defquery run-query!)
 
+(import ecs/entity :refer [Slot slot-new])
+
 ;;; ----------------------------------------------------------------
 ;;; Recursive variadic for-each (E1)
 ;;;
@@ -144,7 +146,7 @@
            __cap (vec-len (~(dot-sym gens) ~world))]
        (while (< __i __cap)
          (do
-           (let [~(first binds) __i] ~body)
+           (let [~(first binds) (slot-new __i)] ~body)
            (set! __i (+ __i 1)))))
     (let [__e-bind (first binds)
           __v-binds (rest binds)]
@@ -153,9 +155,10 @@
                __cap (__fe-min-cap ~comps)]
            (while (< __i __cap)
              (do
-               (when (__fe-has-conj ~comps __i)
-                 (let [~__e-bind __i]
-                   (__fe-value-binds ~comps ~__v-binds __i ~body)))
+               (let [__fe-sl (slot-new __i)]
+                 (when (__fe-has-conj ~comps __fe-sl)
+                   (let [~__e-bind __fe-sl]
+                     (__fe-value-binds ~comps ~__v-binds __fe-sl ~body))))
                (set! __i (+ __i 1)))))))))
 
 ;;; for-each1 -- thin shim over the variadic for-each.

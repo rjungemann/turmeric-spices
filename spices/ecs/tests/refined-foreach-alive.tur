@@ -1,0 +1,27 @@
+#lang turmeric refined
+;; tur-test-flags: --strict-refine
+;; RE1 (c) COMPLETE: the ergonomic `for-each-alive!` macro. One macro generates
+;; the recursive loop, the frozen re-borrow, and the aliveness guard; the user's
+;; refined `rgworld-get-x!` read is spliced as the body and its crossing
+;; discharges PER-ENTITY (this file compiles under --strict-refine only because
+;; it does). Requires the compiler-side macro-expansion path walk
+;; (refine_note_macro_expansion; see turmeric docs/archive/
+;; macro-generated-refined-crossings-do-not-discharge.md).
+;; Spawns 3 (x = 10/20/30), despawns the middle one, prints x for each alive
+;; entity. Expected output: 10, 30 (slot 1 skipped).
+(defmodule refined_foreach_alive (export)
+(import ecs/refined-world :refer [RGWorld rgworld-new rgworld-spawn!
+                                  rgworld-despawn! rgworld-alive?
+                                  rgworld-get-x! rgworld-ent-at
+                                  for-each-alive!])
+
+(defn main [] : int
+  (let [^mut w  (rgworld-new)
+        e0 (rgworld-spawn! w 10)
+        e1 (rgworld-spawn! w 20)
+        e2 (rgworld-spawn! w 30)]
+    (let [_ (rgworld-despawn! w e1)]
+      (for-each-alive! w 3 e
+        (println (rgworld-get-x! w e)))
+      0)))
+)

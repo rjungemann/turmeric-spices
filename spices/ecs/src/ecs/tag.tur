@@ -17,6 +17,8 @@
           tag-new tag-cap tag-count tag-set! tag-clear!
           tag-has? tag-free)
 
+(import ecs/entity :refer [Slot])
+
 ;; Tag is a defopaque whose carrier is :int (the raw C bitset handle). Tags
 ;; are payloadless, so -- unlike (Dense A) / (Sparse A) -- there is no
 ;; phantom element type; `Tag` is a nullary opaque. Lifted from a bare :int
@@ -63,8 +65,8 @@
 
 ;;; tag-set! -- mark entity slot idx as tagged.
 ;;; Since: E1'
-(defn tag-set! [t : Tag idx : int] : nil
-  (__tag-grow t idx)
+(defn tag-set! [t : Tag idx : Slot] : nil
+  (__tag-grow t (:: idx :int))
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -73,7 +75,7 @@
 
 ;;; tag-clear! -- mark entity slot idx as untagged.
 ;;; Since: E1'
-(defn tag-clear! [t : Tag idx : int] : nil
+(defn tag-clear! [t : Tag idx : Slot] : nil
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;
@@ -83,7 +85,7 @@
 
 ;;; tag-has? -- is entity slot idx tagged?
 ;;; Since: E1'
-(defn tag-has? [t : Tag idx : int] : bool
+(defn tag-has? [t : Tag idx : Slot] : bool
   ```c
   typedef struct { uint64_t *words; size_t n_words; size_t cap_bits; } __ecs_tag;
   __ecs_tag *tg = (__ecs_tag *)(intptr_t)t;

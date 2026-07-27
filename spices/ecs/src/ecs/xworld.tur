@@ -28,20 +28,23 @@
 (import ecs/sized-storage :refer [SizedDense sized-dense-get
                                    sized-dense-set! sized-dense-has?])
 (import ecs/xcap          :refer [XWriteCap XReadCap])
+(import ecs/entity        :refer [Slot])
 
-;;; box-world -- malloc-copy a world struct onto the heap and return
-;;; the `:int` carrier the cross-world scheduler threads through.
+;;; box-world -- box a world's carrier value onto the heap and return
+;;; the `:int` cell the cross-world scheduler threads through.
 ;;; Polymorphic in the world type `W`; the inline-C body reflects the
-;;; concrete world's C struct name via the `__TUR_TY_W__` template
+;;; concrete world's C carrier type via the `__TUR_TY_W__` template
 ;;; marker. Replaces the hand-written per-world `box-<WorldName>` triple
-;;; that every cross-world setup previously had to copy.
+;;; that every cross-world setup previously had to copy (retired from
+;;; the tests 2026-07-26 -- their inline-C assumed the old by-value
+;;; struct ABI and no longer compiled).
 ;;;
-;;; Pre-condition: `W` must be a `defstruct`-shaped world type whose C
-;;; representation is a plain struct (the shape `sized-defworld-mono`
-;;; emits). Storage handle fields inside the world are `:int` aliases of
-;;; shared heap pointers, so a memcpy-style by-value copy preserves
-;;; sharing across `load-world` round-trips -- the same discipline the
-;;; hand-written triples relied on.
+;;; Representation note: worlds lowered from `sized-defworld-mono` are
+;;; int64-carried record ADTs, so `__TUR_TY_W__` resolves to the int64
+;;; carrier and the box holds the world HANDLE -- `load-world` hands the
+;;; same world back, so every accessor stays pointed at the same dense
+;;; arrays and state cell across round-trips (the same sharing the old
+;;; struct-copy discipline preserved via `:int` alias fields).
 ;;;
 ;;; Since: GEN-V0
 (defn box-world [W] [w : W] : int
@@ -113,8 +116,8 @@
 ;;; Example:
 ;;;   (sized-defworld-mono RenderWorld (Static 1024) [RenderPos])
 ;;;   (sized-defcomponent-accessors-xmono RenderWorld RenderPos)
-;;;   ;; get-RenderPos : (XReadCap  RenderWorld RenderPos) RenderWorld int -> RenderPos
-;;;   ;; set-RenderPos!: (XWriteCap RenderWorld RenderPos) RenderWorld int RenderPos -> nil
+;;;   ;; get-RenderPos : (XReadCap  RenderWorld RenderPos) RenderWorld Slot -> RenderPos
+;;;   ;; set-RenderPos!: (XWriteCap RenderWorld RenderPos) RenderWorld Slot RenderPos -> nil
 ;;;
 ;;; Since: X1
 (defmacro sized-defcomponent-accessors-xmono [world-name comp-name]
@@ -125,16 +128,16 @@
     `(do
        (defn ~getter [^borrow cap : (XReadCap ~world-name ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int]
+                      e           : Slot]
                     : ~comp-name
          (let [p : ~comp-name (sized-dense-get (~field w) e)] p))
        (defn ~setter [^borrow cap : (XWriteCap ~world-name ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int
+                      e           : Slot
                       v           : ~comp-name]
                     : nil
          (sized-dense-set! (~field w) e v))
-       (defn ~haser [^borrow w : ~world-name e : int] : bool
+       (defn ~haser [^borrow w : ~world-name e : Slot] : bool
          (sized-dense-has? (~field w) e)))))
 
 ) ;; end defmodule ecs/xworld

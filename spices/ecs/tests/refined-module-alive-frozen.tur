@@ -1,0 +1,23 @@
+#lang turmeric refined
+;; tur-test-flags: --strict-refine
+;; RE1: the refined aliveness accessor works ACROSS a module boundary. The
+;; importer establishes the guard in ITS OWN `frozen` region and calls the
+;; module's `rgworld-get-x!`; the crossing must discharge from the guard even
+;; though the accessor + `alive?` measure live in `ecs/refined-world`.
+;;
+;; Expected output: 42
+(defmodule module_alive_frozen (export)
+(import ecs/refined-world :refer [RGWorld rgworld-new rgworld-spawn!
+                                  rgworld-alive? rgworld-get-x! rgworld-despawn!])
+(import ecs/freeze :refer [frozen])
+
+(defn main [] : int
+  (let [^mut w (rgworld-new)
+        e (rgworld-spawn! w 42)]
+    (let [x (frozen w
+              (if (rgworld-alive? w e)
+                (rgworld-get-x! w e)     ;; cross-module crossing; must discharge
+                -1))]
+      (println x)
+      0)))
+)

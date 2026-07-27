@@ -31,7 +31,8 @@
 
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono])
-(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
+(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono
+                                  defworld-box-helpers])
 (import ecs/xcap          :refer [XWriteCap XReadCap
                                   make-write-cap make-read-cap use-cap!])
 (import ecs/xsystem       :refer [XSystemN make-xsystem-n defxsystem
@@ -62,56 +63,9 @@
 ;; Per-world box/load/free (referenced by the C struct name, like the
 ;; two-world fixtures). The N-world `defxsystem` calls `load-<Wtype>`
 ;; for each declared world.
-(defn box-AuthWorld [w : AuthWorld] : int
-  ```c
-  #include <stdlib.h>
-  AuthWorld *p = (AuthWorld *)malloc(sizeof(AuthWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-AuthWorld [wp : int] : AuthWorld
-  ```c
-  return *(AuthWorld *)(intptr_t)wp;
-  ```)
-(defn free-AuthWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((AuthWorld *)(intptr_t)wp);
-  ```)
-
-(defn box-PredWorld [w : PredWorld] : int
-  ```c
-  #include <stdlib.h>
-  PredWorld *p = (PredWorld *)malloc(sizeof(PredWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-PredWorld [wp : int] : PredWorld
-  ```c
-  return *(PredWorld *)(intptr_t)wp;
-  ```)
-(defn free-PredWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((PredWorld *)(intptr_t)wp);
-  ```)
-
-(defn box-RenderWorld [w : RenderWorld] : int
-  ```c
-  #include <stdlib.h>
-  RenderWorld *p = (RenderWorld *)malloc(sizeof(RenderWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-RenderWorld [wp : int] : RenderWorld
-  ```c
-  return *(RenderWorld *)(intptr_t)wp;
-  ```)
-(defn free-RenderWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((RenderWorld *)(intptr_t)wp);
-  ```)
+(defworld-box-helpers AuthWorld)
+(defworld-box-helpers PredWorld)
+(defworld-box-helpers RenderWorld)
 
 ;; The 3-world projection system. Worlds in declaration order:
 ;; slot 0 = auth, slot 1 = pred, slot 2 = ren. Reads Pos from auth,
@@ -124,14 +78,14 @@
   :writes-to  pred [PredPos]
   :writes-to  ren  [RenderPos]
   (do
-    (set-PredPos! pred-PredPos-write-cap pred 0
-      (:: (:: (get-Pos auth-Pos-read-cap auth 0) :int) :PredPos))
-    (set-RenderPos! ren-RenderPos-write-cap ren 0
-      (:: (:: (get-Pos auth-Pos-read-cap auth 0) :int) :RenderPos))
-    (set-PredPos! pred-PredPos-write-cap pred 1
-      (:: (:: (get-Pos auth-Pos-read-cap auth 1) :int) :PredPos))
-    (set-RenderPos! ren-RenderPos-write-cap ren 1
-      (:: (:: (get-Pos auth-Pos-read-cap auth 1) :int) :RenderPos))))
+    (set-PredPos! pred-PredPos-write-cap pred (slot-new 0)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 0)) :int) :PredPos))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 0)) :int) :RenderPos))
+    (set-PredPos! pred-PredPos-write-cap pred (slot-new 1)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 1)) :int) :PredPos))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 1)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 1)) :int) :RenderPos))))
 
 (defn main [] : int
   (let [auth : AuthWorld   (make-AuthWorld 8)
@@ -139,8 +93,8 @@
         ren  : RenderWorld  (make-RenderWorld 8)
         ;; seed the auth world directly via the world-keyed setter.
         acap (:: (make-write-cap Pos-cid) (XWriteCap AuthWorld Pos))]
-    (set-Pos! acap auth 0 (:: 11 :Pos))
-    (set-Pos! acap auth 1 (:: 22 :Pos))
+    (set-Pos! acap auth (slot-new 0) (:: 11 :Pos))
+    (set-Pos! acap auth (slot-new 1) (:: 22 :Pos))
     (use-cap! acap)
     (let [ap (box-AuthWorld   auth)
           pp (box-PredWorld   pred)
@@ -155,10 +109,10 @@
             ren2  : RenderWorld (load-RenderWorld rp)
             prcap (:: (make-read-cap PredPos-cid)   (XReadCap PredWorld PredPos))
             rrcap (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
-            p0 (:: (get-PredPos   prcap pred2 0) :int)
-            p1 (:: (get-PredPos   prcap pred2 1) :int)
-            r0 (:: (get-RenderPos rrcap ren2  0) :int)
-            r1 (:: (get-RenderPos rrcap ren2  1) :int)]
+            p0 (:: (get-PredPos   prcap pred2 (slot-new 0)) :int)
+            p1 (:: (get-PredPos   prcap pred2 (slot-new 1)) :int)
+            r0 (:: (get-RenderPos rrcap ren2  (slot-new 0)) :int)
+            r1 (:: (get-RenderPos rrcap ren2  (slot-new 1)) :int)]
         (println p0)   ;; 11  (pred[0] <- auth[0])
         (println r0)   ;; 11  (ren[0]  <- auth[0])
         (println p1)   ;; 22  (pred[1] <- auth[1])

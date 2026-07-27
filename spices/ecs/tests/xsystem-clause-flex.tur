@@ -21,7 +21,8 @@
 
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono])
-(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
+(import ecs/xworld        :refer [sized-defcomponent-accessors-xmono
+                                  defworld-box-helpers])
 (import ecs/xcap          :refer [XWriteCap XReadCap
                                   make-write-cap make-read-cap use-cap!])
 (import ecs/xsystem       :refer [XSystem make-xsystem defxsystem])
@@ -40,39 +41,8 @@
 (def Pos-cid       0)
 (def RenderPos-cid 0)
 
-(defn box-SimWorld [w : SimWorld] : int
-  ```c
-  #include <stdlib.h>
-  SimWorld *p = (SimWorld *)malloc(sizeof(SimWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-SimWorld [wp : int] : SimWorld
-  ```c
-  return *(SimWorld *)(intptr_t)wp;
-  ```)
-(defn free-SimWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((SimWorld *)(intptr_t)wp);
-  ```)
-
-(defn box-RenderWorld [w : RenderWorld] : int
-  ```c
-  #include <stdlib.h>
-  RenderWorld *p = (RenderWorld *)malloc(sizeof(RenderWorld));
-  *p = w;
-  return (int64_t)(intptr_t)p;
-  ```)
-(defn load-RenderWorld [wp : int] : RenderWorld
-  ```c
-  return *(RenderWorld *)(intptr_t)wp;
-  ```)
-(defn free-RenderWorld-box [wp : int] : nil
-  ```c
-  #include <stdlib.h>
-  free((RenderWorld *)(intptr_t)wp);
-  ```)
+(defworld-box-helpers SimWorld)
+(defworld-box-helpers RenderWorld)
 
 ;; Variant A: omits empty clauses entirely, and orders writes-to before
 ;; reads-from. The macro should still mint a SimWorld read-cap for `Pos`
@@ -82,10 +52,10 @@
   :writes-to   ren [RenderPos]
   :reads-from  sim [Pos]
   ;; multiple body forms -- the macro wraps these in (do ...).
-  (set-RenderPos! ren-RenderPos-write-cap ren 0
-    (:: (:: (get-Pos sim-Pos-read-cap sim 0) :int) :RenderPos))
-  (set-RenderPos! ren-RenderPos-write-cap ren 1
-    (:: (:: (get-Pos sim-Pos-read-cap sim 1) :int) :RenderPos)))
+  (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+    (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 0)) :int) :RenderPos))
+  (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 1)
+    (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 1)) :int) :RenderPos)))
 
 ;; Variant B: canonical 4-clause layout (with the now-unnecessary empties)
 ;; -- proves the relaxed parser still accepts the original shape.
@@ -96,23 +66,23 @@
   :reads-from  ren []
   :writes-to   ren [RenderPos]
   (do
-    (set-RenderPos! ren-RenderPos-write-cap ren 0
-      (:: (:: (get-Pos sim-Pos-read-cap sim 0) :int) :RenderPos))
-    (set-RenderPos! ren-RenderPos-write-cap ren 1
-      (:: (:: (get-Pos sim-Pos-read-cap sim 1) :int) :RenderPos))))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+      (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 0)) :int) :RenderPos))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 1)
+      (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 1)) :int) :RenderPos))))
 
 (defn populate-sim [^borrow sim : SimWorld] : nil
   (let [c1 (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
-    (set-Pos! c1 sim 0 (:: 11 :Pos))
+    (set-Pos! c1 sim (slot-new 0) (:: 11 :Pos))
     (use-cap! c1))
   (let [c2 (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
-    (set-Pos! c2 sim 1 (:: 22 :Pos))
+    (set-Pos! c2 sim (slot-new 1) (:: 22 :Pos))
     (use-cap! c2)))
 
 (defn drain-render [ren : RenderWorld] : nil
   (let [rcap (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
-        v0   (:: (get-RenderPos rcap ren 0) :int)
-        v1   (:: (get-RenderPos rcap ren 1) :int)]
+        v0   (:: (get-RenderPos rcap ren (slot-new 0)) :int)
+        v1   (:: (get-RenderPos rcap ren (slot-new 1)) :int)]
     (println v0)
     (println v1)))
 

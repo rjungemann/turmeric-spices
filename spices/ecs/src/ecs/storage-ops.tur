@@ -61,6 +61,7 @@
 (defmodule ecs/storage-ops
   (export)
 
+(import ecs/entity  :refer [Slot])
 (import ecs/storage :refer [Dense  dense-set!  dense-get  dense-has?])
 (import ecs/sparse  :refer [Sparse sparse-set! sparse-get sparse-has?])
 
@@ -76,9 +77,9 @@
 ;;; Since: E2d-P6
 (defclass StorageOps [S]
   (type Elem : Type)
-  (storage-insert! [s : S idx : int v : Elem] : nil)
-  (storage-get     [s : S idx : int] : Elem)
-  (storage-has?    [s : S idx : int] : bool))
+  (storage-insert! [s : S idx : Slot v : Elem] : nil)
+  (storage-get     [s : S idx : Slot] : Elem)
+  (storage-has?    [s : S idx : Slot] : bool))
 
 ;;; StorageOps [(Dense A)] -- the dense backend. `Elem` is the handle's own
 ;;; phantom `A`; the three methods forward to the matching `dense-*` op.
