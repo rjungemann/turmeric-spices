@@ -90,8 +90,16 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
   `WorldState` + storages and re-exports `alive?`/`despawn!`/`get!` with the
   encapsulation (private state field) the soundness argument needs. The
   `ecs/refined-world` module (below) is that promotion for the single-column
-  facade; wiring the refined surface into the FULL `defworld`/`defcomponent`
-  storage stack remains follow-on work. (It was entangled with the
+  facade, and the FULL-stack promotion SHIPPED 2026-07-26 as
+  `ecs/sized-refined`: `(sized-defworld-refined W)` emits `<W>-alive?`
+  (`#reads`) + `<W>-despawn!` (`^unique ^mut`),
+  `(sized-defcomponent-accessor-refined W C)` emits the cap-gated refined
+  `get-<C>!`, and `(for-each-alive W w n e body)` iterates with per-entity
+  proofs -- against any `sized-defworld-mono` world, beside the unchanged
+  forgiving family. Enabled by a turmeric-side fix letting macro templates
+  emit `#reads` and substitute into `#refine{...}` predicates. Tests
+  `refined-stack-*` (positive, foreach, no-region W0372, despawn-in-region
+  E0200) auto-run; suite 70/70. (It was entangled with the
   `(Storage T)` compiler skew, which is now RESOLVED -- 2026-07-26, turmeric
   `struct_field_type_from_form` gained the assoc-type-projection dispatch and
   the SZ8 Size-literal placeholder; plus the tests' legacy by-value box
