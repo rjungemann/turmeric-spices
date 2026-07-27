@@ -25,16 +25,16 @@
   (let [a : (SizedSparse (Static 128) int) (sized-sparse-new)
         b : (SizedSparse (Static 128) int) (sized-sparse-new)]
     (do
-      (sized-sparse-set! a 7 1000)
-      (sized-sparse-set! a 42 2000)
-      (sized-sparse-set! a 99 3000)
-      (sized-sparse-set! b 1 9999)
-      (sized-sparse-set! b 2 8888)
+      (sized-sparse-set! a (slot-new 7) 1000)
+      (sized-sparse-set! a (slot-new 42) 2000)
+      (sized-sparse-set! a (slot-new 99) 3000)
+      (sized-sparse-set! b (slot-new 1) 9999)
+      (sized-sparse-set! b (slot-new 2) 8888)
       (println (sized-sparse-len a))                  ;; 3
       (println (sized-sparse-len b))                  ;; 2
-      (println (sized-sparse-get a 7))                ;; 1000
-      (println (sized-sparse-get a 42))               ;; 2000
-      (println (sized-sparse-get a 99))               ;; 3000
+      (println (sized-sparse-get a (slot-new 7)))                ;; 1000
+      (println (sized-sparse-get a (slot-new 42)))               ;; 2000
+      (println (sized-sparse-get a (slot-new 99)))               ;; 3000
       ;; Domain unification: both storages carry (Static 128).
       (println (sized-sparse-zip-domain a b))         ;; 5
       (sized-sparse-free a)

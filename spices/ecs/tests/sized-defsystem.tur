@@ -47,8 +47,8 @@
   [Pos]        ;; :reads  -- binds Pos-read-cap
   [Pos]        ;; :writes -- binds Pos-write-cap (linear, auto-consumed)
   (do
-    (set-Pos! Pos-write-cap w 2 (:: 42 :Pos))
-    (let [p (get-Pos Pos-read-cap w 2)]
+    (set-Pos! Pos-write-cap w (slot-new 2) (:: 42 :Pos))
+    (let [p (get-Pos Pos-read-cap w (slot-new 2))]
       (do
         (println (:: p :int))
         (println "physics ok")))))
@@ -69,13 +69,13 @@
       ;; second `physics` ALSO prints `42` here. To distinguish the
       ;; two ticks visibly we write a different value first.
       (set-Pos! (:: (make-write-cap Pos-cid) (WriteCap Pos))
-                w2 2 (:: 100 :Pos))
+                w2 (slot-new 2) (:: 100 :Pos))
       ;; Reading the world via the system body would print 42 (the
       ;; system overwrites slot 2 unconditionally with 42). Skip the
       ;; second `physics` call and instead read directly via the
       ;; cap-gated accessor to surface the 100 we just wrote.
       (let [p (get-Pos (:: (make-read-cap Pos-cid) (ReadCap Pos))
-                       w2 2)]
+                       w2 (slot-new 2))]
         (do
           (println (:: p :int))    ;; 100
           (println "physics ok")

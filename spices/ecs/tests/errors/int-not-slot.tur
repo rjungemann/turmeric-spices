@@ -1,0 +1,18 @@
+;; RE0 storage-side follow-up (2026-07-26): storage indices and accessor
+;; slot parameters are Slot-typed, not bare :int. A raw integer where a
+;; Slot is expected must fail to elaborate (TUR-E0001) -- the type is
+;; load-bearing, not decorative. Wrap with (slot-new i) to assert an int
+;; is a slot index, or pass (entity-index e), which is already a Slot.
+(defmodule int_not_slot_test
+  (export)
+
+(import ecs/entity  :refer [Slot slot-new])
+(import ecs/storage :refer [Dense dense-new dense-set!])
+
+(defopaque Pos :int)
+
+(defn main [] : int
+  (let [s : (Dense Pos) (dense-new)]
+    (dense-set! s 0 (:: 7 :Pos))   ;; raw int index -> TUR-E0001
+    0))
+) ;; end module

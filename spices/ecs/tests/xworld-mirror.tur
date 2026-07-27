@@ -47,8 +47,8 @@
   (let [sim : SimWorld   (make-SimWorld 8)
         ren : RenderWorld (make-RenderWorld 8)
         scap            (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
-    (set-Pos! scap sim 0 (:: 11 :Pos))
-    (set-Pos! scap sim 1 (:: 22 :Pos))
+    (set-Pos! scap sim (slot-new 0) (:: 11 :Pos))
+    (set-Pos! scap sim (slot-new 1) (:: 22 :Pos))
     (use-cap! scap)
     (let [sp (box-SimWorld sim)
           rp (box-RenderWorld ren)
@@ -58,8 +58,8 @@
       (xstage-run! xs)
       (let [ren2 : RenderWorld (load-RenderWorld rp)
             rcap            (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
-            v0              (:: (get-RenderPos rcap ren2 0) :int)
-            v1              (:: (get-RenderPos rcap ren2 1) :int)]
+            v0              (:: (get-RenderPos rcap ren2 (slot-new 0)) :int)
+            v1              (:: (get-RenderPos rcap ren2 (slot-new 1)) :int)]
         (println v0)
         (println v1)
         (let [ok (and (= v0 11) (= v1 22))]

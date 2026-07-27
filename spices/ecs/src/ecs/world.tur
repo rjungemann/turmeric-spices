@@ -16,9 +16,9 @@
 ;;;   (defworld GameWorld [Pos Vel])
 ;;;   (defcomponent-accessors GameWorld Pos)
 ;;;     ;; emits:
-;;;     ;; (defn get-Pos  [w : GameWorld e : int] : Pos  ...)
-;;;     ;; (defn set-Pos! [w : GameWorld e : int v : Pos] : nil ...)
-;;;     ;; (defn has-Pos? [w : GameWorld e : int] : bool ...)
+;;;     ;; (defn get-Pos  [w : GameWorld e : Slot] : Pos  ...)
+;;;     ;; (defn set-Pos! [w : GameWorld e : Slot v : Pos] : nil ...)
+;;;     ;; (defn has-Pos? [w : GameWorld e : Slot] : bool ...)
 ;;;   (defcomponent-accessors GameWorld Vel)
 ;;;     ;; same trio for Vel
 ;;;
@@ -66,7 +66,7 @@
 ;; `:int` slot (the storage layer is int-keyed; lifting it to `Slot` is a
 ;; separate, storage-side change). Only the packed entity handle is lifted
 ;; off `:int` here.
-(import ecs/entity :refer [Entity])
+(import ecs/entity :refer [Entity Slot])
 
 ;;; Component -- the associated-type storage class (E2d-P2).
 ;;;
@@ -162,16 +162,16 @@
     `(do
        (defn ~getter [^borrow cap : (ReadCap  ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int]
+                      e           : Slot]
                     : ~comp-name
          (let [p : ~comp-name (storage-get (~field w) e)] p))
        (defn ~setter [^borrow cap : (WriteCap ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int
+                      e           : Slot
                       v           : ~comp-name]
                     : nil
          (storage-insert! (~field w) e v))
-       (defn ~haser [^borrow w : ~world-name e : int] : bool
+       (defn ~haser [^borrow w : ~world-name e : Slot] : bool
          (storage-has? (~field w) e)))))
 
 ;;; world-fields -- expand a component vector into the flat

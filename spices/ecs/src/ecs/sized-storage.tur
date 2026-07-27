@@ -22,6 +22,8 @@
           sized-dense-has? sized-dense-free
           sized-dense-zip-len)
 
+(import ecs/entity :refer [Slot])
+
 ;; (SizedDense n A) is a defopaque whose carrier is :int (the raw C
 ;; handle). Public accessors take and return (SizedDense n A); private
 ;; `__sized-dense-*-raw` helpers carry the original int-typed inline-C
@@ -140,22 +142,22 @@
 ;;; Aborts on out-of-range idx (cap is static at construction).
 ;;;
 ;;; Since: E2c
-(defn sized-dense-set! [n A] [s : (SizedDense n A) idx : int val : A] : nil
-  (unsafe (__sized-dense-set!-raw (:: s :int) idx val)))
+(defn sized-dense-set! [n A] [s : (SizedDense n A) idx : Slot val : A] : nil
+  (unsafe (__sized-dense-set!-raw (:: s :int) (:: idx :int) val)))
 
 ;;; sized-dense-get -- read the value at slot idx (typed A).
 ;;;
 ;;; Caller must has?-check first; absent slots return unspecified bytes.
 ;;;
 ;;; Since: E2c
-(defn sized-dense-get [n A] [s : (SizedDense n A) idx : int] : A
-  (unsafe (__sized-dense-get-raw (:: s :int) idx)))
+(defn sized-dense-get [n A] [s : (SizedDense n A) idx : Slot] : A
+  (unsafe (__sized-dense-get-raw (:: s :int) (:: idx :int))))
 
 ;;; sized-dense-has? -- is slot idx populated?
 ;;;
 ;;; Since: E2c
-(defn sized-dense-has? [n A] [s : (SizedDense n A) idx : int] : bool
-  (unsafe (__sized-dense-has?-raw (:: s :int) idx)))
+(defn sized-dense-has? [n A] [s : (SizedDense n A) idx : Slot] : bool
+  (unsafe (__sized-dense-has?-raw (:: s :int) (:: idx :int))))
 
 ;;; sized-dense-free -- release the storage's backing arrays.
 ;;;

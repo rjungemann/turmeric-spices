@@ -24,7 +24,7 @@
     (do
       (let [^mut i 0]
         (while (< i 500)
-          (sparse-set! s (+ (* i 2) 1) i)
+          (sparse-set! s (slot-new (+ (* i 2) 1)) i)
           (set! i (+ i 1))))
       (println (sparse-len s))
       (let [^mut j 0
@@ -32,7 +32,7 @@
         (while (< j 500)
           (when (= 0 (mod j 2))
             (let [idx (+ (* j 2) 1)]
-              (when (not (sparse-del! s idx))
+              (when (not (sparse-del! s (slot-new idx)))
                 (set! lost (+ lost 1)))))
           (set! j (+ j 1)))
         (println (sparse-len s))

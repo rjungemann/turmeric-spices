@@ -64,11 +64,11 @@
 ;; auto-consumed at body end. Disjoint mask from combat so the wave
 ;; scheduler places both systems in the same wave.
 (sized-defsystem-scheduled physics GameWorld [Pos] [Pos]
-  (set-Pos! Pos-write-cap w 0 (:: 42 :Pos)))
+  (set-Pos! Pos-write-cap w (slot-new 0) (:: 42 :Pos)))
 
 ;; combat -- writes Hp slot 0.
 (sized-defsystem-scheduled combat GameWorld [Hp] [Hp]
-  (set-Hp! Hp-write-cap w 0 (:: 7 :Hp)))
+  (set-Hp! Hp-write-cap w (slot-new 0) (:: 7 :Hp)))
 
 (defn main [] : int
   (let [w     : GameWorld (make-GameWorld 8)
@@ -85,8 +85,8 @@
       (let [w2    : GameWorld (load-GameWorld wp)
             pcap              (:: (make-read-cap Pos-cid) (ReadCap Pos))
             hcap              (:: (make-read-cap Hp-cid)  (ReadCap Hp))
-            p-val             (get-Pos pcap w2 0)
-            h-val             (get-Hp  hcap w2 0)]
+            p-val             (get-Pos pcap w2 (slot-new 0))
+            h-val             (get-Hp  hcap w2 (slot-new 0))]
         (do
           (println (:: p-val :int))                     ;; 42
           (println (:: h-val :int))                     ;; 7

@@ -58,18 +58,18 @@
   :reads-from  ren []
   :writes-to   ren [RenderPos]
   (do
-    (set-RenderPos! ren-RenderPos-write-cap ren 0
-      (:: (:: (get-Pos sim-Pos-read-cap sim 0) :int) :RenderPos))
-    (set-RenderPos! ren-RenderPos-write-cap ren 1
-      (:: (:: (get-Pos sim-Pos-read-cap sim 1) :int) :RenderPos))))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+      (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 0)) :int) :RenderPos))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 1)
+      (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 1)) :int) :RenderPos))))
 
 (defn main [] : int
   (let [sim : SimWorld    (make-SimWorld 8)
         ren : RenderWorld  (make-RenderWorld 8)
         ;; populate sim directly via the world-keyed setter.
         scap            (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
-    (set-Pos! scap sim 0 (:: 11 :Pos))
-    (set-Pos! scap sim 1 (:: 22 :Pos))
+    (set-Pos! scap sim (slot-new 0) (:: 11 :Pos))
+    (set-Pos! scap sim (slot-new 1) (:: 22 :Pos))
     (use-cap! scap)
     (let [sp (box-SimWorld sim)
           rp (box-RenderWorld ren)
@@ -79,8 +79,8 @@
       (xstage-run! xs)
       (let [ren2 : RenderWorld (load-RenderWorld rp)
             rcap            (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
-            v0              (:: (get-RenderPos rcap ren2 0) :int)
-            v1              (:: (get-RenderPos rcap ren2 1) :int)]
+            v0              (:: (get-RenderPos rcap ren2 (slot-new 0)) :int)
+            v1              (:: (get-RenderPos rcap ren2 (slot-new 1)) :int)]
         (println v0)   ;; 11
         (println v1)   ;; 22
         (let [ok (and (= v0 11) (= v1 22))]

@@ -52,10 +52,10 @@
   :writes-to   ren [RenderPos]
   :reads-from  sim [Pos]
   ;; multiple body forms -- the macro wraps these in (do ...).
-  (set-RenderPos! ren-RenderPos-write-cap ren 0
-    (:: (:: (get-Pos sim-Pos-read-cap sim 0) :int) :RenderPos))
-  (set-RenderPos! ren-RenderPos-write-cap ren 1
-    (:: (:: (get-Pos sim-Pos-read-cap sim 1) :int) :RenderPos)))
+  (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+    (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 0)) :int) :RenderPos))
+  (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 1)
+    (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 1)) :int) :RenderPos)))
 
 ;; Variant B: canonical 4-clause layout (with the now-unnecessary empties)
 ;; -- proves the relaxed parser still accepts the original shape.
@@ -66,23 +66,23 @@
   :reads-from  ren []
   :writes-to   ren [RenderPos]
   (do
-    (set-RenderPos! ren-RenderPos-write-cap ren 0
-      (:: (:: (get-Pos sim-Pos-read-cap sim 0) :int) :RenderPos))
-    (set-RenderPos! ren-RenderPos-write-cap ren 1
-      (:: (:: (get-Pos sim-Pos-read-cap sim 1) :int) :RenderPos))))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+      (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 0)) :int) :RenderPos))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 1)
+      (:: (:: (get-Pos sim-Pos-read-cap sim (slot-new 1)) :int) :RenderPos))))
 
 (defn populate-sim [^borrow sim : SimWorld] : nil
   (let [c1 (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
-    (set-Pos! c1 sim 0 (:: 11 :Pos))
+    (set-Pos! c1 sim (slot-new 0) (:: 11 :Pos))
     (use-cap! c1))
   (let [c2 (:: (make-write-cap Pos-cid) (XWriteCap SimWorld Pos))]
-    (set-Pos! c2 sim 1 (:: 22 :Pos))
+    (set-Pos! c2 sim (slot-new 1) (:: 22 :Pos))
     (use-cap! c2)))
 
 (defn drain-render [ren : RenderWorld] : nil
   (let [rcap (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
-        v0   (:: (get-RenderPos rcap ren 0) :int)
-        v1   (:: (get-RenderPos rcap ren 1) :int)]
+        v0   (:: (get-RenderPos rcap ren (slot-new 0)) :int)
+        v1   (:: (get-RenderPos rcap ren (slot-new 1)) :int)]
     (println v0)
     (println v1)))
 

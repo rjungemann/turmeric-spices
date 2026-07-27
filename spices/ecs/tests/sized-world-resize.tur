@@ -70,10 +70,10 @@
             e2 (sized-spawn! (.state src))
             e3 (sized-spawn! (.state src))]
         (do
-          (sized-dense-set! (.Pos src) (slot->int (entity-index e0)) (:: 0  :Pos))
-          (sized-dense-set! (.Pos src) (slot->int (entity-index e1)) (:: 10 :Pos))
-          (sized-dense-set! (.Pos src) (slot->int (entity-index e2)) (:: 20 :Pos))
-          (sized-dense-set! (.Pos src) (slot->int (entity-index e3)) (:: 30 :Pos))
+          (sized-dense-set! (.Pos src) (entity-index e0) (:: 0  :Pos))
+          (sized-dense-set! (.Pos src) (entity-index e1) (:: 10 :Pos))
+          (sized-dense-set! (.Pos src) (entity-index e2) (:: 20 :Pos))
+          (sized-dense-set! (.Pos src) (entity-index e3) (:: 30 :Pos))
           ;; Despawn e1 -- bumps gens[1] in src, so e1 must stay dead in
           ;; the resized world even though we never touch its gens.
           (sized-despawn (.state src) e1)
@@ -81,9 +81,9 @@
           (let [packed (world-resize-GameWorld src 8)]
             (open packed [n' dst]
               (do
-                (println (:: (sized-dense-get (.Pos dst) 0) :int))  ;; 0
-                (println (:: (sized-dense-get (.Pos dst) 2) :int))  ;; 20
-                (println (:: (sized-dense-get (.Pos dst) 3) :int))  ;; 30
+                (println (:: (sized-dense-get (.Pos dst) (slot-new 0)) :int))  ;; 0
+                (println (:: (sized-dense-get (.Pos dst) (slot-new 2)) :int))  ;; 20
+                (println (:: (sized-dense-get (.Pos dst) (slot-new 3)) :int))  ;; 30
                 (println (sized-alive? (.state dst) e0))            ;; true
                 (println (sized-alive? (.state dst) e2))            ;; true
                 (println (sized-alive? (.state dst) e3))            ;; true

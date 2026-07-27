@@ -612,16 +612,16 @@
     `(do
        (defn ~getter [^borrow cap : (ReadCap  ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int]
+                      e           : Slot]
                     : ~comp-name
          (let [p : ~comp-name (sized-dense-get (~field w) e)] p))
        (defn ~setter [^borrow cap : (WriteCap ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int
+                      e           : Slot
                       v           : ~comp-name]
                     : nil
          (sized-dense-set! (~field w) e v))
-       (defn ~haser [^borrow w : ~world-name e : int] : bool
+       (defn ~haser [^borrow w : ~world-name e : Slot] : bool
          (sized-dense-has? (~field w) e)))))
 
 ;;; sized-defworld -- declare a bounded-capacity world type `(Name n)`.
@@ -716,7 +716,8 @@
          (do
            (while (< i src-cap)
              (do
-               (sized-copy-component-body src dst i ~comps)
+               (let [__sl (slot-new i)]
+                 (sized-copy-component-body src dst __sl ~comps))
                (set! i (+ i 1))))
            (sized-state-copy-into (.state src) (.state dst)))))))
 
@@ -836,18 +837,18 @@
        (defn ~getter [n]
                      [^borrow cap : (ReadCap  ~comp-name)
                       ^borrow w   : (~world-name n)
-                      e           : int]
+                      e           : Slot]
                     : ~comp-name
          (let [p : ~comp-name (sized-dense-get (~field w) e)] p))
        (defn ~setter [n]
                      [^borrow cap : (WriteCap ~comp-name)
                       ^borrow w   : (~world-name n)
-                      e           : int
+                      e           : Slot
                       v           : ~comp-name]
                     : nil
          (sized-dense-set! (~field w) e v))
        (defn ~haser [n]
-                    [^borrow w : (~world-name n) e : int] : bool
+                    [^borrow w : (~world-name n) e : Slot] : bool
          (sized-dense-has? (~field w) e)))))
 
 ;;; sized-defsystem -- declare a typed sized-world system body with

@@ -78,14 +78,14 @@
   :writes-to  pred [PredPos]
   :writes-to  ren  [RenderPos]
   (do
-    (set-PredPos! pred-PredPos-write-cap pred 0
-      (:: (:: (get-Pos auth-Pos-read-cap auth 0) :int) :PredPos))
-    (set-RenderPos! ren-RenderPos-write-cap ren 0
-      (:: (:: (get-Pos auth-Pos-read-cap auth 0) :int) :RenderPos))
-    (set-PredPos! pred-PredPos-write-cap pred 1
-      (:: (:: (get-Pos auth-Pos-read-cap auth 1) :int) :PredPos))
-    (set-RenderPos! ren-RenderPos-write-cap ren 1
-      (:: (:: (get-Pos auth-Pos-read-cap auth 1) :int) :RenderPos))))
+    (set-PredPos! pred-PredPos-write-cap pred (slot-new 0)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 0)) :int) :PredPos))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 0)) :int) :RenderPos))
+    (set-PredPos! pred-PredPos-write-cap pred (slot-new 1)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 1)) :int) :PredPos))
+    (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 1)
+      (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 1)) :int) :RenderPos))))
 
 (defn main [] : int
   (let [auth : AuthWorld   (make-AuthWorld 8)
@@ -93,8 +93,8 @@
         ren  : RenderWorld  (make-RenderWorld 8)
         ;; seed the auth world directly via the world-keyed setter.
         acap (:: (make-write-cap Pos-cid) (XWriteCap AuthWorld Pos))]
-    (set-Pos! acap auth 0 (:: 11 :Pos))
-    (set-Pos! acap auth 1 (:: 22 :Pos))
+    (set-Pos! acap auth (slot-new 0) (:: 11 :Pos))
+    (set-Pos! acap auth (slot-new 1) (:: 22 :Pos))
     (use-cap! acap)
     (let [ap (box-AuthWorld   auth)
           pp (box-PredWorld   pred)
@@ -109,10 +109,10 @@
             ren2  : RenderWorld (load-RenderWorld rp)
             prcap (:: (make-read-cap PredPos-cid)   (XReadCap PredWorld PredPos))
             rrcap (:: (make-read-cap RenderPos-cid) (XReadCap RenderWorld RenderPos))
-            p0 (:: (get-PredPos   prcap pred2 0) :int)
-            p1 (:: (get-PredPos   prcap pred2 1) :int)
-            r0 (:: (get-RenderPos rrcap ren2  0) :int)
-            r1 (:: (get-RenderPos rrcap ren2  1) :int)]
+            p0 (:: (get-PredPos   prcap pred2 (slot-new 0)) :int)
+            p1 (:: (get-PredPos   prcap pred2 (slot-new 1)) :int)
+            r0 (:: (get-RenderPos rrcap ren2  (slot-new 0)) :int)
+            r1 (:: (get-RenderPos rrcap ren2  (slot-new 1)) :int)]
         (println p0)   ;; 11  (pred[0] <- auth[0])
         (println r0)   ;; 11  (ren[0]  <- auth[0])
         (println p1)   ;; 22  (pred[1] <- auth[1])

@@ -28,6 +28,7 @@
 (import ecs/sized-storage :refer [SizedDense sized-dense-get
                                    sized-dense-set! sized-dense-has?])
 (import ecs/xcap          :refer [XWriteCap XReadCap])
+(import ecs/entity        :refer [Slot])
 
 ;;; box-world -- box a world's carrier value onto the heap and return
 ;;; the `:int` cell the cross-world scheduler threads through.
@@ -115,8 +116,8 @@
 ;;; Example:
 ;;;   (sized-defworld-mono RenderWorld (Static 1024) [RenderPos])
 ;;;   (sized-defcomponent-accessors-xmono RenderWorld RenderPos)
-;;;   ;; get-RenderPos : (XReadCap  RenderWorld RenderPos) RenderWorld int -> RenderPos
-;;;   ;; set-RenderPos!: (XWriteCap RenderWorld RenderPos) RenderWorld int RenderPos -> nil
+;;;   ;; get-RenderPos : (XReadCap  RenderWorld RenderPos) RenderWorld Slot -> RenderPos
+;;;   ;; set-RenderPos!: (XWriteCap RenderWorld RenderPos) RenderWorld Slot RenderPos -> nil
 ;;;
 ;;; Since: X1
 (defmacro sized-defcomponent-accessors-xmono [world-name comp-name]
@@ -127,16 +128,16 @@
     `(do
        (defn ~getter [^borrow cap : (XReadCap ~world-name ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int]
+                      e           : Slot]
                     : ~comp-name
          (let [p : ~comp-name (sized-dense-get (~field w) e)] p))
        (defn ~setter [^borrow cap : (XWriteCap ~world-name ~comp-name)
                       ^borrow w   : ~world-name
-                      e           : int
+                      e           : Slot
                       v           : ~comp-name]
                     : nil
          (sized-dense-set! (~field w) e v))
-       (defn ~haser [^borrow w : ~world-name e : int] : bool
+       (defn ~haser [^borrow w : ~world-name e : Slot] : bool
          (sized-dense-has? (~field w) e)))))
 
 ) ;; end defmodule ecs/xworld

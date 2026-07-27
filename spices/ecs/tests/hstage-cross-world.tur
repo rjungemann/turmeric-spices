@@ -66,11 +66,11 @@
 ;; physics + physics2 both write Pos in GameWorld; combat writes Hp in
 ;; AltWorld. physics2 runs after physics (separate wave), so Pos ends 99.
 (sized-defsystem-scheduled physics  GameWorld [Pos] [Pos]
-  (set-Pos! Pos-write-cap w 0 (:: 42 :Pos)))
+  (set-Pos! Pos-write-cap w (slot-new 0) (:: 42 :Pos)))
 (sized-defsystem-scheduled physics2 GameWorld [Pos] [Pos]
-  (set-Pos! Pos-write-cap w 0 (:: 99 :Pos)))
+  (set-Pos! Pos-write-cap w (slot-new 0) (:: 99 :Pos)))
 (sized-defsystem-scheduled combat   AltWorld  [Hp]  [Hp]
-  (set-Hp! Hp-write-cap w 0 (:: 7 :Hp)))
+  (set-Hp! Hp-write-cap w (slot-new 0) (:: 7 :Hp)))
 
 (defn main [] : int
   (let [wa  : GameWorld (make-GameWorld 8)
@@ -96,8 +96,8 @@
               wb2   : AltWorld  (load-AltWorld  wpb)
               pcap            (:: (make-read-cap Pos-cid) (ReadCap Pos))
               hcap            (:: (make-read-cap Hp-cid)  (ReadCap Hp))
-              p-val           (get-Pos pcap wa2 0)
-              h-val           (get-Hp  hcap wb2 0)]
+              p-val           (get-Pos pcap wa2 (slot-new 0))
+              h-val           (get-Hp  hcap wb2 (slot-new 0))]
           (println n)                       ;; 2
           (println (:: p-val :int))         ;; 99
           (println (:: h-val :int))         ;; 7
