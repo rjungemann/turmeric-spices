@@ -64,8 +64,10 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
   full ecs suite runner on the known sized-* skew failures) was fixed the
   same day. The refined tests now live FLAT in `tests/` and auto-run with
   everything else: `tur test tests` completes with all 6 refined tests
-  passing (suite tally 64 tests / 41 passed / 23 failed -- the 23 are the
-  pre-existing `(Storage T)` skew set, none refined).
+  passing (suite tally at the time: 64 tests / 41 passed / 23 failed -- the
+  23 were the pre-existing `(Storage T)` skew set, none refined. That skew
+  was itself fixed later the same day -- see the note at the bottom -- and
+  the suite is now **66/66 green**).
 
 - **RE1 (c) -- for-each aliveness refinement, DONE (macro shipped
   2026-07-26).** The hand-written refined LOOP was already proven
@@ -89,8 +91,13 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
   encapsulation (private state field) the soundness argument needs. The
   `ecs/refined-world` module (below) is that promotion for the single-column
   facade; wiring the refined surface into the FULL `defworld`/`defcomponent`
-  storage stack remains follow-on work (and is entangled with the pre-existing
-  `(Storage T)` compiler skew).
+  storage stack remains follow-on work. (It was entangled with the
+  `(Storage T)` compiler skew, which is now RESOLVED -- 2026-07-26, turmeric
+  `struct_field_type_from_form` gained the assoc-type-projection dispatch and
+  the SZ8 Size-literal placeholder; plus the tests' legacy by-value box
+  triples were replaced with `defworld-box-helpers`. `tur test tests` is
+  **66/66 green**, so the full accessor/for-each surface is validatable
+  again and the follow-on is unblocked.)
 
 ## Shipped accessor module: `ecs/refined-world` (2026-07-26)
 
