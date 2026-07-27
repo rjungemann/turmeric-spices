@@ -67,24 +67,30 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
   passing (suite tally 64 tests / 41 passed / 23 failed -- the 23 are the
   pre-existing `(Storage T)` skew set, none refined).
 
-- **RE1 (c) -- for-each aliveness refinement, PROVEN.** A refined LOOP whose
-  body's `rgworld-get-x!` discharges per-entity works:
-  `tests/refined-loop-alive.tur` -- 1 proven, runs -> 40, correctly skips
-  a despawned entity. It uses tail recursion (TCO'd) + a re-borrow of `w` inside
-  the recursive helper + the `alive?` guard (the `while`+`set!` form is blocked
-  by the loop counter's `set!` tripping the crossing path-cond collector's
-  whole-body `mentions_set` decline). NOTE: local recursion via named-let
-  (`(let go [...] ...)`) or `letrec` also works and discharges, so the recursive
-  form is fully available by hand. An ergonomic `for-each-alive` MACRO is blocked
-  on a separate bug -- a macro that GENERATES a refined guard/crossing does not
-  discharge (turmeric
-  `docs/reported/macro-generated-refined-crossings-do-not-discharge.md`).
+- **RE1 (c) -- for-each aliveness refinement, DONE (macro shipped
+  2026-07-26).** The hand-written refined LOOP was already proven
+  (`tests/refined-loop-alive.tur` -- tail recursion + re-borrow + guard, runs
+  -> 40 skipping a despawned entity; named-let/letrec work too). The ergonomic
+  MACRO was blocked on macro-GENERATED refined guards/crossings not
+  discharging; that is FIXED on the turmeric side (the crossing path walk now
+  traverses macro expansions via `refine_note_macro_expansion`; resolved
+  report: turmeric
+  `docs/archive/macro-generated-refined-crossings-do-not-discharge.md`).
+  `ecs/refined-world` now ships **`for-each-alive!`**: one macro generates the
+  recursive loop (named-let, TCO'd, no `set!`), the frozen re-borrow, and the
+  aliveness guard; the user's refined `rgworld-get-x!` read is spliced as the
+  body and discharges PER-ENTITY. `tests/refined-foreach-alive.tur` (proves +
+  runs -> 10, 30, skipping the despawned slot);
+  `tests/refined-foreach-wrong-entity.tur` (a body reading a DIFFERENT entity
+  than the proven binder stays TUR-W0372). Both auto-run in `tur test tests`.
 - **Promotion to a shipped accessor family.** These fixtures use a self-contained
   `GameWorld` facade. Promoting to a real `ecs` module means a facade that owns a
   `WorldState` + storages and re-exports `alive?`/`despawn!`/`get!` with the
-  encapsulation (private state field) the soundness argument needs.
-- **`for-each` bodies** carrying the aliveness refinement (RE1 item 2) -- the
-  highest-value version, deferred.
+  encapsulation (private state field) the soundness argument needs. The
+  `ecs/refined-world` module (below) is that promotion for the single-column
+  facade; wiring the refined surface into the FULL `defworld`/`defcomponent`
+  storage stack remains follow-on work (and is entangled with the pre-existing
+  `(Storage T)` compiler skew).
 
 ## Shipped accessor module: `ecs/refined-world` (2026-07-26)
 
