@@ -4,6 +4,34 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ## [Unreleased]
 
+### Security / soundness
+
+- **`RGWorld` is now `:sealed`** -- closes the `::` half of the RE1
+  frozen-region aliasing hole. `::` is a *coercing* cast, so any module could
+  previously write `(:: w :int)` and `(:: that-int RGWorld)` to reconstruct an
+  ALIAS of a frozen world and despawn through it, walking around the uniqueness
+  argument that makes `frozen` sound. Mutating the borrowed `w` directly was
+  correctly `TUR-E0200`; the alias was not. Outside `ecs/refined-world` both
+  casts are now `TUR-E0302`.
+
+  The module's TRUST BOUNDARY docstring is updated to the narrower, true claim,
+  and a stale inline comment that asserted the opposite -- that opacity alone
+  "closes the extract-reconstruct-despawn aliasing hole" -- is corrected. It
+  never did; it contradicted the docstring directly above it.
+
+  Note this raises the bar rather than making the region adversarially sound:
+  inline-C can still cast an `int64_t` in any module. The bypass moves from
+  "one `::` away, in ordinary code" to "requires deliberate inline-C."
+
+  Enforcement requires `--enable=sealed-opaque` (prototype experiment; the
+  two-direction rule may still change). Without the flag `:sealed` parses and
+  imposes nothing, so this is **not** a breaking change for consumers -- but it
+  does require a `tur` new enough to parse the attribute (0.32.2+).
+
+  Regression test: `tests/errors/refined-world-sealed-alias.tur`. See the
+  turmeric repo's `docs/reported/frozen-region-aliasing-via-coercing-cast.md`
+  and `docs/upcoming/sealed-opaque-plan.md`.
+
 ### Changed
 
 - **RE0 -- real handle types at the ECS API surface (retire `:int`
