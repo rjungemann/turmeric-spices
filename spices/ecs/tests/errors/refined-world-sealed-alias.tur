@@ -1,0 +1,33 @@
+#lang turmeric refined
+;; tur-test-flags: --enable=sealed-opaque
+;; RE1 aliasing hole: reconstructing an RGWorld through the `::` coercing cast
+;; used to mint an ALIAS of a frozen world and despawn through it, walking
+;; around the uniqueness argument that makes `frozen` sound.
+;;
+;;   (frozen w
+;;     (let [w2 (:: (:: w :int) RGWorld)]   ;; w2 is OWNED, not the borrowed w
+;;       (rgworld-despawn! w2 e)))          ;; ... so no TUR-E0200
+;;
+;; `RGWorld` is now `:sealed`, so both halves of that cast are TUR-E0302
+;; outside `ecs/refined-world`. Reported as
+;; docs/reported/frozen-region-aliasing-via-coercing-cast.md in the turmeric
+;; repo; design in docs/upcoming/sealed-opaque-plan.md.
+;;
+;; Expected: TUR-E0302
+;;
+;; NOTE: this test needs --enable=sealed-opaque. Without the flag the sealing
+;; is not enforced (the experiment is a prototype) and this file COMPILES --
+;; which is the documented gate-off behavior, not a bug.
+(defmodule sealed_alias (export)
+(import ecs/refined-world :refer [RGWorld rgworld-new rgworld-spawn!
+                                  rgworld-despawn!])
+(import ecs/freeze :refer [frozen])
+
+(defn main [] : int
+  (let [^mut w (rgworld-new)
+        e      (rgworld-spawn! w 7)]
+    (frozen w
+      (let [w2 (:: (:: w :int) RGWorld)]   ;; TUR-E0302: cannot unwrap sealed 'RGWorld'
+        (rgworld-despawn! w2 e)))
+    0))
+)
