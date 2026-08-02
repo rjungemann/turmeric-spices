@@ -32,7 +32,39 @@ All notable changes to the `tur-ecs` spice are documented here.
   turmeric repo's `docs/reported/frozen-region-aliasing-via-coercing-cast.md`
   and `docs/upcoming/sealed-opaque-plan.md`.
 
+### Fixed
+
+- **`build.tur` parses again** -- `:spices` was spelled `#fx{...}`, an
+  effect-row literal, where the manifest reader wants a map. The reader split
+  that made the two distinct landed 2026-07-05 (turmeric `fe67bd9fd`,
+  `TUR-E0620`), and the companion spices-side migration converted `:exports`
+  to `#map{...}` but missed `:spices` in the same file. Since then the
+  manifest has failed to read on any `tur` >= 0.27.0, which took the spice's
+  `src/` off the module-resolution path and made **every** intra-spice import
+  fail: `tur test tests` reported 4 passed / 66 failed, none of it a real
+  defect. With `:spices #map{...}` the suite is 70/70 again.
+
+  The same missed conversion was present in **40 other spice manifests** in
+  this repo (174 occurrences in total, under `:spices`, `:options`,
+  `:cmake-deps` and `:bin` -- every map-shaped manifest slot the reader
+  guards). All are converted in the same change.
+
 ### Changed
+
+- **Retire the no-op `#lang turmeric refined` layer token** -- the `refined`
+  experiment graduated in turmeric v0.33.0, so static `#refine{...}` discharge
+  is unconditional and the layer token is accepted only by a compatibility
+  shim that warns `TUR-W0064` and **ages out one minor line after v0.33.0**.
+  Dropped from all 13 files that carried it (12 in `tests/`, one in
+  `tests/errors/`); no file gains a replacement `#lang` line, matching the 58
+  other tests that never had one. Two stale prose claims corrected alongside:
+  `ecs/sized-refined`'s module docstring no longer tells callers they need the
+  experiment, and `tests/refined-alive-frozen.tur` no longer cites
+  `--enable=refined` in its verification note.
+
+  Behavior is unchanged -- the token was already inert. Suite 70/70 before and
+  after; `tests/errors/refined-world-sealed-alias.tur` still reports
+  `TUR-E0302` under `--enable=sealed-opaque` and compiles clean without it.
 
 - **RE0 -- real handle types at the ECS API surface (retire `:int`
   stand-ins)** -- per `docs/upcoming/v1/ecs-refinement-typed-apis-plan.md`

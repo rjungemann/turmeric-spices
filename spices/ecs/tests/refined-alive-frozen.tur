@@ -1,4 +1,3 @@
-#lang turmeric refined
 ;; tur-test-flags: --strict-refine
 ;; RE1 (ecs refinement, gap C2): an aliveness-refined accessor that will not
 ;; compile against an entity whose liveness has not been established -- proven
@@ -8,7 +7,7 @@
 ;; exactly `sized-alive?`'s shape), so `alive?` is impure to the purity walk and
 ;; needs `#reads w`. `despawn!` takes `^unique ^mut w`, so a `frozen` borrow
 ;; makes it uncallable in the region (TUR-E0200) -- which is what lets the guard
-;; discharge soundly. Verified with `--enable=refined --strict-refine`:
+;; discharge soundly. Verified with `--strict-refine`:
 ;;   * WITH the frozen guard: refine: 1 proven, runs -> 42.
 ;;   * WITHOUT the region (see errors/refined-alive-no-region): 1 unknown -> W0372.
 ;; So `#reads` + `frozen` is load-bearing here, not inert.
