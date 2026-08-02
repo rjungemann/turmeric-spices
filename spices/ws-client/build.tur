@@ -3,27 +3,27 @@
   :version     "0.1.0"
   :description "RFC 6455 WebSocket client (ws:// and wss://) for Turmeric"
   :license     "MIT"
-  :spices #fx{
+  :spices #map{
     ;; ws-core owns the shared protocol types (WsConn, WsFrame), the frame
     ;; predicates, and ws-accept-key (NAME-V0). Declared as a :path dep so the
     ;; canonical types resolve for editor/LSP and release builds.
-    "ws-core" #fx{:path "../ws-core"}
+    "ws-core" #map{:path "../ws-core"}
     ;; Workspace-local test framework, used only by tests/. Declared as a
     ;; :path dep so `tur test tests` resolves test/suite + test/assert +
     ;; test/runner from the sibling spice without a fetch or lockfile entry.
-    "test" #fx{:path "../test"}
+    "test" #map{:path "../test"}
   }
-  :cmake-deps #fx{
+  :cmake-deps #map{
     ;; mbedTLS powers the wss:// path (TCP connect + TLS handshake + record
     ;; I/O). It is optional: the ws-client module gates every TLS reference
     ;; on __has_include(<mbedtls/ssl.h>), so when these headers are absent the
     ;; spice still builds and ws:// works -- a wss:// connect just returns a
     ;; null handle whose ws-last-error says to rebuild with mbedTLS. Same
     ;; pattern and pin as tur-http / tur-tls.
-    "mbedtls" #fx{:url     "https://github.com/Mbed-TLS/mbedtls"
+    "mbedtls" #map{:url     "https://github.com/Mbed-TLS/mbedtls"
                :ref     "v3.6.2"
                :targets ["mbedtls" "mbedx509" "mbedcrypto"]
-               :options #fx{:BUILD_SHARED_LIBS "OFF"
+               :options #map{:BUILD_SHARED_LIBS "OFF"
                          :ENABLE_TESTING    "OFF"
                          :ENABLE_PROGRAMS   "OFF"}}
   }
