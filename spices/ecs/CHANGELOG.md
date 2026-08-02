@@ -4,6 +4,39 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **`defworld-classes`** -- declares a world *and* the `Has<Comp>` typeclass
+  plus its per-(World, Comp) instance for every component, in one form.
+  `defworld` already knows its component list at expansion time, so the
+  `1 + 2N` declaration burden (`defworld`, one `defcomponent-class` per
+  component, one `defcomponent-class-instance` per pair) collapses to one
+  call. This is ECB step 3 from the turmeric repo's
+  `docs/upcoming/v1/ecs-component-set-bounds-plan.md` -- the cheap,
+  spice-side share of the `/has` ergonomics win, with no compiler work and
+  no dependency on the structural-bounds feature that plan gates on a
+  profile.
+
+  **It is a new macro rather than a change to `defworld`, deliberately.**
+  The plan recommended emitting the instances from `defworld` itself; that
+  is a breaking change and the plan did not know it. The instance expansion
+  emits cap-mint helpers that name `ecs/cap` symbols *at the call site*, so
+  folding it in makes every `defworld` user import
+  `WriteCap`/`ReadCap`/`make-write-cap`/`make-read-cap` or fail with
+  `unknown function or operator 'make-write-cap'`. In this repo 16 files
+  call `defworld` and exactly one touches the typeclass surface -- and that
+  one declares its worlds with raw `defstruct`, not `defworld`, because it
+  needs a world without the `gens` field. The two surfaces are disjoint in
+  practice, so auto-emission would have broken 15 call sites and every
+  downstream consumer to serve none of them.
+
+  Note the `Has<Comp>` method is declared `: int` by `defcomponent-class`
+  while `defworld` types its fields `(Storage Comp)`, so a caller casts:
+  `(:: (Pos-storage-of w) (Storage Pos))`. That is pre-existing, not
+  introduced here.
+
+  Test: `tests/defworld-classes.tur`. Suite 71/71.
+
 ### Security / soundness
 
 - **`RGWorld` is now `:sealed`** -- closes the `::` half of the RE1
