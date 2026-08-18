@@ -43,10 +43,15 @@ with no fetch step. To declare it explicitly:
 }
 ```
 
-Two modules:
+Four public modules:
 
 - `secret/hygiene` -- three primitives that work on any raw buffer.
 - `secret/core` -- the linear `Secret` handle built on top of them.
+- `secret/kdf` -- HMAC-SHA256 and HKDF-SHA256 over `Secret`s.
+- `secret/hex` -- constant-time hex codecs whose output is a `Secret`.
+
+(`secret/internal` also exists; it is intra-spice plumbing and not part of
+the public API.)
 
 Use `secret/hygiene` directly when you are dealing with someone else's buffer
 (a decoded header, a socket read). Use `secret/core` when you own the
@@ -207,6 +212,42 @@ there. Handing ownership over should destroy your copy, so it does.
 Page locking is fail-soft (see [Locking](#locking-and-fail-soft) below). If
 your threat model actually requires the key to stay out of swap, ask.
 
+## Deriving and authenticating
+
+```turmeric no-check
+(secret-hmac-sha256 key p n)                  ;; : (Result Secret cstr)
+(secret-hkdf-sha256 ikm salt info n)          ;; : (Result Secret cstr)
+```
+
+Both hand back a `Secret`, so a derived key inherits the same discipline as
+a minted one. The MAC is a `Secret` too, deliberately: a MAC compared with
+`memcmp` is as dangerous as a leaked key, and keeping it in a `Secret` makes
+`secret-eq?` -- which is constant-time -- the path of least resistance.
+
+`salt` and `info` are `cstr`, measured with `strlen`. That fits the usual
+case (ASCII labels like `"v1"` or `"encryption key"`) but cannot carry an
+embedded NUL, so a binary salt needs `hkdf-sha256-raw!`, which takes
+pointer/length pairs. RFC 5869's own first test vector uses the salt
+`00 01 .. 0c`, so this is not a hypothetical gap.
+
+## Hex at the boundary
+
+```turmeric no-check
+(secret-of-hex "deadbeef")   ;; : (Result Secret cstr) -- 4 bytes
+(secret->hex k)              ;; : (Result Secret cstr) -- 2n hex chars
+```
+
+Hex is how key material actually travels: config files, environment
+variables, API responses. Encoding returns a `Secret` because the hex form of
+a key is still the key -- returning a plain `cstr` would hand back an unwiped
+copy and quietly undo the discipline the caller opted into. Decoding returns
+one because material arriving as hex is exactly the material most likely to
+be left lying around.
+
+`secret-of-hex` does not wipe its source string; that buffer's lifetime
+belongs to the caller. If it holds real key material, follow up with
+`secure-wipe-ptr!`.
+
 ---
 
 # Part 2 -- Implementation
@@ -348,6 +389,65 @@ Note the error path calls `secret-free-raw!` -- the same teardown
 `secret-wipe!` uses. A mint whose entropy fill failed releases its pages
 instead of handing back a zero-filled buffer that would pass for a key.
 
+## Why SHA-256 is implemented here
+
+`secret/kdf` carries its own SHA-256, HMAC, and HKDF rather than linking the
+tls spice's mbedTLS. The plan originally said to reuse mbedTLS; the reasoning
+for not doing so:
+
+- S1 and S2 need no external library at all. Adding a `:cmake-deps` row makes
+  every caller who wanted `secure-wipe-ptr!` clone and build mbedTLS.
+- For a *security* spice, a smaller supply-chain surface is worth something on
+  its own.
+- The repo already ships a hand-rolled SHA-256 in `stdlib/digest.tur`, whose
+  header advertises "no external crypto libraries are required."
+
+"Don't roll your own crypto" is a real rule, and it is about protocols,
+primitives with genuine side-channel subtlety (AES, RSA, elliptic curves),
+and novel constructions. SHA-256 / HMAC / HKDF are the textbook exception:
+fixed-size, no secret-dependent branching or indexing, no bignum arithmetic.
+
+**That argument only holds while the vectors do.** The implementations are
+pinned to FIPS 180-4 (SHA-256), RFC 4231 cases 1/2/3/6 (HMAC -- case 6 covers
+the "hash a key longer than the block" branch), and RFC 5869 cases 1 and 3
+(HKDF), and the hex encoder is checked exhaustively against `printf %02x` for
+all 256 byte values. If those tests are ever weakened or skipped, the case
+for not linking a vetted library goes with them.
+
+Worth noting how that played out: three of the vector tests failed on first
+run, and all three were transcription errors in the *test file* (a 49-byte
+message where the RFC says 50, a 135-byte key where it says 131, a wrong
+expected string) rather than implementation bugs. That is the argument for
+writing the vectors out longhand instead of round-tripping the code against
+itself -- a round-trip test would have passed against a wrong implementation.
+
+## Constant-time hex
+
+The obvious hex encoder indexes a 16-byte table with a nibble of the secret.
+That is a secret-dependent memory access, and cache-timing attacks against
+exactly that pattern are well established. Both directions here are
+branchless arithmetic:
+
+```c
+/* encode: '0' + x + (39 if x > 9 else 0), 39 == 'a' - '0' - 10 */
+o[i*2] = (unsigned char)('0' + hi + (((9 - hi) >> 31) & 39));
+```
+
+`9 - x` is negative exactly when `x > 9`, so the arithmetic shift yields all
+ones and the mask contributes 39. No table, no branch.
+
+Decoding uses a constant-time range test, `(((lo-1-x) & (x-hi-1)) >> 31)`,
+which is `-1` when `lo <= x <= hi` and `0` otherwise. The three character
+classes (`0-9`, `A-F`, `a-f`) are masked together, and validity is
+accumulated across the whole string rather than short-circuited, so a bad
+character does not change how long the decode takes. A failed decode wipes
+its output rather than returning a partial decode of attacker-controlled
+input.
+
+What is *not* hidden: the length of the input, and whether decoding
+succeeded. Neither is secret -- both are observable from the surrounding
+protocol anyway.
+
 ## Naming: `-raw`, not `__`
 
 The private helpers are `secret-alloc-raw`, `secret-free-raw!`,
@@ -363,7 +463,7 @@ Privacy comes from not exporting them, which is what actually enforces it.
 
 The suite is in three parts, and the third is the interesting one.
 
-- `tur test tests` -- 26 functional cases.
+- `tur test tests` -- 50 functional cases, including the RFC vectors.
 - `bash errors/run.sh` -- the three linear-`Secret` diagnostics. These are
   compile-*fail* fixtures, so they live outside `tests/` (`tur test` recurses
   and would try to build them as an ordinary suite). The runner asserts each
@@ -397,6 +497,27 @@ back empty.
 The general lesson: a security test that can only report "clean" is
 indistinguishable from a test that is not running. Give it something it is
 required to find.
+
+### And the suite itself was not failing
+
+A related trap, found the same day and worth knowing about because it applies
+to every spice in the repo: `tur test` judges a file by its **exit code**, but
+the conventional `main` ends in a hardcoded `0` and `run-all` returns `:void`.
+So a failing `it` printed `not ok`, the summary printed "1 failed", and the
+process still exited 0 -- `tur test` reported the file as passed.
+
+It hid a genuinely failing assertion in this spice's hex tests, caught only
+because the TAP lines were being read by eye. The fix is `run-all-status`
+(added to the `test` spice, additive), which returns 1 when anything failed:
+
+```turmeric no-check
+(defn main [] : int
+  (__all-tests)
+  (run-all-status))
+```
+
+Every other spice still has the hole -- see
+`docs/test-suites-report-success-with-failing-assertions.md`.
 
 ## What this does not protect against
 
