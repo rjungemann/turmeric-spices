@@ -26,6 +26,9 @@ libsodium cannot express.
 | S3 | HMAC-SHA256, HKDF-SHA256, constant-time codecs | planned |
 | S4 | `secret-do` best-effort stack scrub | optional |
 
+Full walkthrough, including the implementation rationale and the testing
+methodology: [`docs/guides/secret-guide.md`](../../docs/guides/secret-guide.md).
+
 Design plan: [`docs/upcoming/secret-spice-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/upcoming/secret-spice-plan.md)
 in the compiler repo.
 
