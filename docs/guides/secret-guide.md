@@ -363,12 +363,18 @@ Every fallible entry point returns `(Result T cstr)` -- never a sentinel
 
 But note **where** those Results are constructed: entirely in Turmeric, with
 `ok`/`err`, while the inline-C helpers deal only in raw pointers and bools.
-That split is a workaround, not a style preference. An inline-C body returns
-the *boxed* Result carrier, and the box-to-struct conversion is silently
-dropped in any function the CPS transform touches -- which includes every
-caller of a higher-order function like `with-secret`. The result is a wall of
-C type errors with no `.tur` attribution. Reported as
-[`cps-result-unbox-dropped.md`](https://github.com/rjungemann/turmeric/blob/main/docs/reported/cps-result-unbox-dropped.md).
+
+That split began as a workaround. An inline-C body returns the *boxed* Result
+carrier, and the box-to-struct conversion used to be silently dropped in any
+function the CPS transform touches -- which is every caller of a higher-order
+function like `with-secret` -- producing a wall of C type errors with no
+`.tur` attribution. That is **fixed** as of turmeric `65024bca`
+([`cps-result-unbox-dropped.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/cps-result-unbox-dropped.md)),
+so it is no longer forced.
+
+The split is kept anyway, because it is the better factoring on its own
+terms: inline C does pointer work, Turmeric does control flow and error
+typing.
 
 So `secret-random!` reads:
 
