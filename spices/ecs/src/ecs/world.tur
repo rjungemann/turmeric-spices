@@ -46,7 +46,7 @@
 ;;; defcomponent-accessors -- depends on gaps A + E + G)
 
 (defmodule ecs/world
-  (export defcomponent defworld defcomponent-accessors
+  (export defcomponent defworld defworld-classes defcomponent-accessors
           defcomponent-cids
           defcomponent-class defcomponent-class-instance
           world-alloc-entity! world-despawn!)
@@ -357,6 +357,58 @@
          (make-write-cap cid))
        (defn ~mint-read-name  [cid : int] : (ReadCap  ~comp-name)
          (make-read-cap  cid)))))
+
+;;; defworld-classes--from -- internal helper. Walks a component vector
+;;; and emits the `Has<Comp>` class plus its `(world, component)`
+;;; instance for each entry. Returns a flat list of forms that
+;;; `defworld-classes` splices into a `do`.
+(defmacro defworld-classes--from [world-name comps]
+  (if (empty? comps)
+    `()
+    `((defcomponent-class ~(first comps))
+      (defcomponent-class-instance ~world-name ~(first comps))
+      ~@(defworld-classes--from world-name (rest comps)))))
+
+;;; defworld-classes -- `defworld`, plus the `Has<Comp>` class and the
+;;; per-(World, Comp) instance for every component in one declaration.
+;;;
+;;; `defworld` already knows its component list at expansion time, so the
+;;; `(defcomponent-class C)` / `(defcomponent-class-instance W C)` pair that
+;;; a typeclass-bounded system needs is derivable rather than hand-written.
+;;; This collapses `1 + 2N` declarations to one.
+;;;
+;;; Parameters:
+;;;   name  -- the world type name
+;;;   comps -- vector of component type names
+;;;
+;;; Example:
+;;;   (defworld-classes GameWorld [Pos Vel])
+;;;     ;; emits:
+;;;     ;;   (defworld GameWorld [Pos Vel])
+;;;     ;;   (defcomponent-class Pos)
+;;;     ;;   (defcomponent-class-instance GameWorld Pos)
+;;;     ;;   (defcomponent-class Vel)
+;;;     ;;   (defcomponent-class-instance GameWorld Vel)
+;;;
+;;; This is a SEPARATE macro rather than a change to `defworld` on
+;;; purpose. The instance expansion emits cap-mint helpers that name
+;;; `ecs/cap` symbols at the call site, so folding it into `defworld`
+;;; would require every existing call site to import
+;;; `WriteCap`/`ReadCap`/`make-write-cap`/`make-read-cap` -- a breaking
+;;; change to a macro whose users overwhelmingly do not touch the
+;;; typeclass surface at all. Use `defworld` when you just want the world
+;;; struct; use this when you also want `Has<Comp>` dispatch.
+;;;
+;;; Callers must import both `ecs/cap` (the four cap symbols above) and
+;;; this module. Redeclaring a component's class is harmless, so two
+;;; worlds may share a component -- each `defworld-classes` re-emits
+;;; `(defcomponent-class C)` and only the instances differ.
+;;;
+;;; Since: ECB step 3 (docs/upcoming/v1/ecs-component-set-bounds-plan.md)
+(defmacro defworld-classes [name comps]
+  `(do
+     (defworld ~name ~comps)
+     ~@(defworld-classes--from name comps)))
 
 ;;; world-alloc-entity! -- allocate the next entity slot.
 ;;;
