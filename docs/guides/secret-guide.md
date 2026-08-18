@@ -459,11 +459,16 @@ protocol anyway.
 The private helpers are `secret-alloc-raw`, `secret-free-raw!`,
 `secret-data-raw` -- not the `__`-prefixed convention used elsewhere in
 stdlib and the spices. Inline-C bodies call siblings through
-`__TUR_CNAME_<name>__`, and a name that itself begins with `__` breaks that
-macro's expansion, producing a call to a function that does not exist. See
-[`tur-cname-macro-breaks-on-leading-underscores.md`](https://github.com/rjungemann/turmeric/blob/main/docs/reported/tur-cname-macro-breaks-on-leading-underscores.md).
+`__TUR_CNAME_<name>__`, and a name that itself began with `__` used to break
+that macro's expansion, producing a call to a function that does not exist
+(or, with a hyphen in the name, a phantom `alloc__` from the C tokenizer
+reading the hyphen as a minus). That is **fixed** as of turmeric `490172c6`
+([`tur-cname-macro-breaks-on-leading-underscores.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/tur-cname-macro-breaks-on-leading-underscores.md)),
+so either spelling works now.
 
-Privacy comes from not exporting them, which is what actually enforces it.
+The `-raw` suffix is kept regardless: privacy comes from not exporting these,
+which is what actually enforces it, and the suffix says what they are rather
+than just that they are internal.
 
 ## Testing methodology
 
