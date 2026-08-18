@@ -22,7 +22,7 @@ libsodium cannot express.
 | Phase | Contents | State |
 |-------|----------|-------|
 | S1 | `secure-wipe-ptr!`, `crypto-random-bytes!`, `ct-eq-ptr?` | shipped |
-| S2 | linear `Secret`, `mlock`, `with-secret` | in progress |
+| S2 | linear `Secret`, `mlock`, `with-secret` | shipped |
 | S3 | HMAC-SHA256, HKDF-SHA256, constant-time codecs | planned |
 | S4 | `secret-do` best-effort stack scrub | optional |
 
@@ -74,6 +74,68 @@ leaks the shared-prefix length to anyone who can time it.
 It hides content, not length. To compare variable-length secrets, compare
 fixed-size digests of them.
 
+## `secret/core` -- the linear `Secret`
+
+```turmeric
+(import secret/core :refer [Secret secret-random! secret-wipe!
+                            with-secret secret-len secret-eq?])
+
+(defn sign-request [body : ptr<void> n : int] : int
+  (let [r (secret-random! 32)]
+    (if (ok? r)
+      (let [k   (ok-val r)
+            mac (with-secret k hmac-into)]
+        (do
+          (secret-wipe! k)      ;; omit this line and the program will not compile
+          mac))
+      0)))
+```
+
+`Secret` is `defopaque ... :linear`. Every control path through a live
+`Secret` must end in exactly one `secret-wipe!`; the observing operations
+(`with-secret`, `secret-eq?`, `secret-len`, `secret-locked?`) take it by
+`^borrow` and do not discharge that obligation. Three things are therefore
+compile errors, not runtime hazards:
+
+| Mistake | Diagnostic |
+|---|---|
+| never wiping a secret | `TUR-E0100` linear value dropped without being consumed |
+| reading one after wiping | `TUR-E0101` linear value used after being consumed |
+| wiping one twice | `TUR-E0101` linear value used after being consumed |
+
+`errors/run.sh` asserts all three. **This discipline is on by default** as of
+`tur` 0.35 -- `-Xsubstructural` is now a no-op that warns `TUR-W0050`. It is
+not an opt-in mode you have to remember to switch on.
+
+### Constructors
+
+`secret-random! [n] : (Result Secret cstr)` mints `n` bytes from the OS
+CSPRNG. A secret that could not be filled is released rather than returned,
+so the error path never yields a zero-filled "key".
+
+`secret-of-bytes [p n] : (Result Secret cstr)` copies `n` bytes in and
+**wipes the caller's buffer**. That wipe is the reason the constructor exists
+rather than a plain copy: material that arrived in an ordinary buffer lives
+in two places until the plain copy is destroyed, and the caller who has just
+handed ownership over is the one least likely to remember.
+
+### Reaching the bytes
+
+`with-secret [s f]` is the only sanctioned route to the payload; there is
+deliberately no accessor that returns the raw pointer. Note the limit
+honestly: the borrow checker stops the `Secret` escaping, but it cannot
+follow the `ptr<void>` handed to `f`. A callback that stashes that pointer
+somewhere outliving the call holds a dangling reference to freed key
+material, and nothing here catches it.
+
+### Locking
+
+Pages are `mlock`ed at construction and marked `MADV_DONTDUMP` where that
+exists. Locking is **fail-soft** -- `RLIMIT_MEMLOCK` is 64 KiB by default on
+many Linux distributions, and refusing to mint a key over an ambient ulimit
+would push callers back to raw buffers, which is strictly worse. Callers who
+genuinely require locking ask `secret-locked?`.
+
 ## Platform coverage
 
 | | wipe | CSPRNG | page locking | core-dump exclusion |
@@ -99,9 +161,15 @@ material.
 ## Tests
 
 ```sh
-tur test tests          # functional suite
+tur test tests          # functional suite (26 cases)
 bash tests/o2/run.sh    # same suite at -O2, plus the dead-store probe
+bash errors/run.sh      # the three linear-Secret diagnostics
 ```
+
+`errors/` holds compile-*fail* fixtures, which is why they sit outside
+`tests/` -- `tur test tests` recurses and would try to build them as an
+ordinary suite. `errors/run.sh` asserts each is rejected with the right
+diagnostic code, rather than leaving the fixtures sitting unverified.
 
 `tests/o2/residue.tur` is worth reading before trusting it: it carries a
 positive control (a frame that is never wiped) alongside the memset control,
