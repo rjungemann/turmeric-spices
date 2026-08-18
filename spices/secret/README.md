@@ -23,7 +23,7 @@ libsodium cannot express.
 |-------|----------|-------|
 | S1 | `secure-wipe-ptr!`, `crypto-random-bytes!`, `ct-eq-ptr?` | shipped |
 | S2 | linear `Secret`, `mlock`, `with-secret` | shipped |
-| S3 | HMAC-SHA256, HKDF-SHA256, constant-time codecs | planned |
+| S3 | HMAC-SHA256, HKDF-SHA256, constant-time codecs | shipped |
 | S4 | `secret-do` best-effort stack scrub | optional |
 
 Full walkthrough, including the implementation rationale and the testing
@@ -139,6 +139,60 @@ many Linux distributions, and refusing to mint a key over an ambient ulimit
 would push callers back to raw buffers, which is strictly worse. Callers who
 genuinely require locking ask `secret-locked?`.
 
+## `secret/kdf` -- HMAC and HKDF
+
+```turmeric
+(import secret/kdf :refer [secret-hmac-sha256 secret-hkdf-sha256])
+
+;; MAC a request body under a borrowed key
+(secret-hmac-sha256 key body len)            ;; => (Result Secret cstr)
+
+;; Derive a purpose-specific subkey from a master secret
+(secret-hkdf-sha256 master "v1" "encryption" 32)
+```
+
+Both return a `Secret`, so a derived key inherits the same
+wipe-or-fail-to-compile discipline as a minted one. The MAC is a `Secret`
+too, on purpose: keeping it in one makes `secret-eq?` (constant-time) the
+path of least resistance instead of `memcmp`.
+
+**Self-contained.** SHA-256, HMAC, and HKDF are implemented in the spice
+rather than pulled from mbedTLS, so the whole spice stays dependency-free --
+no clone-and-build step for someone who only wanted `secure-wipe-ptr!`. That
+trade is only defensible because the implementations are pinned to published
+vectors: FIPS 180-4 for SHA-256, RFC 4231 cases 1/2/3/6 for HMAC (case 6
+covers the "hash a key longer than the block" branch), and RFC 5869 cases 1
+and 3 for HKDF. If those tests are ever weakened, the argument for not
+linking a vetted library goes with them.
+
+HMAC's padded key blocks and inner digest, and HKDF's PRK and chaining
+block, are wiped before their buffers go out of scope.
+
+`salt` and `info` are `cstr` and measured with `strlen`, which suits the
+usual ASCII labels. A salt containing a NUL byte (RFC 5869's own case 1 uses
+`00 01 .. 0c`) needs `hkdf-sha256-raw!`, which takes pointer/length pairs.
+
+## `secret/hex` -- constant-time codecs
+
+```turmeric
+(import secret/hex :refer [secret->hex secret-of-hex])
+
+(secret-of-hex "deadbeef")   ;; => (Result Secret cstr), 4 bytes
+(secret->hex k)              ;; => (Result Secret cstr), 2n hex chars
+```
+
+Hex is how key material actually travels -- config files, environment
+variables, API responses -- and two things usually go wrong there. The
+obvious codec indexes a 16-entry table with a nibble of the secret, which is
+a secret-dependent memory access; these are branchless arithmetic instead,
+with no table, no branch on a secret nibble, and no early exit on a bad
+character. And the decoded value usually lands in a plain buffer someone
+forgets; here it lands in a `Secret`. Encoding also returns a `Secret`,
+because the hex form of a key is still the key.
+
+A failed decode wipes its output rather than leaving a partial decode of
+attacker-controlled input.
+
 ## Platform coverage
 
 | | wipe | CSPRNG | page locking | core-dump exclusion |
@@ -164,7 +218,7 @@ material.
 ## Tests
 
 ```sh
-tur test tests          # functional suite (26 cases)
+tur test tests          # functional suite (50 cases)
 bash tests/o2/run.sh    # same suite at -O2, plus the dead-store probe
 bash errors/run.sh      # the three linear-Secret diagnostics
 ```
