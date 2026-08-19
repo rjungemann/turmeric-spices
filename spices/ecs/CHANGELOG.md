@@ -84,6 +84,33 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Changed
 
+- **`ecs/entity` and `ecs/refined-world`'s read path are now visible
+  Turmeric, not inline C** -- the R4 groundwork from the turmeric repo's
+  `docs/upcoming/trusted-refinement-claims-plan.md` ("the general checked
+  `#reads`"), which is blocked on measure bodies the compiler's walks can
+  see. All eight `ecs/entity` bodies (`slot->int`, `generation->int`,
+  `slot-new`, `generation-new`, `entity-new`, `entity-index`,
+  `entity-generation`, `entity=?`) are rewritten from inline-C identity
+  casts / bit packing to `::` ascriptions plus the `bit-*` builtins, and
+  `ecs/refined-world`'s `rgw-ctrl` / `rgw-gen` become a `::` unwrap and an
+  `array-get-unchecked` load -- so every read `rgworld-alive?`'s answer
+  depends on is in the elaborated tree, where a future footprint walk can
+  attribute it to the frame parameter. No new `tur` floor: the full 87-run
+  test sweep (per-file `tur-test-flags` honored, `tests/errors/` included)
+  is byte-identical to the pre-rewrite baseline under BOTH a tur that
+  models `::`/`(as ...)` in the purity walk (2026-08-19) and one that does
+  not -- on the older walk the rewritten bodies classify UNKNOWN where the
+  inline C classified IMPURE, and nothing in the spice observes that
+  difference. On the new walk the entity unwrappers classify PURE, which
+  can only widen congruence. The one cosmetic delta is a known TUR-W0033
+  on the now-required `(unsafe ...)` block (filed upstream as
+  `docs/reported/unsafe-block-w0033-on-raw-builtins.md`). The sized-world
+  stack (`sized-alive?` and friends) deliberately stays inline C for now
+  -- its conversion is the larger half and belongs with the footprint-walk
+  landing. The stale "`:sealed` is only enforced under
+  `--enable=sealed-opaque`" note in `ecs/refined-world`'s header is
+  corrected alongside (the experiment graduated 2026-08-17).
+
 - **Retire the no-op `#lang turmeric refined` layer token** -- the `refined`
   experiment graduated in turmeric v0.33.0, so static `#refine{...}` discharge
   is unconditional and the layer token is accepted only by a compatibility

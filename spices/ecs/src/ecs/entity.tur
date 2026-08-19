@@ -60,9 +60,7 @@
 ;;;
 ;;; Since: RE0
 (defn slot->int [s : Slot] : int
-  ```c
-  return (int64_t)s;
-  ```)
+  (:: s :int))
 
 ;;; generation->int -- recover the raw machine integer behind a `Generation`.
 ;;;
@@ -78,9 +76,7 @@
 ;;;
 ;;; Since: RE0
 (defn generation->int [g : Generation] : int
-  ```c
-  return (int64_t)g;
-  ```)
+  (:: g :int))
 
 ;;; slot-new -- tag a raw machine integer as a `Slot`.
 ;;;
@@ -95,9 +91,7 @@
 ;;;
 ;;; Since: RE0
 (defn slot-new [i : int] : Slot
-  ```c
-  return (int64_t)i;
-  ```)
+  (:: i Slot))
 
 ;;; generation-new -- tag a raw machine integer as a `Generation`.
 ;;;
@@ -112,9 +106,7 @@
 ;;;
 ;;; Since: RE0
 (defn generation-new [g : int] : Generation
-  ```c
-  return (int64_t)g;
-  ```)
+  (:: g Generation))
 
 ;;; entity-new -- pack (index, generation) into an Entity.
 ;;;
@@ -131,10 +123,9 @@
 ;;; Since: E0
 ;;; RE0: takes `Slot` / `Generation`, returns `Entity`.
 (defn entity-new [idx : Slot gen : Generation] : Entity
-  ```c
-  uint64_t e = ((uint64_t)gen << 32) | ((uint64_t)idx & 0xFFFFFFFFULL);
-  return (int64_t)e;
-  ```)
+  (:: (bit-or (bit-shl (:: gen :int) 32)
+              (bit-and (:: idx :int) 4294967295))
+      Entity))
 
 ;;; entity-index -- unpack the slot index.
 ;;;
@@ -150,9 +141,7 @@
 ;;; Since: E0
 ;;; RE0: takes `Entity`, returns `Slot`.
 (defn entity-index [e : Entity] : Slot
-  ```c
-  return (int64_t)((uint64_t)e & 0xFFFFFFFFULL);
-  ```)
+  (:: (bit-and (:: e :int) 4294967295) Slot))
 
 ;;; entity-generation -- unpack the generation counter.
 ;;;
@@ -165,9 +154,7 @@
 ;;; Since: E0
 ;;; RE0: takes `Entity`, returns `Generation`.
 (defn entity-generation [e : Entity] : Generation
-  ```c
-  return (int64_t)(((uint64_t)e >> 32) & 0xFFFFFFFFULL);
-  ```)
+  (:: (bit-and (bit-shr (:: e :int) 32) 4294967295) Generation))
 
 ;;; entity=? -- structural equality on Entity handles.
 ;;;
@@ -181,8 +168,6 @@
 ;;; Since: E0
 ;;; RE0: takes `Entity` on both sides.
 (defn entity=? [a : Entity b : Entity] : bool
-  ```c
-  return a == b;
-  ```)
+  (= (:: a :int) (:: b :int)))
 
 ) ;; end defmodule ecs/entity
