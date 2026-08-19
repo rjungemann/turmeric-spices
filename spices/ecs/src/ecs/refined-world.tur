@@ -27,11 +27,11 @@
 ;;; repo. Sealing moves that bypass from "one `::` away, in ordinary code" to
 ;;; "requires deliberate inline-C."
 ;;;
-;;; Note the sealing is only ENFORCED under `--enable=sealed-opaque` (the
-;;; experiment is a prototype and its two-direction rule may still change).
-;;; Without the flag `:sealed` parses and imposes nothing, so this module
-;;; compiles either way -- but it does require a `tur` new enough to PARSE the
-;;; attribute (0.32.2+).
+;;; The sealing is enforced UNCONDITIONALLY since the `sealed-opaque`
+;;; experiment graduated (turmeric 2026-08-17): `::` on RGWorld refuses both
+;;; directions outside this module, no flag required. A `tur` new enough to
+;;; PARSE the attribute (0.32.2+) is still the floor; a lingering
+;;; `--enable=sealed-opaque` is an accepted TUR-W0063 no-op.
 ;;;
 ;;; Since: RE1 2026-07-26; :sealed 2026-07-29
 (defmodule ecs/refined-world
@@ -48,10 +48,11 @@
   int64_t* b = (int64_t*)calloc(129, sizeof(int64_t)); /* 64 gens, 64 xs, 1 next */
   return (int64_t)(intptr_t)b;
   ```)
-(defn rgw-gen [ctrl : int idx : int] #fx{} : int
-  ```c
-  int64_t* b = (int64_t*)(intptr_t)ctrl; return b[idx];
-  ```)
+;; R4 prototype: the one read the aliveness measure depends on is now
+;; Turmeric-VISIBLE -- a typed-pointer load instead of inline C -- so a
+;; footprint walk can see it and attribute it to the ctrl argument.
+(defn rgw-gen [ctrl : int idx : int] : int
+  (unsafe (array-get-unchecked (:: ctrl :ptr<void>) idx)))
 (defn rgw-bump [ctrl : int idx : int] #fx{} : int
   ```c
   int64_t* b = (int64_t*)(intptr_t)ctrl; b[idx]++; return 0;
@@ -81,10 +82,11 @@
 ;; those are TUR-E0302 outside this module.
 (defopaque RGWorld :int :sealed)
 
-(defn rgw-ctrl [w : RGWorld] #fx{} : int
-  ```c
-  return (int64_t)w;
-  ```)
+;; R4 prototype: the unwrap is `::` (modeled pure since 2026-08-19), not an
+;; inline-C identity cast (which classified IMPURE by EX_INLINE_C). Legal
+;; here despite :sealed because this IS the declaring module.
+(defn rgw-ctrl [w : RGWorld] : int
+  (:: w :int))
 
 (defn rgworld-new [] : RGWorld
   (:: (rgw-alloc) RGWorld))
