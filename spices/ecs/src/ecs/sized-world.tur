@@ -70,9 +70,7 @@
 ;;; handing to the `__sized-state-*-raw` inline-C helpers.
 ;;; Since: RE0
 (defn worldstate->int [s : WorldState] : int
-  ```c
-  return (int64_t)s;
-  ```)
+  (:: s :int))
 
 ;; Slice 4 shipped the panicking `sized-spawn!`; slice 12 adds the
 ;; design plan's fallible `sized-spawn : ... -> (Result int WorldFull)`
@@ -162,28 +160,6 @@
   }
   ```)
 
-(defn __sized-state-live-raw [s : int] #fx{Unsafe} : int
-  ```c
-  typedef struct {
-    int64_t next; int64_t live; int64_t cap;
-    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
-    int64_t *gens;
-  } __ecs_state;
-  __ecs_state *st = (__ecs_state *)(intptr_t)s;
-  return st->live;
-  ```)
-
-(defn __sized-state-cap-raw [s : int] #fx{Unsafe} : int
-  ```c
-  typedef struct {
-    int64_t next; int64_t live; int64_t cap;
-    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
-    int64_t *gens;
-  } __ecs_state;
-  __ecs_state *st = (__ecs_state *)(intptr_t)s;
-  return st->cap;
-  ```)
-
 ;; Try to allocate the next slot: returns the slot index on success,
 ;; or -1 if the world is full. Pops from the free-list when one is
 ;; available; otherwise advances the `next` high-water mark. The
@@ -208,22 +184,6 @@
   st->next = st->next + 1;
   st->live = st->live + 1;
   return slot;
-  ```)
-
-;; Read the current generation counter for `slot`. Returns -1 if the
-;; slot is out of range. Used by `sized-spawn!` to pack the
-;; freshly-spawned slot's gen into its Entity return, and by
-;; `sized-alive?` to compare against an Entity handle's gen.
-(defn __sized-state-gen-of-raw [s : int slot : int] #fx{Unsafe} : int
-  ```c
-  typedef struct {
-    int64_t next; int64_t live; int64_t cap;
-    int64_t *fl_data; int64_t fl_len; int64_t fl_cap;
-    int64_t *gens;
-  } __ecs_state;
-  __ecs_state *st = (__ecs_state *)(intptr_t)s;
-  if (slot < 0 || slot >= st->cap || !st->gens) return -1;
-  return st->gens[slot];
   ```)
 
 ;;; Copy the gens / next / live counters from `src` into `dst` and
@@ -257,6 +217,35 @@
   d->fl_len = 0;
   ```)
 
+;;; sized-gen-of -- read the current generation counter for `slot` out of
+;;; the state cell, or -1 when `slot` is outside `[0, cap)` (or the world
+;;; is zero-capacity). The Turmeric-VISIBLE replacement for the retired
+;;; `__sized-state-gen-of-raw`: every load is a typed-pointer read the
+;;; compiler's footprint walk can attribute to `s`, so the `#reads s`
+;;; frame is VERIFIED rather than trusted (R4 of the turmeric repo's
+;;; trusted-refinement-claims-plan; check with `tur --dump-read-frames`).
+;;;
+;;; Layout note: the `__ecs_state` control block is seven 8-byte fields
+;;; -- next(0) live(1) cap(2) fl_data(3) fl_len(4) fl_cap(5) gens(6) --
+;;; so slot k of the block is `array-get-unchecked` index k, and the
+;;; gens ARRAY is one more load through the pointer at index 6. The
+;;; pointer expressions are deliberately inline rather than let-bound:
+;;; the footprint walk's root chase follows loads, casts, and field
+;;; hops, but not local aliases.
+;;;
+;;; Since: sized-world visible reads (R4)
+(defn sized-gen-of [s : WorldState slot : int] #reads s : int
+  (if (< slot 0)
+    -1
+    (if (>= slot (unsafe (array-get-unchecked (:: (:: s :int) :ptr<void>) 2)))
+      -1
+      (if (= (unsafe (array-get-unchecked (:: (:: s :int) :ptr<void>) 6)) 0)
+        -1
+        (unsafe (array-get-unchecked
+                  (:: (array-get-unchecked (:: (:: s :int) :ptr<void>) 6)
+                      :ptr<void>)
+                  slot))))))
+
 ;;; sized-state-new -- allocate a state cell with capacity k.
 ;;; Used internally by the constructor that sized-defworld emits;
 ;;; exposed for callers that want to construct a world by hand.
@@ -269,13 +258,13 @@
 
 ;;; sized-live -- read the world's current live count from the
 ;;; state cell (callers pass `(.state w)`).
-(defn sized-live [s : WorldState] : int
-  (unsafe (__sized-state-live-raw (worldstate->int s))))
+(defn sized-live [s : WorldState] #reads s : int
+  (unsafe (array-get-unchecked (:: (:: s :int) :ptr<void>) 1)))
 
 ;;; sized-cap -- read the world's static capacity from the state cell.
 ;;; This is the runtime image of the world's type-level `n`.
-(defn sized-cap [s : WorldState] : int
-  (unsafe (__sized-state-cap-raw (worldstate->int s))))
+(defn sized-cap [s : WorldState] #reads s : int
+  (unsafe (array-get-unchecked (:: (:: s :int) :ptr<void>) 2)))
 
 (defn __sized-state-copy-abort-raw [] #fx{Unsafe} : nil
   ```c
@@ -297,8 +286,8 @@
 (defn sized-state-copy-into [src : WorldState dst : WorldState] : nil
   (let [srci    (worldstate->int src)
         dsti    (worldstate->int dst)
-        src-cap (unsafe (__sized-state-cap-raw srci))
-        dst-cap (unsafe (__sized-state-cap-raw dsti))]
+        src-cap (sized-cap src)
+        dst-cap (sized-cap dst)]
     (if (< dst-cap src-cap)
       (unsafe (__sized-state-copy-abort-raw))
       (unsafe (__sized-state-copy-into-raw srci dsti)))))
@@ -325,7 +314,7 @@
     (if (< slot 0)
       (:: (unsafe (__sized-spawn-bang-abort-raw)) :Entity)
       (entity-new (slot-new slot)
-                  (generation-new (unsafe (__sized-state-gen-of-raw si slot)))))))
+                  (generation-new (sized-gen-of s slot))))))
 
 ;;; sized-slot-generation -- read the current generation counter
 ;;; for `slot` out of the state cell. Exposed for tests and for
@@ -336,9 +325,8 @@
 ;;;
 ;;; Since: E2c slice 4c
 ;;; RE0: takes a `Slot`, returns a `Generation`.
-(defn sized-slot-generation [s : WorldState slot : Slot] : Generation
-  (generation-new (unsafe (__sized-state-gen-of-raw (worldstate->int s)
-                                                    (slot->int slot)))))
+(defn sized-slot-generation [s : WorldState slot : Slot] #reads s : Generation
+  (generation-new (sized-gen-of s (slot->int slot))))
 
 ;;; sized-alive? -- is the Entity handle `e` still valid against
 ;;; the world's state cell?
@@ -352,11 +340,10 @@
 ;;; uniform across both worlds.
 ;;;
 ;;; Since: E2c slice 4c
-(defn sized-alive? [s : WorldState e : Entity] : bool
+(defn sized-alive? [s : WorldState e : Entity] #reads s : bool
   (let [idx (entity-index e)
         gen (entity-generation e)
-        cur (unsafe (__sized-state-gen-of-raw (worldstate->int s)
-                                              (slot->int idx)))]
+        cur (sized-gen-of s (slot->int idx))]
     (if (< cur 0)
       false
       (= (generation->int gen) cur))))
@@ -425,7 +412,7 @@
     (if (< slot 0)
       (__sized-spawn-err)
       (__sized-spawn-ok (entity-new (slot-new slot)
-                                    (generation-new (unsafe (__sized-state-gen-of-raw si slot))))))))
+                                    (generation-new (sized-gen-of s slot)))))))
 
 ;;; sized-despawn -- free the slot named by Entity `e` for reuse,
 ;;; bump that slot's generation counter, and decrement `live`.

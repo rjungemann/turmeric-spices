@@ -84,6 +84,35 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Changed
 
+- **`ecs/sized-world`'s read path is now visible Turmeric -- and the real
+  aliveness chain is VERIFIED, not trusted.** The sized-world half of the
+  R4 conversion (the facade half merged previously): `worldstate->int` is
+  a `::` unwrap; the new `sized-gen-of [s slot] #reads s` replaces
+  `__sized-state-gen-of-raw` with three attributable typed-pointer loads
+  (cap bounds check, gens-null check, `gens[slot]` -- the `__ecs_state`
+  block is seven 8-byte fields, so slot k is `array-get-unchecked` index
+  k and the gens array is one more load through index 6); `sized-live` /
+  `sized-cap` become visible one-load reads; `sized-alive?` and
+  `sized-slot-generation` route through `sized-gen-of` and carry
+  `#reads s`; the dead gen-of/live/cap raw helpers are deleted. Spawn /
+  despawn / copy / free stay inline C (writes are not this conversion's
+  subject).
+
+  The payoff, observable on this repo's own test: with a turmeric that
+  carries the R4 footprint walk,
+  `tur --strict-refine --dump-read-frames run tests/refined-stack-alive.tur`
+  reports every frame in the chain VERIFIED -- `sized-gen-of`,
+  `sized-alive?`, and the macro-generated `GameWorld-alive?`, three
+  frames deep through the walk's fixed-point call mapping. The flagship
+  aliveness measure's `#reads` promise is now checked rather than
+  trusted. On an older `tur` the frames simply stay UNVERIFIED-silent;
+  behavior is unchanged either way -- the full 87-run test sweep
+  (per-file `tur-test-flags` honored, `tests/errors/` included) is
+  byte-identical to the pre-conversion baseline, with zero warning
+  deltas. Style rule the conversion established: keep measure pointer
+  expressions inline rather than let-bound (the compiler's root chase
+  follows loads, casts, and field hops, but not local aliases).
+
 - **`ecs/entity` and `ecs/refined-world`'s read path are now visible
   Turmeric, not inline C** -- the R4 groundwork from the turmeric repo's
   `docs/upcoming/trusted-refinement-claims-plan.md` ("the general checked
