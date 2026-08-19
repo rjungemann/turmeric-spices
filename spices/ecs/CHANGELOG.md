@@ -102,9 +102,10 @@ All notable changes to the `tur-ecs` spice are documented here.
   not -- on the older walk the rewritten bodies classify UNKNOWN where the
   inline C classified IMPURE, and nothing in the spice observes that
   difference. On the new walk the entity unwrappers classify PURE, which
-  can only widen congruence. The one cosmetic delta is a known TUR-W0033
-  on the now-required `(unsafe ...)` block (filed upstream as
-  `docs/reported/unsafe-block-w0033-on-raw-builtins.md`). The sized-world
+  can only widen congruence. The one cosmetic delta was a TUR-W0033 on the
+  now-required `(unsafe ...)` block, filed upstream and fixed the same day
+  (`docs/archive/unsafe-block-w0033-on-raw-builtins.md` in the turmeric
+  repo) -- on a current `tur` the rewrite is warning-clean. The sized-world
   stack (`sized-alive?` and friends) deliberately stays inline C for now
   -- its conversion is the larger half and belongs with the footprint-walk
   landing. The stale "`:sealed` is only enforced under
