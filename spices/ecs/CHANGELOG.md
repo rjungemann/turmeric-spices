@@ -6,6 +6,74 @@ All notable changes to the `tur-ecs` spice are documented here.
 
 ### Added
 
+- **`defsystem-world`** -- declare a System whose body reaches its world at
+  the world's real type. `defsystem` is never told which world it runs
+  against, so it binds `w : int`; a body wanting a typed accessor had to
+  bridge with `(:: w GameWorld)`, and once worlds became by-value aggregates
+  that bridge became `TUR-E0295`. A plain `defsystem` body therefore had no
+  route to its own world at all.
+
+  `defsystem-world` is the unsized counterpart of
+  `sized-defsystem-scheduled` and lowers identically -- typed impl
+  `[^borrow w : World]`, an int-carrier wrapper that calls `load-<World>`,
+  and the `System` value. Cap-binding and auto-consume are unchanged.
+  Pre-condition: `(defworld-box-helpers World)` from `ecs/xworld` for the
+  `load-<World>` the wrapper names.
+
+  **`defsystem` is untouched**, deliberately -- same reasoning as
+  `defworld-classes` above. Every in-repo `defsystem` caller
+  (`stage-pair.tur`, `stage-wave.tur`, `defsystem-caps-bound.tur`) passes an
+  arbitrary int carrier and reinterprets it in the body; none passes a world.
+  So a breaking signature change would have broken every existing call site
+  to serve none of them. Bodies that only want the int carrier should keep
+  using `defsystem`.
+
+  Test: `tests/defsystem-world.tur`. Resolves
+  `docs/ecs-unsized-defsystem-cannot-reach-its-world.md`.
+
+- **`errors/run.sh`** -- the 16 compile-FAIL fixtures moved from
+  `tests/errors/` to `errors/` and are now asserted properly.
+
+  `tur test` recurses, so those fixtures were being built and run as ordinary
+  tests and counted as 16 suite failures: the ecs CI job was red on that
+  directory alone while every real test passed. `tur test tests` is now
+  **72 tests, 72 passed, 0 failed**.
+
+  The runner pins each fixture to a diagnostic **code plus a witness
+  substring**. The code alone is too coarse -- TUR-E0001 and TUR-E0003 each
+  cover several fixtures for unrelated reasons -- and that coarseness is
+  exactly how two fixtures silently stopped testing their subject:
+
+  - `defsystem-set-undeclared` had drifted onto TUR-E0295 (the `::` bridge),
+    never reaching the cap check. Fixed by `defsystem-world` above.
+  - `xworld-unused-world` had drifted onto TUR-E0001 (`expected Slot, got
+    int`) when RE0 lifted storage indices to `Slot`; its literal `0`
+    arguments now fail before the macro's unused-world validation runs.
+    Fixed by passing `(slot-new 0)`.
+
+  Both had been "passing" the whole time. CI gained an opt-in
+  `Assert compile-fail diagnostics` step that runs any spice's
+  `errors/run.sh` (this one and `secret`'s, which had never run in CI).
+
+- **`bench/`** -- the 100k-entity dense `Pos`/`Vel` integrate benchmark the
+  archived `ecs-spice-plan.md` specified and never wrote, vs a hand-rolled C
+  baseline. `bench/run.sh` runs best-of-N and refuses to report a timing
+  whose checksum disagrees with the baseline.
+
+  **The plan's within-2x-of-hand-rolled target is missed**: `for-each2` is
+  8.42x hand-rolled C, `sized-for-each` 3.50x. The cost is neither codegen (a
+  raw-Turmeric loop over flat buffers runs 1.04x C) nor the query macro (a
+  hand-written loop with no `for-each` ties it) -- it concentrates in the
+  unsized `dense-set!` write path, which carries an auto-grow capacity branch,
+  a `present[]` byte write and a `len` update per store. Typeclass dictionary
+  dispatch is a non-issue: 20M lookups are unmeasurable (37.4ms vs 37.3ms
+  with the lookups hoisted -- `cc -O2` hoists them itself).
+
+  Both deferred plans gated on "a profile" now have one:
+  `ecs-component-set-bounds-plan` (the structural `/has` bound) is declined by
+  it, and `ecs-refinement-typed-apis-plan`'s RE2 is reframed. Write-up in
+  `bench/README.md`.
+
 - **`defworld-classes`** -- declares a world *and* the `Has<Comp>` typeclass
   plus its per-(World, Comp) instance for every component, in one form.
   `defworld` already knows its component list at expansion time, so the

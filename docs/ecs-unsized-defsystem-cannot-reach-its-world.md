@@ -1,5 +1,36 @@
 # `tests/errors/defsystem-set-undeclared` passes for the wrong reason
 
+> **RESOLVED 2026-08-20 -- option 4: a new `defsystem-world` macro.**
+>
+> The report offered three options and called it the owner's decision. The
+> chosen resolution is a fourth: `defsystem-world`, a NEW macro in
+> `ecs/system` alongside an unchanged `defsystem`, lowering exactly as
+> `sized-defsystem-scheduled` does -- typed impl `[^borrow w : World]`, an
+> int-carrier wrapper that calls `load-<World>`, and the `System` value.
+> Cap-binding and auto-consume carry over unchanged.
+>
+> This restores the capability (option 3's benefit) without option 3's
+> breaking macro-signature change, and follows the precedent set by
+> `defworld-classes` three weeks earlier: add the macro, do not change the
+> one every caller already uses.
+>
+> One premise in "Options" is worth correcting for the record. Option 3 was
+> described as "the only option that restores the capability", which is true
+> as far as it goes, but the report did not note that **no in-repo caller of
+> `defsystem` passes a world at all** -- `stage-pair.tur` and `stage-wave.tur`
+> hand it `(:: accum :int)` and reinterpret the carrier in the body. So the
+> capability being restored had zero existing users to break, which is what
+> makes the additive route strictly better rather than merely safer.
+>
+> - `defsystem-world` + docstring: `spices/ecs/src/ecs/system.tur`
+> - Positive test: `spices/ecs/tests/defsystem-world.tur` (suite 72/72)
+> - The fixture now reaches its subject: `errors/defsystem-set-undeclared.tur`
+>   fails with **TUR-E0003 `unbound symbol 'Vel-write-cap'`** at the
+>   `set-Vel!` call, not TUR-E0295 at a `::` bridge.
+>
+> The "Adjacent observation" section at the bottom is **also resolved** --
+> see the note there.
+
 **Severity:** medium (a negative test that no longer tests its subject; the
 guarantee it names is still covered elsewhere, so nothing is unprotected --
 but the file asserts something it cannot reach)
@@ -98,6 +129,40 @@ because its `expected.diag` already named TUR-E0003 and the goal there was to
 make the fixture reach the diagnostic it always claimed to test.
 
 ## Adjacent observation: `tur test tests` counts every `errors/` fixture as a failure
+
+> **RESOLVED 2026-08-20.** Both halves of this section are fixed.
+>
+> The 16 fixtures moved from `spices/ecs/tests/errors/` to
+> `spices/ecs/errors/`, so `tur test tests` is **72 tests, 72 passed, 0
+> failed** -- the ecs CI job is no longer red on this directory. And
+> `spices/ecs/errors/run.sh` (modelled on `spices/secret/errors/run.sh`, as
+> this section suggested) now asserts every fixture is rejected with its
+> intended diagnostic.
+>
+> Two changes beyond what was asked for, both prompted by what the runner
+> found:
+>
+> 1. **Assertions pin a witness substring, not just a code.** TUR-E0001 and
+>    TUR-E0003 each cover several ecs fixtures for unrelated reasons, so the
+>    code alone would not have caught the `defsystem-set-undeclared` drift
+>    this report is about. Each assertion also requires a substring only the
+>    intended defect produces (e.g. `unbound symbol 'Vel-write-cap'`).
+> 2. **A SECOND drifted fixture turned up.** `xworld-unused-world.tur`
+>    documents in its own header that it must fail TUR-E0003 on the bare
+>    symbol `defxsystem--world-pred-declared-but-never-read-or-written`. It
+>    was actually failing **TUR-E0001 `expected Slot, got int`** -- RE0's lift
+>    of storage indices to `Slot` made its literal `0` arguments illegal, and
+>    that fires before the macro's validation. So the unused-world check had
+>    silently stopped being tested too. Fixed by passing `(slot-new 0)`;
+>    it now reaches the intended symbol.
+>
+> The workflow's claim that "`tur test <dir>` is NOT recursive" was simply
+> wrong (measured: it recurses) and is corrected in `ci.yml`, along with a new
+> opt-in `Assert compile-fail diagnostics` step that runs any spice's
+> `errors/run.sh`. Note that step also picks up `secret`'s runner, which had
+> never actually executed in CI; it passes.
+
+### Original observation
 
 Noted while gathering the table above, and not caused by anything here.
 `tur test` recurses, and `spices/ecs/tests/errors/` holds compile-*fail*
