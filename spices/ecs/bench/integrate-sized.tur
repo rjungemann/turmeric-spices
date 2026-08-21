@@ -1,0 +1,85 @@
+;; Sized-world integrate -- `sized-for-each` over a (GameWorld (Static N)).
+;;
+;; The RE2 question, made measurable. A sized world's capacity is a
+;; type-level constant, so `sized-for-each`'s loop bound is static (no
+;; runtime `__fe-min-cap` probe, unlike the unsized `for-each`) -- but
+;; `sized-dense-get` still re-checks `0 <= i < cap` on every access.
+;;
+;; RE2 proposes discharging that check statically via a refined slot
+;; index. `docs/upcoming/v1/ecs-refinement-typed-apis-plan.md` gates that
+;; work on a profile, for a specific reason: the parent refinement plan's
+;; whole-program entry-check elision measured at ZERO on both runtime and
+;; code size because `cc -O2` had already done it. The delta between this
+;; row and the raw-Turmeric row is the number that decides whether RE2 is
+;; worth building.
+;;
+;; Same workload, same arithmetic, same checksum as every other variant.
+
+(defmodule integrate_sized_bench
+  (export)
+
+(import ecs/entity        :refer [Slot slot-new])
+(import ecs/sized-storage :refer [SizedDense sized-dense-set!])
+(import ecs/sized-world   :refer [sized-defworld])
+(import ecs/sized-query   :refer [sized-for-each])
+
+(defstruct Pos [x : float y : float])
+(defstruct Vel [x : float y : float])
+
+(sized-defworld GameWorld [Pos Vel])
+
+(def N      100000)
+(def FRAMES 100)
+(def DT     0.25)
+
+(defn i->f [i : int] : float
+  ```c
+  return (double)i;
+  ```)
+
+(defn checksum [sum : float] : int
+  ```c
+  return (int64_t)(sum * 100.0);
+  ```)
+
+(defn now-us [] : int
+  ```c
+  #include <time.h>
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+  ```)
+
+(defn main [] : int
+  (let [w : (GameWorld (Static 100000)) (make-GameWorld 100000)]
+    (do
+      (let [^mut i 0]
+        (while (< i N)
+          (let [f (i->f i)]
+            (sized-dense-set! (.Pos w) (slot-new i)
+                              (make-struct Pos (/ f 8.0) (/ f 4.0)))
+            (sized-dense-set! (.Vel w) (slot-new i)
+                              (make-struct Vel 1.5 -0.5)))
+          (set! i (+ i 1))))
+
+      (let [t0 (now-us)]
+        (do
+          (let [^mut frame 0]
+            (while (< frame FRAMES)
+              (do
+                (sized-for-each w [Pos Vel] [e p v]
+                  (sized-dense-set! (.Pos w) e
+                                    (make-struct Pos
+                                                 (+ (.x p) (* (.x v) DT))
+                                                 (+ (.y p) (* (.y v) DT)))))
+                (set! frame (+ frame 1)))))
+          (let [t1       (now-us)
+                ^mut sum 0.0]
+            (do
+              (sized-for-each w [Pos Vel] [e p v]
+                (set! sum (+ sum (+ (.x p) (.y p)))))
+              (println (- t1 t0))
+              (println (checksum sum))
+              0)))))))
+
+) ;; end defmodule integrate_sized_bench

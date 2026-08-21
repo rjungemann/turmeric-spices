@@ -176,6 +176,37 @@ v1 surface, not language gaps.
    primary (smallest-set iteration) or a dense-then-test fallback.
    Today, use sparse/tag components only via filters inside the body.
 
+2. **`defsystem` bodies cannot reach a typed world -- use
+   `defsystem-world`.** `defsystem` is never told which world it runs
+   against, so it binds `w : int` and the body must reinterpret that
+   carrier itself. Since worlds became by-value aggregates, the old
+   `(:: w GameWorld)` bridge is `TUR-E0295`, so the typed
+   `get-<Comp>` / `set-<Comp>!` accessors are unreachable from a plain
+   `defsystem`. Use `defsystem-world` (which takes the world type and
+   lowers to a typed impl plus an int-carrier wrapper, exactly as
+   `sized-defsystem-scheduled` does) when the body needs its world;
+   keep `defsystem` when the int carrier is all you want.
+
+3. **`ecs/xworld` shadows `ecs/cap`.** `ecs/xcap` exports `use-cap!`,
+   `make-write-cap` and `make-read-cap` under the same names as
+   `ecs/cap`, and `ecs/xworld` pulls them in. A file importing both
+   must import `ecs/xworld` **before** `ecs/cap`, or the two-parameter
+   `XWriteCap` versions win and every component-only cap call fails with
+   `TUR-E0001`. This bites `defsystem-world` users in particular, since
+   the `load-<World>` its expansion names comes from `ecs/xworld`.
+
+### Performance
+
+`bench/` measures the surface against hand-rolled C: 100k entities,
+dense float `Pos`/`Vel`, 100 frames. `for-each2` runs **8.42x**
+hand-rolled and `sized-for-each` **3.50x** -- the archived plan's
+within-2x target is not met. The gap is not Turmeric's codegen (a raw
+Turmeric loop over flat buffers runs 1.04x C) and not the query macro;
+it is the unsized `dense-set!` write path, which carries an auto-grow
+capacity branch, a `present[]` byte write and a `len` update per store.
+Prefer sized worlds where the entity budget is known. See
+[`bench/README.md`](bench/README.md).
+
 ### Breaking change in the I3-I4 ship (2026-06-11)
 
 `defsystem`'s `:reads`/`:writes` are component-name vectors, not

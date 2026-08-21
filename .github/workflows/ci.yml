@@ -130,9 +130,14 @@ jobs:
         env:
           TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
         run: |
-          # `tur test <dir>` is NOT recursive -- it only picks up *.tur files
-          # at the top level of the directory it is given.  Spices store their
-          # test suites in one of two layouts:
+          # `tur test <dir>` DOES recurse into subdirectories.  (This comment
+          # used to claim the opposite; that was wrong, and it is why the ecs
+          # spice's `tests/errors/` compile-FAIL fixtures were being built and
+          # run as ordinary tests and counted as 16 suite failures.  Fixtures
+          # that must NOT compile belong outside tests/ -- see the
+          # "Assert compile-fail diagnostics" step below.)
+          #
+          # Spices store their test suites in one of two layouts:
           #
           #   1. flat:    tests/*.tur                      (ansi, notebook, ...)
           #               (or a flat aggregator that imports nested modules,
@@ -168,6 +173,26 @@ jobs:
               exit 1
             fi
           fi
+
+      # Compile-FAIL fixtures: a spice may keep an `errors/` directory whose
+      # every file must be REJECTED by the compiler, with a specific
+      # diagnostic.  They cannot live under tests/ (`tur test` recurses and
+      # would count each as a failure), and asserting only "does not compile"
+      # lets a fixture silently drift onto an unrelated diagnostic -- so each
+      # spice's errors/run.sh pins the code AND a witness substring.
+      #
+      # Opt-in per spice: the step is a no-op unless errors/run.sh exists.
+      # Currently: ecs (16 fixtures), secret (3).
+      - name: Assert compile-fail diagnostics (if any)
+        working-directory: turmeric-spices/spices/${{ matrix.spice }}
+        env:
+          TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
+        run: |
+          if [ ! -x errors/run.sh ]; then
+            echo "no errors/run.sh; skipping compile-fail assertions"
+            exit 0
+          fi
+          errors/run.sh "$GITHUB_WORKSPACE/turmeric/build/tur"
 
   # Enumerate the spices/ subdirectories that contain a build.tur so the
   # matrix below stays in sync as spices are added.  Output is a JSON array

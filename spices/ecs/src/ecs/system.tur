@@ -23,7 +23,7 @@
 (defmodule ecs/system
   (export System make-system system-reads-mask system-writes-mask
           system-run-fn system-run! system-conflicts?
-          cid-bit defsystem
+          cid-bit defsystem defsystem-world
           ;; Internal helpers used by `defsystem` lowering; exported so
           ;; the macro expansion can resolve them at the call site.
           defsystem--mask
@@ -244,5 +244,101 @@
                     (defsystem--mask ~reads-vec)
                     (defsystem--mask ~writes-vec)
                     ~impl-name)))))
+
+;;; defsystem-world -- declare a System whose body reaches its world at
+;;; the world's real type, rather than through the untyped `:int`
+;;; carrier `defsystem` binds.
+;;;
+;;; Syntax:
+;;;   (defsystem-world name WorldName [reads-comp ...] [writes-comp ...] body)
+;;;
+;;; `defsystem` is never told which world it runs against, so it binds
+;;; `w : int` and a body that wants a typed accessor has to bridge with
+;;; `(:: w WorldName)`. That bridge stopped working when worlds became
+;;; by-value aggregates -- `TUR-E0295: cannot reinterpret by-value
+;;; aggregate as a one-word carrier` -- leaving a plain `defsystem` body
+;;; with no route to its own world (see the resolved report
+;;; `docs/ecs-unsized-defsystem-cannot-reach-its-world.md`).
+;;;
+;;; This macro is the unsized counterpart of `sized-defsystem-scheduled`
+;;; and lowers identically: a typed impl, an int-carrier wrapper that
+;;; loads the boxed world, and the `System` value the scheduler runs.
+;;; `defsystem` is left exactly as it was -- every existing call site
+;;; keeps working, and bodies that only want the int carrier (as the
+;;; `stage-*` tests do) should keep using it.
+;;;
+;;; Pre-condition: a `load-<WorldName>` function must be in scope at the
+;;; macro call site. `(defworld-box-helpers WorldName)` from `ecs/xworld`
+;;; emits it along with the matching `box-<WorldName>` /
+;;; `free-<WorldName>-box` the *caller* needs to hand a world to
+;;; `system-run!` / `stage-run!`.
+;;;
+;;; Expands to three top-level forms:
+;;;
+;;;   (defn name-impl [^borrow w : WorldName] : nil
+;;;     ;; cap-binding lets per :reads / :writes, body, auto-consume
+;;;     ;; -- the same lowering `defsystem` emits, but typed in w.
+;;;     ...)
+;;;
+;;;   (defn name-fn [wp : int] : nil
+;;;     (let [w : WorldName (load-WorldName wp)]
+;;;       (name-impl w)))
+;;;
+;;;   (def name (make-system READS-MASK WRITES-MASK name-fn))
+;;;
+;;; Cap-binding rules and auto-consume semantics match `defsystem`
+;;; exactly: read caps are non-linear and bound as `<Comp>-read-cap`;
+;;; write caps are linear, bound as `<Comp>-write-cap`, and auto-consumed
+;;; once at body end. A `<Comp>-cid` binding must be in scope for each
+;;; declared comp -- `(defcomponent-cids [...])` emits them.
+;;;
+;;; Parameters:
+;;;   name       -- the System value's name (also prefixes -impl / -fn)
+;;;   world-name -- the world type the body is typed against
+;;;   reads-vec  -- vector of component names the system reads
+;;;   writes-vec -- vector of component names the system writes
+;;;   body       -- the system body; `w` is bound at `world-name`
+;;;
+;;; Returns:
+;;;   Nothing at runtime -- expands to three top-level declarations.
+;;;
+;;; Required imports at the call site:
+;;;   (import ecs/cap    :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
+;;;   (import ecs/xworld :refer [defworld-box-helpers])
+;;;
+;;; Example:
+;;;   (defworld GameWorld [Pos Vel])
+;;;   (defcomponent-accessors GameWorld Pos)
+;;;   (defcomponent-cids [Pos Vel])
+;;;   (defworld-box-helpers GameWorld)
+;;;
+;;;   (defsystem-world physics GameWorld
+;;;     [Pos]                     ;; :reads
+;;;     [Pos]                     ;; :writes
+;;;     (set-Pos! Pos-write-cap w (slot-new 0) (make-struct Pos 42 0)))
+;;;
+;;;   (system-run! physics (box-GameWorld world))
+;;;
+;;; Since: GEN-V1
+(defmacro defsystem-world [name world-name reads-vec writes-vec body]
+  (let [impl-name (str->sym (str-append (symbol-name name) "-impl"))
+        fn-name   (str->sym (str-append (symbol-name name) "-fn"))
+        load-name (str->sym (str-append "load-" (symbol-name world-name)))]
+    `(do
+       (defn ~impl-name [^borrow w : ~world-name] : nil
+         (defsystem--with-read-caps
+           (defsystem--with-write-caps
+             (do
+               ~body
+               (defsystem--consume-write-caps ~writes-vec))
+             ~writes-vec)
+           ~reads-vec))
+       (defn ~fn-name [wp : int] : nil
+         (let [w : ~world-name (~load-name wp)]
+           (~impl-name w)))
+       (def ~name (make-system
+                    (defsystem--mask ~reads-vec)
+                    (defsystem--mask ~writes-vec)
+                    ~fn-name)))))
 
 ) ;; end defmodule ecs/system
