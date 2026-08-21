@@ -12,6 +12,7 @@
 (defmodule xworld_unused_world_test
   (export)
 
+(import ecs/entity        :refer [Slot slot-new])
 (import ecs/sized-storage :refer [SizedDense])
 (import ecs/sized-world   :refer [sized-defworld-mono])
 (import ecs/xworld        :refer [sized-defcomponent-accessors-xmono])
@@ -48,8 +49,8 @@
   [auth AuthWorld  pred PredWorld  ren RenderWorld]
   :reads-from auth [Pos]
   :writes-to  ren  [RenderPos]
-  (set-RenderPos! ren-RenderPos-write-cap ren 0
-    (:: (:: (get-Pos auth-Pos-read-cap auth 0) :int) :RenderPos)))
+  (set-RenderPos! ren-RenderPos-write-cap ren (slot-new 0)
+    (:: (:: (get-Pos auth-Pos-read-cap auth (slot-new 0)) :int) :RenderPos)))
 
 (defn main [] : int 0)
 

@@ -5,14 +5,30 @@
 ;;
 ;; This is the spec'd "writes to a component you didn't list is a
 ;; compile-time error" promise from `ecs-spice-plan.md` -- now landed.
+;;
+;; Expected diagnostic: TUR-E0003 (unbound symbol 'Vel-write-cap')
+;;
+;; GEN-V1: this fixture used `defsystem` plus a `(:: w GameWorld)` bridge
+;; to reach the accessor.  `defsystem` binds `w : int`, so once worlds
+;; became by-value aggregates that bridge became TUR-E0295 and fired
+;; BEFORE the cap check -- the fixture still failed to compile, so it
+;; still "passed", but on a diagnostic unrelated to its subject.  It now
+;; uses `defsystem-world`, which types `w` at the world and makes the
+;; unsized accessor route real, so the call actually reaches the cap
+;; check it exists to test.  See the resolved report
+;; `docs/ecs-unsized-defsystem-cannot-reach-its-world.md`.
 
 (defmodule defsystem_set_undeclared_test
   (export)
 
-(import ecs/entity  :refer [entity-index])
+(import ecs/entity  :refer [Slot slot-new])
 (import ecs/storage :refer [dense-new])
-(import ecs/world   :refer [defcomponent defworld defcomponent-accessors world-alloc-entity!])
-(import ecs/system  :refer [System make-system system-run! defsystem])
+(import ecs/world   :refer [defcomponent defworld defcomponent-accessors
+                             defcomponent-cids])
+(import ecs/system  :refer [System make-system system-run! defsystem-world])
+;; `ecs/xworld` re-exports `ecs/xcap`'s `use-cap!`; import it before
+;; `ecs/cap` so the component-only caps win.
+(import ecs/xworld  :refer [defworld-box-helpers])
 (import ecs/cap     :refer [WriteCap ReadCap make-write-cap make-read-cap use-cap!])
 
 (defstruct Pos [x : int y : int])
@@ -24,18 +40,16 @@
 (defworld GameWorld [Pos Vel])
 (defcomponent-accessors GameWorld Pos)
 (defcomponent-accessors GameWorld Vel)
+(defcomponent-cids [Pos Vel])
 
-(def Pos-cid 0)
-(def Vel-cid 1)
+(defworld-box-helpers GameWorld)
 
 ;; Declares :writes [Pos] but the body tries to write Vel.  The body
 ;; has Pos-write-cap in scope but no Vel-write-cap, so set-Vel!'s
 ;; first arg cannot resolve.
-(defsystem rogue
+(defsystem-world rogue GameWorld
   []
   [Pos]
-  (let [gw : GameWorld (:: w GameWorld)
-        e               (world-alloc-entity! (.gens gw))]
-    (set-Vel! Vel-write-cap gw (entity-index e) (make-struct Vel 0 0))))
+  (set-Vel! Vel-write-cap w (slot-new 0) (make-struct Vel 0 0)))
 
 ) ;; end defmodule defsystem_set_undeclared_test
