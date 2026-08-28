@@ -23,7 +23,11 @@
   return diff < 0.01;
   ```)
 
-(defn assert! [cond : bool msg : cstr] : void
+
+;; Named check!, not assert!: stdlib's auto-loaded `contract` module defines a
+;; one-argument `assert!` MACRO, which wins at every call site and rejected
+;; these two-argument calls with "macro 'assert!' expects 1 arguments, got 2".
+(defn check! [cond : bool msg : cstr] : void
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -44,9 +48,9 @@
         di (sdf-eval sdf 0.5 0.0 0.0)
         ;; Point outside (dist = 0.5)
         do (sdf-eval sdf 1.5 0.0 0.0)]
-    (assert! (approx= d0 0.0) "colored-sphere surface dist should be ~0")
-    (assert! (approx= di -0.5) "colored-sphere inside dist should be ~-0.5")
-    (assert! (approx= do 0.5) "colored-sphere outside dist should be ~0.5")
+    (check! (approx= d0 0.0) "colored-sphere surface dist should be ~0")
+    (check! (approx= di -0.5) "colored-sphere inside dist should be ~-0.5")
+    (check! (approx= do 0.5) "colored-sphere outside dist should be ~0.5")
     (csdf-free cs)))
 
 ;; ---- test 2: colored-union combined SDF is correct ----
@@ -62,9 +66,9 @@
         da (sdf-eval sdf -1.5 0.8 0.0)
         ;; Near sphere b surface
         db (sdf-eval sdf  1.5 0.8 0.0)]
-    (assert! (> dm 0.0) "union midpoint should be outside (dm > 0)")
-    (assert! (approx= da 0.0) "union near sphere-a surface should be ~0")
-    (assert! (approx= db 0.0) "union near sphere-b surface should be ~0")
+    (check! (> dm 0.0) "union midpoint should be outside (dm > 0)")
+    (check! (approx= da 0.0) "union near sphere-a surface should be ~0")
+    (check! (approx= db 0.0) "union near sphere-b surface should be ~0")
     (csdf-free u)))
 
 ;; ---- test 3: colored-difference carves correctly ----
@@ -80,9 +84,9 @@
         do   (sdf-eval sdf 3.0 0.0 0.0)
         ;; Inside box but outside hole: inside the difference shape
         din  (sdf-eval sdf 1.5 0.0 0.0)]
-    (assert! (> dh 0.0) "point inside hole should be outside difference (dh > 0)")
-    (assert! (> do 0.0) "point outside box should be outside difference (do > 0)")
-    (assert! (< din 0.0) "point in box but outside hole should be inside difference (din < 0)")
+    (check! (> dh 0.0) "point inside hole should be outside difference (dh > 0)")
+    (check! (> do 0.0) "point outside box should be outside difference (do > 0)")
+    (check! (< din 0.0) "point in box but outside hole should be inside difference (din < 0)")
     (csdf-free diff)))
 
 ;; ---- test 4: mc-extract-colored produces a non-empty mesh ----
@@ -92,16 +96,16 @@
         mesh  (mc-extract-colored scene 16
                                   -2.0 -2.0 -2.0
                                    2.0  2.0  2.0)]
-    (assert! (> mesh 0) "mc-extract-colored should return non-zero handle")
+    (check! (> mesh 0) "mc-extract-colored should return non-zero handle")
     (let [n (cmesh-vertex-count mesh)]
-      (assert! (> n 0) "mc-extract-colored should produce vertices")
+      (check! (> n 0) "mc-extract-colored should produce vertices")
       ;; Spot-check: first vertex should have orange-ish color
       (let [cr (cmesh-get-cr mesh 0)
             cg (cmesh-get-cg mesh 0)
             oi (cmesh-get-object-id mesh 0)]
-        (assert! (approx= cr 1.0) "first vertex red channel should be ~1.0")
-        (assert! (approx= cg 0.5) "first vertex green channel should be ~0.5")
-        (assert! (= oi 1) "first vertex object ID should be 1")))
+        (check! (approx= cr 1.0) "first vertex red channel should be ~1.0")
+        (check! (approx= cg 0.5) "first vertex green channel should be ~0.5")
+        (check! (= oi 1) "first vertex object ID should be 1")))
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -114,14 +118,14 @@
         mesh        (mc-extract-colored scene 24
                                         -3.0 -2.0 -2.0
                                          3.0  2.0  2.0)]
-    (assert! (> mesh 0) "union mesh should be non-zero")
-    (assert! (> (cmesh-vertex-count mesh) 0) "union mesh should have vertices")
+    (check! (> mesh 0) "union mesh should be non-zero")
+    (check! (> (cmesh-vertex-count mesh) 0) "union mesh should have vertices")
     ;; Check that both object IDs appear in the mesh
     (let [n    (cmesh-vertex-count mesh)]
       (let [oi0 (cmesh-get-object-id mesh 0)
             oi1 (cmesh-get-object-id mesh (/ n 2))]
-        (assert! (if (= oi0 1) true (= oi0 2)) "vertex 0 should belong to obj 1 or 2")
-        (assert! (if (= oi1 1) true (= oi1 2)) "midpoint vertex should belong to obj 1 or 2")))
+        (check! (if (= oi0 1) true (= oi0 2)) "vertex 0 should belong to obj 1 or 2")
+        (check! (if (= oi1 1) true (= oi1 2)) "midpoint vertex should belong to obj 1 or 2")))
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -135,7 +139,7 @@
                                   -2.5 -2.0 -2.0
                                    2.5  2.0  2.0)
         ret   (export-obj mesh "/tmp/tur_sdf_test")]
-    (assert! (= ret 0) "export-obj should return 0 on success")
+    (check! (= ret 0) "export-obj should return 0 on success")
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -149,8 +153,8 @@
         d4 (sdf-eval sdf 4.0 0.0 0.0)
         ;; Old origin should be outside
         d0 (sdf-eval sdf 0.0 0.0 0.0)]
-    (assert! (approx= d4 0.0) "translated sphere surface at x=4 should be ~0")
-    (assert! (> d0 0.0) "origin should now be outside translated sphere")
+    (check! (approx= d4 0.0) "translated sphere surface at x=4 should be ~0")
+    (check! (> d0 0.0) "origin should now be outside translated sphere")
     (csdf-free ts)))
 
 ;; ---- main ----

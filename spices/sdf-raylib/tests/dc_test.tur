@@ -25,7 +25,11 @@
   return diff < 0.02;
   ```)
 
-(defn assert! [cond : bool msg : cstr] : void
+
+;; Named check!, not assert!: stdlib's auto-loaded `contract` module defines a
+;; one-argument `assert!` MACRO, which wins at every call site and rejected
+;; these two-argument calls with "macro 'assert!' expects 1 arguments, got 2".
+(defn check! [cond : bool msg : cstr] : void
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -42,15 +46,15 @@
         mesh  (dc-extract-colored scene 24
                                   -2.0 -2.0 -2.0
                                    2.0  2.0  2.0)]
-    (assert! (> mesh 0) "dc-extract-colored sphere: handle should be non-zero")
+    (check! (> mesh 0) "dc-extract-colored sphere: handle should be non-zero")
     (let [n (cmesh-vertex-count mesh)]
-      (assert! (> n 0) "dc-extract-colored sphere: should produce vertices")
+      (check! (> n 0) "dc-extract-colored sphere: should produce vertices")
       (let [cr (cmesh-get-cr mesh 0)
             cg (cmesh-get-cg mesh 0)
             oi (cmesh-get-object-id mesh 0)]
-        (assert! (approx= cr 1.0) "dc sphere: first vertex red should be ~1.0")
-        (assert! (approx= cg 0.5) "dc sphere: first vertex green should be ~0.5")
-        (assert! (= oi 1) "dc sphere: first vertex object ID should be 1")))
+        (check! (approx= cr 1.0) "dc sphere: first vertex red should be ~1.0")
+        (check! (approx= cg 0.5) "dc sphere: first vertex green should be ~0.5")
+        (check! (= oi 1) "dc sphere: first vertex object ID should be 1")))
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -63,13 +67,13 @@
         mesh  (dc-extract-colored scene 24
                                   -3.0 -2.0 -2.0
                                    3.0  2.0  2.0)]
-    (assert! (> mesh 0) "dc union: handle should be non-zero")
-    (assert! (> (cmesh-vertex-count mesh) 0) "dc union: should produce vertices")
+    (check! (> mesh 0) "dc union: handle should be non-zero")
+    (check! (> (cmesh-vertex-count mesh) 0) "dc union: should produce vertices")
     (let [n    (cmesh-vertex-count mesh)
           oi0  (cmesh-get-object-id mesh 0)
           oiM  (cmesh-get-object-id mesh (/ n 2))]
-      (assert! (if (= oi0 1) true (= oi0 2)) "dc union: vertex 0 should be obj 1 or 2")
-      (assert! (if (= oiM 1) true (= oiM 2)) "dc union: mid vertex should be obj 1 or 2"))
+      (check! (if (= oi0 1) true (= oi0 2)) "dc union: vertex 0 should be obj 1 or 2")
+      (check! (if (= oiM 1) true (= oiM 2)) "dc union: mid vertex should be obj 1 or 2"))
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -80,8 +84,8 @@
         mesh  (dc-extract-colored scene 24
                                   -2.0 -2.0 -2.0
                                    2.0  2.0  2.0)]
-    (assert! (> mesh 0) "dc box: handle should be non-zero")
-    (assert! (> (cmesh-vertex-count mesh) 0) "dc box: should produce vertices")
+    (check! (> mesh 0) "dc box: handle should be non-zero")
+    (check! (> (cmesh-vertex-count mesh) 0) "dc box: should produce vertices")
     (cmesh-free mesh)
     (csdf-free scene)))
 
@@ -95,10 +99,10 @@
         n-raw  (cmesh-vertex-count raw)
         welded (cmesh-weld raw 1.0e-4)
         n-weld (imesh-vertex-count welded)]
-    (assert! (> welded 0) "weld: imesh handle should be non-zero")
-    (assert! (> n-weld 0) "weld: should have unique vertices")
-    (assert! (< n-weld n-raw) "weld: unique vertex count should be less than raw count")
-    (assert! (> (imesh-triangle-count welded) 0) "weld: should have triangles")
+    (check! (> welded 0) "weld: imesh handle should be non-zero")
+    (check! (> n-weld 0) "weld: should have unique vertices")
+    (check! (< n-weld n-raw) "weld: unique vertex count should be less than raw count")
+    (check! (> (imesh-triangle-count welded) 0) "weld: should have triangles")
     (imesh-free welded)
     (cmesh-free raw)
     (csdf-free scene)))
@@ -112,7 +116,7 @@
                                     2.0  2.0  2.0)
         welded (cmesh-weld raw 1.0e-4)
         ret    (export-glb welded "/tmp/tur_dc_test")]
-    (assert! (= ret 0) "export-glb: should return 0 on success")
+    (check! (= ret 0) "export-glb: should return 0 on success")
     (imesh-free welded)
     (cmesh-free raw)
     (csdf-free scene)))

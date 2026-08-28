@@ -13,7 +13,11 @@
 
 ;; ---- helpers ----
 
-(defn assert! [cond : bool msg : cstr] : void
+
+;; Named check!, not assert!: stdlib's auto-loaded `contract` module defines a
+;; one-argument `assert!` MACRO, which wins at every call site and rejected
+;; these two-argument calls with "macro 'assert!' expects 1 arguments, got 2".
+(defn check! [cond : bool msg : cstr] : void
   ```c
   #include <stdio.h>
   #include <stdlib.h>
@@ -42,12 +46,12 @@
 (defn test-sphere-glsl [] : void
   (let [scene (colored-sphere 0.0 0.0 0.0 1.5  1.0 0.0 0.0  1)
         glsl  (csdf->glsl scene)]
-    (assert! (> (cstr-len glsl) 0) "csdf->glsl should return non-empty string")
-    (assert! (cstr-contains glsl "sceneSDF") "output should contain 'sceneSDF'")
-    (assert! (cstr-contains glsl "length(") "sphere output should use length()")
-    (assert! (cstr-contains glsl "1.500000") "sphere radius 1.5 should appear as literal")
-    (assert! (cstr-contains glsl "objId") "output should assign objId")
-    (assert! (cstr-contains glsl "col") "output should assign col")
+    (check! (> (cstr-len glsl) 0) "csdf->glsl should return non-empty string")
+    (check! (cstr-contains glsl "sceneSDF") "output should contain 'sceneSDF'")
+    (check! (cstr-contains glsl "length(") "sphere output should use length()")
+    (check! (cstr-contains glsl "1.500000") "sphere radius 1.5 should appear as literal")
+    (check! (cstr-contains glsl "objId") "output should assign objId")
+    (check! (cstr-contains glsl "col") "output should assign col")
     (csdf-glsl-free glsl)
     (csdf-free scene)))
 
@@ -56,9 +60,9 @@
 (defn test-box-glsl [] : void
   (let [scene (colored-box -1.0 -1.0 -1.0  1.0 1.0 1.0  0.0 1.0 0.0  2)
         glsl  (csdf->glsl scene)]
-    (assert! (> (cstr-len glsl) 0) "box glsl should be non-empty")
-    (assert! (cstr-contains glsl "bq_") "box output should declare bq_ temp var")
-    (assert! (cstr-contains glsl "sceneSDF") "box output should contain sceneSDF")
+    (check! (> (cstr-len glsl) 0) "box glsl should be non-empty")
+    (check! (cstr-contains glsl "bq_") "box output should declare bq_ temp var")
+    (check! (cstr-contains glsl "sceneSDF") "box output should contain sceneSDF")
     (csdf-glsl-free glsl)
     (csdf-free scene)))
 
@@ -67,8 +71,8 @@
 (defn test-cylinder-glsl [] : void
   (let [scene (colored-cylinder 0.0 0.0 0.0 0.5  0.0 0.0 1.0  3)
         glsl  (csdf->glsl scene)]
-    (assert! (> (cstr-len glsl) 0) "cylinder glsl should be non-empty")
-    (assert! (cstr-contains glsl ".xy") "cylinder should use .xy swizzle")
+    (check! (> (cstr-len glsl) 0) "cylinder glsl should be non-empty")
+    (check! (cstr-contains glsl ".xy") "cylinder should use .xy swizzle")
     (csdf-glsl-free glsl)
     (csdf-free scene)))
 
@@ -79,10 +83,10 @@
         b    (colored-sphere  1.5 0.0 0.0 0.8  0.0 0.0 1.0  2)
         u    (colored-union a b)
         glsl (csdf->glsl u)]
-    (assert! (> (cstr-len glsl) 0) "union glsl should be non-empty")
-    (assert! (cstr-contains glsl "d_0") "should emit d_0 for first leaf")
-    (assert! (cstr-contains glsl "d_1") "should emit d_1 for second leaf")
-    (assert! (cstr-contains glsl "if (d_") "union should emit an if statement")
+    (check! (> (cstr-len glsl) 0) "union glsl should be non-empty")
+    (check! (cstr-contains glsl "d_0") "should emit d_0 for first leaf")
+    (check! (cstr-contains glsl "d_1") "should emit d_1 for second leaf")
+    (check! (cstr-contains glsl "if (d_") "union should emit an if statement")
     (csdf-glsl-free glsl)
     (csdf-free u)))
 
@@ -93,8 +97,8 @@
         hole  (colored-sphere 0.0 0.0 0.0 1.0  0.0 0.0 0.0  2)
         diff  (colored-difference base hole)
         glsl  (csdf->glsl diff)]
-    (assert! (> (cstr-len glsl) 0) "difference glsl should be non-empty")
-    (assert! (cstr-contains glsl "_dRn") "difference should negate right distance")
+    (check! (> (cstr-len glsl) 0) "difference glsl should be non-empty")
+    (check! (cstr-contains glsl "_dRn") "difference should negate right distance")
     (csdf-glsl-free glsl)
     (csdf-free diff)))
 
@@ -104,9 +108,9 @@
   (let [s    (colored-sphere 0.0 0.0 0.0 1.0  0.0 1.0 0.0  1)
         ts   (colored-translate s 3.0 0.0 0.0)
         glsl (csdf->glsl ts)]
-    (assert! (> (cstr-len glsl) 0) "translate glsl should be non-empty")
-    (assert! (cstr-contains glsl "p_") "translate should emit p_ variable")
-    (assert! (cstr-contains glsl "3.000000") "translate offset 3.0 should appear as literal")
+    (check! (> (cstr-len glsl) 0) "translate glsl should be non-empty")
+    (check! (cstr-contains glsl "p_") "translate should emit p_ variable")
+    (check! (cstr-contains glsl "3.000000") "translate offset 3.0 should appear as literal")
     (csdf-glsl-free glsl)
     (csdf-free ts)))
 

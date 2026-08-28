@@ -15,12 +15,9 @@
                                 sessmap-free])
   (import session/id     :refer [session-id-new])
   (import session/ownstr :refer [to-cstr release])
-  (import valkey/client :refer [Client client-connect client-of client-close])
-
-(defn cok? [r : ptr<void>] : bool
-  ```c
-  return tur_is_ok((int64_t)(intptr_t)r);
-  ```)
+  ;; stdlib ok? / ok-val on the typed (Result Client int): valkey v0.6.0 dropped
+  ;; the client-of extractor. `result` is auto-loaded, so they need no import.
+  (import valkey/client :refer [Client client-connect client-close])
 
 (defn skip-note [] : void
   ```c
@@ -72,8 +69,8 @@
 
 (defn main [] : int
   (let [r (client-connect "127.0.0.1" 6379)]
-    (if (cok? r)
-      (run-roundtrip (client-of r))
+    (if (ok? r)
+      (run-roundtrip (ok-val r))
       (do (skip-note) 0))))
 
 ) ;; end module
