@@ -62,14 +62,11 @@
     /* __tur_include__: #include <unistd.h> */
     /* __tur_include__: #include <stdlib.h> */
     /* __tur_include__: #include <string.h> */
-    /* __tur_include__: #if defined(__linux__) */
-    /* __tur_include__: #include <poll.h> */
-    /* __tur_include__: #include <sys/inotify.h> */
-    /* __tur_include__: #endif */
-    /* __tur_include__: #if defined(__APPLE__) */
-    /* __tur_include__: #include <sys/event.h> */
-    /* __tur_include__: #include <sys/time.h> */
-    /* __tur_include__: #endif */
+    /* The platform headers go through watch/platform.h rather than guarded
+       __tur_include__ lines: the hoist emits every #include ahead of every
+       other directive, which detached the #if guards and pulled
+       <sys/event.h> in on Linux. See that header. */
+    /* __tur_include__: #include <watch/platform.h> */
     /* __tur_include__: typedef struct { char name[256]; unsigned int mask; unsigned int cookie; int is_dir; } TurBackendEvent; */
     /* __tur_include__: typedef struct { char *dir; char *base; int overflow; int fd; int wd; int kq; int dir_fd; TurBackendEvent evbuf[64]; int ev_n; } TurWatchBackend; */
 
@@ -285,7 +282,7 @@
   ;;; backend-event-name-at -- filename from the i-th buffered event.
   ;;; On Linux: the name field from the inotify_event (may be "" for self-events).
   ;;; On Darwin: always "" (snapshot diff provides names in the tree layer).
-  (defn backend-event-name-at [handle : int idx : int] #fx{Unsafe} : cstr
+  (defn (export-as "watch_backend_event_name_at") backend-event-name-at [handle : int idx : int] #fx{Unsafe} : cstr
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     int i = (int)idx;

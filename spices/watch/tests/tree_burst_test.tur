@@ -215,26 +215,32 @@
 
                       ;; Verify at least one event path contains "x.txt"
                       ;; and one contains "y.txt".
-                      (let [found-x 0
-                            found-y 0]
+                      ;; Named foundx / foundy, not found-x / found-y: the
+                      ;; inline-C below assigns to these bindings by their C
+                      ;; name, and tur's mangler encodes `-` as `_hy`, so
+                      ;; `found-x` reaches C as `found_hyx` and the C body's
+                      ;; `found_x` was undeclared. A separator-free name
+                      ;; mangles to itself.
+                      (let [foundx 0
+                            foundy 0]
                         ```c
                         int64_t fx = 0, fy = 0;
-                        int len = (int)watch__debounce__debounce_batch_len(batch);
+                        int len = (int)watch_debounce_batch_len(batch);
                         for (int i = 0; i < len; i++) {
-                          int64_t ev_i = watch__debounce__debounce_batch_event(batch, (int64_t)i);
+                          int64_t ev_i = watch_debounce_batch_event(batch, (int64_t)i);
                           const char *p = (const char *)(intptr_t)
-                              watch__event__watch_event_path(ev_i);
+                              watch_event_path(ev_i);
                           if (p && strstr(p, "x.txt")) fx = 1;
                           if (p && strstr(p, "y.txt")) fy = 1;
                         }
-                        found_x = fx; found_y = fy;
+                        foundx = fx; foundy = fy;
                         return 0;
                         ```
                         (do
                           (tap-record 3 "coalesced batch contains an x.txt event"
-                                      (= found-x 1))
+                                      (= foundx 1))
                           (tap-record 4 "coalesced batch contains a y.txt event"
-                                      (= found-y 1))))
+                                      (= foundy 1))))
 
                       ;; The batch should not grow without bound:
                       ;; coalesced count must be <= 2 (one per file).
