@@ -83,6 +83,14 @@ expect_reject audiobuf-frame-mismatch.tur TUR-E0260 \
   'function '\''audiobuf-mix'\'' shares size variable '\''n'\'' across parameters, but argument 1 has size 256 while argument 2 has size 512' \
   'audiobuf-mix rejects buffers with different frame counts'
 
+# --- secondary opaque handle types are not interchangeable -----------
+expect_reject swap-reject.tur TUR-E0001 \
+  'expected Audio, got DeviceInfo' \
+  'device-count rejects a DeviceInfo as an Audio'
+expect_reject swap-reject.tur TUR-E0001 \
+  'expected DeviceInfo, got Audio' \
+  'device-info-name rejects an Audio as a DeviceInfo'
+
 echo "1..$n"
 if [ "$fail" -ne 0 ]; then
   echo "FAILED"

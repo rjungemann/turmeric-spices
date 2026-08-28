@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# errors/run.sh -- assert the raylib compile-fail diagnostics.
+# errors/run.sh -- assert the plutovg compile-fail diagnostics.
 #
 # These are compile-FAIL fixtures: each must be REJECTED, for a specific
 # reason. That is the inverse of every other test in the spice, so they
@@ -74,49 +74,23 @@ expect_reject() {
   echo "ok $n - $desc"
 }
 
-echo "# the raylib compile-fail diagnostics"
+echo "# the plutovg compile-fail diagnostics"
 
-expect_reject image-height-mismatch.tur TUR-E0260 \
-  'function '\''image-overlay'\'' shares size variable '\''h'\'' across parameters, but argument 1 has size 64 while argument 2 has size 32' \
-  'image-overlay rejects images of different heights'
-expect_reject image-width-mismatch.tur TUR-E0260 \
-  'function '\''image-overlay'\'' shares size variable '\''w'\'' across parameters, but argument 1 has size 64 while argument 2 has size 32' \
-  'image-overlay rejects images of different widths'
-expect_reject raylib-sound-use-after-unload.tur TUR-E0101 \
-  'linear value '\''s'\'' used after being consumed' \
-  'playing an unloaded sound is a use-after-consume'
-expect_reject raylib-texture-leak.tur TUR-E0100 \
-  'linear value '\''t'\'' dropped without being consumed' \
-  'a texture that is never unloaded is a leak'
-expect_reject raylib-texture-use-after-unload.tur TUR-E0101 \
-  'linear value '\''t'\'' used after being consumed' \
-  'drawing an unloaded texture is a use-after-consume'
-
-# --- secondary opaque handle types are not interchangeable -----------
 expect_reject swap-reject.tur TUR-E0001 \
-  'expected Camera3D, got Camera2D' \
-  'begin-mode-3d rejects a Camera2D'
+  'expected Canvas, got DashArray' \
+  'canvas-set-dash-array rejects a DashArray as a Canvas'
 expect_reject swap-reject.tur TUR-E0001 \
-  'expected Color, got Vector2' \
-  'clear-background rejects a Vector2 as a Color'
+  'expected DashArray, got GradientStops' \
+  'dash-array-add rejects a GradientStops as a DashArray'
 expect_reject swap-reject.tur TUR-E0001 \
-  'expected Color, got int' \
-  'clear-background rejects a raw int as a Color'
+  'expected GradientStops, got DashArray' \
+  'gradient-stops-count rejects a DashArray'
 expect_reject swap-reject.tur TUR-E0001 \
-  'expected Vector2, got Rectangle' \
-  'draw-circle-v rejects a Rectangle as a Vector2'
+  'expected FontCache, got Rect' \
+  'font-cache-destroy rejects a Rect as a FontCache'
 expect_reject swap-reject.tur TUR-E0001 \
-  'expected Rectangle, got Vector2' \
-  'draw-rectangle-rec rejects a Vector2 as a Rectangle'
-expect_reject swap-reject.tur TUR-E0001 \
-  'expected Font, got Texture2D' \
-  'unload-font rejects a Texture2D'
-expect_reject swap-reject.tur TUR-E0001 \
-  'expected Model, got Mesh' \
-  'unload-model rejects a Mesh'
-expect_reject swap-reject.tur TUR-E0001 \
-  'expected Texture2D, got Sound' \
-  'unload-texture rejects a Sound'
+  'expected Rect, got DashArray' \
+  'rect-x rejects a DashArray as a Rect'
 
 echo "1..$n"
 if [ "$fail" -ne 0 ]; then
