@@ -27,21 +27,23 @@
   ;; a real Postgres server is not available.
   ;; -------------------------------------------------------------------------
 
-  (describe "postgres/db -- module smoke tests"
+  (defn __all-tests [] : void
+   (describe "postgres/db -- module smoke tests"
 
-    (it "module loads without error"
-      (assert-eq 1 1))
+     (it "module loads without error"
+       (assert-eq 1 1))
 
-    (it "db-connect with bad connstr returns an err result (not null)"
-      (let [r (db-connect "host=127.0.0.1 port=1 dbname=noexist connect_timeout=1")]
-        (assert-true (not (__result-ok? r)))))
+     (it "db-connect with bad connstr returns an err result (not null)"
+       (let [r (db-connect "host=127.0.0.1 port=1 dbname=noexist connect_timeout=1")]
+         (assert-true (not (__result-ok? r)))))
 
-    (it "db-begin, db-commit, db-rollback are callable symbols"
-      ;; We cannot call them without a live connection, but we verify the module
-      ;; exported them by checking that the names resolve to non-zero function
-      ;; pointers (Turmeric represents fns as integers).
-      (assert-eq 1 1)))
+     (it "db-begin, db-commit, db-rollback are callable symbols"
+       ;; We cannot call them without a live connection, but we verify the module
+       ;; exported them by checking that the names resolve to non-zero function
+       ;; pointers (Turmeric represents fns as integers).
+       (assert-eq 1 1))))
 
 
   (defn main [] : int
+    (__all-tests)
     (run-all-status)))
