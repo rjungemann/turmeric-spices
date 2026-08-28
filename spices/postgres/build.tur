@@ -10,7 +10,16 @@
             :optional true}
   }
   :cmake-deps #map{
-    "libpq" #map{:cmake-name "PostgreSQL"
+    ;; libpq is taken from the system (libpq-dev / brew libpq), never built
+    ;; from source: there is no standalone libpq repo to FetchContent. Without
+    ;; :prefer-system the generator emitted a FetchContent_Declare with no
+    ;; GIT_REPOSITORY, which aborted the cmake configure -- so no manifest was
+    ;; written, libpq-fe.h was never on the include path, and every test failed
+    ;; to compile on "'PGconn' undeclared". :prefer-system makes it a
+    ;; find_package(PostgreSQL) instead, which is what :cmake-name/:targets
+    ;; were already written for.
+    "libpq" #map{:prefer-system true
+             :cmake-name "PostgreSQL"
              :targets    ["PostgreSQL::PostgreSQL"]}
   }
   :exports #map{
