@@ -103,6 +103,22 @@ Local-source deps never produce a `tur.lock` entry. Do not hand-edit
 `tur.lock` to add stub entries for workspace siblings -- that workaround is
 no longer needed.
 
+### `tur.lock` is generated, and is NOT committed
+
+Every `spices/*/tur.lock` is gitignored, despite the "Commit this file to
+version control for reproducible builds" header tur writes into it. That
+header describes an intent the toolchain does not implement: nothing ever
+checks out a locked SHA. `tur fetch` without `--update` treats the presence
+of a lock *row* as "this dep is already on disk" and skips the fetch
+outright, so on a cold clone a committed lock leaves the dependency silently
+missing -- strictly worse than having no lock. The clone itself goes through
+`pkg_git_fetch(url, ref, dest)`, by `:ref` and never by `:resolved`, and the
+`:fetched-at` wall-clock stamp means every fetch rewrites the file anyway.
+
+So: never `git add` a `tur.lock`, and do not "restore" one you see missing.
+`.gitignore` carries the full reasoning. Revisit if tur learns to check out
+`:resolved`.
+
 ## CI
 
 `.github/workflows/ci.yml` currently checks out `rjungemann/turmeric` and
