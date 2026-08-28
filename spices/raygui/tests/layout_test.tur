@@ -10,15 +10,24 @@
                                gui-dummy-rec gui-status-bar gui-scroll-panel])
 
 ;;; T1: layout exports resolve without error.
+;;;
+;;; Each binding needs its own name.  Seven bindings all called `_` mangle to
+;;; the same C identifier, and since they hold function pointers of different
+;;; shapes cc rejected the file with "conflicting types for '_'" followed by
+;;; four "redefinition of '_'".  `_` is not a discard in Turmeric -- it is an
+;;; ordinary name.
+;;;
+;;; What this proves is a link-time property: naming each function forces the
+;;; linker to resolve it, so a missing or renamed raygui entry point fails the
+;;; build rather than the run.  (Calling them would need a live window.)
 (defn test-exports-resolve [] : int
-  ;; Simply referencing the imported names proves resolution at link time.
-  (let [_ gui-window-box
-        _ gui-group-box
-        _ gui-line
-        _ gui-panel
-        _ gui-dummy-rec
-        _ gui-status-bar
-        _ gui-scroll-panel]
+  (let [_window-box   gui-window-box
+        _group-box    gui-group-box
+        _line         gui-line
+        _panel        gui-panel
+        _dummy-rec    gui-dummy-rec
+        _status-bar   gui-status-bar
+        _scroll-panel gui-scroll-panel]
     (println "T1 PASS: layout exports resolve")
     0))
 
