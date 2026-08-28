@@ -49,6 +49,12 @@ jobs:
       # project lives in cmake/), so FetchContent adds a directory with
       # nothing to build and produces no library. The osc dep is keyed "lo",
       # i.e. -llo, which the distro's liblo.so satisfies directly.
+      #
+      # libhiredis-dev is for valkey's HEADERS only -- it builds the library
+      # from source, but its inline-C uses the conventional
+      # <hiredis/hiredis.h> while the fetched tree puts hiredis.h at its root.
+      # libpq-dev is for postgres, whose libpq dep is :prefer-system (there is
+      # no standalone libpq repo to fetch).
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -57,11 +63,11 @@ jobs:
             libedit-dev cmake \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgl1-mesa-dev libasound2-dev libxkbcommon-dev \
-            liblo-dev
+            liblo-dev libhiredis-dev libpq-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install libedit cmake liblo || true
+        run: brew install libedit cmake liblo hiredis libpq || true
 
       - name: Build the tur compiler
         working-directory: turmeric
