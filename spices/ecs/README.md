@@ -205,7 +205,7 @@ Turmeric loop over flat buffers runs 1.04x C) and not the query macro;
 it is the unsized `dense-set!` write path, which carries an auto-grow
 capacity branch, a `present[]` byte write and a `len` update per store.
 Prefer sized worlds where the entity budget is known. See
-[`bench/README.md`](bench/README.md).
+[`bench/README.md`](https://github.com/rjungemann/turmeric-spices/blob/main/spices/ecs/bench/README.md).
 
 ### Breaking change in the I3-I4 ship (2026-06-11)
 
