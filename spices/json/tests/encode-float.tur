@@ -3,19 +3,23 @@
 ;; re-parses to the same value; non-finite doubles (Infinity / NaN,
 ;; which JSON cannot represent) render as "null".
 ;;
-;; Expected:
-;;   3.14
-;;   2
-;;   -0.5
-;;   100000000
-;;   null
-;;   null
-;;   rt=3.14
+;; The `Expected:` output this used to print and never check is asserted
+;; below; main returns run-all-status instead of a hardcoded 0.
 
 (defmodule encode_float_test (export)
 
 (import json/encode)
 (import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true assert-eq])
+(import test/runner :refer [run-all-status])
+
+(defn cstr-eq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
 
 (defn __inf [] #fx{Unsafe} : float
   ```c double z = 0.0; return 1.0 / z; ```)
@@ -27,17 +31,35 @@
   ```c printf("rt=%s\n", (const char *)s); ```)
 
 (defn main [] : int
-  (println (encode 3.14))
-  (println (encode 2.0))
-  (println (encode -0.5))
-  (println (encode 100000000.0))
-  (println (encode (unsafe (__inf))))
-  (println (encode (unsafe (__nan))))
-  ;; Round-trip: parse a JSON number into a float, then re-encode it.
   (let [doc  (unsafe (json-parse-doc "{\"pi\":3.14}"))
         root (unsafe (json-doc-root doc))
         pi   (ok-val (:: (decode doc (unsafe (json-obj-get doc root "pi")))
                          (Result float cstr)))]
-    (unsafe (__show-rt (encode pi)))
+    (describe "json Encode [float]"
+
+      (it "encodes a fractional value"
+        (assert-true (cstr-eq? "3.14" (encode 3.14))))
+
+      ;; A whole-valued double renders without a trailing ".0" -- shortest %g.
+      (it "encodes a whole value without a decimal point"
+        (assert-true (cstr-eq? "2" (encode 2.0))))
+
+      (it "encodes a negative value"
+        (assert-true (cstr-eq? "-0.5" (encode -0.5))))
+
+      (it "encodes a large value in full, not exponent form"
+        (assert-true (cstr-eq? "100000000" (encode 100000000.0))))
+
+      ;; JSON has no Infinity or NaN, so both must degrade to null rather than
+      ;; emitting something a parser would reject.
+      (it "encodes Infinity as null"
+        (assert-true (cstr-eq? "null" (encode (unsafe (__inf))))))
+
+      (it "encodes NaN as null"
+        (assert-true (cstr-eq? "null" (encode (unsafe (__nan))))))
+
+      (it "round-trips a parsed float back to its source text"
+        (assert-true (cstr-eq? "3.14" (encode pi)))))
+
     (unsafe (json-doc-free doc))
-    0)))
+    (run-all-status))))

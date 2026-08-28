@@ -1,15 +1,23 @@
+;; The `Expected:` output this used to print and never check is asserted
+;; below; main returns run-all-status instead of a hardcoded 0.
 ;; Full round-trip for the U2 derive-json-opaque opt-in: decode a JSON
 ;; int into a defopaque UserId, then re-encode it through the macro-
 ;; emitted Encode instance. Exercises both directions of the carrier
 ;; delegation path.
-;;
-;; Expected:
-;;   42
 
 (defmodule round_trip_opaque_test (export)
 
 (import json/encode :refer [derive-json-opaque])
 (import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true assert-eq])
+(import test/runner :refer [run-all-status])
+
+(defn cstr-eq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
 
 (defopaque UserId :int)
 (derive-json-opaque UserId :as int)
@@ -18,7 +26,13 @@
   (let [doc  (unsafe (json-parse-doc "42"))
         root (unsafe (json-doc-root doc))
         uid  (ok-val (:: (decode doc root) (Result UserId cstr)))]
-    (println (encode uid))
+    (describe "json derive-json-opaque -- decode then encode"
+
+      ;; The newtype must survive both legs and come back as the bare carrier
+      ;; number, not wrapped in an object.
+      (it "round-trips a defopaque through its int carrier"
+        (assert-true (cstr-eq? "42" (encode uid)))))
+
     (unsafe (json-doc-free doc))
-    0))
+    (run-all-status)))
 )

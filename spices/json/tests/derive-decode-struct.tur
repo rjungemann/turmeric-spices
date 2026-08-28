@@ -2,14 +2,23 @@
 ;; JSON object into a User struct via the macro-emitted Decode instance,
 ;; then re-encode through the Encode side.
 ;;
-;; Expected:
-;;   id=42, name="alice"
-;;   {"id":42,"name":"alice"}
+;; The `Expected:` output this used to print and never check is asserted
+;; below; main returns run-all-status instead of a hardcoded 0.
 
 (defmodule derive_decode_struct_test (export)
 
 (import json/encode :refer [derive-json])
 (import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true assert-eq])
+(import test/runner :refer [run-all-status])
+
+(defn cstr-eq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
 
 (defn __int->cstr [n : int] #fx{Unsafe} : cstr
   ```c char *b = (char*)malloc(24); snprintf(b, 24, "%lld", (long long)n); return b; ```)
@@ -30,11 +39,21 @@
 (derive-json User (id int) (name cstr))
 
 (defn main [] : int
-  (let [doc      (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
-        root     (unsafe (json-doc-root doc))
-        user     (ok-val (:: (decode doc root) (Result User cstr)))]
-    (println (unsafe (__cat4 "id=" (unsafe (__int->cstr (.id user)))
-                             ", name=\"" (unsafe (__cat4 (.name user) "\"" "" "")))))
-    (println (encode user))
+  (let [doc  (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
+        root (unsafe (json-doc-root doc))
+        user (ok-val (:: (decode doc root) (Result User cstr)))]
+    (describe "json derive-json -- Decode into a defstruct"
+
+      (it "decodes the int field into the struct"
+        (assert-eq 42 (.id user)))
+
+      (it "decodes the string field into the struct"
+        (assert-true (cstr-eq? "alice" (.name user))))
+
+      ;; Re-encoding must reproduce the input byte for byte, which is the
+      ;; property that makes derive-json's two instances each other's inverse.
+      (it "re-encodes to the JSON it was decoded from"
+        (assert-true (cstr-eq? "{\"id\":42,\"name\":\"alice\"}" (encode user)))))
+
     (unsafe (json-doc-free doc))
-    0)))
+    (run-all-status))))
