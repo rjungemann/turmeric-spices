@@ -2,7 +2,7 @@
 ;; notebook/keys -- default bindings, keybinding-file loading, and action routing.
 
 (defmodule notebook/keys
-  (export default-keybindings load-keybindings action-dispatch)
+  (export default-keybindings load-keybindings action-dispatch keybindings-free)
 
   (defn __keys-nil-value [] #fx{Unsafe} : int
     ```c
@@ -37,6 +37,23 @@
     ```)
 
   ;;; default-keybindings -- return the built-in command-mode key map.
+;;; keybindings-free -- release a keybinding list and every binding in it.
+;;; Both constructors allocate a Cons per binding with two strdup'd strings;
+;;; nothing used to free either.  Safe on 0.
+  (defn keybindings-free [bindings : int] #fx{Unsafe} : void
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct { char *key; char *action; } NotebookKeyBinding;
+    Cons *node = (Cons *)(intptr_t)bindings;
+    while (node) {
+      Cons *next = (Cons *)(intptr_t)node->tail;
+      NotebookKeyBinding *b = (NotebookKeyBinding *)(intptr_t)node->head;
+      if (b) { free(b->key); free(b->action); free(b); }
+      free(node);
+      node = next;
+    }
+    ```)
+
   (defn default-keybindings [] #fx{Unsafe} : int
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;

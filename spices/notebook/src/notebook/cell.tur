@@ -7,7 +7,7 @@
           cell-start-line cell-end-line
           cells-assign-ids
           cell-set-source!
-          attrs-free cell-free cells-free)
+          attrs-free attrs-copy cell-free cells-free)
 
   ;; Minimal cons helpers so the module stays self-contained.
   (defn __cell-nil-value [] #fx{Unsafe} : int
@@ -349,6 +349,31 @@
       free(node);
       node = next;
     }
+    ```)
+
+;;; attrs-copy -- deep-copy an attrs list.  cell-make stores the list it is
+;;; handed rather than copying it, so anything that builds a second Cell from
+;;; an existing one's attrs has to copy first: sharing the list would leave two
+;;; Cells owning it and cell-free would run over it twice.
+  (defn attrs-copy [attrs : int] #fx{Unsafe} : int
+    ```c
+    typedef struct { char *name; char *value; } Attr;
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    int64_t out = 0;
+    Cons *tailp = NULL;
+    for (Cons *node = (Cons *)(intptr_t)attrs; node; node = (Cons *)(intptr_t)node->tail) {
+      Attr *src = (Attr *)(intptr_t)node->head;
+      Attr *dst = malloc(sizeof(*dst));
+      dst->name  = strdup(src && src->name  ? src->name  : "");
+      dst->value = strdup(src && src->value ? src->value : "");
+      Cons *cell = malloc(sizeof(*cell));
+      cell->head = (int64_t)(intptr_t)dst;
+      cell->tail = 0;
+      if (tailp) tailp->tail = (int64_t)(intptr_t)cell;
+      else out = (int64_t)(intptr_t)cell;
+      tailp = cell;
+    }
+    return out;
     ```)
 
 ;;; cell-free -- release a Cell, including the attrs list it owns.

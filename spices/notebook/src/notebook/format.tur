@@ -117,6 +117,22 @@
     if (p) free(p);
     ```)
 
+;;; __fmt-own -- copy a borrowed string so a concat can consume it.  The
+;;; serialiser mixes literals, borrowed cell fields and malloc'd pieces; making
+;;; every operand owned is what lets __fmt-concat-owned free as it goes.
+  (defn __fmt-own [s : cstr] #fx{Unsafe} : cstr
+    ```c
+    return strdup(s ? (const char *)(intptr_t)s : "");
+    ```)
+
+;;; __fmt-concat-owned -- concatenate two owned strings, releasing both.
+  (defn __fmt-concat-owned [a : cstr b : cstr] #fx{Unsafe} : cstr
+    (let [out (__fmt-str-concat a b)]
+      (do
+        (__fmt-cstr-free a)
+        (__fmt-cstr-free b)
+        out)))
+
   (defn __fmt-cstr-null? [s : cstr] #fx{Unsafe} : bool
     ```c
     return ((const void *)(intptr_t)s) == NULL;
@@ -341,35 +357,42 @@
     return out;
     ```)
 
+;;; The serialiser hands every caller an owned string.  __render-attr-list and
+;;; md-emit already malloc; the literals and the borrowed cell fields go
+;;; through __fmt-own so __fmt-concat-owned can release each intermediate as
+;;; the result is assembled, instead of dropping it on the floor.
   (defn __render-attrs [attrs : int] #fx{Unsafe} : cstr
     (if (__fmt-list-nil? attrs)
-      ""
-      (__fmt-str-concat
-        " {"
-        (__fmt-str-concat (__render-attr-list attrs) "}"))))
+      (__fmt-own "")
+      (__fmt-concat-owned
+        (__fmt-own " {")
+        (__fmt-concat-owned (__render-attr-list attrs) (__fmt-own "}")))))
 
   (defn __render-node [node : int] #fx{Unsafe} : cstr
     (if (= (node-tag node) 0)
       (md-emit (node-prose node))
       (let [cell (node-cell node)]
-        (__fmt-str-concat
-          "```"
-          (__fmt-str-concat (__lang-label (cell-lang cell))
-                            (__fmt-str-concat (__render-attrs (cell-attrs cell))
-                                              (__fmt-str-concat "\n"
-                                                                (__fmt-str-concat (cell-source cell) "\n```"))))))))
+        (__fmt-concat-owned
+          (__fmt-own "```")
+          (__fmt-concat-owned (__fmt-own (__lang-label (cell-lang cell)))
+                              (__fmt-concat-owned (__render-attrs (cell-attrs cell))
+                                                  (__fmt-concat-owned (__fmt-own "\n")
+                                                                      (__fmt-concat-owned (__fmt-own (cell-source cell))
+                                                                                          (__fmt-own "\n```")))))))))
 
   (defn __nodes->str-int [nodes : int] #fx{Unsafe} : int
     (if (__fmt-list-nil? nodes)
-      (__fmt-cstr-as-int "")
+      (__fmt-cstr-as-int (__fmt-own ""))
       (let [cur (__render-node (__fmt-head nodes))]
         (if (__fmt-list-nil? (__fmt-tail nodes))
           (__fmt-cstr-as-int cur)
           (__fmt-cstr-as-int
-            (__fmt-str-concat cur
-                              (__fmt-str-concat "\n\n" (__fmt-int-as-cstr (__nodes->str-int (__fmt-tail nodes))))))))))
+            (__fmt-concat-owned cur
+                                (__fmt-concat-owned (__fmt-own "\n\n")
+                                                    (__fmt-int-as-cstr (__nodes->str-int (__fmt-tail nodes))))))))))
 
   ;;; nodes->str -- serialize notebook nodes back to normalized markdown.
+  ;;; The result is owned by the caller.
   (defn nodes->str [nodes : int] #fx{Unsafe} : cstr
     (__fmt-int-as-cstr (__nodes->str-int nodes)))
 

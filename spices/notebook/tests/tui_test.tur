@@ -4,7 +4,23 @@
 (defmodule notebook/tests/tui
   (import notebook/format :refer [parse-string])
   (import notebook/keys :refer [default-keybindings load-keybindings action-dispatch])
-  (import notebook/tui :refer [tui-opts-make tui-run tui-run-nodes])
+  (import notebook/tui :refer [tui-opts-make tui-run tui-run-nodes tui-opts-free])
+  (import notebook/keys :refer [keybindings-free])
+
+;; Each case releases what it made.  tui-run / tui-run-nodes take ownership of
+;; the node list (the TUI state frees it), so the tests free the Result box,
+;; the opts and the temp paths, but not the nodes.
+;;; free-cstr -- release an owned string.
+  (defn free-cstr [s : cstr] #fx{Unsafe} : void
+    ```c
+    free((char *)(intptr_t)s);
+    ```)
+
+;;; box-free -- release a Result box after taking its payload out.
+  (defn box-free [r : int] #fx{Unsafe} : void
+    ```c
+    if (r) free((void *)(intptr_t)r);
+    ```)
 
   (defn test-ok? [r : int] #fx{Unsafe} : bool
     ```c
@@ -174,6 +190,9 @@
       int64_t clipboard;
       int64_t dirty;
       int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
     } NotebookTuiState;
     NotebookTuiState *st = calloc(1, sizeof(*st));
     st->path = strdup("");
@@ -181,6 +200,42 @@
     st->focus = focus;
     st->status = strdup("");
     return (int64_t)(intptr_t)st;
+    ```)
+
+;;; fake-state-free -- release a state built by fake-state-make.  action-dispatch
+;;; only writes scalar fields, so the two strdup'd strings and the struct are
+;;; everything the test owns.
+  (defn fake-state-free [state : int] #fx{Unsafe} : void
+    ```c
+    typedef struct {
+      char *path;
+      int64_t nodes;
+      int64_t cells;
+      int64_t outputs;
+      int64_t cell_count;
+      int64_t focus;
+      int64_t session;
+      int64_t color;
+      int64_t cell_width;
+      int64_t scrollback;
+      int64_t keybindings;
+      char *status;
+      int64_t pending_effect;
+      int64_t quit_requested;
+      int64_t exit_code;
+      int64_t clipboard;
+      int64_t dirty;
+      int64_t quit_confirm;
+      int64_t output_hidden;
+      char *search_query;
+      int64_t help_visible;
+    } NotebookTuiState;
+    NotebookTuiState *st = (NotebookTuiState *)(intptr_t)state;
+    if (!st) return;
+    free(st->path);
+    free(st->status);
+    free(st->search_query);
+    free(st);
     ```)
 
   (defn fake-state-focus [state : int] #fx{Unsafe} : int
@@ -288,32 +343,49 @@
     ```)
 
   (defn test-default-keybindings [] #fx{Unsafe} : bool
-    (let [bindings (default-keybindings)]
-      (and (cstr-eq? (binding-action bindings "j") "cell-next")
-           (and (cstr-eq? (binding-action bindings "gg") "cell-top")
-                (and (cstr-eq? (binding-action bindings "e") "cell-edit")
-                     (and (cstr-eq? (binding-action bindings "dd") "cell-delete")
-                          (and (cstr-eq? (binding-action bindings "/") "search-prompt")
-                               (and (cstr-eq? (binding-action bindings "?") "help-toggle")
-                                    (cstr-eq? (binding-action bindings "o") "output-toggle")))))))))
+    (let [bindings (default-keybindings)
+          ok (and (cstr-eq? (binding-action bindings "j") "cell-next")
+                  (and (cstr-eq? (binding-action bindings "gg") "cell-top")
+                       (and (cstr-eq? (binding-action bindings "e") "cell-edit")
+                            (and (cstr-eq? (binding-action bindings "dd") "cell-delete")
+                                 (and (cstr-eq? (binding-action bindings "/") "search-prompt")
+                                      (and (cstr-eq? (binding-action bindings "?") "help-toggle")
+                                           (cstr-eq? (binding-action bindings "o") "output-toggle")))))))]
+      (do
+        (keybindings-free bindings)
+        ok)))
 
   (defn test-load-keybindings [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-keybindings")
           path (path-join dir "keys.txt")
           _ (write-file path "# comment\nx quit\n<Enter> cell-run\n")
-          loaded (load-keybindings path)]
-      (and (test-ok? loaded)
-           (cstr-eq? (binding-action (test-ok-val loaded) "x") "quit"))))
+          loaded (load-keybindings path)
+          ok (and (test-ok? loaded)
+                  (cstr-eq? (binding-action (test-ok-val loaded) "x") "quit"))]
+      (do
+        (if (test-ok? loaded) (keybindings-free (test-ok-val loaded)) (__tui-test-noop))
+        (box-free loaded)
+        (free-cstr path)
+        (free-cstr dir)
+        ok)))
+
+;;; __tui-test-noop -- void no-op for a cleanup-only `if`.
+  (defn __tui-test-noop [] #fx{Unsafe} : void
+    ```c
+    return;
+    ```)
 
   (defn test-action-dispatch [] #fx{Unsafe} : bool
     (let [state (fake-state-make 3 1)]
       (do
         (action-dispatch state "cell-prev")
         (action-dispatch state "search-prev")
-        (and (= (fake-state-focus state) 0)
-             (and (= (fake-state-effect state) 13)
-                  (and (not (fake-state-quit? state))
-                       (= (fake-state-quit-confirm state) 0)))))))
+        (let [ok (and (= (fake-state-focus state) 0)
+                      (and (= (fake-state-effect state) 13)
+                           (and (not (fake-state-quit? state))
+                                (= (fake-state-quit-confirm state) 0))))]
+          (fake-state-free state)
+          ok))))
 
   (defn test-tui-run-nodes-scripted [] #fx{Unsafe} : bool
     (let [parsed (parse-string "```turmeric {id=one}\n(+ 1 2)\n```\n\n```turmeric {id=two}\n(+ 3 4)\n```")
@@ -321,11 +393,15 @@
           opts (tui-opts-make 0 0 1000 "")]
       (do
         (set-test-keys "j\n<Enter>\nq\n")
-        (let [run (tui-run-nodes nodes opts)]
+        (let [run (tui-run-nodes nodes opts)
+              ok (and (test-ok? run)
+                      (= (test-ok-val run) 0))]
           (do
             (clear-test-keys)
-            (and (test-ok? run)
-                 (= (test-ok-val run) 0)))))))
+            (box-free run)
+            (tui-opts-free opts)
+            (box-free parsed)
+            ok)))))
 
   (defn test-tui-edit-save-and-quit [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-edit-save")
@@ -336,13 +412,19 @@
         (set-test-editor-text "(+ 5 8)")
         (set-test-keys "e\ns\nq\n")
         (let [run (tui-run path opts)
-              text (slurp path)]
+              text (slurp path)
+              ok (and (test-ok? run)
+                      (and (= (test-ok-val run) 0)
+                           (cstr-eq? text "```turmeric {id=one}\n(+ 5 8)\n```")))]
           (do
             (clear-test-editor-text)
             (clear-test-keys)
-            (and (test-ok? run)
-                 (and (= (test-ok-val run) 0)
-                      (cstr-eq? text "```turmeric {id=one}\n(+ 5 8)\n```"))))))))
+            (free-cstr text)
+            (box-free run)
+            (tui-opts-free opts)
+            (free-cstr path)
+            (free-cstr dir)
+            ok)))))
 
   (defn test-tui-dirty-quit-warning [] #fx{Unsafe} : bool
     (let [parsed (parse-string "```turmeric {id=one}\n(+ 1 2)\n```")
@@ -350,11 +432,15 @@
           opts (tui-opts-make 0 0 1000 "")]
       (do
         (set-test-keys "a\nq\nq\n")
-        (let [run (tui-run-nodes nodes opts)]
+        (let [run (tui-run-nodes nodes opts)
+              ok (and (test-ok? run)
+                      (= (test-ok-val run) 1))]
           (do
             (clear-test-keys)
-            (and (test-ok? run)
-                 (= (test-ok-val run) 1)))))))
+            (box-free run)
+            (tui-opts-free opts)
+            (box-free parsed)
+            ok)))))
 
   (defn test-tui-search-and-output-toggle [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-search")
@@ -368,16 +454,23 @@
         (set-test-search-query "needle")
         (set-test-keys "/\no\nq\n")
         (let [run (tui-run-nodes nodes opts)
-              logged (slurp trace)]
+              logged (slurp trace)
+              ok (and (test-ok? run)
+                      (and (= (test-ok-val run) 0)
+                           (and (cstr-contains? logged "focus:1")
+                                (and (cstr-contains? logged "status:search: needle")
+                                     (cstr-contains? logged "status:hid output")))))]
           (do
             (clear-test-trace)
             (clear-test-search-query)
             (clear-test-keys)
-            (and (test-ok? run)
-                 (and (= (test-ok-val run) 0)
-                      (and (cstr-contains? logged "focus:1")
-                           (and (cstr-contains? logged "status:search: needle")
-                                (cstr-contains? logged "status:hid output"))))))))))
+            (free-cstr logged)
+            (box-free run)
+            (tui-opts-free opts)
+            (box-free parsed)
+            (free-cstr trace)
+            (free-cstr dir)
+            ok)))))
 
   (defn test-tui-help-overlay [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-help")
@@ -390,13 +483,20 @@
         (set-test-trace trace)
         (set-test-keys "?\nq\nq\n")
         (let [run (tui-run-nodes nodes opts)
-              logged (slurp trace)]
+              logged (slurp trace)
+              ok (and (test-ok? run)
+                      (and (= (test-ok-val run) 0)
+                           (cstr-contains? logged "status:help overlay")))]
           (do
             (clear-test-trace)
             (clear-test-keys)
-            (and (test-ok? run)
-                 (and (= (test-ok-val run) 0)
-                      (cstr-contains? logged "status:help overlay"))))))))
+            (free-cstr logged)
+            (box-free run)
+            (tui-opts-free opts)
+            (box-free parsed)
+            (free-cstr trace)
+            (free-cstr dir)
+            ok)))))
 
   (defn test-tui-keybinding-overrides [] #fx{Unsafe} : bool
     (let [dir (temp-dir "turnb-override")
@@ -412,14 +512,70 @@
         (set-test-search-query "needle")
         (set-test-keys "/\nx\n")
         (let [run (tui-run-nodes nodes opts)
-              logged (slurp trace)]
+              logged (slurp trace)
+              ok (and (test-ok? run)
+                      (and (= (test-ok-val run) 0)
+                           (cstr-contains? logged "status:search: needle")))]
           (do
             (clear-test-trace)
             (clear-test-search-query)
             (clear-test-keys)
-            (and (test-ok? run)
-                 (and (= (test-ok-val run) 0)
-                      (cstr-contains? logged "status:search: needle"))))))))
+            (free-cstr logged)
+            (box-free run)
+            (tui-opts-free opts)
+            (box-free parsed)
+            (free-cstr keyfile)
+            (free-cstr trace)
+            (free-cstr dir)
+            ok)))))
+
+;;; The two cases below drive the node-list editors -- add-below, dd, p -- and
+;;; then save, so the assertion is on the serialized notebook rather than on a
+;;; status line.  They are what pins down where a spliced node actually lands.
+;;; A pasted cell keeps the attribute block it was copied from, so its `{id=...}`
+;;; still names the original; the cell's own id is regenerated but never
+;;; serialized.
+  (defn test-tui-add-cell-below-order [] #fx{Unsafe} : bool
+    (let [dir (temp-dir "turnb-add-below")
+          path (path-join dir "demo.tur.md")
+          _ (write-file path "```turmeric {id=one}\n(+ 1 2)\n```\n\n```turmeric {id=two}\n(+ 3 4)\n```")
+          opts (tui-opts-make 0 0 1000 "")]
+      (do
+        (set-test-keys "b\ns\nq\n")
+        (let [run (tui-run path opts)
+              text (slurp path)
+              ok (and (test-ok? run)
+                      (and (= (test-ok-val run) 0)
+                           (cstr-eq? text "```turmeric {id=one}\n(+ 1 2)\n```\n\n```turmeric\n\n```\n\n```turmeric {id=two}\n(+ 3 4)\n```")))]
+          (do
+            (clear-test-keys)
+            (free-cstr text)
+            (box-free run)
+            (tui-opts-free opts)
+            (free-cstr path)
+            (free-cstr dir)
+            ok)))))
+
+  (defn test-tui-delete-and-paste [] #fx{Unsafe} : bool
+    (let [dir (temp-dir "turnb-cut-paste")
+          path (path-join dir "demo.tur.md")
+          _ (write-file path "```turmeric {id=one}\n(+ 1 2)\n```\n\n```turmeric {id=two}\n(+ 3 4)\n```")
+          opts (tui-opts-make 0 0 1000 "")]
+      (do
+        (set-test-keys "d\nd\np\ns\nq\n")
+        (let [run (tui-run path opts)
+              text (slurp path)
+              ok (and (test-ok? run)
+                      (and (= (test-ok-val run) 0)
+                           (cstr-eq? text "```turmeric {id=two}\n(+ 3 4)\n```\n\n```turmeric {id=one}\n(+ 1 2)\n```")))]
+          (do
+            (clear-test-keys)
+            (free-cstr text)
+            (box-free run)
+            (tui-opts-free opts)
+            (free-cstr path)
+            (free-cstr dir)
+            ok)))))
 
   (defn main [] #fx{Unsafe} : int
     (let [f1 (run-case 1 "returns the built-in NB10 keybindings" (test-default-keybindings))
@@ -430,8 +586,11 @@
           f6 (run-case 6 "warns before quitting with unsaved changes" (test-tui-dirty-quit-warning))
           f7 (run-case 7 "searches and toggles focused output" (test-tui-search-and-output-toggle))
           f8 (run-case 8 "opens and dismisses the help overlay" (test-tui-help-overlay))
-          f9 (run-case 9 "merges keybinding overrides onto defaults" (test-tui-keybinding-overrides))]
-      (tap-plan 9 (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 f9)))))))))
-      (if (= (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 f9)))))))) 0) 0 1)))
+          f9 (run-case 9 "merges keybinding overrides onto defaults" (test-tui-keybinding-overrides))
+          f10 (run-case 10 "splices an added cell in below the focused one" (test-tui-add-cell-below-order))
+          f11 (run-case 11 "cuts a cell and pastes it after the focused one" (test-tui-delete-and-paste))
+          fails (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 f11)))))))))) ]
+      (tap-plan 11 fails)
+      (if (= fails 0) 0 1)))
 
 ) ;; end defmodule notebook/tests/tui
