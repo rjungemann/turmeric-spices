@@ -2,11 +2,28 @@
 ;; by delegating to the carrier's Encode. Verifies the encode side of the
 ;; U2 :as :carrier opt-in from the spices-type-features uplift plan.
 ;;
-;; Expected: 42
+;; The `Expected:` output this used to print and never check is now
+;; asserted below; main returns run-all-status rather than a hardcoded 0.
+
 (defmodule derive_encode_opaque_test (export)
 (import json/encode :refer [derive-json-opaque-encode])
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true])
+(import test/runner :refer [run-all-status])
+
+(defn cstr-eq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
 (defopaque UserId :int)
 (derive-json-opaque-encode UserId :as int)
 (defn main [] : int
-  (println (encode (:: 42 UserId)))
-  0))
+  (describe "json derive-json-opaque-encode -- carrier delegation"
+
+    (it "encodes the newtype as its int carrier"
+      (assert-true (cstr-eq? "42"
+                             (encode (:: 42 UserId))))))
+  (run-all-status))
+)

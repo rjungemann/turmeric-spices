@@ -1,24 +1,28 @@
 ;; P2a Decode [bool] -- accept literal true/false; reject non-boolean
 ;; (numbers, strings) with an err.
 ;;
-;; The Result helpers are inlined into each call (rather than threaded
+;; The Result helpers are inlined into each assertion (rather than threaded
 ;; through a typed helper fn) to avoid the open polymorphic-ok carrier/
 ;; by-value ABI bug -- this fixture is intentionally written to exercise
-;; only the Decode [bool] instance, not the surrounding ABI seam.
+;; only the Decode [bool] instance, not the surrounding ABI seam. That is
+;; also why `describe` sits inside the `let`: the doc handles have to stay in
+;; scope without being passed across a function boundary.
 ;;
-;; Expected:
+;; This used to print
 ;;   1
 ;;   0
 ;;   err
 ;;   err
+;; and return a hardcoded 0, so the four values were a comment to be eyeballed
+;; and nothing checked them. They are assertions now.
 
 (defmodule decode_bool_test (export)
 
 (import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
 (import json/encode)
-
-(defn show [b : bool] : void
-  (if b (println "1") (println "0")))
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true])
+(import test/runner :refer [run-all-status])
 
 (defn main [] : int
   (let [doc  (unsafe (json-parse-doc "{\"a\":true,\"b\":false,\"c\":42,\"d\":\"true\"}"))
@@ -27,17 +31,28 @@
         b    (unsafe (json-obj-get doc root "b"))
         c    (unsafe (json-obj-get doc root "c"))
         d    (unsafe (json-obj-get doc root "d"))]
-    (if (err? (:: (decode doc a) (Result bool cstr)))
-      (println "err")
-      (show (ok-val (:: (decode doc a) (Result bool cstr)))))
-    (if (err? (:: (decode doc b) (Result bool cstr)))
-      (println "err")
-      (show (ok-val (:: (decode doc b) (Result bool cstr)))))
-    (if (err? (:: (decode doc c) (Result bool cstr)))
-      (println "err")
-      (show (ok-val (:: (decode doc c) (Result bool cstr)))))
-    (if (err? (:: (decode doc d) (Result bool cstr)))
-      (println "err")
-      (show (ok-val (:: (decode doc d) (Result bool cstr)))))
+    (describe "json Decode [bool]"
+
+      (it "decodes a literal true"
+        (assert-true
+          (let [r (:: (decode doc a) (Result bool cstr))]
+            (and (ok? r) (ok-val r)))))
+
+      (it "decodes a literal false"
+        (assert-true
+          (let [r (:: (decode doc b) (Result bool cstr))]
+            (and (ok? r) (not (ok-val r))))))
+
+      ;; A number is not a bool. JSON has a distinct boolean type, so 42 must
+      ;; not decode as truthy the way it would in a coercing language.
+      (it "rejects a number"
+        (assert-true
+          (err? (:: (decode doc c) (Result bool cstr)))))
+
+      ;; Nor is the *string* "true" a bool.
+      (it "rejects a string, even the string \"true\""
+        (assert-true
+          (err? (:: (decode doc d) (Result bool cstr))))))
+
     (unsafe (json-doc-free doc))
-    0)))
+    (run-all-status))))
