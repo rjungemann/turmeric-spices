@@ -464,16 +464,12 @@
     int64_t attrs;
     int64_t resp_headers;
   };
-  struct __opt_int { bool is_some; int64_t value; };
   struct __tourist_ctx_h *c = (struct __tourist_ctx_h *)(intptr_t)ctx;
   const char *k = (const char *)key;
   for (struct __tourist_attr *p = (struct __tourist_attr *)(intptr_t)c->attrs;
        p; p = p->next) {
     if (strcmp(p->key, k) == 0) {
-      struct __opt_int *o = malloc(sizeof(*o));
-      o->is_some = true;
-      o->value   = p->val;
-      return (int64_t)(intptr_t)o;
+      return tur_some_int(p->val);
     }
   }
   return (int64_t)0;

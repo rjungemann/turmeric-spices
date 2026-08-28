@@ -82,26 +82,22 @@
 
   (defn __cli-result-ok? [result : int] #fx{Unsafe} : bool
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
-    return r && r->is_ok;
+    return tur_is_ok(result);
     ```)
 
   (defn __cli-result-ok-cstr [result : int] #fx{Unsafe} : cstr
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
-    return (r && r->is_ok) ? (const char *)(intptr_t)r->ok_val : "";
+    return tur_is_ok(result) ? (const char *)(intptr_t)tur_ok_value(result) : "";
     ```)
 
   (defn __cli-result-ok-int [result : int] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
-    return (r && r->is_ok) ? r->ok_val : 0;
+    return tur_is_ok(result) ? tur_ok_value(result) : 0;
     ```)
 
   (defn __cli-result-err-cstr [result : int] #fx{Unsafe} : cstr
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
-    return (r && !r->is_ok) ? (const char *)(intptr_t)r->err_val : "";
+    return (result && !tur_is_ok(result)) ? (const char *)(intptr_t)tur_err_value(result) : "";
     ```)
 
   (defn __cli-pos-count [lst : int] #fx{Unsafe} : int

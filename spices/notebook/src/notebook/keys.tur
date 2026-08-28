@@ -19,20 +19,12 @@
 
   (defn __keys-ok [value : int] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = true;
-    r->ok_val = value;
-    r->err_val = 0;
-    return (int64_t)(intptr_t)r;
+    return tur_box_ok(value);
     ```)
 
   (defn __keys-err [value : cstr] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false;
-    r->ok_val = 0;
-    r->err_val = (int64_t)(intptr_t)(value ? strdup((const char *)(intptr_t)value) : strdup("error"));
-    return (int64_t)(intptr_t)r;
+    return tur_err_ptr(value ? strdup((const char *)(intptr_t)value) : strdup("error"));
     ```)
 
   (defn __keys-binding [key : cstr action : cstr] #fx{Unsafe} : int
@@ -91,15 +83,10 @@
     ```c
     typedef struct { int64_t head; int64_t tail; } Cons;
     typedef struct { char *key; char *action; } NotebookKeyBinding;
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = NULL;
     const char *src = path ? (const char *)(intptr_t)path : "";
     FILE *fp = fopen(src, "rb");
     if (!fp) {
-      res = malloc(sizeof(*res));
-      res->is_ok = false;
-      res->ok_val = 0;
-      res->err_val = (int64_t)(intptr_t)strdup("failed to open keybindings file");
-      return (int64_t)(intptr_t)res;
+      return tur_err_ptr(strdup("failed to open keybindings file"));
     }
 
     int64_t out = 0;
@@ -113,21 +100,13 @@
       while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
       if (*p == '\0') {
         fclose(fp);
-        res = malloc(sizeof(*res));
-        res->is_ok = false;
-        res->ok_val = 0;
-        res->err_val = (int64_t)(intptr_t)strdup("invalid keybindings line");
-        return (int64_t)(intptr_t)res;
+        return tur_err_ptr(strdup("invalid keybindings line"));
       }
       *p++ = '\0';
       while (*p == ' ' || *p == '\t') p++;
       if (*p == '\0' || *p == '\r' || *p == '\n') {
         fclose(fp);
-        res = malloc(sizeof(*res));
-        res->is_ok = false;
-        res->ok_val = 0;
-        res->err_val = (int64_t)(intptr_t)strdup("invalid keybindings line");
-        return (int64_t)(intptr_t)res;
+        return tur_err_ptr(strdup("invalid keybindings line"));
       }
 
       char *action = p;
@@ -140,11 +119,7 @@
       *end = '\0';
       if (*action == '\0') {
         fclose(fp);
-        res = malloc(sizeof(*res));
-        res->is_ok = false;
-        res->ok_val = 0;
-        res->err_val = (int64_t)(intptr_t)strdup("invalid keybindings line");
-        return (int64_t)(intptr_t)res;
+        return tur_err_ptr(strdup("invalid keybindings line"));
       }
 
       NotebookKeyBinding *binding = malloc(sizeof(*binding));
@@ -157,11 +132,7 @@
     }
     fclose(fp);
 
-    res = malloc(sizeof(*res));
-    res->is_ok = true;
-    res->ok_val = out;
-    res->err_val = 0;
-    return (int64_t)(intptr_t)res;
+    return tur_box_ok(out);
     ```)
 
   ;;; action-dispatch -- mutate the shared TUI state for a named action.

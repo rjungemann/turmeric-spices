@@ -257,8 +257,8 @@
         found  (if (__cstr-null? header)
                  (:: (err "missing") (Result cstr cstr))
                  (cookie-find header name))]
-    (if (.is-ok found)
-      (__session-init-from-cookie ctx (.ok-val found))
+    (if (ok? found)
+      (__session-init-from-cookie ctx (ok-val found))
       (__session-attach ctx (session-id-new) (sessmap-new) 1))))
 
 (defn __session-init-from-cookie [ctx : Ctx cookie-val : cstr] : int
@@ -270,8 +270,8 @@
         un   (cookie-unsign skey cookie-val)]
     (do
       (__cstr-free cookie-val)
-      (if (.is-ok un)
-        (__session-init-with-id ctx (.ok-val un))
+      (if (ok? un)
+        (__session-init-with-id ctx (ok-val un))
         (__session-attach ctx (session-id-new) (sessmap-new) 1)))))
 
 ;;; __session-init-with-id -- load a verified session ID from the store.

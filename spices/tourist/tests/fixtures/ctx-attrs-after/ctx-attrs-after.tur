@@ -26,15 +26,12 @@
 
   (defn __cr-ok? [r : ptr<void>] : bool
     ```c
-    if (!r) return false;
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return ((struct __cr *)r)->is_ok;
+    return tur_is_ok((int64_t)(intptr_t)r);
     ```)
 
   (defn __cr-val [r : ptr<void>] : int
     ```c
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return (int64_t)((struct __cr *)r)->ok_val;
+    return tur_ok_value((int64_t)(intptr_t)r);
     ```)
 
   (defn sleep-ms [ms : int] #fx{Unsafe} : void
@@ -51,7 +48,7 @@
 
   (defn __none-resp [] : (Option Response)
     ```c
-    return (struct tur__option__Option *)0;
+    return TUR_NONE;
     ```)
 
   ;; Render "id=<int>" body so the assertions can pin a known numeric id.
@@ -70,10 +67,8 @@
   ;; uniformly with the some-payload from ctx-attr-get.
   (defn __opt-unwrap-or [o : (Option int) fallback : int] : int
     ```c
-    struct __opt_int { bool is_some; int64_t value; };
-    if (!o) return (int64_t)fallback;
-    struct __opt_int *p = (struct __opt_int *)o;
-    return p->is_some ? p->value : (int64_t)fallback;
+    int64_t opt = (int64_t)(intptr_t)o;
+    return tur_is_some(opt) ? tur_opt_value(opt) : (int64_t)fallback;
     ```)
 
   ;; -- Pre middleware: stamp request-id=4242 in ctx attrs. ----------------

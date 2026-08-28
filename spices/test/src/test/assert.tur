@@ -83,7 +83,7 @@
     true
     (do (println "  FAIL assert-false: expected false, got true") false)))
 
-;;; assert-some -- assert an option value is some (non-NULL with is_some=true).
+;;; assert-some -- assert an option value is some.
 ;;;
 ;;; Parameters:
 ;;;   o -- option value (opaque :int handle)
@@ -100,13 +100,11 @@
   #include <stdio.h>
   #include <stdint.h>
   if (!o) { printf("  FAIL assert-some: expected some, got none (null)\n"); return 0; }
-  struct { int64_t is_some; int64_t value; } *opt =
-      (void*)(intptr_t)o;
-  if (opt->is_some) return 1;
+  if (tur_is_some(o)) return 1;
   printf("  FAIL assert-some: expected some, got none\n"); return 0;
   ```)
 
-;;; assert-none -- assert an option value is none (NULL or is_some=false).
+;;; assert-none -- assert an option value is none.
 ;;;
 ;;; Parameters:
 ;;;   o -- option value (opaque :int handle)
@@ -122,10 +120,7 @@
   ```c
   #include <stdio.h>
   #include <stdint.h>
-  if (!o) return 1;
-  struct { int64_t is_some; int64_t value; } *opt =
-      (void*)(intptr_t)o;
-  if (!opt->is_some) return 1;
+  if (!tur_is_some(o)) return 1;
   printf("  FAIL assert-none: expected none, got some\n"); return 0;
   ```)
 
@@ -146,9 +141,7 @@
   #include <stdio.h>
   #include <stdint.h>
   if (!r) { printf("  FAIL assert-ok: got null result\n"); return 0; }
-  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
-      (void*)(intptr_t)r;
-  if (res->is_ok) return 1;
+  if (tur_is_ok(r)) return 1;
   printf("  FAIL assert-ok: expected ok, got err\n"); return 0;
   ```)
 
@@ -169,19 +162,18 @@
   #include <stdio.h>
   #include <stdint.h>
   if (!r) { printf("  FAIL assert-err: got null result\n"); return 0; }
-  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
-      (void*)(intptr_t)r;
-  if (!res->is_ok) return 1;
+  if (!tur_is_ok(r)) return 1;
   printf("  FAIL assert-err: expected err, got ok\n"); return 0;
   ```)
 
 ;;; result-ok? -- predicate for the opaque ptr<void> result encoding used by
 ;;; the C-backed spices (plutovg, png, plot, wav, ...).
 ;;;
-;;; These spices return a malloc'd `{ is_ok; ok_val; err_val }` struct as an
-;;; opaque handle, NOT the stdlib Result type, so the auto-loaded stdlib
-;;; ok?/ok-val do not apply.  Use result-ok?/result-val to inspect them; this
-;;; reads the same layout assert-ok/assert-err do.
+;;; These spices return the canonical Result box as an opaque handle rather
+;;; than a typed stdlib Result, so the auto-loaded stdlib ok?/ok-val do not
+;;; apply.  Use result-ok?/result-val to inspect them; this reads the same
+;;; layout assert-ok/assert-err do, via the emitted preamble's tur_is_ok /
+;;; tur_ok_value / tur_err_value inspectors.
 ;;;
 ;;; Parameters:
 ;;;   r -- result value (opaque :int handle)
@@ -193,10 +185,7 @@
 (defn result-ok? [r : int] : bool
   ```c
   #include <stdint.h>
-  if (!r) return 0;
-  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
-      (void*)(intptr_t)r;
-  return res->is_ok ? 1 : 0;
+  return tur_is_ok(r) ? 1 : 0;
   ```)
 
 ;;; result-val -- extract the ok payload from the opaque ptr<void> result
@@ -213,9 +202,7 @@
   ```c
   #include <stdint.h>
   if (!r) return 0;
-  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
-      (void*)(intptr_t)r;
-  return res->ok_val;
+  return tur_ok_value(r);
   ```)
 
 ;;; result-err -- extract the err payload from the opaque ptr<void> result
@@ -232,9 +219,7 @@
   ```c
   #include <stdint.h>
   if (!r) return 0;
-  struct { int64_t is_ok; int64_t ok_val; int64_t err_val; } *res =
-      (void*)(intptr_t)r;
-  return res->err_val;
+  return tur_err_value(r);
   ```)
 
 ) ;; end defmodule test/assert

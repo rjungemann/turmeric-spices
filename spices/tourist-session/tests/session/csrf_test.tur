@@ -95,11 +95,11 @@
   ```)
 
 ;; (some resp) -> true; (none) -> false.
-(defn opt-some? [o : (Option Response)] : bool (.is-some o))
+(defn opt-some? [o : (Option Response)] : bool (some? o))
 
 ;; status code of the Response inside (some resp); 0 for (none).
 (defn opt-status [o : (Option Response)] : int
-  (if (.is-some o) (resp-status (.value o)) 0))
+  (if (some? o) (resp-status (unwrap o)) 0))
 
 ;; seed a session holding a CSRF token; returns a freshly-allocated copy of the
 ;; (id, token) pair via out-params is awkward here, so we mint, capture both,

@@ -106,6 +106,11 @@ is missing its closing `)`. The last line of the file needs an additional `)`.
 > struct returned as an opaque handle — but the call sites used the stdlib
 > `ok?`/`ok-val`/`err-val`, which only accept the stdlib `Result` type.
 >
+> *(Historical: that hand-rolled struct is the pre-SR2b layout. It has since
+> been retired repo-wide in favour of the emitted preamble's
+> `tur_box_ok`/`tur_is_ok`/`tur_ok_value` helpers over the canonical tagged
+> box. Do not copy the struct spelling above into new code.)*
+>
 > Fix applied:
 > - **plot**: `plot/core.tur` defines its own encoding (`__ok`/`__err`); added
 >   local `__ok?`/`__ok-val`/`__err-val` accessors and switched the 11 call

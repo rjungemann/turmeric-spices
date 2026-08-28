@@ -19,15 +19,12 @@
 
   (defn __cr-ok? [r : ptr<void>] : bool
     ```c
-    if (!r) return false;
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return ((struct __cr *)r)->is_ok;
+    return tur_is_ok((int64_t)(intptr_t)r);
     ```)
 
   (defn __cr-val [r : ptr<void>] : int
     ```c
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return (int64_t)((struct __cr *)r)->ok_val;
+    return tur_ok_value((int64_t)(intptr_t)r);
     ```)
 
   (defn cstr-eq? [a : cstr b : cstr] : bool
@@ -41,16 +38,12 @@
   (defn __some-resp [resp : Response] : (Option Response)
     ```c
     #include <stdlib.h>
-    struct __opt { bool is_some; int64_t value; };
-    struct __opt *o = (struct __opt *)malloc(sizeof(*o));
-    o->is_some = true;
-    o->value   = (int64_t)resp;
-    return (struct tur__option__Option *)(intptr_t)o;
+    return tur_some_int((int64_t)resp);
     ```)
 
   (defn __none-resp [] : (Option Response)
     ```c
-    return (struct tur__option__Option *)0;
+    return TUR_NONE;
     ```)
 
   (defn sleep-ms [ms : int] #fx{Unsafe} : void

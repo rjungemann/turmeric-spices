@@ -65,7 +65,7 @@
   (:: (tourist-ctx-new (fake-req cookie) 0) :Ctx))
 
 (defn got-val? [r : (Result cstr cstr) want : cstr] : bool
-  (if (.is-ok r) (seq? (.ok-val r) want) false))
+  (if (ok? r) (seq? (ok-val r) want) false))
 
 (defn main [] : int
  (do
@@ -137,7 +137,7 @@
               (session-flush c1 (:: (text "ok") :Response))
               (tourist-ctx-free c1)
               (let [c2 (mk-ctx (cookie-of id0))   ;; old cookie now unknown
-                    old-gone (if (.is-ok (session-get c2 "user_id")) false true)]
+                    old-gone (if (ok? (session-get c2 "user_id")) false true)]
                 (tourist-ctx-free c2)
                 (assert-true (if (= (memory-store-count s) 1) old-gone false))))))))
 
@@ -153,7 +153,7 @@
           ;; flush emitted it, but here we just verify a forged bare id is
           ;; rejected and a fresh session results.
           (let [c2 (mk-ctx (cookie-of val))      ;; bare id, no MAC
-                rejected (if (.is-ok (session-get c2 "user_id")) false true)]
+                rejected (if (ok? (session-get c2 "user_id")) false true)]
             (tourist-ctx-free c2)
             (assert-true rejected))))))
   (run-all)

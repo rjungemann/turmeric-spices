@@ -181,15 +181,15 @@
 ;;; Since: v0.2.0
 (defn csrf-token [ctx : Ctx] : cstr
   (let [r (session-get ctx __CSRF-KEY)]
-    (if (.is-ok r)
-      (.ok-val r)
+    (if (ok? r)
+      (ok-val r)
       ;; session-id-new returns an owned String; session-set! copies its bytes
       ;; into the map, then we release the String.
       (let [tok (session-id-new)]
         (do
           (session-set! ctx __CSRF-KEY (to-cstr tok))   ;; copies tok into the map
           (release tok)
-          (.ok-val (session-get ctx __CSRF-KEY)))))))
+          (ok-val (session-get ctx __CSRF-KEY)))))))
 
 ;;; csrf-check -- constant-time compare a submitted token to the session's.
 ;;;
@@ -203,7 +203,7 @@
 ;;; Since: v0.2.0
 (defn csrf-check [ctx : Ctx submitted : cstr] : bool
   (let [r (session-get ctx __CSRF-KEY)]
-    (if (.is-ok r) (ct-eq? submitted (.ok-val r)) false)))
+    (if (ok? r) (ct-eq? submitted (ok-val r)) false)))
 
 ;;; __csrf-pass? -- does this request carry a valid token (header or form)?
 (defn __csrf-pass? [ctx : Ctx] : bool

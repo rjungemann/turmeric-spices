@@ -67,7 +67,6 @@
   #endif
 
   struct __cons { int64_t value; int64_t next; };
-  struct __cr   { bool is_ok; int64_t ok_val; int64_t err_val; };
   struct __resp {
     int    status;
     char  *body;
@@ -80,10 +79,7 @@
   const char *raw = (const char *)url;
   int use_tls = (strncmp(raw, "https://", 8) == 0);
   if (!use_tls && strncmp(raw, "http://", 7) != 0) {
-    struct __cr *res = malloc(sizeof(*res));
-    res->is_ok = false; res->ok_val = 0;
-    res->err_val = (int64_t)(intptr_t)"unsupported scheme";
-    return res;
+    return (void *)(intptr_t)tur_err_ptr((void *)"unsupported scheme");
   }
   const char *hoststart = raw + (use_tls ? 8 : 7);
   char host[512]; char port_str[8]; char path[4096];
@@ -161,10 +157,9 @@
                                    MBEDTLS_NET_PROTO_TCP)) != 0) {
       free(resp_buf);
       char *emsg = malloc(128); mbedtls_strerror(ret, emsg, 128);
-      struct __cr *res = malloc(sizeof(*res));
-      res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+      int64_t res = tur_err_ptr(emsg);
       mbedtls_net_free(&server_fd);
-      return res;
+      return (void *)(intptr_t)res;
     }
     mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT,
                                  MBEDTLS_SSL_TRANSPORT_STREAM,
@@ -178,11 +173,10 @@
       if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
         free(resp_buf);
         char *emsg = malloc(128); mbedtls_strerror(ret, emsg, 128);
-        struct __cr *res = malloc(sizeof(*res));
-        res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)emsg;
+        int64_t res = tur_err_ptr(emsg);
         mbedtls_ssl_free(&ssl); mbedtls_ssl_config_free(&conf);
         mbedtls_net_free(&server_fd);
-        return res;
+        return (void *)(intptr_t)res;
       }
     }
     size_t wr = 0;
@@ -205,11 +199,8 @@
     mbedtls_net_free(&server_fd);
   #else
     free(resp_buf);
-    struct __cr *res = malloc(sizeof(*res));
-    res->is_ok = false; res->ok_val = 0;
-    res->err_val = (int64_t)(intptr_t)
-      "https:// not supported: rebuild tur-http with mbedTLS available";
-    return res;
+    return (void *)(intptr_t)tur_err_ptr(
+      (void *)"https:// not supported: rebuild tur-http with mbedTLS available");
   #endif
   } else {
     /* Plain HTTP via raw POSIX sockets -- no native deps. */
@@ -219,20 +210,14 @@
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host, port_str, &hints, &ai) != 0 || !ai) {
       free(resp_buf);
-      struct __cr *res = malloc(sizeof(*res));
-      res->is_ok = false; res->ok_val = 0;
-      res->err_val = (int64_t)(intptr_t)"getaddrinfo failed";
-      return res;
+      return (void *)(intptr_t)tur_err_ptr((void *)"getaddrinfo failed");
     }
     int sfd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
     if (sfd < 0 || connect(sfd, ai->ai_addr, (socklen_t)ai->ai_addrlen) != 0) {
       if (sfd >= 0) close(sfd);
       freeaddrinfo(ai);
       free(resp_buf);
-      struct __cr *res = malloc(sizeof(*res));
-      res->is_ok = false; res->ok_val = 0;
-      res->err_val = (int64_t)(intptr_t)"connect failed";
-      return res;
+      return (void *)(intptr_t)tur_err_ptr((void *)"connect failed");
     }
     freeaddrinfo(ai);
     size_t wr = 0;
@@ -292,9 +277,7 @@
   resp->hdr_count = rcount;
   free(resp_buf);
 
-  struct __cr *res = malloc(sizeof(*res));
-  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)resp; res->err_val = 0;
-  return res;
+  return (void *)(intptr_t)tur_ok_ptr(resp);
   ```)
 
 ;;; http-get -- perform an HTTP GET request.

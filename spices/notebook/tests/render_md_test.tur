@@ -42,14 +42,12 @@
 
   (defn test-ok? [r : int] #fx{Unsafe} : bool
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
-    return res && res->is_ok;
+    return tur_is_ok(r);
     ```)
 
   (defn test-ok-val [r : int] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void*)(intptr_t)r;
-    return res ? res->ok_val : 0;
+    return r ? tur_ok_value(r) : 0;
     ```)
 
   (defn int-as-cstr [value : int] #fx{Unsafe} : cstr

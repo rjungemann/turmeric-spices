@@ -46,38 +46,27 @@
 
   (defn __tui-ok [value : int] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = true;
-    r->ok_val = value;
-    r->err_val = 0;
-    return (int64_t)(intptr_t)r;
+    return tur_box_ok(value);
     ```)
 
   (defn __tui-err [value : cstr] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false;
-    r->ok_val = 0;
-    r->err_val = (int64_t)(intptr_t)(value ? strdup((const char *)(intptr_t)value) : strdup("error"));
-    return (int64_t)(intptr_t)r;
+    return tur_err_ptr(value ? strdup((const char *)(intptr_t)value) : strdup("error"));
     ```)
 
   (defn __tui-result-ok? [result : int] #fx{Unsafe} : bool
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void *)(intptr_t)result;
-    return r && r->is_ok;
+    return tur_is_ok(result);
     ```)
 
   (defn __tui-result-ok-val [result : int] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void *)(intptr_t)result;
-    return r ? r->ok_val : 0;
+    return result ? tur_ok_value(result) : 0;
     ```)
 
   (defn __tui-result-err-val [result : int] #fx{Unsafe} : cstr
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void *)(intptr_t)result;
-    return (r && !r->is_ok) ? (const char *)(intptr_t)r->err_val : "";
+    return (result && !tur_is_ok(result)) ? (const char *)(intptr_t)tur_err_value(result) : "";
     ```)
 
   (defn __tui-cstr-empty? [s : cstr] #fx{Unsafe} : bool

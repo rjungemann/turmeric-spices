@@ -161,14 +161,9 @@
   ;;; __surface-create -- allocate a new plutovg surface.
   (defn __surface-create [width : int height : int] : ptr<void>
     ```c
-    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     extern void* plutovg_surface_create(int width, int height);
     void *s = plutovg_surface_create((int)width, (int)height);
-    PlotResult *r = (PlotResult *)malloc(sizeof(*r));
-    r->is_ok = s != NULL;
-    r->ok_val = s ? (int64_t)(intptr_t)s : 0;
-    r->err_val = s ? 0 : 1;
-    return r;
+    return (void *)(intptr_t)(s ? tur_ok_ptr(s) : tur_err_int(1));
     ```)
 
   ;;; __surface-destroy -- destroy a plutovg surface.
@@ -181,28 +176,18 @@
   ;;; __surface-write-png -- write a plutovg surface to a PNG file.
   (defn __surface-write-png [surface : int path : cstr] : ptr<void>
     ```c
-    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     extern bool plutovg_surface_write_to_png(const void* surface, const char* filename);
     bool ok = plutovg_surface_write_to_png((void *)(intptr_t)surface,
                                            (const char *)(intptr_t)path);
-    PlotResult *r = (PlotResult *)malloc(sizeof(*r));
-    r->is_ok = ok;
-    r->ok_val = 0;
-    r->err_val = ok ? 0 : 1;
-    return r;
+    return (void *)(intptr_t)(ok ? tur_ok_int(0) : tur_err_int(1));
     ```)
 
   ;;; __canvas-create -- allocate a canvas for an existing surface.
   (defn __canvas-create [surface : int] : ptr<void>
     ```c
-    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     extern void* plutovg_canvas_create(void* surface);
     void *c = plutovg_canvas_create((void *)(intptr_t)surface);
-    PlotResult *r = (PlotResult *)malloc(sizeof(*r));
-    r->is_ok = c != NULL;
-    r->ok_val = c ? (int64_t)(intptr_t)c : 0;
-    r->err_val = c ? 0 : 1;
-    return r;
+    return (void *)(intptr_t)(c ? tur_ok_ptr(c) : tur_err_int(1));
     ```)
 
   ;;; __canvas-destroy -- destroy a plutovg canvas.
@@ -1008,16 +993,11 @@
                                           int encoding, float x, float y);
 
     typedef struct { int64_t head; int64_t tail; } Cons;
-    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     #define RETURN_ERR(CODE) do { \
-      PlotResult *__r = (PlotResult *)malloc(sizeof(*__r)); \
-      __r->is_ok = false; __r->ok_val = 0; __r->err_val = (CODE); \
-      return __r; \
+      return (void *)(intptr_t)tur_err_int((CODE)); \
     } while (0)
     #define RETURN_OK(VALUE) do { \
-      PlotResult *__r = (PlotResult *)malloc(sizeof(*__r)); \
-      __r->is_ok = true; __r->ok_val = (VALUE); __r->err_val = 0; \
-      return __r; \
+      return (void *)(intptr_t)tur_ok_int((VALUE)); \
     } while (0)
     typedef struct __plot_renderer {
       int64_t kind;
@@ -1587,16 +1567,11 @@
                                           int encoding, float x, float y);
 
     typedef struct { int64_t head; int64_t tail; } Cons;
-    typedef struct { bool is_ok; int64_t ok_val; int64_t err_val; } PlotResult;
     #define RETURN_ERR(CODE) do { \
-      PlotResult *__r = (PlotResult *)malloc(sizeof(*__r)); \
-      __r->is_ok = false; __r->ok_val = 0; __r->err_val = (CODE); \
-      return __r; \
+      return (void *)(intptr_t)tur_err_int((CODE)); \
     } while (0)
     #define RETURN_OK(VALUE) do { \
-      PlotResult *__r = (PlotResult *)malloc(sizeof(*__r)); \
-      __r->is_ok = true; __r->ok_val = (VALUE); __r->err_val = 0; \
-      return __r; \
+      return (void *)(intptr_t)tur_ok_int((VALUE)); \
     } while (0)
     typedef struct __plot_renderer {
       int64_t kind;

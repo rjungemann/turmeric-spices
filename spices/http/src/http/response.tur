@@ -128,8 +128,6 @@
   /* yyjson.h (when available) is included at file scope above -- see the
      file-scope-c-block at the top of this module. It must not be included
      here: it declares `static inline` functions, illegal inside a function. */
-  struct __pr { bool is_ok; int64_t ok_val; int64_t err_val; };
-  struct __pr *res = malloc(sizeof(*res));
   #ifdef __TUR_HTTP_HAVE_YYJSON
   struct __resp {
     int    status;
@@ -149,19 +147,15 @@
     size_t mlen = strlen(msg);
     char *mbuf = malloc(mlen + 1);
     memcpy(mbuf, msg, mlen + 1);
-    res->is_ok = false; res->ok_val = 0; res->err_val = (int64_t)(intptr_t)mbuf;
-    return res;
+    return (void *)(intptr_t)tur_err_ptr(mbuf);
   }
   yyjson_doc **np = malloc(sizeof(yyjson_doc *));
   *np = doc;
-  res->is_ok = true; res->ok_val = (int64_t)(intptr_t)np; res->err_val = 0;
-  return res;
+  return (void *)(intptr_t)tur_ok_ptr(np);
   #else
   (void)resp;
-  res->is_ok = false; res->ok_val = 0;
-  res->err_val = (int64_t)(intptr_t)
-    "response-json not supported: rebuild tur-http with yyjson available";
-  return res;
+  return (void *)(intptr_t)tur_err_ptr(
+    (void *)"response-json not supported: rebuild tur-http with yyjson available");
   #endif
   ```)
 
