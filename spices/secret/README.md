@@ -27,7 +27,7 @@ libsodium cannot express.
 | S4 | `secret-do` best-effort stack scrub | optional |
 
 Full walkthrough, including the implementation rationale and the testing
-methodology: [`docs/guides/secret-guide.md`](../../docs/guides/secret-guide.md).
+methodology: [`docs/guides/secret-guide.md`](https://github.com/rjungemann/turmeric-spices/blob/main/docs/guides/secret-guide.md).
 
 Design plan: [`docs/upcoming/secret-spice-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/upcoming/secret-spice-plan.md)
 in the compiler repo.

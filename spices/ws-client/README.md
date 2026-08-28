@@ -152,5 +152,5 @@ sends are single frames (the client does not fragment outbound messages).
 
 ## See also
 
-- [WebSocket client guide](../../docs/guides/websocket-client-guide.md)
+- [WebSocket client guide](https://github.com/rjungemann/turmeric-spices/blob/main/docs/guides/websocket-client-guide.md)
 - Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/ws-client>

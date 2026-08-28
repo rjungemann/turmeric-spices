@@ -51,7 +51,7 @@ The three are deliberately separate so any layer can be used independently.
 ## Status
 
 Early in development. See
-[`docs/tur-tourist-plan.md`](../../../turmeric/docs/tur-tourist-plan.md) in the
+[`docs/archive/history/tur-tourist-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/history/tur-tourist-plan.md) in the
 turmeric repo for the full roadmap.
 
 ## See also
