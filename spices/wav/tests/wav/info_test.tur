@@ -10,16 +10,18 @@
   (import test/runner :refer [run-all-status])
   (import wav/info :refer [wav-open-write wav-close wav-sample-rate wav-channels])
 
-  (describe "wav/info"
-    (it "creates a wav file with correct sample rate"
-      (let [r (wav-open-write "/tmp/test_turmeric.wav" 44100 2 ":wav-pcm16")]
-        (if (ok? r)
-          (let [w (ok-val r)]
-            (let [sr (wav-sample-rate w)]
-              (wav-close w)
-              (assert-eq sr 44100)))
-          (assert-true false)))))
+  (defn __all-tests [] : void
+   (describe "wav/info"
+     (it "creates a wav file with correct sample rate"
+       (let [r (wav-open-write "/tmp/test_turmeric.wav" 44100 2 ":wav-pcm16")]
+         (if (ok? r)
+           (let [w (ok-val r)]
+             (let [sr (wav-sample-rate w)]
+               (wav-close w)
+               (assert-eq sr 44100)))
+           (assert-true false))))))
 
 
   (defn main [] : int
+    (__all-tests)
     (run-all-status)))

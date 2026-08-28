@@ -42,28 +42,30 @@
   if (b) free(b);
   ```)
 
-(describe "tur/zlib roundtrip"
-  (it "gzip-encode then gzip-decode recovers the original bytes"
-    (let [reps    100
-          unit    12                       ;; strlen("hello world\n")
-          src-len (* reps unit)
-          src     (build-input reps)
-          enc     (gzip-encode src src-len)
-          enc-len (gzip-buf-len enc)
-          dec     (gzip-decode (gzip-buf-data enc) enc-len)
-          dec-len (gzip-buf-len dec)
-          ok-len  (assert-eq src-len dec-len)
-          ok-eq   (assert-true (bufs-equal? src (gzip-buf-data dec) dec-len))
-          ;; `<` already yields a bool; the `(if ... 1 0)` wrapper made it
-          ;; an int, which assert-true rejects ("expected bool, got int").
-          ok-comp (assert-true (< enc-len src-len))]
-      (gzip-buf-free enc)
-      (gzip-buf-free dec)
-      (free-bytes src)
-      ;; `it` wants a bool; the block used to end on (println ...), which is
-      ;; nil -- so the three assertions above were computed and thrown away
-      ;; and the case could not fail. Report their conjunction instead.
-      (and ok-len (and ok-eq ok-comp)))))
+(defn __all-tests [] : void
+ (describe "tur/zlib roundtrip"
+   (it "gzip-encode then gzip-decode recovers the original bytes"
+     (let [reps    100
+           unit    12                       ;; strlen("hello world\n")
+           src-len (* reps unit)
+           src     (build-input reps)
+           enc     (gzip-encode src src-len)
+           enc-len (gzip-buf-len enc)
+           dec     (gzip-decode (gzip-buf-data enc) enc-len)
+           dec-len (gzip-buf-len dec)
+           ok-len  (assert-eq src-len dec-len)
+           ok-eq   (assert-true (bufs-equal? src (gzip-buf-data dec) dec-len))
+           ;; `<` already yields a bool; the `(if ... 1 0)` wrapper made it
+           ;; an int, which assert-true rejects ("expected bool, got int").
+           ok-comp (assert-true (< enc-len src-len))]
+       (gzip-buf-free enc)
+       (gzip-buf-free dec)
+       (free-bytes src)
+       ;; `it` wants a bool; the block used to end on (println ...), which is
+       ;; nil -- so the three assertions above were computed and thrown away
+       ;; and the case could not fail. Report their conjunction instead.
+       (and ok-len (and ok-eq ok-comp))))))
 
 (defn main [] : int
-  (run-all-status)))
+  (__all-tests)
+    (run-all-status)))
