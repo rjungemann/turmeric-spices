@@ -6,6 +6,7 @@
           cell-make cell-id cell-lang cell-source cell-attrs
           cell-start-line cell-end-line
           cells-assign-ids
+          cell-set-source!
           attrs-free cell-free cells-free)
 
   ;; Minimal cons helpers so the module stays self-contained.
@@ -261,6 +262,23 @@
     } Cell;
     Cell *c = (Cell *)(intptr_t)cell;
     return c && c->source ? c->source : "";
+    ```)
+
+;;; cell-set-source! -- replace a Cell's source text in place.
+  (defn cell-set-source! [cell : int source : cstr] #fx{Unsafe} : void
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    if (!c) return;
+    free(c->source);
+    c->source = source ? strdup((const char *)(intptr_t)source) : strdup("");
     ```)
 
   (defn cell-attrs [cell : int] #fx{Unsafe} : int
