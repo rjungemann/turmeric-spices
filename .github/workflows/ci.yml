@@ -63,7 +63,8 @@ jobs:
             libedit-dev cmake \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgl1-mesa-dev libasound2-dev libxkbcommon-dev \
-            liblo-dev libhiredis-dev libpq-dev
+            liblo-dev libhiredis-dev libpq-dev \
+            xvfb python3-jinja2
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -207,13 +208,22 @@ jobs:
             exit 0
           fi
           TUR="$GITHUB_WORKSPACE/turmeric/build/tur"
+          # Run under a virtual X server when one is available.  opengl's
+          # suites check for $DISPLAY and print "# SKIP: no display available"
+          # without asserting anything when it is missing -- so on a headless
+          # runner all 12 of its assertions were being skipped while the job
+          # reported "3 tests, 3 passed".  Under Xvfb they actually run.
+          # Spices that do not touch a display are unaffected.
+          if command -v xvfb-run >/dev/null 2>&1; then
+            TUR="xvfb-run -a $TUR"
+          fi
           if ls tests/*.tur >/dev/null 2>&1; then
-            "$TUR" test tests
+            $TUR test tests
           else
             n_fail=0
             while IFS= read -r d; do
               echo "== tur test $d =="
-              if ! "$TUR" test "$d"; then
+              if ! $TUR test "$d"; then
                 n_fail=$((n_fail + 1))
               fi
             done < <(find tests -name '*.tur' -print0 \
