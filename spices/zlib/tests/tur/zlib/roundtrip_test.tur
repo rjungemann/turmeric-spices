@@ -25,7 +25,10 @@
   ```)
 
 ;;; bufs-equal? -- compare two ptr<void> buffers of length `n` for equality.
-(defn bufs-equal? [a : ptr<void> b : ptr<void> n : int] : int
+;; Returns bool, not int: assert-true takes a bool, and a `?`-suffixed
+;; predicate returning the int64 carrier is what tripped
+;; "function 'assert-true' arg 1: expected bool, got int".
+(defn bufs-equal? [a : ptr<void> b : ptr<void> n : int] : bool
   ```c
   #include <string.h>
   if (n <= 0) return 1;
@@ -51,11 +54,16 @@
           dec-len (gzip-buf-len dec)
           ok-len  (assert-eq src-len dec-len)
           ok-eq   (assert-true (bufs-equal? src (gzip-buf-data dec) dec-len))
-          ok-comp (assert-true (if (< enc-len src-len) 1 0))]
+          ;; `<` already yields a bool; the `(if ... 1 0)` wrapper made it
+          ;; an int, which assert-true rejects ("expected bool, got int").
+          ok-comp (assert-true (< enc-len src-len))]
       (gzip-buf-free enc)
       (gzip-buf-free dec)
       (free-bytes src)
-      (println "roundtrip=ok"))))
+      ;; `it` wants a bool; the block used to end on (println ...), which is
+      ;; nil -- so the three assertions above were computed and thrown away
+      ;; and the case could not fail. Report their conjunction instead.
+      (and ok-len (and ok-eq ok-comp)))))
 
 (defn main [] : int
   (run-all)
