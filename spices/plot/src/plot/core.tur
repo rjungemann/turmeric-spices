@@ -2,6 +2,12 @@
 
 (defmodule plot/core
   (export plot plot-write-png plot-into-canvas render
+          ;; `render` is generic over `^Backend B`, so a caller cannot build
+          ;; an argument for it without the backend structs -- exporting the
+          ;; entry point but not its sinks left it unusable, and is what made
+          ;; tests/plot/backend_test.tur fail on "symbol 'SurfaceBackend' is
+          ;; private to module 'plot/core'".
+          CanvasBackend SurfaceBackend PngBackend
           __make-renderer __renderer-floats __renderer-ints __renderer-bounds
           __surface-create __surface-destroy __surface-write-png
           __canvas-create __canvas-destroy
