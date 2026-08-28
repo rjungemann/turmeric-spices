@@ -135,7 +135,7 @@ TLS is opt-in: only programs that import `httpd/tls` link mbedTLS. The plaintext
 ## Status
 
 Early in development. See
-[`docs/tur-httpd-plan.md`](../../../turmeric/docs/tur-httpd-plan.md) in the
+[`docs/archive/history/tur-httpd-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/history/tur-httpd-plan.md) in the
 turmeric repo for the full roadmap.
 
 ## See also

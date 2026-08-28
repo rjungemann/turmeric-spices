@@ -2,7 +2,7 @@
 
 Entity-Component-System for Turmeric. Pairs with `tur-raylib` for
 real-time games. Long-form plan and rationale:
-[../../../turmeric/docs/upcoming/ecs-spice-plan.md](../../../turmeric/docs/upcoming/ecs-spice-plan.md).
+[`docs/archive/ecs-spice-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/ecs-spice-plan.md).
 
 ## Status
 
@@ -92,7 +92,7 @@ construction and threads it through every storage as a type-level
 index, so iteration is *statically rectangular* -- the
 `sized-for-each` loop bound comes from the world's type, not a runtime
 min-capacity probe. Design plan:
-[../../../turmeric/docs/upcoming/ecs-sized-world-plan.md](../../../turmeric/docs/upcoming/ecs-sized-world-plan.md).
+[`docs/archive/ecs-sized-world-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/ecs-sized-world-plan.md).
 
 - `ecs/sized-storage` / `ecs/sized-sparse` / `ecs/sized-tag` -- the
   sized counterparts of the three backends, each a phantom-indexed
@@ -167,7 +167,7 @@ Each exits 0 on success.
 ## Known limitations
 
 Each of the original prerequisite gaps (A-I, archived at
-[`docs/archive/history/ecs-prereq-plan.md`](../../../turmeric/docs/archive/history/ecs-prereq-plan.md))
+[`docs/archive/history/ecs-prereq-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/history/ecs-prereq-plan.md))
 has shipped; the residual list below is empirical limits of the
 v1 surface, not language gaps.
 
@@ -242,7 +242,7 @@ body scope, or a freshly minted cap from `make-write-cap` /
 `make-read-cap` (gated by the call site's declared `:writes`). A body
 that writes a component it did not declare now fails to elaborate.
 See the original report at
-[docs/archive/history/ecs-defsystem-write-caps-not-enforced.md](../../../turmeric/docs/archive/history/ecs-defsystem-write-caps-not-enforced.md).
+[`docs/archive/history/ecs-defsystem-write-caps-not-enforced.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/history/ecs-defsystem-write-caps-not-enforced.md).
 
 ## License
 

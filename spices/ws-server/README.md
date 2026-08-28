@@ -218,7 +218,7 @@ that drops straight into a tourist app's route list -- no need to wire up
 
 ## See also
 
-- [WebSocket server guide](../../docs/guides/websocket-server-guide.md)
+- [WebSocket server guide](https://github.com/rjungemann/turmeric-spices/blob/main/docs/guides/websocket-server-guide.md)
 - [tur-httpd](../httpd) -- the HTTP/1.1 server this upgrades from
 - [tur-ws-client](../ws-client) -- the client counterpart
 - Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/ws-server>
