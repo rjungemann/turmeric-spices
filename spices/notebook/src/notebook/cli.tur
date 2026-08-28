@@ -5,13 +5,13 @@
   (import notebook/render-md :refer [render-opts-make render-opts-set-math-mode render-opts-set-assets-mode render-md])
   (import notebook/render-html :refer [render-html])
   (import notebook/tui :refer [tui-opts-make tui-run])
-  (import notebook/format :refer [parse-file node-tag node-cell])
+  (import notebook/format :refer [parse-file node-tag node-cell nodes-free])
   (import notebook/session :refer [session-open session-close
                                    cell-output-cell-id cell-output-status
                                    cell-output-stdout cell-output-value-repr
                                    cell-output-error-msg cell-output-elapsed-ms
                                    output-status-ok output-status-error output-status-skipped])
-  (import notebook/eval :refer [eval-all eval-from])
+  (import notebook/eval :refer [eval-all eval-from outputs-free])
   (import notebook/cell :refer [cell-id cells-assign-ids])
   (import watch/watch :refer [watch-open-one watch-close watch-next])
   (import watch/event :refer [watch-event-free])
@@ -410,6 +410,61 @@
     free(st->out);
     st->out = strdup(value ? (const char *)(intptr_t)value : "");
     return state;
+    ```)
+
+;;; __cli-parse-state-free -- release the parse state and its eight strings.
+;;; The state is mutated in place by the setters, so exactly one exists per
+;;; run; nothing used to free it.  Safe on 0.
+  (defn __cli-parse-state-free [state : int] #fx{Unsafe} : void
+    ```c
+    typedef struct {
+      char *command;
+      char *target;
+      char *path;
+      char *out;
+      char *error_msg;
+      int64_t use_cache;
+      int64_t watch;
+      int64_t no_output;
+      int64_t no_source;
+      int64_t help;
+      char *keybindings_file;
+      int64_t no_color;
+      char *cell_id;
+      int64_t exec_all;
+      int64_t math_mode;
+      int64_t assets_mode;
+    } CliParseState;
+    CliParseState *st = (CliParseState *)(intptr_t)state;
+    if (!st) return;
+    free(st->command);
+    free(st->target);
+    free(st->path);
+    free(st->out);
+    free(st->error_msg);
+    free(st->keybindings_file);
+    free(st->cell_id);
+    free(st);
+    ```)
+
+;;; __cli-spine-free -- free a cons spine, leaving the heads alone.
+  (defn __cli-spine-free [lst : int] #fx{Unsafe} : void
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *node = (Cons *)(intptr_t)lst;
+    while (node) {
+      Cons *next = (Cons *)(intptr_t)node->tail;
+      free(node);
+      node = next;
+    }
+    ```)
+
+;;; __cli-box-free -- release a Result box after taking its payload out.
+;;; Returns 0 so it can sit in a `let` binding.
+  (defn __cli-box-free [r : int] #fx{Unsafe} : int
+    ```c
+    if (r) free((void *)(intptr_t)r);
+    return 0;
     ```)
 
   (defn __cli-state-set-error [state : int value : cstr] #fx{Unsafe} : int
@@ -984,14 +1039,15 @@
       }
       cur = cons->tail;
     }
+    /* Reverse in place.  This used to cons a fresh cell per element and drop
+       the one it read, leaking the first spine entirely. */
     int64_t rev = 0;
     while (cell_list != 0) {
       __NbCons *c = (__NbCons*)cell_list;
-      __NbCons *n = (__NbCons*)malloc(sizeof(__NbCons));
-      n->head = c->head;
-      n->tail = rev;
-      rev = (int64_t)n;
-      cell_list = c->tail;
+      int64_t next = c->tail;
+      c->tail = rev;
+      rev = (int64_t)c;
+      cell_list = next;
     }
     return (int64_t)rev;
     ```)
@@ -1061,18 +1117,25 @@
                 (__cli-eputs (__cli-result-err-cstr parse-result))
                 1)
               (let [nodes (__cli-result-ok-int parse-result)
+                    _box (__cli-box-free parse-result)
                     cells (__cli-cells-from-nodes nodes)
                     session (session-open)]
                 (if (= session 0)
                   (do
                     (__cli-eputs "failed to open eval session")
+                    (__cli-spine-free cells)
+                    (nodes-free nodes)
                     1)
                   (let [outputs (if (= exec-all 0)
                                   (eval-from session cells cell-id 0 0)
-                                    (eval-all session cells 0 0))]
+                                    (eval-all session cells 0 0))
+                        code (__cli-print-outputs outputs)]
                     (do
                       (session-close session)
-                      (__cli-print-outputs outputs)))))))))))
+                      (outputs-free outputs)
+                      (__cli-spine-free cells)
+                      (nodes-free nodes)
+                      code))))))))))
 
   (defn __cli-handle-new [state : int] #fx{Unsafe} : int
     (let [path (__cli-state-path state)]
@@ -1100,7 +1163,14 @@
                        (__cli-cstr-eq? (__cli-head argv) "nb"))
                  (__cli-tail argv)
                  argv)
-          state (__cli-parse-args args (__cli-parse-state-make) "")]
+          state (__cli-parse-args args (__cli-parse-state-make) "")
+          code  (__cli-dispatch state)]
+      (do
+        (__cli-parse-state-free state)
+        code)))
+
+  (defn __cli-dispatch [state : int] #fx{Unsafe} : int
+    (let []
       (if (not (__cli-cstr-empty? (__cli-state-error state)))
         (do
           (__cli-eputs (__cli-state-error state))
