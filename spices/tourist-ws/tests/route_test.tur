@@ -1,0 +1,93 @@
+;; tests/route_test.tur -- wiring tests for tourist-ws/route.
+;;
+;; ws-route! is a thin adapter: it hands `path` to tourist's get! together with
+;; a handler that performs the WebSocket upgrade. The upgrade itself needs a
+;; live Conn and belongs to fixtures/rest-plus-ws/, which stays manual -- but
+;; building the route is pure (get! is `route-new` over `router-compile`, no
+;; socket, and the handler closure is not invoked), so what CAN be asserted
+;; here is that the adapter threads its arguments through correctly:
+;;
+;;   * it produces a route at all,
+;;   * on the GET method specifically, and
+;;   * carrying a pattern compiled from the path it was given -- captures and
+;;     all, so ws-route! "/feed/:room" really is routable per-room.
+;;
+;; That is the whole of ws-route!'s own logic. Regressions in it (a dropped
+;; path, a wrong method) are exactly what this catches.
+
+(defmodule tourist-ws/tests/route
+  (import tourist-ws/route :refer [ws-route!])
+  (import tourist/dsl      :refer [route-method route-pattern])
+  (import tourist/router   :refer [router-match captures-get captures-free])
+  (import tourist/types    :refer [Captures Pattern])
+  (import ws-core/conn     :refer [WsConn])
+  (import test/suite       :refer [describe it])
+  (import test/assert      :refer [assert-true])
+  ;; run-all-status, not run-all: run-all returns void and the conventional
+  ;; `(... (run-all) 0)` main hardcodes a 0 exit, so a failing `it` prints
+  ;; `not ok` and `tur test` still calls the file a pass.
+  (import test/runner      :refer [run-all-status])
+
+  (defn cstr-eq? [a : cstr b : cstr] : bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;;; noop-handler -- stands in for a session body. ws-route! only stores it;
+  ;;; nothing here upgrades a connection, so it is never called.
+  (defn noop-handler [ws : WsConn] : void
+    (let [_ ws] 0))
+
+  ;;; route-for -- the route Item ws-route! builds for `path`.
+  (defn route-for [path : cstr] : int
+    (ws-route! path noop-handler))
+
+  ;;; pattern-of -- the compiled Pattern the route carries.
+  (defn pattern-of [path : cstr] : Pattern
+    (:: (route-pattern (route-for path)) :Pattern))
+
+  ;;; routes? -- does the route built for `path` match `req-path`?
+  (defn routes? [path : cstr req-path : cstr] : bool
+    (let [caps (router-match (pattern-of path) req-path)
+          hit  (not (= (:: caps :int) 0))]
+      (do (when hit (captures-free caps)) hit)))
+
+  ;;; captures-as? -- does routing `req-path` bind `want` under `key`?
+  ;;;
+  ;;; Compared before captures-free, deliberately: captures-get returns a
+  ;;; pointer into the caps struct that captures-free then frees.
+  (defn captures-as? [path : cstr req-path : cstr key : cstr want : cstr] : bool
+    (let [caps (router-match (pattern-of path) req-path)]
+      (if (= (:: caps :int) 0)
+        false
+        (let [r   (captures-get caps key)
+              hit (if (ok? r) (cstr-eq? want (ok-val r)) false)]
+          (do (captures-free caps) hit)))))
+
+  (defn main [] : int
+    (describe "tourist-ws/route -- ws-route! wiring"
+
+      (it "builds a route"
+        (assert-true (not (= 0 (route-for "/ws")))))
+
+      ;; A WebSocket handshake is a GET, so the route ws-route! declares must
+      ;; be a GET route -- nothing else would ever be reached by an upgrade.
+      (it "declares the route on GET"
+        (assert-true (cstr-eq? "GET" (route-method (route-for "/ws")))))
+
+      (it "compiles the path it was given"
+        (assert-true (routes? "/ws" "/ws")))
+
+      (it "does not route a different path"
+        (assert-true (not (routes? "/ws" "/other"))))
+
+      ;; The path is a full tourist pattern, not a literal: a per-room socket
+      ;; endpoint is the motivating case in ws-route!'s own docstring.
+      (it "keeps captures in the path"
+        (assert-true (captures-as? "/feed/:room" "/feed/lobby" "room" "lobby")))
+
+      (it "does not route a capture pattern against a missing segment"
+        (assert-true (not (routes? "/feed/:room" "/feed")))))
+
+    (run-all-status)))

@@ -57,3 +57,17 @@ turmeric repo for the full roadmap.
 ## See also
 
 - Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/tourist>
+
+## Tests
+
+`tests/router_test.tur` covers `tourist/router` -- pattern compilation and
+matching -- which is the part of this spice that runs without a socket:
+literal segments, named captures (single, multiple, and the empty-segment and
+extra-segment misses), the greedy `*` wildcard, and trailing-slash tolerance.
+Run it with `tur test tests`.
+
+`errors/run.sh` asserts the compile-fail fixtures: that Captures, Ctx, Pattern
+and Item are not interchangeable even though all four are `:int` underneath.
+
+Everything under `fixtures/` is a whole app needing a live listener, so those
+stay manual -- see the per-fixture files.
