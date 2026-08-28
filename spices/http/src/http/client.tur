@@ -50,30 +50,37 @@
   #include <sys/socket.h>
   #include <netdb.h>
 
-  /* TLS is optional. Detect mbedTLS at compile time; when absent, https://
-     URLs return a runtime err rather than failing the build.
+  /* The mbedTLS headers reach file scope through `__tur_include__` markers,
+     which are hoisted from anywhere in the body. Written as bare directives
+     under an #ifdef they stayed INSIDE the function -- tur hoists only the
+     unbroken run of #include lines at the head of a body and stops at the
+     first line that is not one -- which put mbedtls/error.h's `static inline
+     mbedtls_error_add` inside a function ("invalid storage class for
+     function") and broke every httpd test that pulls in http/client.
 
-     These go through `__tur_include__` markers rather than bare directives.
-     tur hoists the unbroken run of #include lines at the HEAD of an inline-C
-     body to file scope and stops at the first line that is not one, so a
-     directive guarded by #if -- as these were -- stays inside the function
-     body. That put mbedtls/error.h's `static inline mbedtls_error_add` inside
-     a function: "invalid storage class for function", which broke every httpd
-     test that pulls in http/client. A `__tur_include__` marker is hoisted from
-     anywhere in the body and carries arbitrary preprocessor lines, so the
-     conditional compilation survives (watch/backend.tur guards its
-     inotify/kqueue includes the same way). */
-  /* __tur_include__: #if defined(__has_include) */
-  /* __tur_include__: #  if __has_include(<mbedtls/ssl.h>) */
-  /* __tur_include__: #    define __TUR_HTTP_TLS 1 */
-  /* __tur_include__: #  endif */
-  /* __tur_include__: #endif */
-  /* __tur_include__: #ifdef __TUR_HTTP_TLS */
+     Note what the markers do NOT buy: the hoist sorts its payloads into two
+     buckets and emits every #include ahead of every other directive, so the
+     #if/#ifdef lines below arrive AFTER the includes they read as guarding
+     and guard nothing. These five headers are included unconditionally. That
+     is correct here only because mbedTLS is a hard :cmake-deps of this spice
+     and so is always present; the "optional TLS" the detection below was
+     written for is not actually in effect. (watch/backend.tur was bitten by
+     the same bucketing -- it hoisted a macOS-only <sys/event.h> onto Linux --
+     and now puts its guards inside a real header, src/watch/platform.h. The
+     same move would restore the option here if mbedTLS ever becomes
+     optional.)
+
+     __TUR_HTTP_TLS is still defined, and still gates the TLS code paths in
+     the body below. */
   /* __tur_include__: #include <mbedtls/net_sockets.h> */
   /* __tur_include__: #include <mbedtls/ssl.h> */
   /* __tur_include__: #include <mbedtls/entropy.h> */
   /* __tur_include__: #include <mbedtls/ctr_drbg.h> */
   /* __tur_include__: #include <mbedtls/error.h> */
+  /* __tur_include__: #if defined(__has_include) */
+  /* __tur_include__: #  if __has_include(<mbedtls/ssl.h>) */
+  /* __tur_include__: #    define __TUR_HTTP_TLS 1 */
+  /* __tur_include__: #  endif */
   /* __tur_include__: #endif */
 
   struct __cons { int64_t value; int64_t next; };
