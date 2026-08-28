@@ -5,7 +5,8 @@
           attr-name attr-value
           cell-make cell-id cell-lang cell-source cell-attrs
           cell-start-line cell-end-line
-          cells-assign-ids)
+          cells-assign-ids
+          attrs-free cell-free cells-free)
 
   ;; Minimal cons helpers so the module stays self-contained.
   (defn __cell-nil-value [] #fx{Unsafe} : int
@@ -304,26 +305,129 @@
     return c ? c->end_line : 0;
     ```)
 
-  (defn __assign-cell-id [cell : int idx : int] #fx{Unsafe} : int
-    (if (__cell-cstr-eq? (cell-id cell) "")
-      (cell-make (__cell-str-concat "cell-" (__cell-int->cstr idx))
-                 (cell-lang cell)
-                 (cell-source cell)
-                 (cell-attrs cell)
-                 (cell-start-line cell)
-                 (cell-end-line cell))
-      cell))
+;; ---------------------------------------------------------------------
+;; Ownership
+;;
+;; Every constructor here returns a value the caller owns, and every
+;; container owns its elements: an attrs list owns its Attrs, and a Cell owns
+;; its id, its source and its attrs list.  None of that used to be releasable
+;; -- there was no `free` of any kind in this module -- so every notebook test
+;; that parsed a cell ended with AddressSanitizer reporting the leak and
+;; exiting non-zero.
+;;
+;; Each of these is safe on 0.
+;; ---------------------------------------------------------------------
+
+;;; attrs-free -- release an attrs list and every Attr in it.
+  (defn attrs-free [attrs : int] #fx{Unsafe} : void
+    ```c
+    typedef struct { char *name; char *value; } Attr;
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *node = (Cons *)(intptr_t)attrs;
+    while (node) {
+      Cons *next = (Cons *)(intptr_t)node->tail;
+      Attr *a = (Attr *)(intptr_t)node->head;
+      if (a) { free(a->name); free(a->value); free(a); }
+      free(node);
+      node = next;
+    }
+    ```)
+
+;;; cell-free -- release a Cell, including the attrs list it owns.
+  (defn cell-free [cell : int] #fx{Unsafe} : void
+    ```c
+    typedef struct { char *name; char *value; } Attr;
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    if (!c) return;
+    free(c->id);
+    free(c->source);
+    Cons *node = (Cons *)(intptr_t)c->attrs;
+    while (node) {
+      Cons *next = (Cons *)(intptr_t)node->tail;
+      Attr *a = (Attr *)(intptr_t)node->head;
+      if (a) { free(a->name); free(a->value); free(a); }
+      free(node);
+      node = next;
+    }
+    free(c);
+    ```)
+
+;;; cells-free -- release a cons list of Cells and the list's own cells.
+  (defn cells-free [cells : int] #fx{Unsafe} : void
+    (if (__cell-list-nil? cells)
+      (__cell-noop)
+      (let [next (__cell-tail cells)]
+        (do
+          (cell-free (__cell-head cells))
+          (__cell-cons-free cells)
+          (cells-free next)))))
+
+;;; __cell-cons-free -- free one cons cell, leaving its head alone.
+  (defn __cell-cons-free [node : int] #fx{Unsafe} : void
+    ```c
+    free((void *)(intptr_t)node);
+    ```)
+
+;;; __cell-noop -- void no-op, so a cleanup-only `if` has void on both arms.
+  (defn __cell-noop [] #fx{Unsafe} : void
+    ```c
+    return;
+    ```)
+
+  ;;; __assign-cell-id -- give `cell` the id "cell-<idx>" if it has none.
+  ;;;
+  ;;; Rewrites the id in place.  It used to build a WHOLE NEW Cell with
+  ;;; cell-make and return that, which leaked three ways at once: the original
+  ;;; Cell was orphaned, the two temporary strings behind the generated id were
+  ;;; dropped after cell-make strdup'd them, and -- worse than any leak -- the
+  ;;; new Cell aliased the old one's attrs list, so any correct `free` of both
+  ;;; would be a double free.  Mutating removes all three.
+  (defn __assign-cell-id [cell : int idx : int] #fx{Unsafe} : void
+    ```c
+    typedef struct {
+      char *id;
+      int64_t lang;
+      char *source;
+      int64_t attrs;
+      int64_t start_line;
+      int64_t end_line;
+    } Cell;
+    Cell *c = (Cell *)(intptr_t)cell;
+    if (!c) return;
+    if (c->id && c->id[0] != '\0') return;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "cell-%lld", (long long)idx);
+    free(c->id);
+    c->id = strdup(buf);
+    ```)
 
   ;;; cells-assign-ids -- fill in missing cell ids with sequential cell-N names.
+  ;;;
+  ;;; Returns the list it was given, with ids filled in.  It used to return a
+  ;;; freshly consed list built by reversing an intermediate list -- so both
+  ;;; the intermediate list's cons cells and every replaced Cell leaked, and
+  ;;; the caller was handed a list that shared attrs with the one it still
+  ;;; held.  Every caller uses the return value and drops the input, so
+  ;;; returning the same list is a drop-in change.
   (defn cells-assign-ids [cells : int] #fx{Unsafe} : int
-    (let [rev (__cells-assign-ids-rev cells 1 (__cell-nil-value))]
-      (__reverse-list rev (__cell-nil-value))))
+    (do
+      (__cells-assign-ids-walk cells 1)
+      cells))
 
-  (defn __cells-assign-ids-rev [cells : int idx : int acc : int] #fx{Unsafe} : int
+  (defn __cells-assign-ids-walk [cells : int idx : int] #fx{Unsafe} : int
     (if (__cell-list-nil? cells)
-      acc
-      (__cells-assign-ids-rev (__cell-tail cells)
-                              (+ idx 1)
-                              (__cell-cons (__assign-cell-id (__cell-head cells) idx) acc))))
+      0
+      (do
+        (__assign-cell-id (__cell-head cells) idx)
+        (__cells-assign-ids-walk (__cell-tail cells) (+ idx 1)))))
 
 ) ;; end defmodule notebook/cell
