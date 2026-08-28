@@ -29,6 +29,7 @@
 (defmodule watch/watch
   (import watch/backend :refer [backend-supported? backend-open backend-close
                                 backend-wait backend-drain backend-drain-into
+                                backend-drain-append
                                 backend-event-count backend-event-name-at
                                 backend-event-mask-at backend-event-cookie-at
                                 backend-event-is-dir-at
@@ -798,6 +799,44 @@ static int tur_inotify_kind(unsigned int mask) {
     #if defined(__linux__)
     {
       int ev_count = (int)watch__backend__backend_hyevent_hycount(bk);
+
+      /* Atomic-save coalescing.
+       *
+       * A "write temp, rename into place" save inside one directory arrives
+       * as a burst: IN_CREATE / IN_MODIFY / IN_CLOSE_WRITE on the temp name,
+       * then IN_MOVED_FROM(temp) + IN_MOVED_TO(final) sharing a cookie.
+       * Reporting all five means the first event a caller sees names a temp
+       * file that no longer exists -- which is what the caller was trying to
+       * avoid by watching the directory instead of the file.
+       *
+       * When coalesce is on, gather the names that were moved away WITHIN
+       * this batch (a MOVED_FROM whose cookie is matched by a MOVED_TO here)
+       * and suppress every event on those names.  A move out of the watched
+       * directory has no matching MOVED_TO, so its delete is still reported.
+       */
+      char moved_away[64][256];
+      int  moved_away_n = 0;
+      if (w->coalesce) {
+        for (int j = 0; j < ev_count && moved_away_n < 64; j++) {
+          unsigned int mj = (unsigned int)watch__backend__backend_hyevent_hymask_hyat(bk, (int64_t)j);
+          unsigned int cj = (unsigned int)watch__backend__backend_hyevent_hycookie_hyat(bk, (int64_t)j);
+          if (!(mj & IN_MOVED_FROM) || cj == 0) continue;
+          for (int k = 0; k < ev_count; k++) {
+            if (k == j) continue;
+            unsigned int mk = (unsigned int)watch__backend__backend_hyevent_hymask_hyat(bk, (int64_t)k);
+            unsigned int ck = (unsigned int)watch__backend__backend_hyevent_hycookie_hyat(bk, (int64_t)k);
+            if (!(mk & IN_MOVED_TO) || ck != cj) continue;
+            const char *nj = (const char *)(intptr_t)
+                watch_backend_event_name_at(bk, (int64_t)j);
+            moved_away[moved_away_n][0] = '\0';
+            if (nj) strncpy(moved_away[moved_away_n], nj, 255);
+            moved_away[moved_away_n][255] = '\0';
+            moved_away_n++;
+            break;
+          }
+        }
+      }
+
       for (int j = 0; j < ev_count; j++) {
         const char *ename = (const char *)(intptr_t)
             watch_backend_event_name_at(bk, (int64_t)j);
@@ -805,6 +844,14 @@ static int tur_inotify_kind(unsigned int mask) {
         unsigned int cookie = (unsigned int)watch__backend__backend_hyevent_hycookie_hyat(bk, (int64_t)j);
         int          is_dir = (int)watch__backend__backend_hyevent_hyis_hydir_hyat(bk, (int64_t)j);
         if (!ename) ename = "";
+
+        if (moved_away_n > 0 && ename[0]) {
+          int suppressed = 0;
+          for (int m = 0; m < moved_away_n; m++) {
+            if (strcmp(moved_away[m], ename) == 0) { suppressed = 1; break; }
+          }
+          if (suppressed) continue;
+        }
 
         int kind = tur_inotify_kind(mask);
         if (kind == 6) {
@@ -975,10 +1022,23 @@ static int tur_inotify_kind(unsigned int mask) {
                                     (watch-kind-overflow) 1 0)
                   (do
                     (__watcher-sleep-ms (__watcher-debounce-ms watcher))
-                    ;; Second drain after debounce window.
-                    (backend-drain-into back)
+                    ;; Second drain after the debounce window, APPENDING to
+                    ;; what the first drain already buffered.  It used to be
+                    ;; backend-drain-into, which clears evbuf first -- so the
+                    ;; burst that woke poll() was thrown away, and because a
+                    ;; burst normally lands well inside the 150 ms window the
+                    ;; second drain came back empty and watch-next returned 0.
+                    (backend-drain-append back)
                     (__watcher-tree-produce-events watcher idx root)
-                    (__watcher-pending-pop watcher)))))))))
+                    ;; NOTE the paren count: this closes the do, if, do, let,
+                    ;; if, let, if, let and the defn itself.  It used to stop
+                    ;; one short, which left `defn __watch-next-tree` open --
+                    ;; so __watch-make-cons and watch-drain were parsed as
+                    ;; nested definitions inside its body, the body's value
+                    ;; became a definition rather than the popped event, and
+                    ;; the emitted C ended `return 0;` no matter what.  That
+                    ;; is why tree-mode watch-next never returned an event.
+                    (__watcher-pending-pop watcher))))))))))
 
   ;;; __watch-make-cons -- internal: wrap a single event handle in a cons cell.
   (defn __watch-make-cons [head : int] #fx{Unsafe} : int
@@ -1007,4 +1067,4 @@ static int tur_inotify_kind(unsigned int mask) {
     ;; multi-element batches arrive with WT6 / WTNF4.
     (let [_ debounce-ms
           ev (watch-next watcher timeout-ms)]
-      (__watch-make-cons ev)))))
+      (__watch-make-cons ev))))

@@ -28,7 +28,7 @@
 (defmodule watch/backend
   (export backend-supported?
           backend-open backend-close
-          backend-wait backend-drain backend-drain-into
+          backend-wait backend-drain backend-drain-into backend-drain-append
           backend-event-count
           backend-event-name-at backend-event-mask-at
           backend-event-cookie-at backend-event-is-dir-at
@@ -193,12 +193,38 @@
   ;;; Overflow is stored on the handle; query via backend-last-overflow?.
   ;;; Calling this function clears ev_n and overflow before draining.
   (defn backend-drain-into [handle : int] #fx{Unsafe} : int
+    (do
+      (__backend-evbuf-reset handle)
+      (backend-drain-append handle)))
+
+  ;;; __backend-evbuf-reset -- empty the event buffer and clear the overflow
+  ;;; flag.  Safe on 0.
+  (defn __backend-evbuf-reset [handle : int] #fx{Unsafe} : void
+    ```c
+    TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
+    if (!w) return;
+    w->ev_n     = 0;
+    w->overflow = 0;
+    ```)
+
+  ;;; backend-drain-append -- drain the OS queue WITHOUT clearing evbuf first.
+  ;;;
+  ;;; Same as backend-drain-into except that events land after whatever is
+  ;;; already buffered.  This is what the debounce window in
+  ;;; watch/watch's tree path needs: it drains once when poll() fires, sleeps
+  ;;; for the debounce interval, then drains again to pick up the rest of the
+  ;;; burst.  When that second call reset ev_n, the first drain's events were
+  ;;; destroyed -- and since a burst usually arrives faster than the 150 ms
+  ;;; window, the second drain typically found nothing, so watch-next returned
+  ;;; no event at all.  (The single-file path never noticed: it re-stats the
+  ;;; file rather than reading evbuf.)
+  ;;;
+  ;;; Returns the total event count in evbuf, or -1 on a fatal read error.
+  (defn backend-drain-append [handle : int] #fx{Unsafe} : int
     ```c
     TurWatchBackend *w = (TurWatchBackend *)(intptr_t)handle;
     if (!w) return -1;
 
-    w->ev_n    = 0;
-    w->overflow = 0;
     int empty_base = !w->base || w->base[0] == '\0';
 
     #if defined(__linux__)
@@ -246,12 +272,19 @@
         combined |= (unsigned int)evs[i].fflags;
     }
     if (combined) {
-      TurBackendEvent *be = &w->evbuf[0];
-      memset(be->name, 0, sizeof(be->name));
-      be->mask   = combined;
-      be->cookie = 0;
-      be->is_dir = 0; /* filled by snapshot diff in tree layer */
-      w->ev_n    = 1;
+      /* Darwin stores one synthetic entry carrying the combined NOTE_*
+         flags.  Appending must not turn that into two entries, so a repeat
+         drain ORs into the entry already there. */
+      if (w->ev_n > 0) {
+        w->evbuf[w->ev_n - 1].mask |= combined;
+      } else {
+        TurBackendEvent *be = &w->evbuf[0];
+        memset(be->name, 0, sizeof(be->name));
+        be->mask   = combined;
+        be->cookie = 0;
+        be->is_dir = 0; /* filled by snapshot diff in tree layer */
+        w->ev_n    = 1;
+      }
     }
     (void)empty_base;
     return (int64_t)w->ev_n;
