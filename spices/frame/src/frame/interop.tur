@@ -47,15 +47,25 @@
   ```)
 
 ;; ---------------------------------------------------------------------------
-;; Release callbacks.  Defined as their own defns so the mangled C names can
-;; be referenced as void(*)(struct Arrow*) by cast.
+;; Release callbacks.  Defined as their own defns so their C names can be
+;; referenced as void(*)(struct Arrow*) by cast.
+;;
+;; Each is pinned to a stable C symbol with `export-as`, the same way plot
+;; pins `plot_sample_adaptive` / `plot_renderer_bbox`.  Without the pin the
+;; hand-written `extern` declarations below have to spell out whatever
+;; turmeric's injective identifier mangler produces for a `__`-prefixed,
+;; kebab-cased name -- which they did, as `frame__interop____ip_release_array`,
+;; until the mangler began encoding `_` as `_un` and `-` as `_hy` and the real
+;; symbol became `frame__interop___un_unip_hyrelease_hyarray`.  The externs
+;; then referred to nothing and every build of this module failed at link.
+;; The pin makes the C name part of this file rather than of the mangler.
 ;; ---------------------------------------------------------------------------
 
 ;;; __ip-release-array -- ArrowArray release callback.  Frees buffers, the
 ;;; buffers[] pointer array, the children[] array (releasing each child
 ;;; recursively), and `private_data` (currently NULL).  Idempotent: sets
 ;;; release to NULL.
-(defn #[used] __ip-release-array [arr : int] : void
+(defn #[used] (export-as "frame_interop_release_array") __ip-release-array [arr : int] : void
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -91,7 +101,7 @@
 
 ;;; __ip-release-schema -- ArrowSchema release callback.  Frees format/name
 ;;; strings, children, and `private_data`.  Idempotent.
-(defn #[used] __ip-release-schema [sch : int] : void
+(defn #[used] (export-as "frame_interop_release_schema") __ip-release-schema [sch : int] : void
   ```c
   #include <stdlib.h>
   #include <stdint.h>
@@ -129,7 +139,7 @@
 ;;; __ip-export-column-into -- fill an externally-allocated (schema, array)
 ;;; pair from a tur-frame column.  Sets release callbacks.  Used internally
 ;;; by both arrow-export-column (single column) and arrow-export (frame).
-(defn #[used] __ip-export-column-into [col : int name : cstr sch : int arr : int] : int
+(defn #[used] (export-as "frame_interop_export_column_into") __ip-export-column-into [col : int name : cstr sch : int arr : int] : int
   ```c
   #include <stdlib.h>
   #include <string.h>
@@ -152,8 +162,8 @@
     void *validity; void *values; void *offsets;
   };
 
-  extern void frame__interop____ip_release_array(int64_t);
-  extern void frame__interop____ip_release_schema(int64_t);
+  extern void frame_interop_release_array(int64_t);
+  extern void frame_interop_release_schema(int64_t);
 
   struct __frame_col *c = (struct __frame_col *)(intptr_t)col;
   struct ArrowSchema *s = (struct ArrowSchema *)(intptr_t)sch;
@@ -193,7 +203,7 @@
   s->n_children = 0;
   s->children   = NULL;
   s->dictionary = NULL;
-  s->release    = (void (*)(struct ArrowSchema *))frame__interop____ip_release_schema;
+  s->release    = (void (*)(struct ArrowSchema *))frame_interop_release_schema;
   s->private_data = NULL;
 
   /* ---- ArrowArray ---- */
@@ -204,7 +214,7 @@
   a->n_children = 0;
   a->children   = NULL;
   a->dictionary = NULL;
-  a->release    = (void (*)(struct ArrowArray *))frame__interop____ip_release_array;
+  a->release    = (void (*)(struct ArrowArray *))frame_interop_release_array;
   a->private_data = NULL;
 
   a->buffers = (const void **)calloc((size_t)n_buffers, sizeof(void *));
@@ -323,9 +333,9 @@
   struct __frame_schema { int64_t n_fields; int64_t *fields; };
   struct __frame_field  { char *name; int64_t type_tag; int64_t nullable; };
 
-  extern void frame__interop____ip_release_array(int64_t);
-  extern void frame__interop____ip_release_schema(int64_t);
-  extern int64_t frame__interop____ip_export_column_into(int64_t col, const char *nm, int64_t sch, int64_t arr);
+  extern void frame_interop_release_array(int64_t);
+  extern void frame_interop_release_schema(int64_t);
+  extern int64_t frame_interop_export_column_into(int64_t col, const char *nm, int64_t sch, int64_t arr);
 
   struct __frame_frame *fr = (struct __frame_frame *)(intptr_t)f;
   struct __frame_schema *sc = (struct __frame_schema *)(intptr_t)fr->schema;
@@ -337,14 +347,14 @@
   char *nm  = (char *)malloc(1); nm[0] = '\0';
   s->format = fmt; s->name = nm; s->metadata = NULL;
   s->flags = 0; s->n_children = fr->n_cols; s->dictionary = NULL;
-  s->release = (void (*)(struct ArrowSchema *))frame__interop____ip_release_schema;
+  s->release = (void (*)(struct ArrowSchema *))frame_interop_release_schema;
   s->private_data = NULL;
   s->children = (struct ArrowSchema **)calloc((size_t)fr->n_cols, sizeof(void *));
 
   /* Array header: length = nrows, n_children = ncols, n_buffers = 1 (validity = NULL). */
   a->length = fr->n_rows; a->null_count = 0; a->offset = 0;
   a->n_buffers = 1; a->n_children = fr->n_cols; a->dictionary = NULL;
-  a->release = (void (*)(struct ArrowArray *))frame__interop____ip_release_array;
+  a->release = (void (*)(struct ArrowArray *))frame_interop_release_array;
   a->private_data = NULL;
   a->buffers = (const void **)calloc(1, sizeof(void *));
   a->buffers[0] = NULL; /* struct validity is NULL */
@@ -354,7 +364,7 @@
     struct __frame_field *fd = (struct __frame_field *)(intptr_t)sc->fields[c];
     s->children[c] = (struct ArrowSchema *)calloc(1, sizeof(struct ArrowSchema));
     a->children[c] = (struct ArrowArray  *)calloc(1, sizeof(struct ArrowArray));
-    int64_t ok = frame__interop____ip_export_column_into(
+    int64_t ok = frame_interop_export_column_into(
       fr->columns[c],
       (const char *)(intptr_t)(fd && fd->name ? fd->name : ""),
       (int64_t)(intptr_t)s->children[c],
@@ -368,7 +378,7 @@
 ;; Column-level import.
 ;; ---------------------------------------------------------------------------
 
-(defn #[used] __ip-fmt-to-tag [fmt : cstr] : int
+(defn #[used] (export-as "frame_interop_fmt_to_tag") __ip-fmt-to-tag [fmt : cstr] : int
   ```c
   #include <string.h>
   #include <stdint.h>
@@ -410,12 +420,12 @@
     void *validity; void *values; void *offsets;
   };
 
-  extern int64_t frame__interop____ip_fmt_to_tag(const char *);
+  extern int64_t frame_interop_fmt_to_tag(const char *);
 
   struct ArrowSchema *s = (struct ArrowSchema *)(intptr_t)sch;
   struct ArrowArray  *a = (struct ArrowArray *)(intptr_t)arr;
   if (!s || !a || !s->format) return 0;
-  int64_t tag = frame__interop____ip_fmt_to_tag(s->format);
+  int64_t tag = frame_interop_fmt_to_tag(s->format);
   if (tag == 0) return 0;
 
   int64_t n = a->length;
