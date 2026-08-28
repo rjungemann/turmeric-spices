@@ -49,30 +49,32 @@
   #include <unistd.h>
   #include <sys/socket.h>
   #include <netdb.h>
-  #include <mbedtls/net_sockets.h>
-  #include <mbedtls/ssl.h>
-  #include <mbedtls/entropy.h>
-  #include <mbedtls/ctr_drbg.h>
-  #include <mbedtls/error.h>
 
-  /* The mbedTLS includes above must stay in the unbroken run of #include
-     lines at the HEAD of this body -- not even a comment may interrupt it.
-     tur hoists that leading run up to file scope and stops at the first line
-     that is not an #include; behind the #ifdef they used to sit below, they
-     were left inside the function body, so mbedtls/error.h's `static inline
-     mbedtls_error_add` was declared inside a function ("invalid storage class
-     for function") and every httpd test that pulls in http/client failed to
-     compile. mbedTLS is a hard :cmake-deps of this spice, so it is always
-     present and the includes need no guard; the detection below still gates
-     the TLS code paths.
+  /* TLS is optional. Detect mbedTLS at compile time; when absent, https://
+     URLs return a runtime err rather than failing the build.
 
-     Detect mbedTLS at compile time; when absent, https:// URLs return a
-     runtime err rather than failing the build. */
-  #if defined(__has_include)
-  #  if __has_include(<mbedtls/ssl.h>)
-  #    define __TUR_HTTP_TLS 1
-  #  endif
-  #endif
+     These go through `__tur_include__` markers rather than bare directives.
+     tur hoists the unbroken run of #include lines at the HEAD of an inline-C
+     body to file scope and stops at the first line that is not one, so a
+     directive guarded by #if -- as these were -- stays inside the function
+     body. That put mbedtls/error.h's `static inline mbedtls_error_add` inside
+     a function: "invalid storage class for function", which broke every httpd
+     test that pulls in http/client. A `__tur_include__` marker is hoisted from
+     anywhere in the body and carries arbitrary preprocessor lines, so the
+     conditional compilation survives (watch/backend.tur guards its
+     inotify/kqueue includes the same way). */
+  /* __tur_include__: #if defined(__has_include) */
+  /* __tur_include__: #  if __has_include(<mbedtls/ssl.h>) */
+  /* __tur_include__: #    define __TUR_HTTP_TLS 1 */
+  /* __tur_include__: #  endif */
+  /* __tur_include__: #endif */
+  /* __tur_include__: #ifdef __TUR_HTTP_TLS */
+  /* __tur_include__: #include <mbedtls/net_sockets.h> */
+  /* __tur_include__: #include <mbedtls/ssl.h> */
+  /* __tur_include__: #include <mbedtls/entropy.h> */
+  /* __tur_include__: #include <mbedtls/ctr_drbg.h> */
+  /* __tur_include__: #include <mbedtls/error.h> */
+  /* __tur_include__: #endif */
 
   struct __cons { int64_t value; int64_t next; };
   struct __resp {
