@@ -1652,16 +1652,20 @@
                       (if (= (md-node-meta item) 2)
                         "[x] "
                         ""))
-            full-body (__str-concat checkbox body)
+            full-body (__cat-owned (__own checkbox) body)
             prefix (if ordered
-                     (__str-concat (__int->cstr (+ start idx)) (__str-concat marker " "))
-                     (__str-concat marker " "))
+                     (__cat-owned (__int->cstr (+ start idx)) (__cat-owned (__own marker) (__own " ")))
+                     (__cat-owned (__own marker) (__own " ")))
+            ;; __format-list-item borrows both operands, so they are released
+            ;; here rather than consumed.
             rendered (__format-list-item prefix full-body)]
+        (__cstr-free prefix)
+        (__cstr-free full-body)
         (if (list-nil? (tail items))
           (__cstr-as-int rendered)
           (__cstr-as-int
-            (__str-concat rendered
-                         (__str-concat "\n" (__int-as-cstr (__emit-list-items (tail items) ordered start marker (+ idx 1))))))))))
+            (__cat-owned rendered
+                         (__cat-owned (__own "\n") (__int-as-cstr (__emit-list-items (tail items) ordered start marker (+ idx 1))))))))))
 
   (defn __table-align-mark [align : int] : cstr
     (if (= align 1)
@@ -1675,27 +1679,27 @@
   (defn __emit-table-row-cells [cells : int] #fx{Unsafe} : int
     (if (list-nil? cells)
       (__cstr-as-int (__own ""))
-      (let [cell-text (md-node-text (head cells))]
+      (let [cell-text (__own (md-node-text (head cells)))]
         (if (list-nil? (tail cells))
           (__cstr-as-int cell-text)
           (__cstr-as-int
-            (__str-concat cell-text
-                         (__str-concat " | " (__int-as-cstr (__emit-table-row-cells (tail cells))))))))))
+            (__cat-owned cell-text
+                         (__cat-owned (__own " | ") (__int-as-cstr (__emit-table-row-cells (tail cells))))))))))
 
   (defn __emit-table-align-cells [cells : int] #fx{Unsafe} : int
     (if (list-nil? cells)
       (__cstr-as-int (__own ""))
-      (let [cell-mark (__table-align-mark (md-node-meta (head cells)))]
+      (let [cell-mark (__own (__table-align-mark (md-node-meta (head cells))))]
         (if (list-nil? (tail cells))
           (__cstr-as-int cell-mark)
           (__cstr-as-int
-            (__str-concat cell-mark
-                         (__str-concat " | " (__int-as-cstr (__emit-table-align-cells (tail cells))))))))))
+            (__cat-owned cell-mark
+                         (__cat-owned (__own " | ") (__int-as-cstr (__emit-table-align-cells (tail cells))))))))))
 
   (defn __emit-table-row [row : int] #fx{Unsafe} : int
     (__cstr-as-int
-      (__str-concat "| "
-                    (__str-concat (__int-as-cstr (__emit-table-row-cells (md-node-children row))) " |"))))
+      (__cat-owned (__own "| ")
+                   (__cat-owned (__int-as-cstr (__emit-table-row-cells (md-node-children row))) (__own " |")))))
 
   (defn __emit-table-body-rows [rows : int] #fx{Unsafe} : int
     (if (list-nil? rows)
@@ -1704,25 +1708,25 @@
         (if (list-nil? (tail rows))
           rendered
           (__cstr-as-int
-            (__str-concat (__int-as-cstr rendered)
-                         (__str-concat "\n" (__int-as-cstr (__emit-table-body-rows (tail rows))))))))))
+            (__cat-owned (__int-as-cstr rendered)
+                         (__cat-owned (__own "\n") (__int-as-cstr (__emit-table-body-rows (tail rows))))))))))
 
   (defn __emit-table-node [n : int] #fx{Unsafe} : int
     (let [rows (md-node-children n)
           header (head rows)
           body (tail rows)
           align-row (__cstr-as-int
-                     (__str-concat "| "
-                                   (__str-concat (__int-as-cstr (__emit-table-align-cells (md-node-children header))) " |")))]
+                     (__cat-owned (__own "| ")
+                                  (__cat-owned (__int-as-cstr (__emit-table-align-cells (md-node-children header))) (__own " |"))))]
       (if (list-nil? body)
         (__cstr-as-int
-          (__str-concat (__int-as-cstr (__emit-table-row header))
-                       (__str-concat "\n" (__int-as-cstr align-row))))
+          (__cat-owned (__int-as-cstr (__emit-table-row header))
+                       (__cat-owned (__own "\n") (__int-as-cstr align-row))))
         (__cstr-as-int
-          (__str-concat (__int-as-cstr (__emit-table-row header))
-                       (__str-concat "\n"
-                                     (__str-concat (__int-as-cstr align-row)
-                                                   (__str-concat "\n" (__int-as-cstr (__emit-table-body-rows body))))))))))
+          (__cat-owned (__int-as-cstr (__emit-table-row header))
+                       (__cat-owned (__own "\n")
+                                    (__cat-owned (__int-as-cstr align-row)
+                                                 (__cat-owned (__own "\n") (__int-as-cstr (__emit-table-body-rows body))))))))))
 
   (defn __emit-node-int [n : int] #fx{Unsafe} : int
     (let [tag (md-node-tag n)]
@@ -1749,20 +1753,20 @@
                   (__emit-nodes-with-sep (md-node-children n) "\n\n")
                     (if (= tag (md-tag-code-block))
                     (__cstr-as-int
-                     (__str-concat "```"
-                                   (__str-concat (md-node-info n)
-                                                 (__str-concat "\n"
-                                                               (__str-concat (md-node-text n)
-                                                                             "\n```")))))
+                     (__cat-owned (__own "```")
+                                  (__cat-owned (__own (md-node-info n))
+                                               (__cat-owned (__own "\n")
+                                                            (__cat-owned (__own (md-node-text n))
+                                                                         (__own "\n```"))))))
                       (if (= tag (md-tag-thematic-break))
                        (__cstr-as-int (__own "---"))
                        (if (= tag (md-tag-math-block))
                          (__cstr-as-int
-                           (__str-concat "$$\n"
-                                         (__str-concat (md-node-text n) "\n$$")))
+                           (__cat-owned (__own "$$\n")
+                                        (__cat-owned (__own (md-node-text n)) (__own "\n$$"))))
                          (if (= tag (md-tag-math-inline))
                            (__cstr-as-int
-                             (__str-concat "$" (__str-concat (md-node-text n) "$")))
+                             (__cat-owned (__own "$") (__cat-owned (__own (md-node-text n)) (__own "$"))))
                            (__cstr-as-int (__own "")))))))))))))))
 
   ;;; md-emit -- serialize a parsed NB0 AST back to normalized markdown.
@@ -1837,8 +1841,8 @@
     (if (list-nil? nodes)
       (__cstr-as-int (__own ""))
       (__cstr-as-int
-        (__str-concat (__int-as-cstr (__emit-inline-plain-node-int (head nodes)))
-                      (__int-as-cstr (__emit-inline-plain-list (tail nodes)))))))
+        (__cat-owned (__int-as-cstr (__emit-inline-plain-node-int (head nodes)))
+                     (__int-as-cstr (__emit-inline-plain-list (tail nodes)))))))
 
   (defn __emit-inline-html-list [nodes : int] #fx{Unsafe} : int
     (if (list-nil? nodes)
@@ -1882,21 +1886,26 @@
 
   (defn __emit-link-html-int [n : int] #fx{Unsafe} : int
     (let [title-attr (if (__cstr-eq? (md-node-text n) "")
-                       ">"
-                       (__str-concat " title=\"" (__str-concat (__html-escape (md-node-text n)) "\">")))]
+                       (__own ">")
+                       (__cat-owned (__own " title=\"") (__cat-owned (__html-escape (md-node-text n)) (__own "\">"))))]
       (__cstr-as-int
-        (__str-concat "<a href=\"" (__str-concat (__html-escape (md-node-info n))
-          (__str-concat "\"" (__str-concat title-attr
-            (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n))) "</a>"))))))))
+        (__cat-owned (__own "<a href=\"") (__cat-owned (__html-escape (md-node-info n))
+          (__cat-owned (__own "\"") (__cat-owned title-attr
+            (__cat-owned (__int-as-cstr (__emit-inline-html-list (md-node-children n))) (__own "</a>")))))))))
 
   (defn __emit-image-html-int [n : int] #fx{Unsafe} : int
     (let [title-tail (if (__cstr-eq? (md-node-text n) "")
-                       " />"
-                       (__str-concat " title=\"" (__str-concat (__html-escape (md-node-text n)) "\" />")))]
+                       (__own " />")
+                       (__cat-owned (__own " title=\"") (__cat-owned (__html-escape (md-node-text n)) (__own "\" />"))))
+          ;; __html-escape borrows, so the plain-text alt it escapes is a
+          ;; separate allocation that has to be released once escaped.
+          alt-plain (__int-as-cstr (__emit-inline-plain-list (md-node-children n)))
+          alt (__html-escape alt-plain)]
+      (__cstr-free alt-plain)
       (__cstr-as-int
-        (__str-concat "<img src=\"" (__str-concat (__html-escape (md-node-info n))
-          (__str-concat "\" alt=\"" (__str-concat (__html-escape (__int-as-cstr (__emit-inline-plain-list (md-node-children n))))
-            (__str-concat "\"" title-tail))))))))
+        (__cat-owned (__own "<img src=\"") (__cat-owned (__html-escape (md-node-info n))
+          (__cat-owned (__own "\" alt=\"") (__cat-owned alt
+            (__cat-owned (__own "\"") title-tail))))))))
 
   ;; Every operand below is owned -- __html-escape, __html-escape-math and the
   ;; emit helpers all allocate, and the literals go through __own -- so
@@ -1953,22 +1962,22 @@
             body (if (list-nil? (md-node-children cell))
                    (__html-escape (md-node-text cell))
                    (__int-as-cstr (__emit-inline-html-list (md-node-children cell))))
-            rendered (__str-concat "<"
-                                   (__str-concat tag-name
-                                                 (__str-concat (__table-align-attr (md-node-meta cell))
-                                                               (__str-concat ">"
-                                                                             (__str-concat body
-                                                                                           (__str-concat "</"
-                                                                                                         (__str-concat tag-name ">")))))))]
+            rendered (__cat-owned (__own "<")
+                                  (__cat-owned (__own tag-name)
+                                               (__cat-owned (__own (__table-align-attr (md-node-meta cell)))
+                                                            (__cat-owned (__own ">")
+                                                                         (__cat-owned body
+                                                                                      (__cat-owned (__own "</")
+                                                                                                   (__cat-owned (__own tag-name) (__own ">"))))))))]
         (if (list-nil? (tail cells))
           (__cstr-as-int rendered)
           (__cstr-as-int
-            (__str-concat rendered (__int-as-cstr (__emit-table-cells-html (tail cells) header?))))))))
+            (__cat-owned rendered (__int-as-cstr (__emit-table-cells-html (tail cells) header?))))))))
 
   (defn __emit-table-row-html [row : int header? : bool] #fx{Unsafe} : int
     (__cstr-as-int
-      (__str-concat "<tr>"
-                    (__str-concat (__int-as-cstr (__emit-table-cells-html (md-node-children row) header?)) "</tr>"))))
+      (__cat-owned (__own "<tr>")
+                   (__cat-owned (__int-as-cstr (__emit-table-cells-html (md-node-children row) header?)) (__own "</tr>")))))
 
   (defn __emit-table-body-html [rows : int] #fx{Unsafe} : int
     (if (list-nil? rows)
@@ -1977,8 +1986,8 @@
         (if (list-nil? (tail rows))
           rendered
           (__cstr-as-int
-            (__str-concat (__int-as-cstr rendered)
-                          (__str-concat "\n" (__int-as-cstr (__emit-table-body-html (tail rows))))))))))
+            (__cat-owned (__int-as-cstr rendered)
+                         (__cat-owned (__own "\n") (__int-as-cstr (__emit-table-body-html (tail rows))))))))))
 
   (defn __emit-table-html-int [n : int] #fx{Unsafe} : int
     (let [rows (md-node-children n)
@@ -1987,14 +1996,14 @@
           header-html (__emit-table-row-html header true)]
       (if (list-nil? body)
         (__cstr-as-int
-          (__str-concat "<table>\n<thead>\n"
-                        (__str-concat (__int-as-cstr header-html) "\n</thead>\n</table>")))
+          (__cat-owned (__own "<table>\n<thead>\n")
+                       (__cat-owned (__int-as-cstr header-html) (__own "\n</thead>\n</table>"))))
         (__cstr-as-int
-          (__str-concat "<table>\n<thead>\n"
-                        (__str-concat (__int-as-cstr header-html)
-                                      (__str-concat "\n</thead>\n<tbody>\n"
-                                                    (__str-concat (__int-as-cstr (__emit-table-body-html body))
-                                                                  "\n</tbody>\n</table>"))))))))
+          (__cat-owned (__own "<table>\n<thead>\n")
+                       (__cat-owned (__int-as-cstr header-html)
+                                    (__cat-owned (__own "\n</thead>\n<tbody>\n")
+                                                 (__cat-owned (__int-as-cstr (__emit-table-body-html body))
+                                                              (__own "\n</tbody>\n</table>")))))))))
 
   ;; `lvl` is used twice, so it is copied rather than consumed and released
   ;; once at the end.
