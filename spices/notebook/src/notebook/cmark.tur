@@ -1844,8 +1844,8 @@
     (if (list-nil? nodes)
       (__cstr-as-int (__own ""))
       (__cstr-as-int
-        (__str-concat (__int-as-cstr (__emit-inline-html-node-int (head nodes)))
-                      (__int-as-cstr (__emit-inline-html-list (tail nodes)))))))
+        (__cat-owned (__int-as-cstr (__emit-inline-html-node-int (head nodes)))
+                     (__int-as-cstr (__emit-inline-html-list (tail nodes)))))))
 
   (defn __emit-block-html-list [nodes : int] #fx{Unsafe} : int
     (if (list-nil? nodes)
@@ -1854,8 +1854,9 @@
         (if (list-nil? (tail nodes))
           cur
           (__cstr-as-int
-            (__str-concat (__int-as-cstr cur)
-                          (__str-concat "\n" (__int-as-cstr (__emit-block-html-list (tail nodes))))))))))
+            (__cat-owned (__int-as-cstr cur)
+                         (__cat-owned (__own "\n")
+                                      (__int-as-cstr (__emit-block-html-list (tail nodes))))))))))
 
   (defn __emit-inline-plain-node-int [n : int] #fx{Unsafe} : int
     (let [tag (md-node-tag n)]
@@ -1897,38 +1898,42 @@
           (__str-concat "\" alt=\"" (__str-concat (__html-escape (__int-as-cstr (__emit-inline-plain-list (md-node-children n))))
             (__str-concat "\"" title-tail))))))))
 
+  ;; Every operand below is owned -- __html-escape, __html-escape-math and the
+  ;; emit helpers all allocate, and the literals go through __own -- so
+  ;; __cat-owned can consume them.  The __str-concat chains this replaces
+  ;; dropped one intermediate per link.
   (defn __emit-inline-html-node-int [n : int] #fx{Unsafe} : int
     (let [tag (md-node-tag n)]
       (if (= tag (md-tag-text))
         (__cstr-as-int (__html-escape (md-node-text n)))
         (if (= tag (md-tag-emph))
           (__cstr-as-int
-            (__str-concat "<em>" (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n))) "</em>")))
+            (__cat-owned (__own "<em>") (__cat-owned (__int-as-cstr (__emit-inline-html-list (md-node-children n))) (__own "</em>"))))
           (if (= tag (md-tag-strong))
             (__cstr-as-int
-              (__str-concat "<strong>" (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n))) "</strong>")))
+              (__cat-owned (__own "<strong>") (__cat-owned (__int-as-cstr (__emit-inline-html-list (md-node-children n))) (__own "</strong>"))))
             (if (= tag (md-tag-strikethrough))
               (__cstr-as-int
-                (__str-concat "<del>" (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n))) "</del>")))
+                (__cat-owned (__own "<del>") (__cat-owned (__int-as-cstr (__emit-inline-html-list (md-node-children n))) (__own "</del>"))))
             (if (= tag (md-tag-code-span))
               (__cstr-as-int
-                (__str-concat "<code>" (__str-concat (__html-escape (md-node-text n)) "</code>")))
+                (__cat-owned (__own "<code>") (__cat-owned (__html-escape (md-node-text n)) (__own "</code>"))))
               (if (= tag (md-tag-link))
                 (__emit-link-html-int n)
                 (if (= tag (md-tag-image))
                   (__emit-image-html-int n)
                   (if (= tag (md-tag-autolink))
                     (__cstr-as-int
-                      (__str-concat "<a href=\"" (__str-concat (__html-escape (md-node-info n))
-                        (__str-concat "\">" (__str-concat (__html-escape (md-node-text n)) "</a>")))))
+                      (__cat-owned (__own "<a href=\"") (__cat-owned (__html-escape (md-node-info n))
+                        (__cat-owned (__own "\">") (__cat-owned (__html-escape (md-node-text n)) (__own "</a>"))))))
                     (if (= tag (md-tag-hard-break))
                       (__cstr-as-int (__own "<br />\n"))
                       (if (= tag (md-tag-soft-break))
                         (__cstr-as-int (__own "\n"))
                         (if (= tag (md-tag-math-inline))
                           (__cstr-as-int
-                            (__str-concat "<span class=\"math inline\">$"
-                              (__str-concat (__html-escape-math (md-node-text n)) "$</span>")))
+                            (__cat-owned (__own "<span class=\"math inline\">$")
+                              (__cat-owned (__html-escape-math (md-node-text n)) (__own "$</span>"))))
                           (__cstr-as-int (__own "")))))))))))))))
 
   (defn __table-align-attr [align : int] : cstr
@@ -1991,13 +1996,29 @@
                                                     (__str-concat (__int-as-cstr (__emit-table-body-html body))
                                                                   "\n</tbody>\n</table>"))))))))
 
+  ;; `lvl` is used twice, so it is copied rather than consumed and released
+  ;; once at the end.
   (defn __emit-heading-html-int [n : int] #fx{Unsafe} : int
-    (let [lvl (__int->cstr (md-node-meta n))]
-      (__cstr-as-int
-        (__str-concat "<h" (__str-concat lvl (__str-concat ">"
-          (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n)))
-                        (__str-concat "</h" (__str-concat lvl ">")))))))))
+    (let [lvl (__int->cstr (md-node-meta n))
+          out (__cat-owned (__own "<h")
+                (__cat-owned (__own lvl)
+                  (__cat-owned (__own ">")
+                    (__cat-owned (__int-as-cstr (__emit-inline-html-list (md-node-children n)))
+                      (__cat-owned (__own "</h") (__cat-owned (__own lvl) (__own ">")))))))]
+      (do
+        (__cstr-free lvl)
+        (__cstr-as-int out))))
 
+;;; __cstr-free -- release an owned string.  Safe on 0.
+  (defn __cstr-free [s : cstr] #fx{Unsafe} : void
+    ```c
+    void *p = (void *)(intptr_t)s;
+    if (p) free(p);
+    ```)
+
+  ;; As with the inline emitter: every operand is owned, literals included
+  ;; (via __own), so __cat-owned can consume them.  The nested __str-concat
+  ;; chains this replaces dropped an intermediate at every link.
   (defn __emit-block-html-node-int [n : int] #fx{Unsafe} : int
     (let [tag (md-node-tag n)]
       (if (= tag (md-tag-document))
@@ -2006,46 +2027,46 @@
           (__emit-heading-html-int n)
           (if (= tag (md-tag-paragraph))
             (__cstr-as-int
-              (__str-concat "<p>" (__str-concat (__int-as-cstr (__emit-inline-html-list (md-node-children n))) "</p>")))
+              (__cat-owned (__own "<p>") (__cat-owned (__int-as-cstr (__emit-inline-html-list (md-node-children n))) (__own "</p>"))))
             (if (= tag (md-tag-blockquote))
               (__cstr-as-int
-                (__str-concat "<blockquote>\n" (__str-concat (__int-as-cstr (__emit-block-html-list (md-node-children n))) "\n</blockquote>")))
+                (__cat-owned (__own "<blockquote>\n") (__cat-owned (__int-as-cstr (__emit-block-html-list (md-node-children n))) (__own "\n</blockquote>"))))
               (if (= tag (md-tag-list))
                 (if (> (md-node-meta n) 0)
                   (__cstr-as-int
-                    (__str-concat
+                    (__cat-owned
                       (if (= (md-node-meta n) 1)
-                        "<ol>"
-                        (__str-concat "<ol start=\"" (__str-concat (__int->cstr (md-node-meta n)) "\">")))
-                      (__str-concat (__int-as-cstr (__emit-block-html-list (md-node-children n))) "</ol>")))
+                        (__own "<ol>")
+                        (__cat-owned (__own "<ol start=\"") (__cat-owned (__int->cstr (md-node-meta n)) (__own "\">"))))
+                      (__cat-owned (__int-as-cstr (__emit-block-html-list (md-node-children n))) (__own "</ol>"))))
                   (__cstr-as-int
-                    (__str-concat "<ul>" (__str-concat (__int-as-cstr (__emit-block-html-list (md-node-children n))) "</ul>"))))
+                    (__cat-owned (__own "<ul>") (__cat-owned (__int-as-cstr (__emit-block-html-list (md-node-children n))) (__own "</ul>")))))
                 (if (= tag (md-tag-list-item))
                   (__cstr-as-int
-                    (__str-concat "<li>"
-                                  (__str-concat
-                                    (if (= (md-node-meta n) 1)
-                                      "<input type=\"checkbox\" disabled=\"\" /> "
-                                      (if (= (md-node-meta n) 2)
-                                        "<input type=\"checkbox\" checked=\"\" disabled=\"\" /> "
-                                        ""))
-                                    (__str-concat (__int-as-cstr (__emit-block-html-list (md-node-children n))) "</li>"))))
+                    (__cat-owned (__own "<li>")
+                                 (__cat-owned
+                                   (if (= (md-node-meta n) 1)
+                                     (__own "<input type=\"checkbox\" disabled=\"\" /> ")
+                                     (if (= (md-node-meta n) 2)
+                                       (__own "<input type=\"checkbox\" checked=\"\" disabled=\"\" /> ")
+                                       (__own "")))
+                                   (__cat-owned (__int-as-cstr (__emit-block-html-list (md-node-children n))) (__own "</li>")))))
                   (if (= tag (md-tag-table))
                     (__emit-table-html-int n)
                     (if (= tag (md-tag-code-block))
                     (__cstr-as-int
-                      (__str-concat "<pre><code"
-                                    (__str-concat
-                                      (if (__cstr-eq? (md-node-info n) "")
-                                        ">"
-                                        (__str-concat " class=\"language-" (__str-concat (__html-escape (md-node-info n)) "\">")))
-                                      (__str-concat (__html-escape (md-node-text n)) "</code></pre>"))))
+                      (__cat-owned (__own "<pre><code")
+                                   (__cat-owned
+                                     (if (__cstr-eq? (md-node-info n) "")
+                                       (__own ">")
+                                       (__cat-owned (__own " class=\"language-") (__cat-owned (__html-escape (md-node-info n)) (__own "\">"))))
+                                     (__cat-owned (__html-escape (md-node-text n)) (__own "</code></pre>")))))
                     (if (= tag (md-tag-thematic-break))
                       (__cstr-as-int (__own "<hr />"))
                       (if (= tag (md-tag-math-block))
                         (__cstr-as-int
-                          (__str-concat "<span class=\"math display\">$$"
-                            (__str-concat (__html-escape-math (md-node-text n)) "$$</span>")))
+                          (__cat-owned (__own "<span class=\"math display\">$$")
+                            (__cat-owned (__html-escape-math (md-node-text n)) (__own "$$</span>"))))
                         (__cstr-as-int (__own ""))))))))))))))
 
   (defn md-emit-html [n : int] #fx{Unsafe} : cstr
