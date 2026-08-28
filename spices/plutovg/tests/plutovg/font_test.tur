@@ -27,16 +27,12 @@
 
   (defn err? [r : int] : bool
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res =
-        (void *)(intptr_t)r;
-    return res && !res->is_ok;
+    return r != 0 && !tur_is_ok(r);
     ```)
 
   (defn ok-handle [r : int] : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res =
-        (void *)(intptr_t)r;
-    return res ? (int64_t)res->ok_val : 0;
+    return r ? tur_ok_value(r) : 0;
     ```)
 
   ;; -- Filesystem probing helpers --

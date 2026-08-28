@@ -19,8 +19,7 @@
 
 (defn cok? [r : ptr<void>] : bool
   ```c
-  struct __vc_res { bool is_ok; int64_t ok_val; int64_t err_val; };
-  return ((struct __vc_res *)r)->is_ok;
+  return tur_is_ok((int64_t)(intptr_t)r);
   ```)
 
 (defn skip-note [] : void
@@ -40,7 +39,7 @@
   (if (= loaded 0)
     false
     (let [r (sessmap-get (:: loaded :SessMap) key)]
-      (if (.is-ok r) (seq? (.ok-val r) want) false))))
+      (if (ok? r) (seq? (ok-val r) want) false))))
 
 ;; runs the real round-trip; consumes the linear Client.
 (defn run-roundtrip [c : Client] : int

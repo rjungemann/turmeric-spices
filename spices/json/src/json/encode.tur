@@ -181,7 +181,7 @@
 ;;; `42` / `null`, `(Option cstr)` emits `"s"` / `null`, and so on -- letting a
 ;;; derive-json struct carry optional fields.
 ;;;
-;;; The body dispatches `encode` directly on `(.value x)`; recovering the
+;;; The body dispatches `encode` directly on `(unwrap x)`; recovering the
 ;;; concrete element type through that field extraction needs turmeric main
 ;;; #475 (constrained instance method dispatch on pointer-carried elements).
 ;;;
@@ -189,8 +189,8 @@
 (definstance Encode [Option]
   [(Encode A)]
   (encode [x] : cstr
-    (if (.is-some x)
-      (encode (.value x))
+    (if (some? x)
+      (encode (unwrap x))
       (__json-null-frag))))
 
 ;; Runtime helper: join a cons-list of element fragments into `[e1,e2,...]`.

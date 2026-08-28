@@ -14,15 +14,12 @@
 
   (defn __cr-ok? [r : ptr<void>] : bool
     ```c
-    if (!r) return false;
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return ((struct __cr *)r)->is_ok;
+    return tur_is_ok((int64_t)(intptr_t)r);
     ```)
 
   (defn __cr-val [r : ptr<void>] : int
     ```c
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return (int64_t)((struct __cr *)r)->ok_val;
+    return tur_ok_value((int64_t)(intptr_t)r);
     ```)
 
   (defn sleep-ms [ms : int] #fx{Unsafe} : void

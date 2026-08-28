@@ -77,11 +77,9 @@
         (assert-eq 0
           ```c
           /* assert-ok would assert ok; we want assert-err equivalence
-           * without pulling in assert-err. Result layout:
-           *   { bool is_ok; int64_t ok_val; int64_t err_val; } */
-          struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r =
-              (void *)(intptr_t)pr;
-          return r && !r->is_ok ? 0 : 1;
+           * without pulling in assert-err. The value is the canonical
+           * Result box, read through the emitted preamble's inspector. */
+          return (pr != 0 && !tur_is_ok(pr)) ? 0 : 1;
           ```))))
 
   (describe "plutovg/paint gradient-stops builder"

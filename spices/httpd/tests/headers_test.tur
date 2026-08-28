@@ -22,15 +22,12 @@
 
   (defn __cr-ok? [r : ptr<void>] : bool
     ```c
-    if (!r) return 0;
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return ((struct __cr *)r)->is_ok;
+    return tur_is_ok((int64_t)(intptr_t)r);
     ```)
 
   (defn __cr-val [r : ptr<void>] : int
     ```c
-    struct __cr { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return (int64_t)((struct __cr *)r)->ok_val;
+    return tur_ok_value((int64_t)(intptr_t)r);
     ```)
 
   (defn cstr-eq? [a : cstr b : cstr] : bool
@@ -40,20 +37,17 @@
     ```)
 
   ;; ok? / ok-val on the result<:cstr> that req-header returns.  We can't
-  ;; rely on stdlib/result here because the request handle's result struct
-  ;; layout is shared (bool/int64/int64) but the type elaborator gets
-  ;; confused when stdlib's polymorphic ok? meets a bare :int handle.
+  ;; rely on stdlib/result here because the type elaborator gets confused
+  ;; when stdlib's polymorphic ok? meets a bare :int handle -- so read the
+  ;; canonical Result box through the emitted preamble's inspectors.
   (defn __hdr-ok? [r : int] : bool
     ```c
-    if (!r) return 0;
-    struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return ((struct __r *)(intptr_t)r)->is_ok;
+    return tur_is_ok(r);
     ```)
 
   (defn __hdr-val [r : int] : cstr
     ```c
-    struct __r { bool is_ok; int64_t ok_val; int64_t err_val; };
-    return (const char *)(intptr_t)((struct __r *)(intptr_t)r)->ok_val;
+    return (const char *)(intptr_t)tur_ok_value(r);
     ```)
 
   (defn nil-cons [] : int

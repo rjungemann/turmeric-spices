@@ -94,14 +94,13 @@
   ```)
 
 ;; -- cmd-result helpers -----------------------------------------------------
-;; valkey/cmd returns a malloc'd {bool is_ok; int64 ok_val; int64 err_val;}
-;; result wrapping a redisReply*. We free the reply via reply-free and the
-;; wrapper itself here so neither leaks across a request.
+;; valkey/cmd returns a malloc'd canonical Result box wrapping a redisReply*.
+;; We free the reply via reply-free and the box itself here so neither leaks
+;; across a request.
 
 (defn __res-ok? [r : ptr<void>] : bool
   ```c
-  struct __vc_res { bool is_ok; int64_t ok_val; int64_t err_val; };
-  return ((struct __vc_res *)r)->is_ok;
+  return tur_is_ok((int64_t)(intptr_t)r);
   ```)
 
 (defn __res-free [r : ptr<void>] : void

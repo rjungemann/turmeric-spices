@@ -42,8 +42,8 @@
 ;; Greet the logged-in user, or send anonymous visitors to /login.
 (defn dashboard-handler [ctx : Ctx] : Response
   (let [uid (session-get ctx "user_id")]
-    (if (.is-ok uid)
-      (text (str-cat "Hello, user " (.ok-val uid)))
+    (if (ok? uid)
+      (text (str-cat "Hello, user " (ok-val uid)))
       (redirect "/login"))))
 
 ;; Clear the session and its cookie.

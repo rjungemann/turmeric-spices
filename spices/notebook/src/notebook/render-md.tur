@@ -59,32 +59,22 @@
 
   (defn __rmd-ok [value : int] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = true;
-    r->ok_val = value;
-    r->err_val = 0;
-    return (int64_t)(intptr_t)r;
+    return tur_box_ok(value);
     ```)
 
   (defn __rmd-err [value : cstr] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = malloc(sizeof(*r));
-    r->is_ok = false;
-    r->ok_val = 0;
-    r->err_val = (int64_t)(intptr_t)(value ? strdup((const char *)(intptr_t)value) : strdup(""));
-    return (int64_t)(intptr_t)r;
+    return tur_err_ptr(value ? strdup((const char *)(intptr_t)value) : strdup(""));
     ```)
 
   (defn __rmd-result-ok? [result : int] #fx{Unsafe} : bool
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
-    return r && r->is_ok;
+    return tur_is_ok(result);
     ```)
 
   (defn __rmd-result-ok-val [result : int] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *r = (void*)(intptr_t)result;
-    return r ? r->ok_val : 0;
+    return result ? tur_ok_value(result) : 0;
     ```)
 
   (defn __rmd-cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool

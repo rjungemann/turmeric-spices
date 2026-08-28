@@ -141,9 +141,9 @@
   ;; Extract the ok-value (image handle) from a png/reader result, or 0 on err.
   (defn __img-result-handle [r : ptr<void>] #fx{Unsafe} : int
     ```c
-    struct { bool is_ok; int64_t ok_val; int64_t err_val; } *res = (void *)r;
-    if (!res || !res->is_ok) return 0;
-    return res->ok_val;
+    int64_t res = (int64_t)(intptr_t)r;
+    if (!tur_is_ok(res)) return 0;
+    return tur_ok_value(res);
     ```)
 
   ;;; image-display-tui -- render an image path in the terminal.

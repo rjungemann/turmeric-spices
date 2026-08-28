@@ -48,8 +48,8 @@
 ;; unsign a cstr value; true iff it recovers to `want`. Releases the ok String.
 (defn unsign-ok-is? [key : cstr value : cstr want : cstr] : bool
   (let [r (cookie-unsign key value)]
-    (if (.is-ok r)
-      (let [id (.ok-val r)
+    (if (ok? r)
+      (let [id (ok-val r)
             eq (seq? (to-cstr id) want)]
         (do (release id) eq))
       false)))
@@ -57,8 +57,8 @@
 ;; unsign a cstr value; true iff it is rejected. Releases any (unexpected) ok.
 (defn unsign-rejects? [key : cstr value : cstr] : bool
   (let [r (cookie-unsign key value)]
-    (if (.is-ok r)
-      (do (release (.ok-val r)) false)
+    (if (ok? r)
+      (do (release (ok-val r)) false)
       true)))
 
 ;; sign under `key`; true iff the signed value contains a '.'.

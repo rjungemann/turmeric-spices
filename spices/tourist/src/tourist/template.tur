@@ -18,11 +18,9 @@
 (defn __rt-extract-ok [r : int] : cstr
   ```c
   #include <stdlib.h>
-  struct __res { bool is_ok; int64_t ok_val; int64_t err_val; };
   if (r == 0) return "";
-  struct __res *res = (struct __res *)(intptr_t)r;
-  char *val = res->is_ok ? (char *)(intptr_t)res->ok_val : (char *)"";
-  free(res);
+  char *val = tur_is_ok(r) ? (char *)(intptr_t)tur_ok_value(r) : (char *)"";
+  free((void *)(intptr_t)r);
   return val;
   ```)
 
