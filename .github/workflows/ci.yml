@@ -68,7 +68,28 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install libedit cmake liblo hiredis libpq || true
+        run: |
+          brew install libedit cmake liblo hiredis libpq || true
+          # apt drops its libraries and headers into paths the compiler
+          # already searches; Homebrew does not.  On Apple Silicon the prefix
+          # is /opt/homebrew, and clang searches neither /opt/homebrew/lib nor
+          # /opt/homebrew/include by default -- which is why osc's suites
+          # failed with `ld: library 'lo' not found` even though `brew install
+          # liblo` had just succeeded.  Keg-only formulae (libpq, libedit) are
+          # not symlinked into the prefix at all, so they need their own.
+          brew_prefix="$(brew --prefix)"
+          libs="$brew_prefix/lib"
+          incs="$brew_prefix/include"
+          for formula in libpq libedit; do
+            keg="$(brew --prefix "$formula" 2>/dev/null)" || continue
+            [ -n "$keg" ] || continue
+            libs="$libs:$keg/lib"
+            incs="$incs:$keg/include"
+          done
+          {
+            echo "LIBRARY_PATH=$libs"
+            echo "CPATH=$incs"
+          } >> "$GITHUB_ENV"
 
       - name: Build the tur compiler
         working-directory: turmeric
@@ -129,6 +150,14 @@ jobs:
         env:
           TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
         run: |
+          # tur is built here with -DCMAKE_BUILD_TYPE=Debug, so the compiler
+          # itself is ASan-instrumented and its frames are several times
+          # larger than a release build's.  emit_value_dispatch recurses over
+          # the expression tree, and ecs's test corpus is deep enough to
+          # exhaust the default 8 MB stack -- reproducible on Linux by
+          # dropping to `ulimit -s 2048`, on main's own sources.  Give the
+          # process the hard limit; macOS caps it well below `unlimited`.
+          ulimit -s unlimited 2>/dev/null || ulimit -s 65520 2>/dev/null || true
           # SC8: regression matrix.
           # Before the spice-aware-check work, `tur check src/foo/bar.tur`
           # could not resolve intra-spice imports like `(import foo/baz)`
@@ -182,6 +211,10 @@ jobs:
         env:
           TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
         run: |
+          # Same stack headroom as the type-check step above: `tur test <dir>`
+          # builds the whole directory in one go, so it is the deepest thing
+          # the ASan-instrumented compiler is asked to emit.
+          ulimit -s unlimited 2>/dev/null || ulimit -s 65520 2>/dev/null || true
           # `tur test <dir>` DOES recurse into subdirectories.  (This comment
           # used to claim the opposite; that was wrong, and it is why the ecs
           # spice's `tests/errors/` compile-FAIL fixtures were being built and
