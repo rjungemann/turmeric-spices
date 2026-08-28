@@ -30,6 +30,9 @@
         e1 (rgworld-spawn! w 20)
         e2 (rgworld-spawn! w 30)]
     (let [_ (rgworld-despawn! w e1)]
-      (println (sum-alive w 0 3 0))                 ;; 10 + 30 = 40
-      0)))
+      ;; e1 was despawned, so the guarded loop must skip it: 10 + 30 = 40.
+      ;; Returned rather than merely printed, so a wrong sum fails the file.
+      (let [total (sum-alive w 0 3 0)]
+        (println total)
+        (if (= total 40) 0 1)))))
 )
