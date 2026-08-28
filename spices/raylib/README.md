@@ -73,7 +73,7 @@ existing call sites compile unchanged.
 The value-like opaques (`Color`, `Vector2`, `Rectangle`, `Camera2D`,
 `Camera3D`, `Mesh`, `Material`, `Matrix`) are nominally distinct -- mixing
 them up is a type error (see `tests/raylib/swap_reject_test.tur`) -- but
-have no deleter, so they stay plain. See `tests/errors/` for the rejected
+have no deleter, so they stay plain. See `errors/` for the rejected
 linear cases.
 
 ## See also

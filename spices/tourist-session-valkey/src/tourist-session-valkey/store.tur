@@ -23,7 +23,7 @@
   (import session/serde :refer [sessmap-encode sessmap-decode])
   (import valkey/client :refer [Client])
   (import valkey/cmd    :refer [cmd-get cmd-set cmd-del cmd-expire])
-  (import valkey/reply  :refer [Reply reply-of reply-type reply-string reply-free])
+  (import valkey/reply  :refer [Reply reply-type reply-string reply-free])
   (export valkey-store-new)
 
 ;; default TTL (24h) when a session config asks for max-age 0 ("until browser
@@ -94,26 +94,13 @@
   ```)
 
 ;; -- cmd-result helpers -----------------------------------------------------
-;; valkey/cmd returns a malloc'd canonical Result box wrapping a redisReply*.
-;; We free the reply via reply-free and the box itself here so neither leaks
-;; across a request.
+;; valkey/cmd returns a typed `(Result Reply int)`.  Since SR2a a concrete
+;; monomorph flows BY VALUE, so there is no result box to free -- only the
+;; redisReply* the ok arm carries, which reply-free releases.
 
-(defn __res-ok? [r : ptr<void>] : bool
-  ```c
-  return tur_is_ok((int64_t)(intptr_t)r);
-  ```)
-
-(defn __res-free [r : ptr<void>] : void
-  ```c
-  #include <stdlib.h>
-  free((void *)r);
-  ```)
-
-;;; __finish -- free the reply (when present) and the result wrapper.
-(defn __finish [r : ptr<void>] : void
-  (do
-    (when (__res-ok? r) (reply-free (reply-of r)))
-    (__res-free r)))
+;;; __finish -- free the reply a command result carries, when it has one.
+(defn __finish [r : (Result Reply int)] : void
+  (when (ok? r) (reply-free (ok-val r))))
 
 ;; -- vtable slots -----------------------------------------------------------
 
@@ -123,13 +110,13 @@
         r   (cmd-get (:: (__vk-client state) :Client) key)]
     (do
       (__cstr-free key)
-      (if (__res-ok? r)
-        (let [rep (reply-of r)
+      (if (ok? r)
+        (let [rep (ok-val r)
               out (if (seq? (reply-type rep) "string")
                     (:: (sessmap-decode (reply-string rep)) :int)
                     0)]
-          (do (reply-free rep) (__res-free r) out))
-        (do (__res-free r) 0)))))
+          (do (reply-free rep) out))
+        0))))
 
 ;;; vk-save -- SET the envelope then EXPIRE the key to the session lifetime.
 ;;;

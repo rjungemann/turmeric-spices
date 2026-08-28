@@ -16,7 +16,7 @@
 (defmodule notebook/image
   (import ansi/image :refer [image-display image-display-rgba image-placeholder])
   (import ansi/term  :refer [term-image-protocol])
-  (import png/reader :refer [png-read img-free img-of])
+  (import png/reader :refer [png-read img-free])
   (import png/info   :refer [img-width img-height img-pixels])
   (export image-marker
           image-hook-record-path
@@ -138,14 +138,6 @@
     return out;
     ```)
 
-  ;; Extract the ok-value (image handle) from a png/reader result, or 0 on err.
-  (defn __img-result-handle [r : ptr<void>] #fx{Unsafe} : int
-    ```c
-    int64_t res = (int64_t)(intptr_t)r;
-    if (!tur_is_ok(res)) return 0;
-    return tur_ok_value(res);
-    ```)
-
   ;;; image-display-tui -- render an image path in the terminal.
   ;;;
   ;;; Picks a protocol via (term-image-protocol).  For Kitty (1) and iTerm2 (2)
@@ -170,18 +162,17 @@
       (do
         (if (= proto 3)
           ;; Sixel: decode the PNG ourselves and emit raw pixels.
-          (let [res (png-read path)
-                handle (__img-result-handle res)]
-            (if (= handle 0)
-              (image-placeholder path)
-              ;; img-of recovers the nominal Img opaque from the result so the
-              ;; png/info accessors (which take Img, not a bare int handle)
+          (let [res (png-read path)]
+            (if (ok? res)
+              ;; ok-val recovers the nominal Img opaque from the typed Result so
+              ;; the png/info accessors (which take Img, not a bare int handle)
               ;; type-check after png's defopaque uplift.
-              (let [img (img-of res)]
+              (let [img (ok-val res)]
                 (do
                   (image-display-rgba (img-width img) (img-height img)
                                       (img-pixels img))
-                  (img-free img)))))
+                  (img-free img)))
+              (image-placeholder path)))
           ;; Kitty / iTerm2 / placeholder: let ansi/image pick.
           (image-display path))
         ```c fputc('\n', stdout); fflush(stdout); ```

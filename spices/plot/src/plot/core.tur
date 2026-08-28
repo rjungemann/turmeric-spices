@@ -690,6 +690,23 @@
   (defn bbox-empty? [bb : BBox] : bool
     (let [lo (.x-min bb)] (not (= lo lo))))
 
+  ;;; bbox-from-raw -- pack the raw { x0,x1,y0,y1; valid } carrier (as produced
+  ;;; by __renderer-bbox / __point-list-bbox) into a typed BBox with make-struct
+  ;;; (so no struct-by-value crosses the inline-C boundary), freeing the
+  ;;; carrier. An invalid carrier becomes an empty box (x-min = NaN).
+  ;;;
+  ;;; Defined ahead of its callers on purpose: a `defn` whose return type is an
+  ;;; aggregate must be elaborated before the call site, or the caller sees the
+  ;;; int64 carrier instead of `BBox` and trips TUR-E0709.
+  (defn bbox-from-raw [b : ptr<void>] : BBox
+    (if (__rbb-valid? b)
+      (let [box (make-struct BBox (__rbb-get b 0) (__rbb-get b 1)
+                                  (__rbb-get b 2) (__rbb-get b 3))]
+        (do (__rbb-free b) box))
+      (let [n   (__rbb-nan)
+            box (make-struct BBox n n n n)]
+        (do (__rbb-free b) box))))
+
   ;;; renderer-bbox -- a renderer's data-space bounding box as a typed BBox.
   ;;;
   ;;; The Turmeric-level wrapper over the P0 `__renderer-bbox` extraction: it
@@ -699,19 +716,6 @@
   ;;; the forthcoming `Renderer` typeclass's `bounds` method will hand back.
   (defn renderer-bbox [renderer : int] : BBox
     (bbox-from-raw (__renderer-bbox renderer)))
-
-  ;;; bbox-from-raw -- pack the raw { x0,x1,y0,y1; valid } carrier (as produced
-  ;;; by __renderer-bbox / __point-list-bbox) into a typed BBox with make-struct
-  ;;; (so no struct-by-value crosses the inline-C boundary), freeing the
-  ;;; carrier. An invalid carrier becomes an empty box (x-min = NaN).
-  (defn bbox-from-raw [b : ptr<void>] : BBox
-    (if (__rbb-valid? b)
-      (let [box (make-struct BBox (__rbb-get b 0) (__rbb-get b 1)
-                                  (__rbb-get b 2) (__rbb-get b 3))]
-        (do (__rbb-free b) box))
-      (let [n   (__rbb-nan)
-            box (make-struct BBox n n n n)]
-        (do (__rbb-free b) box))))
 
   ;; ===========================================================================
   ;; Renderer typeclass -- U2 renderer-kind collapse, P2.

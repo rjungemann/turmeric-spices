@@ -91,7 +91,7 @@ appropriate `vk-*` constructor. The typed helpers (`cmd-set`, `cmd-get`,
 Under `-Xsubstructural` this makes use-after-close and connection leaks
 compile-time errors (`TUR-E0101` / `TUR-E0100`) instead of runtime faults.
 The discipline is inert in ordinary builds, so existing call sites compile
-unchanged. See `tests/errors/` for the rejected cases.
+unchanged. See `errors/` for the rejected cases.
 
 ## See also
 
