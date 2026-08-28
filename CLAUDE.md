@@ -136,3 +136,67 @@ builds `tur` from source on every run. That is intentional for CI's
 reproducibility guarantees (CI verifies spices against tip-of-main turmeric,
 not against a release). For **local** and **agent sandbox** work, prefer the
 prebuilt path above.
+
+## Writing tests that can actually fail
+
+Two traps, both of which produce a green suite that checks nothing. Both are
+silent -- no diagnostic, no warning.
+
+**A `describe` block must sit inside a `defn`.** A `(describe ...)` written as
+a direct child of `defmodule` is dropped by the compiler: it is typechecked
+and then discarded, so `tur emit-c` shows a `main` that calls
+`run-all-status` and nothing else. The suite prints `1..0 / All 0 tests
+passed` and exits 0. Wrap the blocks in a `(defn __all-tests [] : void ...)`
+and call it from `main` before `run-all-status`.
+
+**`main` must return `run-all-status`, not a hardcoded `0`.** `tur test`
+judges a file by its exit code; `(run-all)` returns void, so a failing `it`
+prints `not ok` and the suite still reports success.
+
+Related shapes worth knowing, each found the hard way:
+
+- A `defn` nested inside another `defn` is always a missing close paren. The
+  outer body then ends on a definition rather than a value and the emitted C
+  returns 0 unconditionally.
+- An inline ```c block in **statement** position (not the last form of its
+  defn) whose body contains a top-level `return` returns from the whole
+  enclosing function. Everything after it is dead code. Put the `return` in a
+  defn of its own.
+- A `: nil` self-recursive `defn` makes codegen bind a void call to
+  `__auto_type`, which cc rejects ("variable or field declared void").
+  Return `int` with an explicit base case.
+- A module-level `(def x (...))` whose initialiser has a `:linear` type (e.g.
+  stdlib's `Mutex`) emits no global at all; the C then fails on an undeclared
+  identifier. Hold the carrier instead: `(def m (:: (mutex-new) :int))`, and
+  cast back at each borrow.
+
+## `:cmake-deps` that the fetch heuristics cannot describe
+
+Without `:targets`, `tur fetch` guesses a dep's include dir
+(`${SOURCE_DIR}/include`, else `${SOURCE_DIR}`) and its `-l` name (the dep or
+target basename). Several real libraries defeat both guesses: a
+header-only library with its header in `src/`; a target whose `OUTPUT_NAME`
+differs from its name (glfw builds `libglfw3.a`); a find_package import whose
+target is `PostgreSQL::PostgreSQL` while the library is `libpq`; a "library"
+that is really a code generator (glad).
+
+The fix is a small CMake project under `spices/<spice>/cmake-deps/<name>/`
+that produces a target whose name **is** the `-l` name, declared as a `:path`
+cmake-dep with `:targets`:
+
+```turmeric
+:cmake-deps #map{
+  "raygui" #map{:path    "../cmake-deps/raygui"
+                :targets ["raygui"]}}
+```
+
+With `:targets`, tur reads include dirs from the target's
+`INTERFACE_INCLUDE_DIRECTORIES` and link dirs from `$<TARGET_FILE_DIR:...>`
+instead of guessing. Note the leading `../`: `:path` is spliced in as
+`add_subdirectory("./<path>")` inside `cmake/`, so the path is relative to
+that directory, not to the spice root. See `raygui`, `opengl` and `postgres`
+for worked examples.
+
+A missing header does **not** fail the build: hoisted includes are emitted as
+`#if __has_include(<x.h>) ... #endif`, so a wrong include dir degrades
+silently into implicit declarations and confusing type errors much later.
