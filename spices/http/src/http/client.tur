@@ -49,21 +49,29 @@
   #include <unistd.h>
   #include <sys/socket.h>
   #include <netdb.h>
-
-  /* TLS is optional. Detect mbedTLS at compile time; when absent, https://
-     URLs return a runtime err rather than failing the build. */
-  #if defined(__has_include)
-  #  if __has_include(<mbedtls/ssl.h>)
-  #    define __TUR_HTTP_TLS 1
-  #  endif
-  #endif
-
-  #ifdef __TUR_HTTP_TLS
   #include <mbedtls/net_sockets.h>
   #include <mbedtls/ssl.h>
   #include <mbedtls/entropy.h>
   #include <mbedtls/ctr_drbg.h>
   #include <mbedtls/error.h>
+
+  /* The mbedTLS includes above must stay in the unbroken run of #include
+     lines at the HEAD of this body -- not even a comment may interrupt it.
+     tur hoists that leading run up to file scope and stops at the first line
+     that is not an #include; behind the #ifdef they used to sit below, they
+     were left inside the function body, so mbedtls/error.h's `static inline
+     mbedtls_error_add` was declared inside a function ("invalid storage class
+     for function") and every httpd test that pulls in http/client failed to
+     compile. mbedTLS is a hard :cmake-deps of this spice, so it is always
+     present and the includes need no guard; the detection below still gates
+     the TLS code paths.
+
+     Detect mbedTLS at compile time; when absent, https:// URLs return a
+     runtime err rather than failing the build. */
+  #if defined(__has_include)
+  #  if __has_include(<mbedtls/ssl.h>)
+  #    define __TUR_HTTP_TLS 1
+  #  endif
   #endif
 
   struct __cons { int64_t value; int64_t next; };
