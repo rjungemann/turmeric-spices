@@ -43,6 +43,12 @@ jobs:
       # configure aborts ("RandR headers not found"), which means NO dep gets
       # built for that spice -- not just the graphical one -- and every test
       # in it fails to compile.
+      #
+      # liblo is for osc, and is a system package rather than a source build
+      # on purpose: liblo keeps no CMakeLists.txt at its repo root (its CMake
+      # project lives in cmake/), so FetchContent adds a directory with
+      # nothing to build and produces no library. The osc dep is keyed "lo",
+      # i.e. -llo, which the distro's liblo.so satisfies directly.
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -50,11 +56,12 @@ jobs:
           sudo apt-get install -y \
             libedit-dev cmake \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libgl1-mesa-dev libasound2-dev libxkbcommon-dev
+            libgl1-mesa-dev libasound2-dev libxkbcommon-dev \
+            liblo-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install libedit cmake || true
+        run: brew install libedit cmake liblo || true
 
       - name: Build the tur compiler
         working-directory: turmeric
