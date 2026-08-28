@@ -95,6 +95,6 @@ flows through tourist's middleware chain like any other route.
 
 ## Tests
 
-`tests/fixtures/rest-plus-ws/` is the TOUR-V0.3 coexistence fixture: a single
+`fixtures/rest-plus-ws/` is the TOUR-V0.3 coexistence fixture: a single
 app with both a `/api` REST route and a `/ws` WebSocket route. Type-check it
-with `tur check tests/fixtures/rest-plus-ws/main.tur`.
+with `tur check fixtures/rest-plus-ws/main.tur`.

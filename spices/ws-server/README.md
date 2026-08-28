@@ -206,14 +206,14 @@ that drops straight into a tourist app's route list -- no need to wire up
   echoes out), covering the handshake, five text messages, and the 16-bit
   length path. It cannot use the `ws-client` spice in-process because both
   spices define `WsConn` / `WsFrame`.
-- `tests/fixtures/echo/run.sh` -- live round-trip with the **`ws-client`**
+- `fixtures/echo/run.sh` -- live round-trip with the **`ws-client`**
   spice as the driver, run as a separate process to avoid that type clash.
 - `tests/broadcast_test.tur` -- flat broadcast fan-out test (run by CI via
   `tur test tests`): a `Mutex<vec<WsConn>>` hub built from plain user code on
   top of the spice surface. Three inline raw-socket clients connect, one sends
   a single text frame, and three reader threads each verify they receive it --
   exercising the fan-out to every registered connection under the hub lock.
-- `tests/fixtures/broadcast/run.sh` -- the same broadcast scenario driven by
+- `fixtures/broadcast/run.sh` -- the same broadcast scenario driven by
   three concurrent **`ws-client`** connections in a separate process.
 
 ## See also

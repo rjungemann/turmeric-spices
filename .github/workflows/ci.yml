@@ -95,15 +95,17 @@ jobs:
           # walk alone resolves them -- verified: ecs-raylib still gets
           # raylib, plot still gets plutovg, httpd still gets yyjson+mbedtls.
           root="$GITHUB_WORKSPACE/turmeric-spices/build.tur"
-          moved=""
-          if [ -f "$root" ]; then mv "$root" "$root.ci-hidden"; moved=1; fi
+          # Restore on any exit path -- a half-hidden workspace root would
+          # break every step after this one.
+          trap '[ -f "$root.ci-hidden" ] && mv "$root.ci-hidden" "$root"' EXIT
+          if [ -f "$root" ]; then mv "$root" "$root.ci-hidden"; fi
           rc=0
           if grep -qE ':cmake-deps|:spices' build.tur; then
             "$GITHUB_WORKSPACE/turmeric/build/tur" fetch --update || rc=$?
           else
             echo "no :cmake-deps or :spices declared"
           fi
-          if [ -n "$moved" ]; then mv "$root.ci-hidden" "$root"; fi
+          if [ -f "$root.ci-hidden" ]; then mv "$root.ci-hidden" "$root"; fi
           if [ "$rc" -ne 0 ]; then
             echo "::warning::fetch reported errors (often optional :spices entries); proceeding anyway"
           fi
@@ -218,7 +220,8 @@ jobs:
       # spice's errors/run.sh pins the code AND a witness substring.
       #
       # Opt-in per spice: the step is a no-op unless errors/run.sh exists.
-      # Currently: ecs (16 fixtures), secret (3).
+      # Currently: c-dsl, ecs, http, httpd, linalg, opengl, postgres, raylib,
+      # raygui, rtaudio, secret, sqlite, thread-pool, tls, valkey.
       - name: Assert compile-fail diagnostics (if any)
         working-directory: turmeric-spices/spices/${{ matrix.spice }}
         env:
@@ -229,6 +232,28 @@ jobs:
             exit 0
           fi
           errors/run.sh "$GITHUB_WORKSPACE/turmeric/build/tur"
+
+      # Runnable end-to-end fixtures: a spice may keep a `fixtures/` directory
+      # of whole PROGRAMS (each with its own `main`) rather than test suites.
+      # Like errors/, they cannot live under tests/ -- `tur test` recurses, and
+      # would build each fixture as a suite, find no tests in it, and count it
+      # as a failure. That alone made several jobs red.
+      #
+      # Opt-in per spice: the step is a no-op unless fixtures/run.sh exists.
+      # Currently: template (4 fixtures). tourist, tourist-ws, tls, ws-client
+      # and ws-server keep fixtures/ directories whose per-fixture run.sh
+      # scripts need a live server or a Python helper; those stay manual, and
+      # the absent aggregate runner makes this step skip them.
+      - name: Run end-to-end fixtures (if any)
+        working-directory: turmeric-spices/spices/${{ matrix.spice }}
+        env:
+          TUR_STDLIB_DIR: ${{ github.workspace }}/turmeric/stdlib
+        run: |
+          if [ ! -x fixtures/run.sh ]; then
+            echo "no fixtures/run.sh; skipping end-to-end fixtures"
+            exit 0
+          fi
+          fixtures/run.sh "$GITHUB_WORKSPACE/turmeric/build/tur"
 
   # Enumerate the spices/ subdirectories that contain a build.tur so the
   # matrix below stays in sync as spices are added.  Output is a JSON array
