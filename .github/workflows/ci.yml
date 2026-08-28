@@ -366,11 +366,23 @@ jobs:
           for d in spices/*/; do
             name=$(basename "$d")
             pushd "$d" >/dev/null
-            # tur fetch is the cheapest way to exercise the manifest parser.
-            # We do not require fetch to succeed (optional :spices entries
-            # may fail to clone) -- only that no `:cmake-deps must be a map`
-            # or other manifest-parse diagnostic is emitted.
-            out=$("$GITHUB_WORKSPACE/turmeric/build/tur" fetch 2>&1 || true)
+            # --dry-run is the cheapest way to exercise the manifest parser:
+            # it parses, plans, and stops, performing no clone and leaving
+            # tur.lock untouched. We do not require the plan to succeed
+            # (optional :spices entries may be unreachable) -- only that no
+            # `:cmake-deps must be a map` or other manifest-parse diagnostic
+            # is emitted, and --dry-run still emits those.
+            #
+            # It used to be a plain `tur fetch`, which was survivable only
+            # because every spice had a committed tur.lock: fetch without
+            # --update treats the presence of a lock row as "already on disk"
+            # and skips the work. Those lockfiles are gone now (see
+            # .gitignore for why), so a plain fetch here genuinely cloned and
+            # configured every native dep -- and because this loop, unlike the
+            # per-spice job below, does not move the workspace root build.tur
+            # aside, each of the 45 iterations walked every workspace member
+            # and so built all 17 native libraries in the repo. The job hung.
+            out=$("$GITHUB_WORKSPACE/turmeric/build/tur" fetch --dry-run 2>&1 || true)
             if echo "$out" | grep -q 'must be a map\|no (defpackage'; then
               echo "::error::$name manifest parse error"
               echo "$out"
