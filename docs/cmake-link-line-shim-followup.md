@@ -5,27 +5,27 @@ upstream fixes.** Nothing here should land until the turmeric changes are
 merged and CI builds a compiler that has them.
 
 **What changed since this was first written.** Four more upstream defects were
-found and fixed by testing against these spices rather than fixtures: a 
+found and fixed by testing against these spices rather than fixtures: a `:path`
 cmake-dep was doubled and then resolved against the wrong base directory, one
-dependency with an old  aborted every configure on
-CMake 4, shared-library deps linked clean and died at load with no ,
-and -- most relevant here --  is now walked inside
+dependency with an old `cmake_minimum_required` aborted every configure on
+CMake 4, shared-library deps linked clean and died at load with no `-rpath`,
+and -- most relevant here -- `INTERFACE_LINK_LIBRARIES` is now walked inside
 CMake at configure time, recursing through non-linkable targets.
 
-That last one matters for : **a raylib-backed spice now builds and runs
-on macOS with no shim at all.** raylib vendors glfw as an , so
+That last one matters for `raygui`: **a raylib-backed spice now builds and runs
+on macOS with no shim at all.** raylib vendors glfw as an `OBJECT_LIBRARY`, so
 its Cocoa/IOKit requirements are only reachable by recursing into it, and its
-OpenGL requirement arrives as an absolute  path that has to be
-respelled . Both are handled upstream now. So the framework
+OpenGL requirement arrives as an absolute `.framework` path that has to be
+respelled `-framework OpenGL`. Both are handled upstream now. So the framework
 and link-name reasoning in the per-shim audit below is settled; what is left in
 each shim is the non-framework work.
 
- still does not configure, but for a new and structural reason:
-every workspace sibling's  merge into one CMake project sharing
-one target namespace, and 's glfw collides with the glfw raylib vendors
-for  (). Filed upstream as
-. That is now the blocker,
-not the  bug named further down.
+`spices/opengl` still does not configure, but for a new and structural reason:
+every workspace sibling's `:cmake-deps` merge into one CMake project sharing
+one target namespace, and `opengl`'s glfw collides with the glfw raylib vendors
+for `raygui` (`add_library cannot create target "glfw"`). Filed upstream as
+`transitive-cmake-deps-collide-on-duplicate-targets`. That is now the blocker,
+not the `:path` bug named further down.
 
 **Original status:** Nothing in this document should land until the turmeric
 change that motivates it is merged and CI is building a compiler that has it.
