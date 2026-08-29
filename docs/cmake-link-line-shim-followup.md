@@ -31,6 +31,34 @@ not the `:path` bug named further down.
 change that motivates it is merged and CI is building a compiler that has it.
 Filed 2026-08-28 so the work is not lost.
 
+## Update 2 (2026-08-28): `spices/opengl` builds
+
+The last upstream blocker is fixed. `pkg_collect_transitive_cmake_deps` no
+longer seeds every workspace `:members` sibling, so building one spice no
+longer configures every member's native deps -- for `spices/opengl` that was
+**15** dependencies (mbedtls, sqlite3, libpq, rtaudio, ...) where it needs
+glfw and glad. It is now 1.
+
+`spices/opengl` fetches, configures, builds `libglfw.a` + `libglad.a`, and
+`tur build .` succeeds on macOS. `spices/raygui`'s raylib links with no shim.
+Both spices the framework report listed as compiler-blocked are now unblocked.
+
+Two consequences for this repo:
+
+1. **The CI workaround in `.github/workflows/ci.yml` is now redundant.** The
+   "Fetch C dependencies" step moves the root `build.tur` aside so the
+   directory stops looking like a workspace, precisely to stop the compiler
+   pulling in all 17 native libs. That hack -- and its `trap`-based restore --
+   can be deleted once CI builds a compiler with the fix. Its comment is the
+   best statement of the problem anyone wrote; worth preserving in the commit
+   message that removes it.
+2. **glad needs `jinja2`** at build time (it is a Python generator that renders
+   the loader from templates). CI already installs `python3-jinja2`; a local
+   developer needs it too, and CMake's `find_package(Python)` prefers a
+   framework Python over `PATH`, so a bare venv on `PATH` is not enough --
+   set `VIRTUAL_ENV`/`Python_ROOT_DIR`, or install it into the interpreter
+   CMake selects. Worth a line in the opengl README.
+
 ## Background
 
 Two turmeric reports were fixed together on 2026-08-28:
