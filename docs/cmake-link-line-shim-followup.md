@@ -52,12 +52,12 @@ Two consequences for this repo:
    can be deleted once CI builds a compiler with the fix. Its comment is the
    best statement of the problem anyone wrote; worth preserving in the commit
    message that removes it.
-2. **glad needs `jinja2`** at build time (it is a Python generator that renders
-   the loader from templates). CI already installs `python3-jinja2`; a local
-   developer needs it too, and CMake's `find_package(Python)` prefers a
-   framework Python over `PATH`, so a bare venv on `PATH` is not enough --
-   set `VIRTUAL_ENV`/`Python_ROOT_DIR`, or install it into the interpreter
-   CMake selects. Worth a line in the opengl README.
+2. **glad's `jinja2` prerequisite is gone** -- resolved in this branch by
+   vendoring the generator's output (`spices/opengl/cmake-deps/opengl/glad/`,
+   ~1.4 MB), the same thing raylib does with its own checked-in copy. The
+   `python3-jinja2` line in CI's apt install is now unnecessary for this spice.
+   Verified with no jinja2 installed: fetch and build both succeed with zero
+   Python invocations.
 
 ## Background
 
