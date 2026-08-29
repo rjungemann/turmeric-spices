@@ -1,31 +1,28 @@
 # `cmake-deps/` shim follow-up: what the turmeric link-line fix makes removable
 
-**Status: blocked, and partly superseded -- updated 2026-08-28 after further
-upstream fixes.** Nothing here should land until the turmeric changes are
-merged and CI builds a compiler that has them.
+**Status: partly landed -- updated 2026-08-29.** rjungemann/turmeric#791 is
+merged to turmeric `main`, so the changes that were gated on it are now done in
+this branch:
 
-**What changed since this was first written.** Four more upstream defects were
-found and fixed by testing against these spices rather than fixtures: a `:path`
-cmake-dep was doubled and then resolved against the wrong base directory, one
-dependency with an old `cmake_minimum_required` aborted every configure on
-CMake 4, shared-library deps linked clean and died at load with no `-rpath`,
-and -- most relevant here -- `INTERFACE_LINK_LIBRARIES` is now walked inside
-CMake at configure time, recursing through non-linkable targets.
+- **The CI workspace-root workaround is removed.** Verified against the merged
+  compiler: `tur fetch` in `spices/opengl` with the workspace root in place
+  emits exactly one dep (`opengl-deps`), not 17.
+- **The opengl shim's `set_target_properties(glfw PROPERTIES OUTPUT_NAME glfw)`
+  is removed.** glfw now builds as `libglfw3.a` under its own name and tur
+  links it by `$<TARGET_FILE:glfw>`; `tur fetch` and `tur build .` both exit 0
+  and all eight modules type-check.
+- **glad is vendored**, so `python3-jinja2` is gone from CI and no spice needs
+  Python to build.
 
-That last one matters for `raygui`: **a raylib-backed spice now builds and runs
-on macOS with no shim at all.** raylib vendors glfw as an `OBJECT_LIBRARY`, so
-its Cocoa/IOKit requirements are only reachable by recursing into it, and its
-OpenGL requirement arrives as an absolute `.framework` path that has to be
-respelled `-framework OpenGL`. Both are handled upstream now. So the framework
-and link-name reasoning in the per-shim audit below is settled; what is left in
-each shim is the non-framework work.
+**Still outstanding** (not gated on anything upstream, just untested here):
 
-`spices/opengl` still does not configure, but for a new and structural reason:
-every workspace sibling's `:cmake-deps` merge into one CMake project sharing
-one target namespace, and `opengl`'s glfw collides with the glfw raylib vendors
-for `raygui` (`add_library cannot create target "glfw"`). Filed upstream as
-`transitive-cmake-deps-collide-on-duplicate-targets`. That is now the blocker,
-not the `:path` bug named further down.
+- **postgres**: move to `:prefer-system` + `:targets ["PostgreSQL::PostgreSQL"]`
+  and drop the `pq` re-export target, keeping the Homebrew keg-only
+  `PostgreSQL_ROOT` probe. Not done because libpq is not installed on the box
+  this was written on, so it could not be verified.
+- **raygui**: the implementation TU (`raygui_impl.c`) still needs somewhere to
+  live; `:c-sources` is the plausible destination and that is a redesign, not a
+  deletion.
 
 **Original status:** Nothing in this document should land until the turmeric
 change that motivates it is merged and CI is building a compiler that has it.

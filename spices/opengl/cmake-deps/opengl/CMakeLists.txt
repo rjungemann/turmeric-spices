@@ -41,9 +41,11 @@ FetchContent_Declare(glfw
 )
 FetchContent_MakeAvailable(glfw)
 
-# Make the archive's name match the target's, so the -l the manifest derives
-# from the target name resolves.
-set_target_properties(glfw PROPERTIES OUTPUT_NAME glfw)
+# glfw's OUTPUT_NAME is glfw3, so its archive is libglfw3.a while its target is
+# `glfw`. That mismatch used to need a rename here -- the manifest derived `-l`
+# from the target *name*, so `-lglfw` did not resolve. rjungemann/turmeric#791
+# made tur link by $<TARGET_FILE:glfw>, which is the artifact CMake actually
+# produces, so the rename is gone and glfw builds under its own name.
 
 # ---------------------------------------------------------------------------
 # glad -- vendored, pre-generated
