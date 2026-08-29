@@ -19,7 +19,11 @@
 ```c
 #include <stdlib.h>
 #include <pthread.h>
-struct __httpd_warg { int client_fd; void *handler; };
+/* No local `struct __httpd_warg` here: httpd/pool defines it at file scope and
+   is imported above, so both land in the same translation unit and a second
+   definition is a C redefinition error. The local copy had also gone stale --
+   it predated the `conn_mode` field, and being the one the compiler saw at the
+   use site it broke httpd/pool's own `wa->conn_mode = ...`. */
 static pthread_mutex_t g_mu     = PTHREAD_MUTEX_INITIALIZER;
 static long            g_served = 0;
 static long            g_fd_sum = 0;

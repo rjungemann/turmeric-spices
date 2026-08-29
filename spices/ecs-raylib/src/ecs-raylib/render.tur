@@ -22,17 +22,24 @@
   ```)
 
 ;;; render-circles -- emit a defn `name` that draws every
-;;; (Pos2, Radius, Color) entity as a filled circle at its position.
+;;; (Pos2, Radius, Tint) entity as a filled circle at its position.
 ;;; Must be called between `begin-drawing` and `end-drawing`.
 ;;;
 ;;;   (render-circles render GameWorld)
 ;;;   ;; later: (render w)
 ;;;
-;;; Since: E3
+;;; The colour component is `Tint`, not raylib's `Color`.  `Color` belongs to
+;;; raylib/types and `Component` to ecs/world, so no module in this spice can
+;;; legally write `(defcomponent Color)` -- see the Tint note in
+;;; ecs-raylib/components.  `tint-make` wraps a Color for storage;
+;;; `tint-color` unwraps it.
+;;;
+;;; Since: E3 (colour component became Tint in E4)
 (defmacro render-circles [name world-type]
   `(defn ~name [^borrow w : ~world-type] : nil
-     (for-each w [Pos2 Radius Color] [e p r c]
+     (for-each w [Pos2 Radius Tint] [e p r c]
        (__raylib-draw-circle (pos2-x (:: p Pos2)) (pos2-y (:: p Pos2))
-                              (radius-value (:: r Radius)) c))))
+                              (radius-value (:: r Radius))
+                              (:: (:: c Tint) :int)))))
 
 ) ;; end defmodule

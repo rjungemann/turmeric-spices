@@ -16,7 +16,7 @@
           gui-toggle gui-toggle-group gui-check-box
           gui-slider gui-slider-bar gui-progress-bar
           gui-spinner gui-value-box
-          gui-text-box gui-text-box-multi
+          gui-text-box
           gui-combo-box gui-dropdown-box
           gui-list-view gui-list-view-ex
           gui-color-picker gui-color-bar-alpha gui-color-bar-hue
@@ -332,31 +332,16 @@
   return (int64_t)edit_b;
   ```)
 
-;;; gui-text-box-multi -- draw a multi-line text input box.
-;;;
-;;; Parameters:
-;;;   r    -- bounding Rect
-;;;   buf  -- mutable text buffer handle (from make-text-buf)
-;;;   size -- buffer capacity in bytes
-;;;   edit -- current edit mode state
-;;;
-;;; Returns:
-;;;   New edit mode state.
-;;;
-;;; Example:
-;;;   (set! editing (gui-text-box-multi (rect 10.0 10.0 300.0 120.0) notes-buf 256 editing))
-;;;
-;;; Since: Phase 3
-(defn gui-text-box-multi [r : Rect buf : int size : int edit : int] : int
-  ```c
-  #include <raylib.h>
-  #include <raygui.h>
-  Rectangle bounds = { (float)r.x, (float)r.y, (float)r.width, (float)r.height };
-  bool edit_b = (bool)edit;
-  int result = GuiTextBoxMulti(bounds, (char *)(intptr_t)buf, (int)size, edit_b);
-  if (result) edit_b = !edit_b;
-  return (int64_t)edit_b;
-  ```)
+;; gui-text-box-multi is gone.
+;;
+;; It wrapped GuiTextBoxMulti, which raygui removed in 4.0 -- the version this
+;; spice pins.  There is no replacement: 4.0's GuiTextBox carries a
+;; `bool multiline = false;` with a "TODO: Consider multiline text input"
+;; beside it, so the control genuinely does not exist.  Nothing could have
+;; been calling this: without the header on the include path every Gui* call
+;; fell through to an implicit declaration, so the whole spice has never
+;; linked, and GuiTextBoxMulti would have been an undefined symbol the moment
+;; it did.  Removing an export that could never resolve is not a break.
 
 ;; ---------------------------------------------------------------------------
 ;; Edit-mode numeric controls (Phase 3)
@@ -693,8 +678,17 @@
   #include <raylib.h>
   #include <raygui.h>
   Rectangle bounds = { (float)r.x, (float)r.y, (float)r.width, (float)r.height };
-  Vector2 cell = GuiGrid(bounds, (const char *)text, (float)spacing, (int)divs, NULL);
-  if (cell.x < 0.0f) return (int64_t)-1;
+  /* GuiGrid reports the hovered cell through its `Vector2 *mouseCell`
+     out-parameter and returns an int result code; this used to assign its
+     return value straight into a Vector2 ("invalid initializer") and pass
+     NULL for the out-param, so the cell was thrown away.
+     raygui leaves *mouseCell at {0,0} when the pointer is outside bounds,
+     which is indistinguishable from cell (0,0) -- so the "-1 when the mouse
+     is elsewhere" contract this function documents is decided here, with the
+     same hit test raygui itself uses. */
+  Vector2 cell = { 0 };
+  GuiGrid(bounds, (const char *)text, (float)spacing, (int)divs, &cell);
+  if (!CheckCollisionPointRec(GetMousePosition(), bounds)) return (int64_t)-1;
   return (int64_t)(((int64_t)(int)cell.y << 32) | (int64_t)(int)cell.x);
   ```)
 

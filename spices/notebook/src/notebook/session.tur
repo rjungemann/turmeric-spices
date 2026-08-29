@@ -4,7 +4,7 @@
   (export notebook-session-autolink-hint
           output-status-ok output-status-error output-status-skipped
           session-open session-close session-reset session-eval
-          cell-output-make
+          cell-output-make cell-output-free
           cell-output-cell-id cell-output-status cell-output-stdout
           cell-output-value-repr cell-output-error-msg
           cell-output-elapsed-ms cell-output-image-paths)
@@ -46,8 +46,67 @@
     out->value_repr = value_repr_text ? strdup((const char *)(intptr_t)value_repr_text) : strdup("");
     out->error_msg = error_msg_text ? strdup((const char *)(intptr_t)error_msg_text) : strdup("");
     out->elapsed_ms = elapsed_ms_value;
-    out->image_paths = image_paths_list;
+    /* Copy the caller's list into cells this output owns, so cell-output-free
+       has one rule to follow no matter which constructor built the output.
+       The caller keeps its own list. */
+    {
+      typedef struct { int64_t head; int64_t tail; } Cons;
+      Cons *src = (Cons *)(intptr_t)image_paths_list;
+      Cons *head = NULL, *tail = NULL;
+      while (src) {
+        Cons *node = malloc(sizeof(*node));
+        const char *p = (const char *)(intptr_t)src->head;
+        node->head = (int64_t)(intptr_t)strdup(p ? p : "");
+        node->tail = 0;
+        if (!head) head = node; else tail->tail = (int64_t)(intptr_t)node;
+        tail = node;
+        src = (Cons *)(intptr_t)src->tail;
+      }
+      out->image_paths = (int64_t)(intptr_t)head;
+    }
     return (int64_t)(intptr_t)out;
+    ```)
+
+;;; cell-output-free -- release a cell-output and everything it owns.
+;;;
+;;; There was no way to release one.  cell-output-make and cache-get both
+;;; malloc a NotebookCellOutput with four strdup'd strings, session-eval hands
+;;; one back for every cell evaluated, and nothing ever freed any of it -- so
+;;; every notebook test that evaluated a cell ended with AddressSanitizer
+;;; reporting the leak and exiting non-zero.  (tur's Debug build compiles the
+;;; C it generates with -fsanitize=address,undefined on purpose.)
+;;;
+;;; The image-paths list is owned by the output: cell-output-make copies the
+;;; caller's list into malloc'd cells so that the ownership rule is the same
+;;; whichever constructor produced the output, and this frees them.  Safe on 0.
+;;;
+;;; Since: notebook-v0.1.1
+  (defn cell-output-free [output : int] #fx{Unsafe} : void
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    typedef struct {
+      char *cell_id;
+      int64_t status;
+      char *stdout_text;
+      char *value_repr;
+      char *error_msg;
+      int64_t elapsed_ms;
+      int64_t image_paths;
+    } NotebookCellOutput;
+    NotebookCellOutput *out = (NotebookCellOutput *)(intptr_t)output;
+    if (!out) return;
+    free(out->cell_id);
+    free(out->stdout_text);
+    free(out->value_repr);
+    free(out->error_msg);
+    Cons *node = (Cons *)(intptr_t)out->image_paths;
+    while (node) {
+      Cons *next = (Cons *)(intptr_t)node->tail;
+      free((char *)(intptr_t)node->head);
+      free(node);
+      node = next;
+    }
+    free(out);
     ```)
 
   (defn cell-output-cell-id [output : int] #fx{Unsafe} : cstr

@@ -111,10 +111,29 @@
     if (str) fputs(str, stdout);
     ```)
 
+  ;; A FAIL used to be printed and then forgotten -- this file's `main` was
+  ;; `(defn main [] : int 0)`, so nothing it checked could reach the exit
+  ;; status. Count failures instead, so main can return them.
+  ;; The counter is declared through a __tur_include__ marker, which hoists it
+  ;; to C file scope where both accessors below can see it.
+  (defn __record-fail [] #fx{Unsafe} : void
+    ```c
+    /* __tur_include__: static int __tidal_fails = 0; */
+    __tidal_fails++;
+    ```)
+
+  ;; No __tur_include__ marker here on purpose -- the hoist emits one
+  ;; declaration per marker, so repeating it is a C redefinition. The one in
+  ;; __record-fail lands at file scope ahead of both functions.
+  (defn __fail-count [] #fx{Unsafe} : int
+    ```c
+    return __tidal_fails;
+    ```)
+
   (defn print-bool [label : cstr b : bool] #fx{Unsafe} : void
     (if b
       (do (tidal-print label) (println " PASS"))
-      (do (tidal-print label) (println " FAIL"))))
+      (do (tidal-print label) (println " FAIL") (__record-fail))))
 
   ;; ---- tidal/event inline ----
 
@@ -1093,7 +1112,10 @@
                 (tidal-concat dur-str "] inf)) play)"))))))))
 
   ;; ---- tests ----
+  ;; Wrapped in a defn and called from main. As a bare top-level block none of
+  ;; this ran: the file printed nothing at all and checked nothing.
 
+  (defn __run-checks [] #fx{Unsafe} : void
   (unsafe
   (println "=== tidal/event ===")
 
@@ -1242,8 +1264,8 @@
   (println "")
   (println "Done.")
 
-  )
-  0
+  ))
 
-
-  (defn main [] : int 0))
+  (defn main [] : int
+    (unsafe (__run-checks))
+    (unsafe (__fail-count))))

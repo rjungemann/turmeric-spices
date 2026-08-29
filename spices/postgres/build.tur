@@ -4,14 +4,20 @@
   :description "PostgreSQL client for Turmeric via libpq"
   :license     "MIT"
   :spices #map{
-    "test" #map{:url    "https://github.com/rjungemann/turmeric-spices"
-            :ref    "test-v0.1.0"
-            :subdir "spices/test"
-            :optional true}
+    "test" #map{:path   "../test"
+                :url    "https://github.com/rjungemann/turmeric-spices"
+                :ref    "test-v0.1.0"
+                :subdir "spices/test"
+                :optional true}
   }
+  ;; libpq comes from the system; cmake-deps/postgres/CMakeLists.txt finds it
+  ;; and re-exports it as a target named `pq`, because tur derives the -l name
+  ;; from the target basename and PostgreSQL::PostgreSQL would give the
+  ;; non-existent -lPostgreSQL.  :path is spliced in as
+  ;; add_subdirectory("./<path>") relative to cmake/, hence the leading ../
   :cmake-deps #map{
-    "libpq" #map{:cmake-name "PostgreSQL"
-             :targets    ["PostgreSQL::PostgreSQL"]}
+    "libpq" #map{:path    "../cmake-deps/postgres"
+                 :targets ["pq"]}
   }
   :exports #map{
     "postgres/db"     ["Conn"

@@ -4,13 +4,15 @@
   :description "2D data visualization rendered with plutovg"
   :license     "MIT"
   :spices #map{
-    "plutovg" #map{:url    "https://github.com/rjungemann/turmeric-spices"
-                :ref    "plutovg-v0.1.0"
-                :subdir "spices/plutovg"}
-    "test" #map{:url    "https://github.com/rjungemann/turmeric-spices"
-             :ref    "test-v0.1.0"
-             :subdir "spices/test"
-             :optional true}
+    "plutovg" #map{:path   "../plutovg"
+                   :url    "https://github.com/rjungemann/turmeric-spices"
+                   :ref    "plutovg-v0.1.0"
+                   :subdir "spices/plutovg"}
+    "test" #map{:path   "../test"
+                :url    "https://github.com/rjungemann/turmeric-spices"
+                :ref    "test-v0.1.0"
+                :subdir "spices/test"
+                :optional true}
   }
   ;; plot's inline C calls plutovg_* directly, but libplutovg (the C library)
   ;; is the plutovg *spice*'s own :cmake-deps. The compiler now collects
@@ -28,7 +30,12 @@
                      "sym-cross" "sym-plus" "sym-diamond"]
     "plot/tick"     ["linear-ticks" "log-ticks" "format-tick"
                      "linear-tick-labels" "log-tick-labels"]
-    "plot/core"     ["plot" "plot-write-png" "plot-into-canvas"]
+    "plot/core"     ["plot" "plot-write-png" "plot-into-canvas"
+                     ;; `render` is the Backend-generic entry point; the
+                     ;; class and the three sinks are what a caller needs
+                     ;; to build an argument for it.
+                     "render"
+                     "CanvasBackend" "SurfaceBackend" "PngBackend"]
     "plot/decor"    ["x-axis" "y-axis" "axes"
                      "x-tick-lines" "y-tick-lines" "tick-grid"
                      "hrule" "hrule-styled" "vrule" "vrule-styled"

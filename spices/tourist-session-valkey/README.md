@@ -14,13 +14,13 @@ It plugs into the same `Store` vtable, so installation is identical to the
 built-in stores:
 
 ```turmeric
-(import valkey/client          :refer [client-connect client-of client-close])
+(import valkey/client          :refer [client-connect client-close])
 (import tourist-session-valkey/store :refer [valkey-store-new])
 (import session/mw             :refer [session-mw])
 (import session/config         :refer [default-session-config])
 
 (defn main [] : int
-  (let [c     (client-of (client-connect "127.0.0.1" 6379))
+  (let [c     (ok-val (client-connect "127.0.0.1" 6379))
         store (valkey-store-new c "sess" 86400)]   ;; client, key prefix, max-age
     (let [srv (tourist 3000
                 (session-mw store (default-session-config))

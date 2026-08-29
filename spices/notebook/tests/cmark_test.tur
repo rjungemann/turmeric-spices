@@ -198,6 +198,12 @@
       "<table>\n<thead>\n<tr><th align=\"left\">name</th><th align=\"right\">value</th></tr>\n</thead>\n<tbody>\n<tr><td align=\"left\">foo</td><td align=\"right\"><del>bar</del></td></tr>\n</tbody>\n</table>"
       (md-emit-html (md-parse "| name | value |\n| :--- | ---: |\n| foo | ~~bar~~ |"))))
 
+;;; The markdown table emitter had no coverage -- only the HTML one did -- so
+;;; nothing pinned down where its cells, separators and alignment row land.
+  (defn test-gfm-table-roundtrip [] #fx{Unsafe} : bool
+    (let [source "| name | value |\n| :--- | ---: |\n| foo | bar |\n| baz | qux |"]
+      (cstr-eq? source (md-emit (md-parse source)))))
+
   (defn test-task-list [] #fx{Unsafe} : bool
     (let [doc (md-parse "- [ ] todo\n- [x] done")
           lst (first-child doc)
@@ -309,9 +315,10 @@
           f24 (run-case 24 "unterminated math block degrades to paragraph" (test-math-block-unterminated))
           f25 (run-case 25 "round-trips mixed prose and math" (test-math-roundtrip-mixed))
           f26 (run-case 26 "emits html for math blocks" (test-math-block-html))
-          f27 (run-case 27 "emits html for inline math" (test-math-inline-html))]
-      (tap-plan 27 (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 (+ f17 (+ f18 (+ f19 (+ f20 (+ f21 (+ f22 (+ f23 (+ f24 (+ f25 (+ f26 f27)))))))))))))))))))))))))))
-      (if (= (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 (+ f17 (+ f18 (+ f19 (+ f20 (+ f21 (+ f22 (+ f23 (+ f24 (+ f25 (+ f26 f27)))))))))))))))))))))))))) 0)
+          f27 (run-case 27 "emits html for inline math" (test-math-inline-html))
+          f28 (run-case 28 "round-trips a gfm table back to markdown" (test-gfm-table-roundtrip))]
+      (tap-plan 28 (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 (+ f17 (+ f18 (+ f19 (+ f20 (+ f21 (+ f22 (+ f23 (+ f24 (+ f25 (+ f26 (+ f27 f28))))))))))))))))))))))))))))
+      (if (= (+ f1 (+ f2 (+ f3 (+ f4 (+ f5 (+ f6 (+ f7 (+ f8 (+ f9 (+ f10 (+ f11 (+ f12 (+ f13 (+ f14 (+ f15 (+ f16 (+ f17 (+ f18 (+ f19 (+ f20 (+ f21 (+ f22 (+ f23 (+ f24 (+ f25 (+ f26 (+ f27 f28))))))))))))))))))))))))))) 0)
         0
         1)))
 

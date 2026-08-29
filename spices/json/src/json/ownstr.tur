@@ -41,11 +41,24 @@
 ;;;   String -- a new owned String holding a copy of s's bytes.
 ;;;
 ;;; Since: 0.3.0
-(defn adopt-cstr [s : cstr] : String
+;;; The runtime call is split out so the inline C returns a plain carrier
+;;; instead of a `String`.  Written as one function, the body returned
+;;; `(int64_t)(intptr_t)...` from whatever C type the compiler had chosen to
+;;; lower `(defopaque String :ptr<void>)` to -- and that choice is not stable
+;;; across compiler versions.  Where it lowers to `void *`, the body is
+;;; returning an integer from a pointer-typed function: gcc calls that
+;;; -Wint-conversion and carries on, clang rejects it outright, which is how
+;;; four spices came to fail on macOS CI and pass on Linux.  Handing the
+;;; carrier to `(:: ... String)` lets the compiler emit whichever conversion
+;;; its own lowering needs, so this is correct under either one.
+(defn __adopt-cstr-raw [s : cstr] : int
   ```c
   extern void *tur_string_adopt_cstr(const char *);
   return (int64_t)(intptr_t)tur_string_adopt_cstr((const char *)s);
   ```)
+
+(defn adopt-cstr [s : cstr] : String
+  (:: (__adopt-cstr-raw s) String))
 
 ;;; to-cstr -- borrow the String's NUL-terminated bytes (O(1), no copy).
 ;;;

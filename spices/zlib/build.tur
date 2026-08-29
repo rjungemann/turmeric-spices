@@ -4,13 +4,19 @@
   :description "zlib + gzip encode/decode for Turmeric"
   :license     "Zlib"
   :spices #map{
-    "test" #map{:url    "https://github.com/rjungemann/turmeric-spices"
-            :ref    "test-v0.1.0"
-            :subdir "spices/test"
-            :optional true}
+    "test" #map{:path   "../test"
+                :url    "https://github.com/rjungemann/turmeric-spices"
+                :ref    "test-v0.1.0"
+                :subdir "spices/test"
+                :optional true}
   }
   :cmake-deps #map{
-    "zlib" #map{:url     "https://github.com/madler/zlib"
+    "zlib" #map{
+            ;; :cmake-name pins the -l name. zlib's dep key is "zlib", but
+            ;; the archive it builds is libz.a -- so the guessed -lzlib found
+            ;; nothing. The link dir the default guess gives is already right.
+            :cmake-name "z"
+            :url     "https://github.com/madler/zlib"
             :ref     "v1.3.1"
             :options #map{:ZLIB_BUILD_EXAMPLES "OFF"
                       :BUILD_SHARED_LIBS    "OFF"}}

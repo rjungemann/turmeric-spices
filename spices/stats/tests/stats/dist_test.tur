@@ -9,7 +9,7 @@
   (import stats/rng    :refer [rng-make rng-free])
   (import test/assert  :refer [assert-true])
   (import test/suite   :refer [describe it])
-  (import test/runner  :refer [run-all])
+  (import test/runner  :refer [run-all-status])
 
   (defn approx= [x : float y : float tol : float] : bool
     ```c
@@ -32,11 +32,31 @@
     (it "qnorm(0.5) = 0"
       (assert-true (approx= (qnorm 0.5 0.0 1.0) 0.0 1e-6)))
 
-    (it "qnorm(0.975) ~ 1.96"
-      (assert-true (approx= (qnorm 0.975 0.0 1.0) 1.959964 1e-3)))
+    ;; 1e-9, not the 1e-3 this used to allow: AS241 is accurate to ~1e-16, and
+    ;; a loose tolerance is what let a corrupted coefficient set look plausible.
+    (it "qnorm(0.975) ~ 1.959963985"
+      (assert-true (approx= (qnorm 0.975 0.0 1.0) 1.9599639845400545 1e-9)))
 
     (it "pnorm(qnorm(0.9)) ~ 0.9  (round-trip)"
-      (assert-true (approx= (pnorm (qnorm 0.9 0.0 1.0) 0.0 1.0) 0.9 1e-6))))
+      (assert-true (approx= (pnorm (qnorm 0.9 0.0 1.0) 0.0 1.0) 0.9 1e-6)))
+
+    ;; qnorm has three branches -- |p-0.5| <= 0.425, then sqrt(-log) with a
+    ;; split at r = 5. 0.9 exercises the first, 0.975 the second, and 1e-12 the
+    ;; third; without a case past r = 5 that last branch is never evaluated.
+    (it "qnorm(0.999) ~ 3.090232306"
+      (assert-true (approx= (qnorm 0.999 0.0 1.0) 3.090232306167813 1e-9)))
+
+    (it "qnorm reaches the far tail (r > 5 branch)"
+      (assert-true (approx= (qnorm 1e-12 0.0 1.0) -7.034483825301132 1e-9)))
+
+    (it "qnorm is symmetric about the mean"
+      (assert-true (approx= (qnorm 0.025 0.0 1.0)
+                            (- 0.0 (qnorm 0.975 0.0 1.0)) 1e-12)))
+
+    ;; Location/scale must shift and stretch the standard quantile.
+    (it "qnorm honours mu and sigma"
+      (assert-true (approx= (qnorm 0.975 10.0 2.0)
+                            (+ 10.0 (* 2.0 1.9599639845400545)) 1e-9))))
 
   (describe "stats/dist t"
     (it "pt(0, df=10) = 0.5"
@@ -59,5 +79,4 @@
 
   (defn main [] : int
     (__all-tests)
-    (run-all)
-    0))
+    (run-all-status)))

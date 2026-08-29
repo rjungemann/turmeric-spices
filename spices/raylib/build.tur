@@ -4,17 +4,24 @@
   :description "Raylib graphics and input bindings for Turmeric"
   :license     "MIT"
   :spices #map{
-    "math" #map{:url    "https://github.com/turmeric-spice/turmeric-spices"
-            :ref    "math-v0.1.0"
-            :subdir "spices/math"}
-    "test" #map{:url    "https://github.com/turmeric-spice/turmeric-spices"
-            :ref    "test-v0.1.0"
-            :subdir "spices/test"
-            :optional true}
+    "math" #map{:path    "../math"
+                :url    "https://github.com/rjungemann/turmeric-spices"
+                :ref    "math-v0.1.0"
+                :subdir "spices/math"}
+    "test" #map{:path   "../test"
+                :url    "https://github.com/rjungemann/turmeric-spices"
+                :ref    "test-v0.1.0"
+                :subdir "spices/test"
+                :optional true}
   }
   :cmake-deps #map{
+    ;; :targets is load-bearing: without it the generated manifest guesses
+    ;; the link dir as <dep>-build, but raylib builds its archive into
+    ;; <dep>-build/raylib, so the link failed with "cannot find -lraylib".
+    ;; With :targets the dir comes from CMake's own $<TARGET_FILE_DIR:raylib>.
     "raylib" #map{:url     "https://github.com/raysan5/raylib"
               :ref     "5.5"
+              :targets ["raylib"]
               :options #map{:BUILD_SHARED_LIBS "OFF"
                         :BUILD_EXAMPLES   "OFF"
                         :BUILD_GAMES      "OFF"}}

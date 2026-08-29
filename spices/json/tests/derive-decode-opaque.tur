@@ -1,18 +1,21 @@
-;; derive-json-opaque emits a Decode instance for a defopaque newtype
-;; by delegating to the carrier's Decode and wrapping the result back
-;; into the opaque. Verifies the decode side of the U2 :as :carrier
-;; opt-in from the spices-type-features uplift plan.
-;;
-;; Expected:
-;;   42
+;; The `Expected:` output this used to print and never check is asserted
+;; below; main returns run-all-status instead of a hardcoded 0.
+;; derive-json-opaque-decode emits a Decode instance for a defopaque newtype
+;; by delegating to the carrier's Decode.
 
 (defmodule derive_decode_opaque_test (export)
 
 (import json/encode :refer [derive-json-opaque-decode])
 (import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true assert-eq])
+(import test/runner :refer [run-all-status])
 
-(defn __int->cstr [n : int] #fx{Unsafe} : cstr
-  ```c char *b = (char*)malloc(24); snprintf(b, 24, "%lld", (long long)n); return b; ```)
+(defn cstr-eq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
 
 (defopaque UserId :int)
 (derive-json-opaque-decode UserId :as int)
@@ -21,7 +24,11 @@
   (let [doc  (unsafe (json-parse-doc "42"))
         root (unsafe (json-doc-root doc))
         uid  (ok-val (:: (decode doc root) (Result UserId cstr)))]
-    (println (unsafe (__int->cstr (:: uid int))))
+    (describe "json derive-json-opaque-decode -- carrier delegation"
+
+      (it "decodes a bare JSON int into the newtype"
+        (assert-eq 42 (:: uid int))))
+
     (unsafe (json-doc-free doc))
-    0))
+    (run-all-status)))
 )

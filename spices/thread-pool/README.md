@@ -185,16 +185,18 @@ the handle's lifetime.
 ```sh
 cd spices/thread-pool
 tur test tests/thread-pool                 # functional suite (5 files)
-TUR_BIN=$(command -v tur) bash tests/compile-fail/run.sh   # linear/type rejections
+errors/run.sh $(command -v tur)            # linear/type rejections
 ```
 
 The functional suite covers basic submit + drain, back-pressure, size
 clamping, stop-with-queue-non-empty, multiple distinct `(Pool T)` in one
 translation unit, the raw hatch, `pool-try-submit` + accessors, `with-pool`
 (scope-exit and nested), futures (fan-out await, try, cancel), and `pool-map`.
-The `compile-fail` runner asserts that forgetting `pool-stop` (`TUR-E0100`),
-double `pool-stop` (`TUR-E0101`), and a wrong-typed submit (`TUR-E0001`) are all
-rejected.
+The compile-FAIL fixtures live in `errors/`, not under `tests/` -- `tur test`
+recurses, and would build and run each of them as an ordinary test and count
+it as a failure. `errors/run.sh` (which CI runs) asserts instead that each is
+rejected, and for the right reason: forgetting `pool-stop` (`TUR-E0100`),
+double `pool-stop` (`TUR-E0101`), and a wrong-typed submit (`TUR-E0001`).
 
 ## Scope
 

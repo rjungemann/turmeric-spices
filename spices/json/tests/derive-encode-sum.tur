@@ -1,13 +1,22 @@
 ;; derive-json-sum-encode emits an Encode instance for a defdata sum type
 ;; using the externally-tagged convention `{"Ctor": {...fields...}}`.
 ;;
-;; Expected:
-;;   {"Click":{"x":3,"y":4}}
-;;   {"Scroll":{"dy":9}}
+;; The `Expected:` output this used to print and never check is now
+;; asserted below; main returns run-all-status rather than a hardcoded 0.
 
 (defmodule derive_encode_sum_test (export)
 
 (import json/encode :refer [derive-json-sum-encode])
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true])
+(import test/runner :refer [run-all-status])
+
+(defn cstr-eq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
 
 (defdata Event :copy [] (Click :int :int) (Scroll :int))
 (derive-json-sum-encode Event
@@ -15,6 +24,13 @@
   (Scroll (dy int)))
 
 (defn main [] : int
-  (println (encode (Click 3 4)))
-  (println (encode (Scroll 9)))
-  0))
+  (describe "json derive-json-sum-encode -- externally tagged"
+
+    (it "tags a two-field variant with its constructor name"
+      (assert-true (cstr-eq? "{\"Click\":{\"x\":3,\"y\":4}}"
+                             (encode (Click 3 4)))))
+    (it "tags a one-field variant the same way"
+      (assert-true (cstr-eq? "{\"Scroll\":{\"dy\":9}}"
+                             (encode (Scroll 9))))))
+  (run-all-status))
+)

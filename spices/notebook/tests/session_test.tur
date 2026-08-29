@@ -4,7 +4,8 @@
   (import notebook/session :refer [session-open session-close session-reset session-eval
                                    output-status-ok output-status-error
                                    cell-output-status cell-output-stdout
-                                   cell-output-value-repr cell-output-error-msg])
+                                   cell-output-value-repr cell-output-error-msg
+                                   cell-output-free])
 
   (defn cstr-eq? [a : cstr b : cstr] #fx{Unsafe} : bool
     ```c
@@ -34,41 +35,55 @@
       (tap-line idx name ok)
       (bool->fail ok)))
 
+  ;; Every session-eval hands back a cell-output the caller owns; each of
+  ;; these used to drop it on the floor, which is what AddressSanitizer was
+  ;; reporting.  The verdict is computed before the free, because
+  ;; cell-output-value-repr hands back a pointer into the struct.
   (defn test-persistent-env [] #fx{Unsafe} : bool
-    (let [s (session-open)
-          _ (session-eval s "(def answer 41)" 0)
-          out (session-eval s "(+ answer 1)" 0)]
+    (let [s   (session-open)
+          d   (session-eval s "(def answer 41)" 0)
+          out (session-eval s "(+ answer 1)" 0)
+          ok  (and (= (cell-output-status out) (output-status-ok))
+                   (cstr-eq? (cell-output-value-repr out) "42"))]
       (do
+        (cell-output-free d)
+        (cell-output-free out)
         (session-close s)
-        (and (= (cell-output-status out) (output-status-ok))
-             (cstr-eq? (cell-output-value-repr out) "42")))))
+        ok)))
 
   (defn test-reset [] #fx{Unsafe} : bool
     (let [s (session-open)
-          _ (session-eval s "(def answer 41)" 0)]
+          d (session-eval s "(def answer 41)" 0)]
       (do
+        (cell-output-free d)
         (session-reset s)
-        (let [out (session-eval s "(+ answer 1)" 0)]
+        (let [out (session-eval s "(+ answer 1)" 0)
+              ok  (and (= (cell-output-status out) (output-status-error))
+                       (not (cstr-eq? (cell-output-error-msg out) "")))]
+          (cell-output-free out)
           (session-close s)
-          (and (= (cell-output-status out) (output-status-error))
-               (not (cstr-eq? (cell-output-error-msg out) "")))))))
+          ok))))
 
   (defn test-stdout-capture [] #fx{Unsafe} : bool
-    (let [s (session-open)
-          out (session-eval s "(do (println \"hi\") 7)" 0)]
+    (let [s   (session-open)
+          out (session-eval s "(do (println \"hi\") 7)" 0)
+          ok  (and (= (cell-output-status out) (output-status-ok))
+                   (and (cstr-eq? (cell-output-value-repr out) "7")
+                        (not (cstr-eq? (cell-output-stdout out) ""))))]
       (do
+        (cell-output-free out)
         (session-close s)
-        (and (= (cell-output-status out) (output-status-ok))
-             (and (cstr-eq? (cell-output-value-repr out) "7")
-                  (not (cstr-eq? (cell-output-stdout out) "")))))))
+        ok)))
 
   (defn test-sweet-exp [] #fx{Unsafe} : bool
-    (let [s (session-open)
-          out (session-eval s "+(5 3)" 1)]
+    (let [s   (session-open)
+          out (session-eval s "+(5 3)" 1)
+          ok  (and (= (cell-output-status out) (output-status-ok))
+                   (cstr-eq? (cell-output-value-repr out) "8"))]
       (do
+        (cell-output-free out)
         (session-close s)
-        (and (= (cell-output-status out) (output-status-ok))
-             (cstr-eq? (cell-output-value-repr out) "8")))))
+        ok)))
 
   (defn main [] #fx{Unsafe} : int
     (let [f1 (run-case 1 "persists definitions across eval calls" (test-persistent-env))

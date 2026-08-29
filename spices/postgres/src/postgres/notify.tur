@@ -166,11 +166,24 @@
 (defn __notify-poll-err [] : (Result Notification int)
   ```c return tur_err_int(0); ```)
 
+;; The `if` is the whole body, with no enclosing `let`.
+;;
+;; It used to bind `(let [ci (__pq-consume-input conn)] (if (= ci 0) ...))`,
+;; and codegen then emitted one unbox too many for the by-value Result:
+;;
+;;     __t61 = (*(tur_adt_Result__Notification__int *)(intptr_t)(__ps_62));
+;;     ...
+;;     __t59 = (*(tur_adt_Result__Notification__int *)(intptr_t)(__t61));
+;;
+;; -- the second line dereferences a value that is already the struct, and cc
+;; rejected the file with "aggregate value used where an integer was
+;; expected".  The carrier-returning helpers below are the same shape used
+;; throughout this spice and in plutovg; it is the let-around-if nesting that
+;; provokes the extra unwrap.
 (defn notify-poll [^borrow conn : Conn] : (Result Notification int)
-  (let [ci (__pq-consume-input conn)]
-    (if (= ci 0)
-      (__notify-poll-err)
-      (__notify-poll-ok (__pq-notifies conn)))))
+  (if (= (__pq-consume-input conn) 0)
+    (__notify-poll-err)
+    (__notify-poll-ok (__pq-notifies conn))))
 
 ;;; notification-channel -- return the channel name of a PGnotify notification.
 ;;;

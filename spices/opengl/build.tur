@@ -5,23 +5,20 @@
   :license     "MIT"
   :repository  "https://github.com/rjungemann/turmeric-spices"
 
+  ;; glfw and glad both need a real CMake target before their include and
+  ;; link paths are knowable -- see cmake-deps/opengl/CMakeLists.txt.  :path
+  ;; is spliced in as add_subdirectory("./<path>") relative to cmake/, hence
+  ;; the leading ../
   :cmake-deps #map{
-    "glfw" #map{:url     "https://github.com/glfw/glfw"
-            :ref     "3.4"
-            :options #map{:GLFW_BUILD_EXAMPLES "OFF"
-                      :GLFW_BUILD_TESTS    "OFF"
-                      :GLFW_BUILD_DOCS     "OFF"}}
-    "glad" #map{:url     "https://github.com/Dav1dde/glad"
-            :ref     "v2.0.6"
-            :options #map{:GLAD_SOURCES_DIR "."
-                      :GLAD_PROFILE     "core"
-                      :GLAD_API         "gl:core=3.3"}}}
+    "opengl-deps" #map{:path    "../cmake-deps/opengl"
+                       :targets ["glfw" "glad"]}}
 
   :spices #map{
-    "test" #map{:url    "https://github.com/rjungemann/turmeric-spices"
-            :ref    "test-v0.1.0"
-            :subdir "spices/test"
-            :optional true}
+    "test" #map{:path   "../test"
+                :url    "https://github.com/rjungemann/turmeric-spices"
+                :ref    "test-v0.1.0"
+                :subdir "spices/test"
+                :optional true}
   }
 
   :exports #map{

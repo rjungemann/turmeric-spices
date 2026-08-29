@@ -6,18 +6,20 @@
 (defmodule render-elab-test (export)
 
 (import ecs/storage :refer [dense-new dense-set! dense-get])
-(import ecs/world   :refer [defcomponent defworld])
+(import ecs/world   :refer [defworld])
 (import ecs/query   :refer [for-each])
-(import ecs-raylib/components :refer [Pos2 Radius
+(import ecs-raylib/components :refer [Pos2 Radius Tint
                                        pos2-make pos2-x pos2-y
-                                       radius-make radius-value])
-(import raylib/types :refer [Color])
+                                       radius-make radius-value
+                                       tint-make tint-color])
 (import ecs-raylib/render     :refer [render-circles __raylib-draw-circle])
 
-(defcomponent Pos2)
-(defcomponent Radius)
-(defcomponent Color)
-(defworld Scene [Pos2 Radius Color])
+;; The Component instances live in ecs-raylib/components now.  Declaring them
+;; here made them orphan instances (TUR-E0013), and `(defcomponent Color)` is
+;; an orphan wherever it is written: Component belongs to ecs/world and Color
+;; to raylib/types, so no module in this spice owns either.  The colour
+;; component is `Tint`, which ecs-raylib does own.
+(defworld Scene [Pos2 Radius Tint])
 
 (render-circles render Scene)
 

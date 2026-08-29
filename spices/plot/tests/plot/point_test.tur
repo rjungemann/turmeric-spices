@@ -10,7 +10,7 @@
   (import plot/style :refer [default-line-style default-point-style default-plot-opts])
   (import test/assert :refer [assert-ok assert-true])
   (import test/suite  :refer [describe it])
-  (import test/runner :refer [run-all])
+  (import test/runner :refer [run-all-status])
 
   ;; Local pair constructor (shadows stdlib `pair`).
   (defn xy-pair [x : float y : float] : int
@@ -64,7 +64,7 @@
   (defn pt-diag [x : float] : float ```c return (double)x; ```)
   (defn pt-vf [x : float y : float] : int (xy-pair (* -1.0 y) x))
 
-  (defn point-renderers [] : int
+  (defn point-renderers [] : (Vec int)
     (vec-of (axes)
             (function pt-diag -1.0 2.0 64 (default-line-style) "diag")
             (points (t-cons (xy-pair 0.0 0.0) (t-cons (xy-pair 1.0 1.0) (t-cons (xy-pair 1.5 0.5) 0)))
@@ -106,5 +106,4 @@
         (write-point-png-ok))
       (it "draws non-background marks in the interior"
         (pixel-sanity-point)))
-    (run-all)
-    0))
+    (run-all-status)))

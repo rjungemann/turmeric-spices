@@ -4,18 +4,28 @@
   :description "Immediate-mode GUI controls for Turmeric, layered on tur-raylib"
   :license     "MIT"
   :spices #map{
-    "raylib" #map{:url    "https://github.com/rjungemann/turmeric-spices"
-              :ref    "raylib-v0.1.0"
-              :subdir "spices/raylib"}
-    "test"   #map{:url    "https://github.com/rjungemann/turmeric-spices"
-              :ref    "test-v0.1.0"
-              :subdir "spices/test"
-              :optional true}
+    "raylib" #map{:path    "../raylib"
+                  :url    "https://github.com/rjungemann/turmeric-spices"
+                  :ref    "raylib-v0.1.0"
+                  :subdir "spices/raylib"}
+    "test"   #map{:path   "../test"
+                  :url    "https://github.com/rjungemann/turmeric-spices"
+                  :ref    "test-v0.1.0"
+                  :subdir "spices/test"
+                  :optional true}
   }
+  ;; raygui is header-only: no CMakeLists, header in src/, and no library to
+  ;; link.  Fetching it directly gave an include dir with no raygui.h in it
+  ;; and an `-lraygui` for a library that does not exist -- see
+  ;; cmake-deps/raygui/CMakeLists.txt, which builds a real target instead.
+  ;; :targets makes tur read the include dir and link dir off that target
+  ;; rather than guessing from the source layout.
   :cmake-deps #map{
-    "raygui" #map{:url     "https://github.com/raysan5/raygui"
-              :ref     "4.0"
-              :options #map{}}
+    ;; :path is spliced into cmake/CMakeLists.txt as add_subdirectory("./<path>")
+    ;; and CMake resolves that relative to cmake/, so the leading ../ is what
+    ;; reaches the spice root.
+    "raygui" #map{:path    "../cmake-deps/raygui"
+                  :targets ["raygui"]}
   }
   :exports #map{
     "raygui/rect"     ["Rect" "rect"]
@@ -28,7 +38,7 @@
                        "gui-toggle" "gui-toggle-group" "gui-check-box"
                        "gui-slider" "gui-slider-bar" "gui-progress-bar"
                        "gui-spinner" "gui-value-box"
-                       "gui-text-box" "gui-text-box-multi"
+                       "gui-text-box"
                        "gui-combo-box" "gui-dropdown-box"
                        "gui-list-view" "gui-list-view-ex"
                        "gui-color-picker" "gui-color-bar-alpha" "gui-color-bar-hue"

@@ -95,6 +95,15 @@ flows through tourist's middleware chain like any other route.
 
 ## Tests
 
-`tests/fixtures/rest-plus-ws/` is the TOUR-V0.3 coexistence fixture: a single
-app with both a `/api` REST route and a `/ws` WebSocket route. Type-check it
-with `tur check tests/fixtures/rest-plus-ws/main.tur`.
+`tests/route_test.tur` covers ws-route!'s own logic, which is wiring: that it
+produces a route, on GET (a handshake is a GET, so nothing else would ever be
+reached by an upgrade), carrying a pattern compiled from the path it was given
+-- captures included, so `ws-route! "/feed/:room"` really is routable per-room.
+Building a route is pure (`get!` is `route-new` over `router-compile`) and the
+handler closure is not invoked, so this needs no listener. Run it with
+`tur test tests`.
+
+The upgrade itself does need a live connection and stays manual:
+`fixtures/rest-plus-ws/` is the TOUR-V0.3 coexistence fixture, a single app
+with both a `/api` REST route and a `/ws` WebSocket route. Type-check it with
+`tur check fixtures/rest-plus-ws/main.tur`.

@@ -6,7 +6,7 @@
 ;; implemented inline here, keeping this flat unit test self-contained in a
 ;; single process. (Since NAME-V0 ws-client and ws-server share one `WsConn` /
 ;; `WsFrame` from ws-core, so the two could be loaded into one program now --
-;; the ws-client-driven round-trip in tests/fixtures/echo/ still runs them as
+;; the ws-client-driven round-trip in fixtures/echo/ still runs them as
 ;; separate processes to exercise the real socket path end to end.)
 ;;
 ;; The inline client sends MASKED frames (client->server, per RFC 6455 5.3) and
@@ -27,7 +27,7 @@
                                 ws-closed? ws-error? ws-timeout?])
   (import test/suite  :refer [describe it])
   (import test/assert :refer [assert-true])
-  (import test/runner :refer [run-all])
+  (import test/runner :refer [run-all-status])
 
 ;; ---------------------------------------------------------------------------
 ;; file-scope C: a tiny raw-socket WebSocket client used to drive the server.
@@ -228,5 +228,5 @@ static char *wsc__recv_text(int fd) {
                   (do (wsc-close fd) (assert-true r)))))))
 
         (server-stop srv)
-        (run-all)))
-    0))
+        ))
+    (run-all-status)))

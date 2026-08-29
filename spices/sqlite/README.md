@@ -64,7 +64,7 @@ Under `-Xsubstructural` this makes use-after-close, use-after-finalize,
 double-close, and forgotten finalize into compile-time errors
 (`TUR-E0101` / `TUR-E0100`) instead of runtime faults. The discipline is
 inert in ordinary builds, so existing call sites compile unchanged. See
-`tests/errors/` for the rejected cases. (db-query's transient statement
+`errors/` for the rejected cases. (db-query's transient statement
 never escapes, so it stays a raw handle internally and needs no manual
 finalize.)
 

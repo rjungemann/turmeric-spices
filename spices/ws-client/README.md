@@ -145,9 +145,9 @@ sends are single frames (the client does not fragment outbound messages).
 - `tests/codec_test.tur` -- flat unit test (run by CI via `tur test tests`):
   asserts `ws-accept-key` against the RFC 6455 §4.2.2 vector, exercising the
   inline SHA-1 + base64 with no network.
-- `tests/fixtures/ws-echo-text/run.sh` -- live `ws://` round-trip against a
+- `fixtures/ws-echo-text/run.sh` -- live `ws://` round-trip against a
   pure-Python echo server (text frames + timeout path).
-- `tests/fixtures/ws-echo-tls/run.sh` -- live `wss://` round-trip over real TLS
+- `fixtures/ws-echo-tls/run.sh` -- live `wss://` round-trip over real TLS
   with a self-signed cert (requires `tur fetch` for mbedTLS).
 
 ## See also

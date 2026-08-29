@@ -4,14 +4,20 @@
   :description "PCRE2 regex bindings for Turmeric"
   :license     "MIT"
   :spices #map{
-    "test" #map{:url "https://github.com/rjungemann/turmeric-spices"
-            :ref "test-v0.1.0"
-            :subdir "spices/test"
-            :optional true}
+    "test" #map{:path   "../test"
+                :url "https://github.com/rjungemann/turmeric-spices"
+                :ref "test-v0.1.0"
+                :subdir "spices/test"
+                :optional true}
   }
   :cmake-deps #map{
+    ;; :cmake-name pins the -l name. Without it the link lib is guessed from
+    ;; the dep name (pcre2), but the 8-bit build produces libpcre2-8.a, so the
+    ;; link failed with "cannot find -lpcre2". The link DIR (<dep>-build) the
+    ;; default guess gives is already right, so :cmake-name is the whole fix.
     "pcre2" #map{:url "https://github.com/PCRE2Project/pcre2"
              :ref "pcre2-10.44"
+             :cmake-name "pcre2-8"
              :options #map{:BUILD_SHARED_LIBS    "OFF"
                        :PCRE2_BUILD_PCRE2_8  "ON"
                        :PCRE2_BUILD_PCRE2_16 "OFF"

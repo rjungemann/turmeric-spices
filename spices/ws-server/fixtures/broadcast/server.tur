@@ -1,0 +1,155 @@
+;; fixtures/broadcast/server.tur -- live broadcast hub driven by run.sh.
+;;
+;; Starts an httpd server (server-start-pool-conn) whose /ws route upgrades to
+;; WebSocket and registers each connection in a shared `Mutex<vec<WsConn>>`
+;; hub. Every inbound data frame is fanned out to every registered connection
+;; under the hub mutex; on disconnect a worker removes itself from the hub
+;; before its WsConn is freed, so a broadcast never touches a dead connection.
+;; Binds the port named by WS_SRV_PORT and blocks forever; run.sh starts it in
+;; the background and kills it when the client driver (client.tur, which uses
+;; the ws-client spice) is done.
+;;
+;; This runs as a SEPARATE process from the ws-client driver to exercise the
+;; real socket path end to end. (Since NAME-V0 both spices share one `WsConn` /
+;; `WsFrame` from ws-core, so single-process is possible now; the split is kept
+;; on purpose.) It is the broadcast counterpart of the echo fixture next door,
+;; and the cross-process (real ws-client <-> ws-server) complement to the
+;; self-contained tests/broadcast_test.tur.
+;;
+;; stdlib/mutex.tur backs the hub lock; stdlib/vec.tur is auto-loaded.
+(load "stdlib/mutex.tur")
+
+(defmodule ws-server/fixtures/broadcast-server
+  (import httpd/types    :refer [Conn Request])
+  (import httpd/server   :refer [server-start-pool-conn])
+  (import httpd/request  :refer [req-path])
+  (import httpd/response :refer [resp-ok bad-request not-found])
+  (import ws-server/server
+    :refer [ws-upgrade ws-server-recv ws-server-send ws-server-close
+            ws-set-server-timeout])
+  (import ws-core/conn  :refer [WsConn])
+  (import ws-core/frame :refer [ws-frame-text ws-text? ws-binary?
+                                ws-closed? ws-error? ws-timeout?])
+
+  (defn port [] : int
+    ```c
+    #include <stdlib.h>
+    const char *p = getenv("WS_SRV_PORT");
+    return (int64_t)(p ? atoi(p) : 0);
+    ```)
+
+  (defn block-forever [] #fx{Unsafe} : void
+    ```c
+    #include <unistd.h>
+    for (;;) sleep(3600);
+    ```)
+
+  (defn cstr-eq? [a : cstr b : cstr] : bool
+    ```c
+    #include <string.h>
+    return strcmp((const char *)a, (const char *)b) == 0;
+    ```)
+
+  ;; ---------------------------------------------------------------------
+  ;; The broadcast hub -- `Mutex<vec<WsConn>>` in plain user code. Every
+  ;; mutation and every fan-out runs under the one mutex.
+  ;; ---------------------------------------------------------------------
+
+  ;; The hub lock is held as its int carrier, not as a `Mutex`-typed global.
+  ;;
+  ;; `(def hub-mutex (mutex-new))` is what this used to say, and it looks
+  ;; right -- but stdlib's `Mutex` is `(defopaque Mutex :ptr<void> :linear)`,
+  ;; and the compiler silently drops a module-level `def` whose initialiser
+  ;; has a linear type.  No diagnostic: `tur check` passes, and then cc fails
+  ;; with "'hub_hymutex_1866' undeclared", because every use site referenced a
+  ;; global that was never emitted.  (Minimal repro: `(def g (mutex-new))`
+  ;; plus one `(mutex-lock g)`.  The same file with `(def n (vec-new))`
+  ;; emits its global fine, so it is the linearity, not module-level def.)
+  ;;
+  ;; Casting the handle to its `:int` carrier at creation consumes the linear
+  ;; value exactly once, which is what linearity wants, and leaves an ordinary
+  ;; global behind.  Each use casts back for the `^borrow` that mutex-lock and
+  ;; mutex-unlock take, so the lock discipline is unchanged.
+  (def hub-mutex (:: (mutex-new) :int))
+
+;;; hub-lock! / hub-unlock! -- borrow the hub mutex through its carrier.
+  (defn hub-lock!   [] : nil (mutex-lock   (:: hub-mutex Mutex)))
+  (defn hub-unlock! [] : nil (mutex-unlock (:: hub-mutex Mutex)))
+  (def hub (:: (vec-new) (Vec WsConn)))
+
+  (defn ws-eq? [a : WsConn b : WsConn] : bool
+    (= (:: a :int) (:: b :int)))
+
+  (defn hub-register! [ws : WsConn] : nil
+    (do (hub-lock!)
+        (vec-push! hub ws)
+        (hub-unlock!)))
+
+  (defn hub-index [ws : WsConn i : int n : int] : int
+    (if (>= i n)
+      -1
+      (if (ws-eq? ws (vec-get hub i))
+        i
+        (hub-index ws (+ i 1) n))))
+
+  (defn hub-unregister! [ws : WsConn] : nil
+    (do (hub-lock!)
+        (let [n   (vec-len hub)
+              idx (hub-index ws 0 n)]
+          (when (>= idx 0)
+            (do (vec-set! hub idx (vec-get hub (- n 1)))
+                (vec-pop! hub)
+                nil)))
+        (hub-unlock!)))
+
+  ;; Returns int, not nil, and recurses through an explicit `if` with a `0`
+  ;; base case.  As a `: nil` function whose recursive call sat in the tail of
+  ;; a `when`, codegen emitted
+  ;;
+  ;;     __auto_type __ps_428 = (ws_..._hub_hysend_hyeach(...));
+  ;;
+  ;; -- binding the result of a void-returning C function, which cc rejects
+  ;; with "variable or field declared void".  The sibling hub-index has the
+  ;; same self-recursive shape and compiles, because it returns int.
+  (defn hub-send-each [msg : cstr i : int n : int] : int
+    (if (< i n)
+      (do (ws-server-send (vec-get hub i) msg)
+          (hub-send-each msg (+ i 1) n))
+      0))
+
+  (defn hub-broadcast! [msg : cstr] : nil
+    (do (hub-lock!)
+        (hub-send-each msg 0 (vec-len hub))
+        (hub-unlock!)))
+
+  ;; ---------------------------------------------------------------------
+  ;; Server side: register, fan every inbound data frame out to the hub.
+  ;; ---------------------------------------------------------------------
+
+  (defn broadcast-loop [ws : WsConn] : void
+    (let [f (ws-server-recv ws)]
+      (if (or (ws-closed? f) (ws-error? f) (ws-timeout? f))
+        nil
+        (do
+          (when (or (ws-text? f) (ws-binary? f))
+            (hub-broadcast! (ws-frame-text f)))
+          (broadcast-loop ws)))))
+
+  (defn handler [conn : int req : int] : int
+    (let [c (:: conn Conn)
+          r (:: req Request)]
+      (if (cstr-eq? (req-path r) "/ws")
+        (if (ok? (ws-upgrade c r
+                   (fn [ws : WsConn] : void
+                     (do (ws-set-server-timeout ws 10000)
+                         (hub-register! ws)
+                         (broadcast-loop ws)
+                         (hub-unregister! ws)
+                         (ws-server-close ws)))))
+          (:: (resp-ok "text/plain" "") :int)
+          (:: (bad-request "not a websocket request") :int))
+        (:: (not-found "") :int))))
+
+  (defn main [] : int
+    (let [srv (server-start-pool-conn (port) handler 8)]
+      (do (unsafe (block-forever)) 0))))

@@ -5,11 +5,11 @@
   (import notebook/cache :refer [cache-get cache-put])
   (import notebook/session :refer [output-status-ok output-status-error output-status-skipped
                                    session-eval
-                                   cell-output-make
+                                   cell-output-make cell-output-free
                                    cell-output-status cell-output-stdout
                                    cell-output-value-repr cell-output-error-msg
                                    cell-output-elapsed-ms cell-output-image-paths])
-  (export eval-cell eval-all eval-from)
+  (export eval-cell eval-all eval-from outputs-free)
 
   (defn __nbe-nil-value [] #fx{Unsafe} : int
     ```c
@@ -65,6 +65,43 @@
     ```c
     void *p = (void *)(intptr_t)s;
     if (p) free(p);
+    ```)
+
+;;; __nbe-cons-free -- free one cons cell, leaving its head alone.
+  (defn __nbe-cons-free [node : int] #fx{Unsafe} : void
+    ```c
+    free((void *)(intptr_t)node);
+    ```)
+
+;;; __nbe-noop -- void no-op, so a cleanup-only `if` has void on both arms.
+  (defn __nbe-noop [] #fx{Unsafe} : void
+    ```c
+    return;
+    ```)
+
+;;; outputs-free -- release the list eval-all / eval-from returns, and every
+;;; cell-output in it.  The caller owns that list; nothing used to free it.
+;;; Safe on 0.
+  (defn outputs-free [outputs : int] #fx{Unsafe} : void
+    (if (__nbe-list-nil? outputs)
+      (__nbe-noop)
+      (let [next (__nbe-tail outputs)]
+        (do
+          (cell-output-free (__nbe-head outputs))
+          (__nbe-cons-free outputs)
+          (outputs-free next)))))
+
+;;; __nbe-hash-map-pop-free -- free the head entry of a key-map and its cons
+;;; cell, leaving the tail (which belongs to the caller's frame) alone.
+  (defn __nbe-hash-map-pop-free [entries : int] #fx{Unsafe} : void
+    ```c
+    typedef struct { char *id; char *hash; } NotebookHashEntry;
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *node = (Cons *)(intptr_t)entries;
+    if (!node) return;
+    NotebookHashEntry *e = (NotebookHashEntry *)(intptr_t)node->head;
+    if (e) { free(e->id); free(e->hash); free(e); }
+    free(node);
     ```)
 
   (defn __nbe-hash-entry-make [entry_id : cstr hash_value : cstr] #fx{Unsafe} : int
@@ -278,9 +315,18 @@
                       (cell-output-elapsed-ms output)
                       (cell-output-image-paths output)))
 
+  ;;; __nbe-fresh-output -- evaluate `cell` and label the result with its id.
+  ;;;
+  ;;; session-eval hands back an output the caller owns; __nbe-wrap-output
+  ;;; copies its fields into a new one, so the original has to be released --
+  ;;; it used to be dropped, once per evaluated cell.  This is safe now that
+  ;;; cell-output-make copies the image-paths list rather than aliasing it.
   (defn __nbe-fresh-output [session : int cell : int] #fx{Unsafe} : int
-    (__nbe-wrap-output (cell-id cell)
-                       (session-eval session (cell-source cell) (cell-lang cell))))
+    (let [raw     (session-eval session (cell-source cell) (cell-lang cell))
+          wrapped (__nbe-wrap-output (cell-id cell) raw)]
+      (do
+        (cell-output-free raw)
+        wrapped)))
 
   (defn __nbe-eval-cell-with-key [session : int cell : int cache : int key : cstr] #fx{Unsafe} : int
     (let [cache-enabled (and (not (= cache 0))
@@ -304,9 +350,16 @@
           (__nbe-fresh-output session cell)))))
 
   ;;; eval-cell -- evaluate one cell, honoring eval=false by skipping it.
+  ;;;
+  ;;; __nbe-cache-key returns a freshly allocated 64-char hex digest that the
+  ;;; caller owns; this used to pass it straight through and drop it, leaking
+  ;;; 65 bytes per evaluated cell.  __nbe-eval-all-rev already frees its own.
   (defn eval-cell [session : int cell : int cache : int] #fx{Unsafe} : int
-    (__nbe-eval-cell-with-key session cell cache
-                              (__nbe-cache-key cell "")))
+    (let [key (__nbe-cache-key cell "")
+          out (__nbe-eval-cell-with-key session cell cache key)]
+      (do
+        (__nbe-cstr-free key)
+        out)))
 
   (defn __nbe-should-continue? [cell : int output : int] #fx{Unsafe} : bool
     (if (= (cell-output-status output) (output-status-error))
@@ -326,14 +379,31 @@
           (do
             (__nbe-cstr-free dep-hashes)
             (__nbe-cstr-free cell-key)
-            (if (__nbe-should-continue? cell output)
-              (__nbe-eval-all-rev session (__nbe-tail cells) cache opts next-acc next-map)
-              next-acc))))))
+            ;; `next-map` is cons(entry, key-map): this frame owns the entry
+            ;; and the cell, the tail belongs to the caller's frame.  Release
+            ;; them once the recursion that reads them has returned -- the
+            ;; whole map used to be dropped when eval-all finished.
+            (let [result (if (__nbe-should-continue? cell output)
+                           (__nbe-eval-all-rev session (__nbe-tail cells) cache opts next-acc next-map)
+                           next-acc)]
+              (do
+                (__nbe-hash-map-pop-free next-map)
+                result)))))))
 
+  ;;; __nbe-reverse -- reverse a list, consuming its cons cells.
+  ;;;
+  ;;; It used to cons a fresh cell for every element and drop the old one, so
+  ;;; reversing an N-cell list leaked N cons cells.  The heads move across
+  ;;; untouched; only the spine is rebuilt, so freeing the old spine as we go
+  ;;; is exactly right.
   (defn __nbe-reverse [lst : int acc : int] #fx{Unsafe} : int
     (if (__nbe-list-nil? lst)
       acc
-      (__nbe-reverse (__nbe-tail lst) (__nbe-cons (__nbe-head lst) acc))))
+      (let [next (__nbe-tail lst)
+            out  (__nbe-cons (__nbe-head lst) acc)]
+        (do
+          (__nbe-cons-free lst)
+          (__nbe-reverse next out)))))
 
   ;;; eval-all -- evaluate cells in order, halting on error unless error=continue.
   (defn eval-all [session : int cells : int cache : int opts : int] #fx{Unsafe} : int

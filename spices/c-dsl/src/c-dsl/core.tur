@@ -231,23 +231,20 @@
 ;;;   (c-for1 "i" ":int" "0" "i < 10" "i++" (c-call "printf" ...))
 ;;;
 ;;; Since: P1
+;;
+;; `type` goes through `c-type`, the same as c-let1 / c-let1-uninit /
+;; c-const1.  It did not used to: the body was hand-rolled inline C that
+;; snprintf'd `type` in verbatim, so (c-for1 "i" ":int" ...) emitted
+;; `for (:int i = 0; ...)` -- a keyword where a C type belongs.  The
+;; "emits typed for loop" case in tests/c-dsl/core_test.tur has always
+;; asserted the right answer; it just never ran, because its `describe`
+;; sat at defmodule top level where the compiler drops it.
+;;
+;; Delegating the rest to c-for-raw also means the body is indented by
+;; `c-indent` like every other block form, rather than by a literal four
+;; spaces that only ever indented the first line of a multi-line body.
 (defn c-for1 [var : cstr type : cstr init : cstr cond : cstr step : cstr body : cstr] : cstr
-  ```c
-  #include <stdio.h>
-  #include <stdlib.h>
-  const char *svar  = (const char*)(intptr_t)var;
-  const char *stype = (const char*)(intptr_t)type;
-  const char *sinit = (const char*)(intptr_t)init;
-  const char *scond = (const char*)(intptr_t)cond;
-  const char *sstep = (const char*)(intptr_t)step;
-  const char *sbody = (const char*)(intptr_t)body;
-  int n = snprintf(NULL, 0, "for (%s %s = %s; %s; %s) {\n    %s\n}",
-                   stype, svar, sinit, scond, sstep, sbody);
-  char *out = malloc(n + 1);
-  snprintf(out, n + 1, "for (%s %s = %s; %s; %s) {\n    %s\n}",
-           stype, svar, sinit, scond, sstep, sbody);
-  return out;
-  ```)
+  (c-for-raw (c-sprintf3 "%s %s = %s" (c-type type) var init) cond step body))
 
 ;;; c-for-raw -- emit a for loop with a raw (pre-formatted) init clause.
 ;;;

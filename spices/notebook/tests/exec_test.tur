@@ -72,6 +72,19 @@
     fclose(f);
     ```)
 
+;;; spine-free -- release an argv list built with test-cons; the heads are
+;;; string literals, so only the spine is ours.
+  (defn spine-free [lst : int] #fx{Unsafe} : void
+    ```c
+    typedef struct { int64_t head; int64_t tail; } Cons;
+    Cons *node = (Cons *)(intptr_t)lst;
+    while (node) {
+      Cons *next = (Cons *)(intptr_t)node->tail;
+      free(node);
+      node = next;
+    }
+    ```)
+
   (defn main [] #fx{Unsafe} : int
     (let [tmp-nb "/tmp/exec_test_nb.tur.md"
           tmp-new "/tmp/exec_test_new.tur.md"]
@@ -114,6 +127,10 @@
 
               fails (+ t1 (+ t2 (+ t3 (+ t4 (+ t5 t6)))))]
           (do
+            (spine-free argv-exec-all2)
+            (spine-free argv-new)
+            (spine-free argv-no-path)
+            (spine-free argv-no-flag)
             (remove-file tmp-nb)
             (remove-file tmp-new)
             (tap-plan 6 fails)
