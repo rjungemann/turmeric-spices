@@ -1,6 +1,33 @@
 # `cmake-deps/` shim follow-up: what the turmeric link-line fix makes removable
 
-**Status: blocked.** Nothing in this document should land until the turmeric
+**Status: blocked, and partly superseded -- updated 2026-08-28 after further
+upstream fixes.** Nothing here should land until the turmeric changes are
+merged and CI builds a compiler that has them.
+
+**What changed since this was first written.** Four more upstream defects were
+found and fixed by testing against these spices rather than fixtures: a 
+cmake-dep was doubled and then resolved against the wrong base directory, one
+dependency with an old  aborted every configure on
+CMake 4, shared-library deps linked clean and died at load with no ,
+and -- most relevant here --  is now walked inside
+CMake at configure time, recursing through non-linkable targets.
+
+That last one matters for : **a raylib-backed spice now builds and runs
+on macOS with no shim at all.** raylib vendors glfw as an , so
+its Cocoa/IOKit requirements are only reachable by recursing into it, and its
+OpenGL requirement arrives as an absolute  path that has to be
+respelled . Both are handled upstream now. So the framework
+and link-name reasoning in the per-shim audit below is settled; what is left in
+each shim is the non-framework work.
+
+ still does not configure, but for a new and structural reason:
+every workspace sibling's  merge into one CMake project sharing
+one target namespace, and 's glfw collides with the glfw raylib vendors
+for  (). Filed upstream as
+. That is now the blocker,
+not the  bug named further down.
+
+**Original status:** Nothing in this document should land until the turmeric
 change that motivates it is merged and CI is building a compiler that has it.
 Filed 2026-08-28 so the work is not lost.
 
