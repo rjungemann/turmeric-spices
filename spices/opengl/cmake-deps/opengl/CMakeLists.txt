@@ -9,7 +9,8 @@
 #     wrong directory.
 #   * glad v2.0.6 is a Python *generator*, not a library.  Its checkout has no
 #     root CMakeLists and builds nothing, so <glad/gl.h> was never produced
-#     and `-lglad` never existed.  The loader has to be generated.
+#     and `-lglad` never existed.  The loader is now vendored pre-generated
+#     under glad/ -- see the note above that target.
 #
 # Declaring this directory as a :path cmake-dep with
 # :targets ["glfw" "glad"] makes tur read include dirs from each target's
@@ -40,24 +41,33 @@ FetchContent_Declare(glfw
 )
 FetchContent_MakeAvailable(glfw)
 
-# Make the archive's name match the target's, so the -l the manifest derives
-# from the target name resolves.
-set_target_properties(glfw PROPERTIES OUTPUT_NAME glfw)
+# glfw's OUTPUT_NAME is glfw3, so its archive is libglfw3.a while its target is
+# `glfw`. That mismatch used to need a rename here -- the manifest derived `-l`
+# from the target *name*, so `-lglfw` did not resolve. rjungemann/turmeric#791
+# made tur link by $<TARGET_FILE:glfw>, which is the artifact CMake actually
+# produces, so the rename is gone and glfw builds under its own name.
 
 # ---------------------------------------------------------------------------
-# glad
+# glad -- vendored, pre-generated
 # ---------------------------------------------------------------------------
-FetchContent_Declare(glad
-  GIT_REPOSITORY https://github.com/Dav1dde/glad
-  GIT_TAG        v2.0.6
-)
-FetchContent_MakeAvailable(glad)
-
-set(GLAD_CMAKE_DIR   "${glad_SOURCE_DIR}/cmake" CACHE STRING "" FORCE)
-set(GLAD_SOURCES_DIR "${glad_SOURCE_DIR}"       CACHE STRING "" FORCE)
-include("${glad_SOURCE_DIR}/cmake/GladConfig.cmake")
-
-# REPRODUCIBLE pins the bundled Khronos specification instead of fetching the
-# latest one at build time -- the build should not change under us, and a CI
-# runner should not need to reach khronos.org.
-glad_add_library(glad STATIC REPRODUCIBLE API gl:core=3.3)
+# glad is a Python *generator*: it renders the loader from Jinja2 templates.
+# Running it at build time made jinja2 a hard build dependency of this spice --
+# `ModuleNotFoundError: No module named 'jinja2'` fails the whole configure, and
+# the interpreter CMake picks is not necessarily the one on PATH, so a venv is
+# not enough to fix it locally.
+#
+# So we vendor the generator's output instead of the generator, which is exactly
+# what raylib does with its own copy (raylib/src/external/glad.h is checked in,
+# and raylib's build needs no Python at all). Same API, no toolchain
+# prerequisite, and one fewer thing to fetch.
+#
+# glad/ was produced by glad 2.0.6 with:
+#
+#     python3 -m glad --api gl:core=3.3 --reproducible c
+#
+# and the full provenance (generator version, spec, extension list, options) is
+# in the header of glad/include/glad/gl.h. Regenerate only when the target GL
+# version changes; `--reproducible` pins the bundled Khronos spec so the output
+# is deterministic and the build never reaches khronos.org.
+add_library(glad STATIC "${CMAKE_CURRENT_SOURCE_DIR}/glad/src/gl.c")
+target_include_directories(glad PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/glad/include")

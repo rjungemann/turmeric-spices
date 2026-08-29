@@ -55,6 +55,13 @@ jobs:
       # <hiredis/hiredis.h> while the fetched tree puts hiredis.h at its root.
       # libpq-dev is for postgres, whose libpq dep is :prefer-system (there is
       # no standalone libpq repo to fetch).
+      #
+      # python3-jinja2 used to be here for glad, which is a Python generator
+      # that renders its loader from Jinja2 templates.  opengl now vendors
+      # glad's generated output instead of running the generator (the same
+      # thing raylib does with its own checked-in copy), so no spice needs
+      # Python to build.  Note the macOS leg never installed jinja2 at all --
+      # which is part of why opengl was red there.
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -64,7 +71,7 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgl1-mesa-dev libasound2-dev libxkbcommon-dev \
             liblo-dev libhiredis-dev libpq-dev \
-            xvfb python3-jinja2
+            xvfb
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -113,34 +120,26 @@ jobs:
           # own but still need their deps' native libs fetched, so trigger
           # fetch whenever EITHER section is present.
           #
-          # The root build.tur is moved aside for the duration. It lists every
-          # spice as a :member, which makes this directory a workspace, and
-          # when collecting :cmake-deps the compiler walks not just this
-          # spice's declared :spices but every workspace member -- so `tur
-          # fetch` in spices/json emitted a cmake/CMakeLists.txt with all 17
-          # native libs in the repo rather than yyjson alone. That is both
-          # enormously wasteful (every one of these jobs would build raylib,
-          # libpq, mbedTLS, ...) and fatal: one dep that cannot configure on
-          # this runner aborts the whole configure, so NOTHING gets built and
-          # every test in the spice fails to compile. json died on raylib's
-          # GLFW this way while needing only yyjson.
+          # This used to move the root build.tur aside for the duration: it
+          # lists every spice as a :member, and the compiler once collected
+          # :cmake-deps from every workspace member rather than the spice's
+          # declared :spices closure -- so `tur fetch` in spices/json emitted a
+          # CMakeLists with all 17 native libs instead of yyjson alone, and one
+          # dep that could not configure took the whole job down with it.
           #
-          # Every spice that genuinely needs a sibling's native lib declares
-          # that sibling in its own :spices (with a :path), so the declared
-          # walk alone resolves them -- verified: ecs-raylib still gets
-          # raylib, plot still gets plutovg, httpd still gets yyjson+mbedtls.
-          root="$GITHUB_WORKSPACE/turmeric-spices/build.tur"
-          # Restore on any exit path -- a half-hidden workspace root would
-          # break every step after this one.
-          trap '[ -f "$root.ci-hidden" ] && mv "$root.ci-hidden" "$root"' EXIT
-          if [ -f "$root" ]; then mv "$root" "$root.ci-hidden"; fi
+          # rjungemann/turmeric#791 fixed that upstream: the walk now uses the
+          # declared closure, so there is nothing to hide from. Verified against
+          # that compiler -- `tur fetch` in spices/opengl with the workspace
+          # root in place emits exactly one dep (opengl-deps), not 17.
+          # TUR_CMAKE_DEPS_WORKSPACE_WIDE=1 restores the old behavior if a
+          # spice ever genuinely needs a sibling's native lib without declaring
+          # that sibling in :spices.
           rc=0
           if grep -qE ':cmake-deps|:spices' build.tur; then
             "$GITHUB_WORKSPACE/turmeric/build/tur" fetch --update || rc=$?
           else
             echo "no :cmake-deps or :spices declared"
           fi
-          if [ -f "$root.ci-hidden" ]; then mv "$root.ci-hidden" "$root"; fi
           if [ "$rc" -ne 0 ]; then
             echo "::warning::fetch reported errors (often optional :spices entries); proceeding anyway"
           fi
