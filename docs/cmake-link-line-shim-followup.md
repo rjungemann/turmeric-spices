@@ -45,13 +45,16 @@ Both spices the framework report listed as compiler-blocked are now unblocked.
 
 Two consequences for this repo:
 
-1. **The CI workaround in `.github/workflows/ci.yml` is now redundant.** The
-   "Fetch C dependencies" step moves the root `build.tur` aside so the
-   directory stops looking like a workspace, precisely to stop the compiler
-   pulling in all 17 native libs. That hack -- and its `trap`-based restore --
-   can be deleted once CI builds a compiler with the fix. Its comment is the
-   best statement of the problem anyone wrote; worth preserving in the commit
-   message that removes it.
+1. **The CI workaround in `.github/workflows/ci.yml` is redundant, but not
+   yet removable.** The "Fetch C dependencies" step moves the root `build.tur`
+   aside so the directory stops looking like a workspace, precisely to stop the
+   compiler pulling in all 17 native libs. The job checks out
+   `rjungemann/turmeric` with no `ref:`, i.e. **the default branch**, so the
+   hack cannot come out until the scoping fix is on turmeric `main` -- a merged
+   PR elsewhere is not enough. Left in place with the removal condition and a
+   verification recipe recorded in the comment. Its original comment is the
+   best statement of the problem anyone wrote; worth preserving in whatever
+   commit finally removes it.
 2. **glad's `jinja2` prerequisite is gone** -- resolved in this branch by
    vendoring the generator's output (`spices/opengl/cmake-deps/opengl/glad/`,
    ~1.4 MB), the same thing raylib does with its own checked-in copy. The
