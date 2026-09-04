@@ -136,12 +136,21 @@ jobs:
           # that sibling in :spices.
           rc=0
           if grep -qE ':cmake-deps|:spices' build.tur; then
-            "$GITHUB_WORKSPACE/turmeric/build/tur" fetch --update || rc=$?
+            "$GITHUB_WORKSPACE/turmeric/build/tur" fetch --update 2>&1 | tee /tmp/tur-fetch.log
+            rc=${PIPESTATUS[0]}
           else
             echo "no :cmake-deps or :spices declared"
           fi
           if [ "$rc" -ne 0 ]; then
-            echo "::warning::fetch reported errors (often optional :spices entries); proceeding anyway"
+            # Non-fatal by design -- an :optional :spices dep is *expected* to
+            # fail here. But a required :cmake-deps native build can fail the
+            # same way, and it then surfaces two steps later as an unrelated
+            # link error ("library 'x' not found") with nothing to tell the two
+            # cases apart. Put the actual `tur fetch` output in the annotation
+            # itself (GitHub escapes %/\r/\n for the ::warning:: message body)
+            # so the failure is findable without digging back through the log.
+            tail=$(tail -n 20 /tmp/tur-fetch.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/$/%0A/' | tr -d '\n')
+            echo "::warning title=tur fetch exited ${rc}::${tail}"
           fi
 
       - name: Type-check spice sources
