@@ -12,10 +12,18 @@
   }
   :cmake-deps #map{
     "zlib" #map{
-            ;; :cmake-name pins the -l name. zlib's dep key is "zlib", but
-            ;; the archive it builds is libz.a -- so the guessed -lzlib found
-            ;; nothing. The link dir the default guess gives is already right.
-            :cmake-name "z"
+            ;; zlib's own CMakeLists.txt hardcodes BOTH the `zlib` (shared,
+            ;; libz.1.dylib) and `zlibstatic` (static, libz.a) targets --
+            ;; :BUILD_SHARED_LIBS OFF below does not gate either one. With no
+            ;; :targets declared, the link line fell back to a name-derived
+            ;; -lz, which macOS's linker resolves to the dylib (found ahead of
+            ;; the .a in the same _deps build dir); the resulting binary then
+            ;; failed at load with "Library not loaded: @rpath/libz.1.dylib --
+            ;; no LC_RPATH's found", since nothing arranged an rpath for it.
+            ;; :targets ["zlibstatic"] links by exact artifact path
+            ;; ($<TARGET_FILE:zlibstatic> -> libz.a) instead, so the shared
+            ;; library is never in the running.
+            :targets ["zlibstatic"]
             :url     "https://github.com/madler/zlib"
             :ref     "v1.3.1"
             :options #map{:ZLIB_BUILD_EXAMPLES "OFF"
