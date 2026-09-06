@@ -28,7 +28,12 @@
                          :ENABLE_TESTING       "OFF"
                          :ENABLE_PROGRAMS      "OFF"
                          :USE_SHARED_MBEDTLS_LIBRARY "OFF"
-                         :USE_STATIC_MBEDTLS_LIBRARY "ON"}}
+                         :USE_STATIC_MBEDTLS_LIBRARY "ON"
+                         ;; See the matching comment in ../tls/build.tur: newer
+                         ;; Clang's -Wunterminated-string-initialization fires on
+                         ;; mbedtls's own TLS 1.3 label arrays and mbedtls's
+                         ;; CMakeLists turns that into a hard error by default.
+                         :MBEDTLS_FATAL_WARNINGS "OFF"}}
     ;; yyjson (json's native lib) is no longer re-declared here: json's
     ;; Encode/Decode inline-C still #includes <yyjson.h> for the typed client
     ;; codecs (response-decode / json-request), but the compiler now collects

@@ -10,7 +10,17 @@
                :options #map{:ENABLE_PROGRAMS    "OFF"
                          :ENABLE_TESTING     "OFF"
                          :USE_SHARED_MBEDTLS_LIBRARY "OFF"
-                         :USE_STATIC_MBEDTLS_LIBRARY "ON"}}
+                         :USE_STATIC_MBEDTLS_LIBRARY "ON"
+                         ;; mbedtls's own CMakeLists turns MBEDTLS_FATAL_WARNINGS
+                         ;; on by default, appending -Werror to its build. Newer
+                         ;; Clang (AppleClang 21+) promoted -Wunterminated-string-
+                         ;; initialization to a default warning, which fires on
+                         ;; mbedtls's deliberately-non-null-terminated TLS 1.3
+                         ;; label array initializers (ssl_tls13_keys.c) and turns
+                         ;; the whole vendored build into a hard error. We do not
+                         ;; own this source; only turn off ITS fatal-warnings
+                         ;; policy, not any warning strictness of our own code.
+                         :MBEDTLS_FATAL_WARNINGS "OFF"}}
   }
   :exports #map{
     "tls/autolink" ["tls-autolink-hint"]
