@@ -1,5 +1,68 @@
 # Every spice's test suite reports success even when assertions fail
 
+> **RESOLVED 2026-09-09 -- every `test/suite` file in the repo returns
+> `run-all-status`; verified in both directions.**
+>
+> **What #60 did.** "Get all 45 spices building and testing, and make the
+> suites able to fail" (`6cd1236`, 2026-08-28) converted the whole corpus in
+> one pass -- 159 files under `spices/*/tests/` touched. Every test file that
+> uses the `test/suite` DSL now ends `(run-all-status)`; the count on `main`
+> is **129**.
+>
+> **What was left.** Nothing. `grep -rln "(run-all)" spices/*/tests/` still
+> reports two files:
+>
+> - `spices/tourist/tests/router_test.tur`
+> - `spices/tourist-ws/tests/route_test.tur`
+>
+> Both are **false positives**. Each already imports and calls
+> `run-all-status`; the literal `(run-all)` the grep matches is inside the
+> explanatory comment above the import, which quotes the old
+> `(... (run-all) 0)` idiom this report describes. The grep in "Remaining
+> work" cannot tell code from prose -- the correct check is
+> `grep -L run-all-status` over the files that import `test/suite`, which
+> comes back empty.
+>
+> **Verified in both directions** (2026-09-09, `tur` v0.46.0 built from
+> source at `turmeric@e68592477`, stdlib 0.46.0), with three throwaway
+> single-suite directories:
+>
+> | file | idiom | assertion | `tur test` |
+> | --- | --- | --- | --- |
+> | `pass_test.tur` | `(run-all-status)` | all pass | reports pass, **exit 0** |
+> | `fail_test.tur` | `(run-all-status)` | one `assert-eq` fails | `FAIL`, **exit 1** |
+> | `oldstyle_test.tur` | `(run-all)` then `0` | one `assert-eq` fails | reports **pass, exit 0** |
+>
+> The third row is this report's bug, still reproducible on demand -- which
+> is what makes the first two meaningful rather than vacuous.
+>
+> **Suites re-run** (nothing went red):
+>
+> - `tourist`: `tur test tests` -> 18/18 assertions, exit 0.
+> - `tourist-ws`: 6/6 assertions, exit 0. Needs mbedtls (transitively via
+>   `ws-server` -> `tls`); on a current Apple clang the vendored mbedtls
+>   build fails on `-Werror,-Wunterminated-string-initialization`, so it must
+>   be configured `-DMBEDTLS_FATAL_WARNINGS=OFF`. That is a host-toolchain
+>   issue in the dep, not a spice failure -- CI's Linux/macOS images build it
+>   as-is.
+>
+> **Out of scope, noted for the record.** 142 test files with a `main` do not
+> call `run-all-status` because they do not use the `test/suite` DSL at all
+> (ansi, ecs, ecs-raylib, json, watch, signal, thread-pool, ...). Most roll
+> their own TAP helper whose `tap-finish` / `finish` already `return 1` on
+> any failure, so they were never affected. A subset of the ecs tests are
+> golden-output programs that print values and end in a literal `0` -- for
+> those `tur test` still only proves "compiles and does not crash", because
+> nothing compares the printed output to an expectation. That is a
+> **different** hole (no expected-output file) from the one this report
+> describes, and it is not addressed here.
+>
+> - Runner: `spices/test/src/test/runner.tur` (`run-all-status`, exported in
+>   `spices/test/build.tur`).
+> - `spices/tourist/fixtures/*/` still call `(run-all)` on purpose: they need
+>   a live listener, are not under `tests/`, and CI never runs them.
+
+
 **Severity:** high (CI is green on assertion failures across the whole repo;
 only *compile* failures are actually caught)
 **Found:** 2026-08-18, while building `spices/secret` -- it hid a genuinely
