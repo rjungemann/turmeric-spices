@@ -34,6 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: rjungemann/turmeric
+          ref: ${{ needs.discover-spices.outputs.turmeric-sha }}
           path: turmeric
 
       # The X11 / GL / ALSA headers are for the spices whose :cmake-deps build
@@ -327,8 +328,34 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       spices: ${{ steps.list.outputs.spices }}
+      turmeric-sha: ${{ steps.turmeric.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+      # Resolve rjungemann/turmeric's main to ONE commit for this whole run.
+      #
+      # Every leg used to check out `main` by name, at whatever moment that
+      # leg happened to start.  The matrix is ~90 jobs and the runner pool
+      # staggers them over an hour, so a compiler change landing mid-run gave
+      # different legs *different compilers* -- and the resulting failure
+      # names the spice, not the skew.  That is exactly what reddened
+      # `ecs (ubuntu-latest)` in run 34448162505: it started 07:04Z and got a
+      # compiler that still enforced the TUR-E0712 expression-nesting cap,
+      # while `ecs (macos-latest)` started 07:49Z, after the cap was retired
+      # upstream, and passed the identical source.
+      #
+      # Pinning per-run keeps "spices test against turmeric main" -- the SHA is
+      # still resolved fresh on every run -- while making a single run
+      # internally consistent, so a red leg means a real defect.
+      - id: turmeric
+        name: Resolve turmeric main to one SHA for this run
+        run: |
+          sha=$(git ls-remote https://github.com/rjungemann/turmeric.git refs/heads/main | cut -f1)
+          if [ -z "$sha" ]; then
+            echo "could not resolve rjungemann/turmeric main" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "turmeric main for this run: $sha"
       - id: list
         run: |
           json=$(find spices -mindepth 2 -maxdepth 2 -name build.tur \
@@ -342,6 +369,7 @@ jobs:
   # `{` vs `#{` regression class without needing the full per-spice matrix.
   manifest-parse:
     name: Parse every build.tur
+    needs: discover-spices
     runs-on: ubuntu-latest
     steps:
       - name: Checkout turmeric-spices
@@ -353,6 +381,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: rjungemann/turmeric
+          ref: ${{ needs.discover-spices.outputs.turmeric-sha }}
           path: turmeric
 
       - name: Install dependencies
