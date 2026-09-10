@@ -46,6 +46,14 @@
   #include <stdlib.h>
   #include <stdio.h>
   #include <unistd.h>
+  #if defined(__APPLE__)
+  /* Darwin declares getentropy(2) in <sys/random.h>; its <unistd.h> does not.
+     glibc declares it in <unistd.h>, which is why the Linux leg never needed
+     this and the omission stayed invisible. clang 21 makes an implicit
+     function declaration a hard error (C99 removed them), so without this
+     include the file does not compile on macOS at all. */
+  #include <sys/random.h>
+  #endif
 
   unsigned char buf[32];
   int ok = 0;
