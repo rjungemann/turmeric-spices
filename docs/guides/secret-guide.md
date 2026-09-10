@@ -527,8 +527,8 @@ because the TAP lines were being read by eye. The fix is `run-all-status`
   (run-all-status))
 ```
 
-Every other spice still has the hole -- see
-`docs/test-suites-report-success-with-failing-assertions.md`.
+Every spice's `test/suite` file now ends this way -- see
+`docs/test-suites-report-success-with-failing-assertions.md`, resolved.
 
 ## What this does not protect against
 
