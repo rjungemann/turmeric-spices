@@ -157,11 +157,18 @@ The residual create-vs-rename divergence for genuinely new names is left
 in place and documented separately in
 `docs/watch-darwin-fresh-name-is-create.md`.
 
-## What was not verified
+## Verification
 
-Linux was not re-run: this box is macOS and has no working container
-runtime (the `docker` CLI is present but no daemon). The Linux argument is
-structural rather than measured -- the `backend-wait` change is entirely
-inside `#elif defined(__APPLE__)`, the `<poll.h>` move is inert on Linux
-(it was already included there), and the fixture's added write happens
-before the watcher exists. CI's ubuntu leg is the check.
+- **macOS 27 / Darwin 27.0.0, `tur` v0.46.0, local: 9/9**, three
+  consecutive clean runs. Was 7/9, reproducible.
+- **Linux, CI `watch (ubuntu-latest)`: 9/9** -- `# All 8 backend-drain-into
+  tests passed.`, `# All 7 watch/tree tests passed.`, and the tree fixture
+  reports `# event path: [a/b/leaf.txt] kind: 4`, the same `rename` the
+  Darwin snapshot diff now produces.
+
+Linux could not be re-run locally (this box is macOS with no container
+runtime), so the ubuntu CI leg is what measured it. The structural argument
+matched: the `backend-wait` change is entirely inside
+`#elif defined(__APPLE__)`, the `<poll.h>` move is inert on Linux (it was
+already included there), and the fixture's added write happens strictly
+before the watcher exists, so it emits no events on either backend.
