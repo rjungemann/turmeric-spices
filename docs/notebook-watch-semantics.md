@@ -245,3 +245,38 @@ limitation: cross-platform behavior is guaranteed for atomic-save flows
 and entry-level events; pure in-place writes are Linux-only. Closing this
 gap on Darwin would require also kqueue-ing the file fd directly, which
 in turn requires re-opening it across rename -- deferred to v0.2.
+
+Re-measured 2026-09-09 on macOS 27 (Darwin 27.0.0), kqueue `EVFILT_VNODE`
+on a directory fd with the flag set section 1 lists. The note above holds exactly:
+
+| Operation on a child of the watched dir | Darwin dir-kqueue fires? |
+|-----------------------------------------|--------------------------|
+| in-place `fopen("w")` + write            | no                       |
+| `O_APPEND` write                         | no                       |
+| atomic save (temp + `rename` over it)    | yes (`NOTE_WRITE`)       |
+| create a new entry                       | yes (`NOTE_WRITE`)       |
+| `unlink` an entry                        | yes (`NOTE_WRITE`)       |
+
+### What this note does *not* explain
+
+The paragraph above is about **whether the OS fires at all**. It has twice
+been reached for to explain macOS failures that were something else, so two
+explicit exclusions:
+
+- **"`backend-wait` returned 1 but `backend-event-count` was 0."** Not this
+  limitation -- an entry-level change had fired correctly. That was a bug in
+  the Darwin `backend-wait`, which used `kevent()` to observe the queue and
+  so *dequeued* the event it was only supposed to notice, leaving the
+  following drain nothing to find. Fixed 2026-09-09 by polling the kqueue fd
+  instead (`poll(2)` on a kqueue descriptor is level-triggered and
+  non-consuming on Darwin, and is already how the tree path treats this same
+  fd). See `docs/watch-macos-backend-wait-consumed-the-event.md`.
+
+- **"Darwin reported `create` where Linux reported `rename`."** Also not this
+  limitation -- the event fired on both. It is a *classification* difference:
+  Linux sees the `rename(2)` itself (`IN_MOVED_TO`), while the Darwin tree
+  layer recovers names by diffing directory snapshots and cannot tell a name
+  that arrived by rename from one that arrived by `creat`. The two backends
+  agree whenever the destination name already existed, which is what an
+  atomic save over a real file is. See
+  `docs/watch-darwin-fresh-name-is-create.md`.

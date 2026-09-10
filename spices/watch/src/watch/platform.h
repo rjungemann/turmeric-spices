@@ -23,8 +23,15 @@
 #ifndef TUR_WATCH_PLATFORM_H
 #define TUR_WATCH_PLATFORM_H
 
+/* poll(2) is used on BOTH backends: on Linux to watch the inotify fd, on
+   Darwin to watch the kqueue fd.  A kqueue descriptor is pollable and
+   level-triggered on Darwin -- poll() reports it readable without dequeuing
+   anything -- which is what lets backend-wait observe the queue while
+   leaving the events for backend-drain-* to consume.  (watch/watch's
+   __watcher-tree-poll-fired already polls this same fd via backend-fd.) */
+#include <poll.h>
+
 #if defined(__linux__)
-#  include <poll.h>
 #  include <sys/inotify.h>
 #elif defined(__APPLE__)
 #  include <sys/event.h>
