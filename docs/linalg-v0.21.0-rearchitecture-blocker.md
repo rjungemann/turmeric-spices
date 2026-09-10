@@ -37,10 +37,15 @@ were the enabling work referenced as the blockers.
 These are spice-side workarounds; each is a candidate turmeric report (the
 list-API one is already on the turmeric agent's list):
 
-1. **A hyphen in a `defstruct` type name does not survive C codegen.**
-   `(defstruct la-vec ...)` type-checks but emits `la-vec <var>` (invalid C).
+1. **A hyphen in a `defstruct` type name did not survive C codegen.**
+   `(defstruct la-vec ...)` type-checked but emitted `la-vec <var>` (invalid C).
    Worked around by hyphen-free type names (`lavec`, `cholfac`, `lufac`,
    `qrfac`); the *functions* keep hyphens fine.
+   **RETIRED 2026-09-09:** re-tested on turmeric v0.46.0 -- a hyphenated
+   `defstruct` type name now mangles to a valid C identifier
+   (`la-vec` -> `tur_adt_la_hyvec`) and `make-struct` / `.field` round-trip
+   correctly. The hyphen-free names already in the source are harmless and were
+   left alone; new code need not avoid hyphens.
 2. **A `^mut` float accumulator captured by a `letrec` closure does not
    propagate its mutations back out** (captured by value), and **threading a
    float accumulator through the recursive self-call mis-carriers to 0**. Both
@@ -60,8 +65,10 @@ list-API one is already on the turmeric agent's list):
    built). The cons-list `*-from-list` constructors were replaced with variadic
    `la-vec-of` / `mat-of` macros over `(Vec float)`.
 
-`mat4-inv` in `small` remains the one stubbed `panic` (TODO(linalg-u4)) — its
-type-correct reimplementation is independent of this rearchitecture.
+`mat4-inv` in `small` is fully implemented (adjugate method: determinant by
+complementary 2x2 minors, then the cofactor-transpose). Its only `panic` is the
+singular-matrix guard. `tests/small.tur` covers it with four checks, including
+the round-trips `ok 6 - mat4-inv inv(M)*M=I` and `ok 7 - mat4-inv M*inv(M)=I`.
 
 ---
 
@@ -78,10 +85,10 @@ type-correct reimplementation is independent of this rearchitecture.
   `mat4-mul-vec4`, `mat4-ptr`) compiles+runs. This is the **proven `:copy`
   template** for any other fixed-size struct work. Two notes: the constructor
   names moved `vecN` → `vecN-of` (the type name `vecN` is now the make-struct
-  tag and can't double as a function), and `mat4-inv` is **stubbed with a
-  `panic`** — its old body mixed `vec3-cross`/`vec4-dot` on the same values
-  (only valid under int-pointer aliasing) and needs a type-correct reimpl + a
-  numerical test (TODO(linalg-u4)).
+  tag and can't double as a function), and `mat4-inv` was at that point **stubbed
+  with a `panic`** -- its old body mixed `vec3-cross`/`vec4-dot` on the same
+  values (only valid under int-pointer aliasing) and needed a type-correct
+  reimpl + a numerical test. (Both landed; see the Resolution above.)
 - **Remaining (5 modules):** `vec`/`mat` (core, need the `(Vec float)` + `^borrow`
   dynamic model), `solve`/`decomp`/`fmt` (same, plus the pre-existing paren
   bugs). These are the larger rewrite; `small` did not need `Vec`/borrows. **(All

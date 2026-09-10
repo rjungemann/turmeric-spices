@@ -1,7 +1,7 @@
 ---
 title: Track C U3 (row-typed schemas) — compiler blockers retired by turmeric #479–#483
 category: Spice-uplift blocker assessment (Track C / U3)
-status: UNBLOCKED — every compiler prerequisite verified present; U3 target 1 (frame/typed) landed on this branch
+status: UNBLOCKED -- every compiler prerequisite verified present. Targets 1-3 shipped except the `http` CLIENT half; target 4 (json) is moot.
 verified-on: turmeric main @ 99cc8b32 (post #479/#480/#481/#482/#483; built from source)
 verified-by: turmeric-spices Claude (Track C, branch claude/track-c-u3-turmeric-cgmo6u)
 plan: rjungemann/turmeric docs/upcoming/spices-type-features-uplift-plan.md (Phase U3)
@@ -104,19 +104,21 @@ Shape (mirrors `ecs/query.tur`):
 ;; typed delegates: tframe-nrows / tcol-int32-at / tcol-utf8-at / ...
 ```
 
-Because the module's definitions are row-*polymorphic*, the source and the
-runtime test check **flag-free** — `frame/typed` passes the CI `tur check` step
-and the `tur test tests/frame` suite (`tests/frame/typed_test.tur`, 4/4 green)
-without `-Xdata-literals`. A concrete `#row{...}` is only needed at a call site
-that names a specific schema.
+`frame/typed` passes the CI `tur check` step and the `tur test tests/frame`
+suite (`tests/frame/typed_test.tur`). Its definitions are row-*polymorphic*; a
+concrete `#row{...}` is only needed at a call site that names a specific
+schema, and that no longer needs a flag either.
 
-### Concrete-schema demonstrations (verified under `-Xdata-literals`)
+### Concrete-schema demonstrations
 
-Naming a concrete row needs `-Xdata-literals`, and the U3 "negative fixture"
-must *fail to compile* — which the repo's `tur test` harness has no mode for
-yet (uplift-plan P5 is still open). So the positive/negative demonstrations are
-recorded here rather than as CI-run tests. Both verified against `tur` @
-`99cc8b32`:
+**Note (2026-09-09):** `-Xdata-literals` is no longer needed. `#row{...}` parses
+ungated on turmeric v0.46.0, and passing the flag now only produces
+`warning [TUR-W0050]: -Xdata-literals is no longer needed; the feature is on by
+default`. Concrete-row call sites check flag-free.
+
+The negative demonstrations below now ship as real `errors/` fixtures for
+`postgres` and `httpd` (see "Target status" at the bottom). Both were originally
+verified against `tur` @ `99cc8b32`:
 
 ```turmeric
 ;; POSITIVE — a frame ascribed to the matching schema row: checks + runs.
@@ -139,17 +141,48 @@ Note: the `frame` suite has 3 *pre-existing* failures against tip-of-main `tur`
 (`group_test`, `interop_test`, `reshape_test` — a linker error unrelated to
 U3); they fail with or without `frame/typed` and are out of scope here.
 
-## What is NOT yet done (remaining U3 targets)
+## Target status (re-verified 2026-09-09, turmeric v0.46.0)
 
-This branch lands the compiler-readiness assessment plus U3 target 1 (`frame`).
-The remaining targets follow, one PR per the plan's within-spice ordering
-(opaques before rows for postgres/sqlite):
+The section that used to sit here listed targets 2, 3 and 4 as outstanding.
+Targets 2 and 3 have since shipped (target 3 except its client half). Current
+state:
 
-2. `postgres`/`sqlite` — `Result<#row{...}>`, `Stmt<params cols>` (after U1 opaques).
-3. `http`/`httpd` — `Request<#row{headers...}>` / `Response<...>`.
-4. `json` — object shapes as rows; retire the hand-rolled cons-walk decoder in
-   `spices/json/src/json/encode.tur` in favor of the now-unblocked container
-   `Decode` path.
+| # | Target | Module | Smoke test | Negative fixture | Status |
+|---|---|---|---|---|---|
+| 1 | `frame` | `frame/typed.tur` | `tests/frame/typed_test.tur` | -- | shipped |
+| 2 | `postgres` | `postgres/typed.tur` | `tests/postgres/u3_smoke.tur` | `errors/postgres-trows-row-mismatch.tur` | shipped |
+| 2 | `sqlite` | `sqlite/typed.tur` | `tests/u3_smoke.tur` | -- | shipped |
+| 3 | `httpd` (server) | `httpd/typed.tur` | `tests/u3_smoke.tur` | `errors/httpd-trequest-row-mismatch.tur` | shipped |
+| 3 | `http` (client) | -- | -- | -- | **NOT DONE** |
+| 4 | `json` | -- | -- | -- | **moot** |
+
+All four shipped modules are registered in their spice's `build.tur :exports`.
+
+The two negative fixtures are the U3 deliverable and both still reject, flag-free:
+
+```
+errors/postgres-trows-row-mismatch.tur:31:16: error [TUR-E0001]: function
+  'read-user' arg 1: expected (type-app TRows #row{id : int name : cstr}),
+  got (type-app TRows #row{id : int age : int})
+
+errors/httpd-trequest-row-mismatch.tur:33:19: error [TUR-E0001]: function
+  'require-auth' arg 1: expected (type-app TRequest #row{authorization : cstr}),
+  got (type-app TRequest #row{accept : cstr})
+```
+
+### Genuinely remaining
+
+- **Target 3, the `http` client half.** There is no `http/typed.tur`, and
+  `spices/http/build.tur` exports only `http/client`, `http/request`,
+  `http/response`, `http/error`. A row-typed `Request<#row{headers...}>` /
+  `Response<...>` on the client side is still to do.
+- **Target 4, `json` -- moot, not pending.** The spice is 100% yyjson-backed
+  (`:cmake-deps` pulls `ibireme/yyjson`; `parse`/`emit`/`encode`/`decode`/`patch`
+  all wrap it), so it has no Turmeric-level recursive IR to carry a row. The
+  sibling U5 doc reaches the same conclusion for the same reason -- see
+  `u5-hkt-ast-feasibility-2026-06-21.md`, section "The json target is still
+  moot". It should be dropped from the U3 target list rather than tracked as
+  outstanding.
 
 A `Col t` typed-column newtype and the term-level `(k in r)` membership
 predicate (deferred per P0) remain follow-ups; `frame/typed`'s accessors take
