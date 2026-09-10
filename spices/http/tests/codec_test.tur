@@ -25,13 +25,13 @@
   (defn __req-method [req : int] : cstr
     ```c
     struct __req { char *method; char *url; char *body; int64_t headers; };
-    return (int64_t)(intptr_t)((struct __req *)(intptr_t)req)->method;
+    return ((struct __req *)(intptr_t)req)->method;
     ```)
 
   (defn __req-body [req : int] : cstr
     ```c
     struct __req { char *method; char *url; char *body; int64_t headers; };
-    return (int64_t)(intptr_t)((struct __req *)(intptr_t)req)->body;
+    return ((struct __req *)(intptr_t)req)->body;
     ```)
 
   ;; Look up a header value by key in the alternating key/value cons-list, or
@@ -46,10 +46,10 @@
       const char *k = (const char *)(intptr_t)c->value;
       struct __cons *v = (struct __cons *)(intptr_t)c->next;
       if (k && strcmp(k, (const char *)key) == 0)
-        return (int64_t)(intptr_t)(const char *)(intptr_t)v->value;
+        return (const char *)(intptr_t)v->value;
       c = (struct __cons *)(intptr_t)v->next;
     }
-    return (int64_t)(intptr_t)"";
+    return "";
     ```)
 
   ;; -- Synthesize a response handle carrying `body` (no network). -----------
@@ -72,7 +72,7 @@
     #include <stdio.h>
     char *b = (char *)malloc(24);
     snprintf(b, 24, "%lld", (long long)n);
-    return (int64_t)(intptr_t)b;
+    return b;
     ```)
 
   ;; -- Typed payload. -------------------------------------------------------
