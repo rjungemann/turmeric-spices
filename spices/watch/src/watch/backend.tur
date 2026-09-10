@@ -160,18 +160,30 @@
     if (rc == 0) return 0;
     return 1;
     #elif defined(__APPLE__)
-    struct kevent ev;
-    int n;
-    if (timeout_ms < 0) {
-      n = kevent(w->kq, NULL, 0, &ev, 1, NULL);
-    } else {
-      struct timespec ts;
-      ts.tv_sec  = timeout_ms / 1000;
-      ts.tv_nsec = (timeout_ms % 1000) * 1000000L;
-      n = kevent(w->kq, NULL, 0, &ev, 1, &ts);
-    }
-    if (n <  0) return -1;
-    if (n == 0) return 0;
+    /* poll(2) the kqueue fd rather than kevent()-ing it.
+     *
+     * A kqueue descriptor is pollable on Darwin and poll() is LEVEL-triggered
+     * and NON-consuming on it: the queue reads as readable while anything is
+     * pending, and nothing is dequeued.  That is exactly the Linux contract
+     * ("wait observes, drain consumes"), and it is already how the tree path
+     * treats this fd -- __watcher-tree-poll-fired in watch/watch polls
+     * backend-fd, which is w->kq here.
+     *
+     * This used to call kevent() with a one-slot output buffer, which
+     * DEQUEUED the event and then threw its fflags away with the local
+     * `struct kevent ev`.  The backend-drain-* that followed polled an
+     * already-empty queue, found combined == 0, and left ev_n at 0 -- so on
+     * Darwin backend-wait returning 1 was reliably followed by
+     * backend-event-count returning 0.  The single-file path never noticed
+     * (it re-stats the target instead of reading evbuf) and the tree path
+     * never calls backend-wait at all, which is why only the direct backend
+     * callers saw it. */
+    struct pollfd pfd;
+    pfd.fd     = w->kq;
+    pfd.events = POLLIN;
+    int rc = poll(&pfd, 1, (int)timeout_ms);
+    if (rc <  0) return -1;
+    if (rc == 0) return 0;
     return 1;
     #else
     (void)timeout_ms;

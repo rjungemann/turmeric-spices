@@ -4,12 +4,29 @@
 ;;   /tmp/tur-watch-tree-<pid>/
 ;;     a/
 ;;       b/
-;;         leaf.txt
+;;         leaf.txt   <- created BEFORE the watcher opens; see below
 ;;     c/
-;; Opens a tree watcher on the root, then fires a write inside a/b/
-;; from a background pthread.  WTNF2/3 expectation: watch-next returns an
-;; event whose path is exactly "a/b/leaf.txt" (relative to root) on both
-;; Linux (inotify name) and Darwin (snapshot diff).
+;; Opens a tree watcher on the root, then fires an atomic save (write temp +
+;; rename over the target) inside a/b/ from a background pthread.  WTNF2/3
+;; expectation: watch-next returns an event whose path is exactly
+;; "a/b/leaf.txt" (relative to root) on both Linux (inotify name) and Darwin
+;; (snapshot diff).
+;;
+;; leaf.txt must EXIST before watch-open-tree, or the scenario is not an
+;; atomic save at all -- it is a first create, and the two backends then
+;; disagree for a real reason:
+;;
+;;   Linux   sees the rename(2) itself (IN_MOVED_TO) and reports kind=rename
+;;           whether or not the destination name existed before.
+;;   Darwin  gets no name and no operation from kqueue-on-a-directory; the
+;;           tree layer recovers the name by diffing directory snapshots, so
+;;           a name that was absent from the previous snapshot is honestly a
+;;           create -- there is nothing in the signal that says "this name
+;;           arrived via rename".
+;;
+;; With leaf.txt pre-created the snapshot diff sees the SAME name with a
+;; DIFFERENT inode, which is unambiguously an atomic save, and both backends
+;; report kind=rename.  See docs/watch-darwin-fresh-name-is-create.md.
 
 (defmodule watch/tests/tree
   (import watch/event :refer [watch-kind-write watch-kind-rename
@@ -133,12 +150,16 @@
     return strcmp(sa, sb) == 0;
     ```)
 
-  ;; Print the event path to stderr for debugging on failure.
-  (defn dbg-path [ev : int] #fx{Unsafe} : void
+  ;; Print the event path AND kind to stderr for debugging on failure.
+  ;; The kind is the half that actually failed here once (Darwin reported
+  ;; kind=create where Linux reported kind=rename), and printing only the
+  ;; path meant the TAP output named the wrong suspect.
+  (defn dbg-event [ev : int kind : int] #fx{Unsafe} : void
     ```c
     const char *p = (const char *)(intptr_t)
         watch_event_path(ev);
-    fprintf(stderr, "# event path: [%s]\n", p ? p : "<null>");
+    fprintf(stderr, "# event path: [%s] kind: %lld\n", p ? p : "<null>",
+            (long long)kind);
     ```)
 
   (defn main [] #fx{Unsafe} : int
@@ -165,6 +186,13 @@
           (make-dir b)
           (make-dir c)
 
+          ;; Seed leaf.txt so the save below is an OVERWRITE, not a create.
+          ;; Different content from the save ("hello") so the size differs
+          ;; too: if the inode were somehow reused, the Darwin snapshot diff
+          ;; still classifies the change as a write rather than reporting
+          ;; nothing.  See the header comment for why this matters.
+          (write-file leaf "initial")
+
           (let [w (watch-open-tree root opts)]
             (do
               (tap-record 1 "watch-open-tree returned non-zero"
@@ -188,7 +216,7 @@
                   ;; Linux delivers IN_MOVED_TO with name "leaf.txt" inside a/b.
                   ;; Darwin snapshot diff sees inode change for "leaf.txt".
                   ;; In both cases the relative path should be "a/b/leaf.txt".
-                  (dbg-path ev)
+                  (dbg-event ev (watch-event-kind ev))
                   (tap-record 6 "event path is a/b/leaf.txt (per-file naming)"
                               (cstr-eq? (watch-event-path ev) "a/b/leaf.txt"))
                   (watch-event-free ev)))

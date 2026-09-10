@@ -87,7 +87,7 @@ For recursive directory watching use `watch-open-tree`:
 | Single-file watch | yes | yes (unchanged) |
 | Atomic-save (write temp + rename) on Linux + Darwin | yes | yes (unchanged) |
 | In-place writes on Linux | yes | yes (unchanged) |
-| In-place writes on Darwin | kind=rename via inode diff | kind=write via size diff |
+| In-place writes on Darwin | **no event** (see note) | **no event** (see note) |
 | Recursive directory watch (`watch-open-tree`) | yes (dir-level only) | yes, **per-file naming** |
 | Per-file path in tree-mode events | **no** (dir path only) | **yes** (both Linux + Darwin) |
 | Per-file kind classification in tree mode | **no** (always `write`) | **yes** |
@@ -98,6 +98,17 @@ For recursive directory watching use `watch-open-tree`:
 | `watch-add-path` / `watch-remove-path` | stubs return -1 | stubs return -1 |
 | Callback / async API | no | no |
 | macOS FSEvents backend | no | no (planned v0.3) |
+
+> **Note on in-place writes on Darwin.** Both backends register the parent
+> *directory*, and `kqueue`'s `EVFILT_VNODE` on a directory fires for
+> entry-level changes (create, unlink, rename) but not for in-place content
+> modification of a child file -- so a plain `fopen("w")` or `O_APPEND` write
+> over an existing target produces no Darwin event at all, and the
+> snapshot/inode diff never gets a chance to classify it. This table
+> previously claimed a `kind=write via size diff` here; that was wrong.
+> Atomic-save flows (write temp + rename), which is what vim, emacs and
+> VS Code do by default, fire on both backends. Measured on macOS 27,
+> 2026-09-09; see `docs/notebook-watch-semantics.md` section 10.
 | Windows backend | no | no |
 
 ### v0.2.0 semantics change for tree-mode callers
