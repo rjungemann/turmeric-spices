@@ -3,9 +3,10 @@
 **Date:** 2026-07-26
 **Phase:** RE1 of `ecs-refinement-typed-apis-plan.md`, on top of C2
 (`refine-stateful-measures-plan.md`).
-**Status:** the pattern is proven end-to-end; two compiler dependencies were
-found and resolved along the way; harness integration + promotion to a shipped
-accessor module remain.
+**Status:** DONE. The pattern is proven end-to-end, two compiler dependencies
+were found and resolved along the way, harness integration landed, and the
+accessor family shipped as `ecs/refined-world` (single-column facade) and
+`ecs/sized-refined` (full stack) -- both registered in `build.tur :exports`.
 
 ## What RE1 delivers
 
@@ -48,7 +49,7 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
    compiler repo with full validation; see
    `docs/archive/frozen-macro-breaks-refinement-guard-discharge.md`.
 
-## Remaining RE1 work
+## RE1 work items -- all closed
 
 - **Harness integration -- DONE; auto-run UNBLOCKED (2026-07-26).**
   `tur test` gained per-test directives (`;; tur-test-flags: --strict-refine`,
@@ -85,8 +86,9 @@ Fixtures (verified with `--enable=refined --strict-refine` on a Debug `tur`):
   runs -> 10, 30, skipping the despawned slot);
   `tests/refined-foreach-wrong-entity.tur` (a body reading a DIFFERENT entity
   than the proven binder stays TUR-W0372). Both auto-run in `tur test tests`.
-- **Promotion to a shipped accessor family.** These fixtures use a self-contained
-  `GameWorld` facade. Promoting to a real `ecs` module means a facade that owns a
+- **Promotion to a shipped accessor family -- DONE (2026-07-26).** The fixtures
+  above used a self-contained
+  `GameWorld` facade. Promoting to a real `ecs` module meant a facade that owns a
   `WorldState` + storages and re-exports `alive?`/`despawn!`/`get!` with the
   encapsulation (private state field) the soundness argument needs. The
   `ecs/refined-world` module (below) is that promotion for the single-column

@@ -136,19 +136,24 @@
   ;; the leftover suffix?". The elegant form is a cata whose carrier is a
   ;; matcher closure `(fn [k s] bool)` (the "NFA is one cata" shape).
   ;;
-  ;; STATUS (verified against turmeric main built from source, post #489..#497):
-  ;; the function-typed-carrier cata now WORKS for carriers whose arguments are
-  ;; scalars -- `B = (fn [int] int)` (turmeric #489) and `B = (fn [int int]
-  ;; int)` both fold + run. But the matcher carrier is `B = (fn [(fn [cstr]
-  ;; bool) cstr] bool)`: its *first argument is itself a function* (the
-  ;; continuation `k`). That case still mis-lowers -- at the carrier-result
-  ;; application site the fn-typed argument is passed thin (cast to `int64_t`)
-  ;; instead of as a fat closure box, so `(re-cata match-alg e)` segfaults at
-  ;; runtime (it now type-checks AND compiles -- the old "comes back as int,
-  ;; not callable" blocker is gone). Minimal repro + analysis in
-  ;; docs/u5-regex-matcher-cata-blocker-2026-06-22.md. Until that fix lands the
-  ;; matcher stays direct structural recursion over the same tree -- still a
-  ;; fold, just not routed through `re-cata`.
+  ;; STATUS (verified against turmeric v0.46.0, 2026-09-09): the matcher-as-cata
+  ;; is NOT blocked. The carrier `B = (fn [(fn [cstr] bool) cstr] bool)` -- whose
+  ;; first argument is itself the continuation `k` -- type-checks, compiles, and
+  ;; folds correctly. The earlier report that it segfaulted at runtime is
+  ;; obsolete.
+  ;;
+  ;; One emitter papercut remains, and it is arm-order-dependent: in an algebra
+  ;; returning a function-typed carrier, the emitter types the `match` result
+  ;; temporary from the FIRST arm as written. A first arm returning a closure
+  ;; that captures nothing gets an `int64_t` temporary while every arm builds a
+  ;; `void *` fat-closure box, and `cc` rejects the file with `-Wint-conversion`.
+  ;; `EmptyF` is nullary, so its natural `(k s)` arm captures nothing -- writing
+  ;; the capturing `LitF` arm first is the whole workaround. Details and the
+  ;; matrix in docs/u5-regex-matcher-cata-blocker-2026-06-22.md.
+  ;;
+  ;; The matcher below stays direct structural recursion over the same tree --
+  ;; still a fold, just not routed through `re-cata`. That is now a code-shape
+  ;; choice, not a compiler constraint.
 
   ;; consume one literal char off the front of `s`; return s+1, or null on miss
   (defn lit-step [lit : cstr s : cstr] : cstr

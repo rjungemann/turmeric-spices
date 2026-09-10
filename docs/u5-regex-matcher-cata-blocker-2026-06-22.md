@@ -1,60 +1,135 @@
 ---
-title: Track C U5 (regex matcher as one cata) — re-checked after turmeric #489..#497
+title: Track C U5 (regex matcher as one cata) -- re-verified on turmeric v0.46.0
 category: Spice-uplift feasibility analysis (Track C / U5)
-status: PARTIALLY UNBLOCKED — function-typed-carrier cata now works for scalar-argument carriers (#489); the regex matcher carrier (a function whose own argument is a function) still mis-lowers and segfaults. Matcher stays direct recursion. New minimal repro filed below.
-verified-on: turmeric main @ d9fb741 (#497, built from source: cmake --build build-release)
-verified-by: turmeric-spices Claude (Track C, branch claude/track-c-turmeric-work-6471kr)
+status: UNBLOCKED -- the function-typed-carrier segfault is gone. A narrower emitter defect survives (arm-order-dependent carrier typing) and has a one-line source workaround.
+verified-on: turmeric v0.46.0 (`tur --version` -> 0.46.0)
+verified-by: turmeric-spices docs accuracy sweep, 2026-09-09
 plan: rjungemann/turmeric docs/upcoming/spices-type-features-uplift-plan.md (Phase U5)
 ---
 
-# U5 regex matcher: can it become one `cata` now?
+# U5 regex matcher: can it become one `cata`?
+
+> **RESOLVED 2026-09-09 -- yes, it can.**
+>
+> This document previously reported that a `cata` whose carrier is a function
+> taking a function argument (`B = (fn [(fn [cstr] bool) cstr] bool)`)
+> **segfaulted at runtime**, and that the regex matcher therefore had to stay
+> direct structural recursion. That is no longer true on v0.46.0: the doc's own
+> minimal repro compiles and prints `7`, and the regex matcher's exact carrier
+> shape compiles and matches correctly.
+>
+> What survives is a much narrower **emitter** defect about the C type of one
+> temporary, described below. It is order-dependent and has a trivial
+> source-level workaround, so it is a papercut, not a blocker.
 
 ## TL;DR
 
-The U5 feasibility doc (`u5-hkt-ast-feasibility-2026-06-21.md`) closed with one
-open edge: the regex spice's backtracking matcher wanted to be a single
-`re-cata` with a **function-typed carrier** `B`, but `(re-cata match-alg e)`
-"came back as `int` and was not callable", so `re-matches?` shipped as direct
-structural recursion.
+- **The old blocker is gone.** A function-typed carrier whose own argument is a
+  function type-checks, compiles, and runs. No thin/fat closure mismatch at the
+  application site, no segfault.
+- **A narrower defect survives.** In an algebra whose return type is a function
+  type, the emitter types the `match` result temporary from the **first arm as
+  written**. If that first arm returns a closure that **captures nothing**, the
+  temporary is emitted as `int64_t` while every arm actually builds a `void *`
+  fat-closure box, and `cc` rejects the file.
+- **Workaround: write a capturing arm first.** With that one reordering the
+  whole matcher compiles and runs. Nothing else changes.
 
-Re-checked against turmeric main built from source at `d9fb741` (post the
-#479..#497 cluster, which includes **#489 "hkt-cata function-typed carrier"**):
+## Verification (turmeric v0.46.0)
 
-- **That old blocker is gone.** A function-typed-carrier cata now type-checks,
-  compiles, *and runs* when the carrier's arguments are **scalars**:
-  `B = (fn [int] int)` (turmeric fixture `hkt-cata-fn-carrier-recursive`) and
-  `B = (fn [int int] int)` both fold and return the right value.
-- **A new, narrower blocker remains.** The regex matcher carrier is
-  `B = (fn [(fn [cstr] bool) cstr] bool)` — its **first argument is itself a
-  function** (the CPS continuation `k`). That case still mis-lowers: at the
-  carrier-result application site the function-typed argument is passed *thin*
-  (cast to `int64_t`) instead of as a fat closure box, so the program
-  **segfaults at runtime** (it now type-checks and compiles cleanly — only
-  codegen is wrong).
+### The old repro now passes
 
-So the matcher-as-cata is still blocked, but on a different, sharper defect
-than recorded on 2026-06-21. `re-matches?` stays direct recursion.
+The minimal repro this document filed on 2026-06-22 -- carrier
+`B = (fn [(fn [int] int) int] int)`, whose first argument is the CPS
+continuation -- was re-run verbatim:
 
-## What *did* land this pass
+```
+tur check repro.tur   -> exit 0
+tur run   repro.tur   -> 7
+```
 
-- The layer ascriptions the value folds and `unroll-re` used to need
-  (`(:: l (ReF Re))` after `(match e (Roll l) ...)`) are **no longer
-  required** — matching `(Roll l)` now refines `l`'s recursion slot directly.
-  `spices/regex/src/regex/tree.tur` dropped them; the 14/14 `tests/tree_test`
-  suite stays green.
+`7` is the expected answer. There is no int-from-pointer warning and no
+segfault. (The run emits one unrelated `-Wtypedef-redefinition` C11 warning
+about `tur_adt_Expr`, which is cosmetic and unconnected to carriers.)
 
-## Verification matrix (turmeric main @ d9fb741, `tur` built from source)
+### The regex matcher's real carrier shape
 
-| Carrier `B` | type-checks | compiles (`cc`) | runs | result |
+The matcher carrier `B = (fn [(fn [cstr] bool) cstr] bool)` was rebuilt
+standalone over a `ReF` functor with the spice's own five constructors
+(`EmptyF`, `LitF`, `AltF`, `CatF`, `StarF`) and the spice's `lit-step` inline-C.
+Folded with `re-cata`, `(cat (lit "a") (lit "b"))` against `"ab"` prints
+`match`. The fold is correct end to end.
+
+That run required the arm reordering below. With the arms in their natural
+order -- `EmptyF` first -- the program fails at the C compile step.
+
+## The surviving defect: arm-order-dependent carrier typing
+
+### Symptom
+
+`tur check` passes. `cc` fails:
+
+```
+error: incompatible pointer to integer conversion assigning to 'int64_t'
+       (aka 'long long') from 'void *' [-Wint-conversion]
+    __t270 = __t273;
+error: incompatible integer to pointer conversion returning 'int64_t'
+       (aka 'long long') from a function with result type 'void *'
+    return __t270;
+```
+
+One assignment error per algebra arm, plus one on the return.
+
+### Cause
+
+The algebra lowers to a C function returning `void *` (the fat-closure
+pointer). Its `match` lowers to a result temporary that every arm assigns into.
+The emitter picks that temporary's C type from the first arm. A closure that
+captures nothing is classified as thin, so the temporary is declared
+`int64_t` -- but the arm still builds a fat box:
+
+```c
+static void * alg(const tur_adt_ExprF__fn2_fn0__struct_int__int * l) {
+        int64_t __t270 = 0;              /* <-- typed from the first arm */
+        ...
+            case 0: {
+                void *__t272 = malloc(sizeof(void *) + 2 * sizeof(int64_t));
+                __t271[0] = (int64_t)(intptr_t)__tur_fatshim2;
+                __t271[1] = (int64_t)(intptr_t)__fn_1502;
+                void *__t273 = __t271;
+                __t270 = __t273;         /* <-- void* into int64_t */
+```
+
+When the first arm's closure *does* capture, the same temporary is emitted as
+`void * __t270 = 0;` and every arm assigns cleanly.
+
+### Observed matrix
+
+Carrier `B = (fn [(fn [int] int) int] int)`, varying only the `LitF` arm body
+(`n` is the matched constructor's field):
+
+| First arm's body | captures `n` | `tur check` | `cc` | runs |
 |---|---|---|---|---|
-| `(fn [int] int)` (turmeric fixture) | ✅ | ✅ | ✅ | 7 / 12 |
-| `(fn [int int] int)` (2 scalar args) | ✅ | ✅ | ✅ | 13 |
-| `(fn [(fn [int] int) int] int)` (fn-typed **arg**) | ✅ | ⚠️ warns | ✗ | **segfault** |
-| regex matcher `(fn [(fn [cstr] bool) cstr] bool)` | ✅ | ⚠️ warns | ✗ | **segfault** |
+| `(k (+ s n))` | yes | pass | pass | yes |
+| `(if (> n 0) (k s) 0)` | yes | pass | pass | yes |
+| `(k s)` | no | pass | **FAIL** | -- |
+| `(k (+ s 0))` | no | pass | **FAIL** | -- |
+| `(let [b (k s)] b)` | no | pass | **FAIL** | -- |
 
-The two failing rows are the *same* defect: a carrier whose parameter list
-contains a function type. Arity is not the trigger (the 2-scalar-arg row
-passes); a function-typed *argument* is.
+Two controls pin the rule to arm **order**, not to capture as such:
+
+- Writing the capturing `AddF` arm **first** and the non-capturing `(k s)`
+  `LitF` arm second: compiles and runs.
+- The regex `ReF` algebra with the capturing `LitF` arm written first and the
+  non-capturing `EmptyF` / `StarF` arms after it: compiles and runs.
+- All arms non-capturing: fails, as expected.
+
+So a non-capturing closure anywhere but the first arm is harmless. Only the
+first arm sets the temporary's type.
+
+This is why the regex matcher hits it by default: `EmptyF` is a **nullary**
+constructor, so its arm `(k s)` has nothing it *could* capture, and it is
+naturally written first.
 
 ## Minimal repro (no inline C)
 
@@ -78,57 +153,25 @@ passes); a function-typed *argument* is.
 (defn lit [n : int] : Expr (Roll (LitF n)))
 (defn add [x : Expr y : Expr] : Expr (Roll (AddF x y)))
 
-;; carrier B = (fn [(fn [int] int) int] int): first arg is itself a function
+;; FAILS at `cc`: the first arm's closure captures nothing.
+;; Swap the two arms and it compiles and runs.
 (defn alg [l : (ExprF (fn [(fn [int] int) int] int))]
          : (fn [(fn [int] int) int] int)
   (match l
-    (LitF n)   (fn [k : (fn [int] int) s : int] : int (k (+ s n)))
+    (LitF n)   (fn [k : (fn [int] int) s : int] : int (k s))
     (AddF x y) (fn [k : (fn [int] int) s : int] : int
                  (x (fn [s2 : int] : int (y k s2)) s))))
 
 (defn main [] : int
-  (println ((cata alg (add (lit 3) (lit 4))) (fn [r : int] : int r) 0))) ;; expect 7
+  (println ((cata alg (add (lit 3) (lit 4))) (fn [r : int] : int r) 0)))
 ```
-
-- `tur check` → exit 0.
-- `tur run` → C compile emits an int-from-pointer warning at the carrier-result
-  application site and the program **segfaults**. The generated call is
-
-  ```c
-  __t56 = ((int64_t (*)(void*, int64_t, int64_t))(intptr_t)(...))(
-              (void*)(...), __fn_1078, INT64_C(0));
-  ```
-
-  i.e. the continuation argument `__fn_1078` (a fat closure pointer) is passed
-  in an `int64_t` slot and the callee dispatches it thin → jump into the env
-  block.
-
-Control that **passes** (swap the function-typed first arg for a scalar):
-
-```turmeric
-(defn alg [l : (ExprF (fn [int int] int))] : (fn [int int] int)
-  (match l
-    (LitF n)   (fn [a : int b : int] : int (+ n (+ a b)))
-    (AddF x y) (fn [a : int b : int] : int (+ (x a b) (y a b)))))
-;; ((cata alg (add (lit 3) (lit 4))) 1 2) => 13
-```
-
-## Relationship to the existing turmeric report
-
-`rjungemann/turmeric:docs/reported/hkt-cata-function-carrier-recursive-segfault.md`
-records the recursive function-carrier segfault as **FIXED** for its canonical
-repro (`B = (fn [int] int)`). The case above is the **next** variant: the
-carrier's *argument* is a function. It needs the same fat-closure ABI treatment
-#489 gave the carrier *result* to be extended to function-typed *arguments* of
-the carrier at the application site. Filing it against turmeric requires a
-turmeric-rooted session (writes to turmeric are out of scope here); the
-self-contained repro above is ready to drop into `docs/reported/`.
 
 ## Bottom line for Track C / U5
 
 - regex value folds: already one `re-cata` each (shipped earlier).
-- regex matcher: **still direct recursion** — blocked on the function-typed
-  *argument* carrier defect above, not on anything spice-side.
-- The other U5 AST targets (`c-dsl`, `glsl`, `scscm`, `template`) do **not**
-  need a function-typed carrier and were already assessed doable post #483/#487;
-  this defect does not gate them.
+- regex matcher: **no longer blocked.** It stays direct structural recursion in
+  `spices/regex/src/regex/tree.tur` today as a code-shape choice, not because
+  the compiler prevents the cata. Converting it needs only that a capturing arm
+  be written before the nullary `EmptyF` arm.
+- The other U5 AST targets (`c-dsl`, `glsl`, `scscm`, `template`) do not need a
+  function-typed carrier and were never gated by this.
