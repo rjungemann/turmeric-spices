@@ -218,22 +218,37 @@ static wsb_arg_t *wsb__arg_new(int fd, const char *msg) {
   ;; can never dereference a dead connection.
   ;; ---------------------------------------------------------------------
 
-  ;; The hub lock is held as its int carrier, not as a `Mutex`-typed global.
+  ;; The hub lock is held as its `ptr<void>` carrier, not as a `Mutex`-typed
+  ;; global.
   ;;
   ;; `(def hub-mutex (mutex-new))` is what this used to say, and it looks
   ;; right -- but stdlib's `Mutex` is `(defopaque Mutex :ptr<void> :linear)`,
-  ;; and the compiler silently drops a module-level `def` whose initialiser
+  ;; and the compiler silently drops a module-level `def` whose initializer
   ;; has a linear type.  No diagnostic: `tur check` passes, and then cc fails
   ;; with "'hub_hymutex_1866' undeclared", because every use site referenced a
   ;; global that was never emitted.  (Minimal repro: `(def g (mutex-new))`
   ;; plus one `(mutex-lock g)`.  The same file with `(def n (vec-new))`
   ;; emits its global fine, so it is the linearity, not module-level def.)
   ;;
-  ;; Casting the handle to its `:int` carrier at creation consumes the linear
-  ;; value exactly once, which is what linearity wants, and leaves an ordinary
-  ;; global behind.  Each use casts back for the `^borrow` that mutex-lock and
-  ;; mutex-unlock take, so the lock discipline is unchanged.
-  (def hub-mutex (:: (mutex-new) :int))
+  ;; Ascribing the handle at creation consumes the linear value exactly once,
+  ;; which is what linearity wants, and leaves an ordinary global behind.
+  ;; Each use casts back for the `^borrow` that mutex-lock and mutex-unlock
+  ;; take, so the lock discipline is unchanged.
+  ;;
+  ;; The carrier is `:ptr<void>` and NOT `:int`.  `:int` was the obvious
+  ;; choice and it is wrong twice over.  A mutex handle is not a number, so
+  ;; `:int` is exactly the type-eraser CLAUDE.md's "No Lazy :int Stand-Ins"
+  ;; rule exists to keep out -- `Mutex` already IS `ptr<void>`, so the honest
+  ;; carrier costs nothing.  It also miscompiles: the global is declared from
+  ;; the ascribed type (`int64_t`) while `mutex-new` returns `void *`, and the
+  ;; module-level `def` store emits the assignment with no bridging cast --
+  ;; `hub_hymutex_1969 = __ps_526;`.  clang 21 rejects that outright
+  ;; (-Wint-conversion is an error by default now), so the macOS leg could not
+  ;; build this file.  A `let` binder bridges the same straddle correctly;
+  ;; module-level `def` does not.  Reported upstream as
+  ;; docs/reported/global-def-store-misses-int-ptr-bridge.md in turmeric.
+  ;; Matching the carrier to the value's real C type sidesteps it entirely.
+  (def hub-mutex (:: (mutex-new) :ptr<void>))
 
 ;;; hub-lock! / hub-unlock! -- borrow the hub mutex through its carrier.
   (defn hub-lock!   [] : nil (mutex-lock   (:: hub-mutex Mutex)))
