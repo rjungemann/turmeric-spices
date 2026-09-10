@@ -153,6 +153,27 @@ jobs:
             tail=$(tail -n 20 /tmp/tur-fetch.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/$/%0A/' | tr -d '\n')
             echo "::warning title=tur fetch exited ${rc}::${tail}"
           fi
+          # ...and a native :cmake-deps build that FAILED is not the ambiguous
+          # case. It guarantees a missing archive, so the job is already dead;
+          # the only question is whether it dies here, where the compiler error
+          # is, or 400 lines later pointing at a library nobody touched.
+          #
+          # Run 34448162505 is the argument for dying here. One mbedtls
+          # -Werror abort (clang 21's -Wunterminated-string-initialization vs
+          # mbedtls's own MBEDTLS_FATAL_WARNINGS) took out nine macOS jobs, and
+          # each reported a *different* spice failing to find a *different*
+          # .a -- including `libyyjson.a`, a library with nothing to do with
+          # the actual fault, which was simply next in the same aborted `make`.
+          #
+          # Match on `cmake build failed` specifically, NOT on $rc: the exit
+          # code also covers :optional :spices resolution failures, which must
+          # stay non-fatal. Checked against all 79 passing jobs of that run --
+          # none of them prints this line, so nothing green today goes red.
+          if [ -f /tmp/tur-fetch.log ] && grep -q 'cmake build failed' /tmp/tur-fetch.log; then
+            echo "::error title=native dependency build failed::a :cmake-deps library failed to build; the compiler errors are above, in this step -- do not chase the link error in a later step"
+            grep -n 'cmake build failed' /tmp/tur-fetch.log
+            exit 1
+          fi
 
       - name: Type-check spice sources
         working-directory: turmeric-spices/spices/${{ matrix.spice }}
