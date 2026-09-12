@@ -1,0 +1,206 @@
+;; crdt/causal -- Dot and DotContext, the unit of causality.
+;;
+;; A Dot is one replica's n-th contribution: (replica, counter).  Nothing else
+;; in the system ever mints that pair, so a dot names an event uniquely without
+;; coordination -- which is the whole trick.
+;;
+;; A DotContext is the set of dots a replica has OBSERVED, stored compactly as
+;; a version vector: replica -> highest counter seen.  That compaction is exact
+;; only while each replica's dots arrive without gaps, which is what causal
+;; delivery gives you; C6's sync layer is where that assumption gets paid for.
+;;
+;; No inline C (crdt-spice-plan 2.5).
+
+;; The lattice classes are not auto-loaded (lattice-vocabulary-plan 3.5).
+(load "stdlib/typeclass-lattice.tur")
+
+(defmodule crdt/causal
+  (import crdt/lattice :refer [map-merge-with])
+  (export Dot mk-dot dot-replica dot-counter
+          DotContext dotctx-new dotctx-witness dotctx-seen? dotctx-next
+          dotctx-count)
+
+;;; Dot -- one replica's n-th event.
+;;;
+;;; Since: crdt-spice-plan C2
+;;
+;; `replica : Sym` rather than a ReplicaId newtype -- see crdt/counter for why
+;; (defopaque over Sym does not compile; the defstruct alternative forces a
+;; MapKey instance that can only be written in inline C).  A Sym field in a
+;; record only became legal in v0.46.1.
+;; NOTE the constructor is `mk-dot`, not `dot`: stdlib/macros.tur (which IS
+;; auto-loaded) already defines a `dot` macro for method-call sugar, and macro
+;; expansion precedes everything, so a function of that name is unreachable.
+;; Same collision shape that retired the max/min macros in
+;; lattice-vocabulary-plan L1 -- worth checking a name against macros.tur before
+;; exporting it.
+(defstruct Dot [replica : Sym counter : int])
+
+;;; mk-dot -- mint a dot.
+;;;
+;;; Parameters:
+;;;   r -- the replica
+;;;   n -- its counter value for this event
+;;;
+;;; Returns:
+;;;   The Dot (r, n).
+;;;
+;;; Example:
+;;;   (mk-dot (quote alice) 3)
+;;;
+;;; Since: crdt-spice-plan C2
+(defn mk-dot [r : Sym n : int] : Dot (Dot r n))
+
+;;; dot-replica -- the replica that minted this dot.
+;;;
+;;; Parameters:
+;;;   d -- the dot
+;;;
+;;; Returns:
+;;;   Its replica.
+;;;
+;;; Example:
+;;;   (dot-replica (mk-dot (quote alice) 3))   ; => alice
+;;;
+;;; Since: crdt-spice-plan C2
+(defn dot-replica [^borrow d : Dot] : Sym (.replica d))
+
+;;; dot-counter -- the counter value of this dot.
+;;;
+;;; Parameters:
+;;;   d -- the dot
+;;;
+;;; Returns:
+;;;   Its counter.
+;;;
+;;; Example:
+;;;   (dot-counter (mk-dot (quote alice) 3))   ; => 3
+;;;
+;;; Since: crdt-spice-plan C2
+(defn dot-counter [^borrow d : Dot] : int (.counter d))
+
+;;; DotContext -- the causal history a replica has observed.
+;;;
+;;; Since: crdt-spice-plan C2
+(defstruct DotContext [seen : int])
+
+;;; dotctx-new -- an empty causal history.
+;;;
+;;; Returns:
+;;;   A DotContext that has observed nothing.
+;;;
+;;; Example:
+;;;   (dotctx-new)
+;;;
+;;; Since: crdt-spice-plan C2
+(defn dotctx-new [] : DotContext
+  (DotContext (:: (map-new) int)))
+
+;;; dotctx-witness -- record that a dot has been observed.
+;;;
+;;; Parameters:
+;;;   c -- the context
+;;;   d -- the dot
+;;;
+;;; Returns:
+;;;   A new DotContext including d.
+;;;
+;;; Example:
+;;;   (dotctx-witness (dotctx-new) (mk-dot (quote alice) 1))
+;;;
+;;; Since: crdt-spice-plan C2
+;;
+;; Keeps the HIGHEST counter per replica, so witnessing an older dot is a
+;; no-op.  That is what makes the context a join-semilattice rather than a
+;; growing log.
+(defn dotctx-witness [c : DotContext ^borrow d : Dot] : DotContext
+  (let [m   (:: (.seen c) (Map Sym int))
+        r   (.replica d)
+        n   (.counter d)
+        cur (if (map-has? m r) (map-get m r) 0)]
+    (DotContext (:: (map-assoc m r (if (< cur n) n cur)) int))))
+
+;;; dotctx-seen? -- has this dot been observed?
+;;;
+;;; Parameters:
+;;;   c -- the context
+;;;   d -- the dot
+;;;
+;;; Returns:
+;;;   true when the context's counter for d's replica is at least d's.
+;;;
+;;; Example:
+;;;   (dotctx-seen? ctx (mk-dot (quote alice) 1))
+;;;
+;;; Since: crdt-spice-plan C2
+(defn dotctx-seen? [^borrow c : DotContext ^borrow d : Dot] : bool
+  (let [m (:: (.seen c) (Map Sym int))
+        r (.replica d)]
+    (if (map-has? m r) (>= (map-get m r) (.counter d)) false)))
+
+;;; dotctx-next -- the next dot this replica may mint.
+;;;
+;;; Parameters:
+;;;   c -- the context
+;;;   r -- the replica
+;;;
+;;; Returns:
+;;;   The dot one past the highest this context has for r.
+;;;
+;;; Example:
+;;;   (dotctx-next ctx (quote alice))
+;;;
+;;; Since: crdt-spice-plan C2
+(defn dotctx-next [^borrow c : DotContext r : Sym] : Dot
+  (let [m (:: (.seen c) (Map Sym int))]
+    (Dot r (+ 1 (if (map-has? m r) (map-get m r) 0)))))
+
+;;; dotctx-count -- how many replicas this context has heard from.
+;;;
+;;; Parameters:
+;;;   c -- the context
+;;;
+;;; Returns:
+;;;   The number of distinct replicas in the version vector.
+;;;
+;;; Example:
+;;;   (dotctx-count ctx)   ; => 2
+;;;
+;;; Since: crdt-spice-plan C2
+(defn dotctx-count [^borrow c : DotContext] : int
+  (map-count (:: (.seen c) (Map Sym int))))
+
+;;; __imax -- internal: the larger of two ints.
+(defn __imax [x : int y : int] : int (if (< x y) y x))
+
+;;; JoinSemilattice [DotContext] -- pointwise maximum of the version vectors.
+;;
+;; The same join a G-Counter uses, and for the same reason: each replica owns
+;; its own slot, so a disagreement is always "one of us has seen less".
+(definstance JoinSemilattice [DotContext]
+  (join [x y] (DotContext (map-merge-with (.seen x) (.seen y) __imax))))
+
+;;; BoundedJoin [DotContext] -- the empty history is the least element.
+(definstance BoundedJoin [DotContext]
+  (bottom [] (dotctx-new)))
+
+;;; Eq [DotContext] -- same replicas, same counters.
+(definstance Eq [DotContext]
+  (eq? [^borrow x ^borrow y]
+    (and (= (dotctx-count x) (dotctx-count y))
+         (= (__dotctx-sum x) (__dotctx-sum y)))))
+
+;;; __dotctx-sum -- internal: sum of the counters, a cheap content digest.
+(defn __dotctx-sum [^borrow c : DotContext] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: (.seen c) (Map Sym int))))
+        s  (__sum-loop it 0)]
+    (hamt/iter-destroy! it)
+    s))
+
+;;; __sum-loop -- internal.
+(defn __sum-loop [it : ptr<void> acc : int] : int
+  (if (hamt/iter-advance! it)
+    (__sum-loop it (+ acc (:: (hamt/iter-cur-val it) int)))
+    acc))
+
+) ;; end defmodule crdt/causal

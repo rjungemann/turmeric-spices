@@ -1,0 +1,85 @@
+;; crdt/lattice -- the two lattice helpers stdlib does not have.
+;;
+;; The classes themselves (JoinSemilattice, BoundedJoin, lattice-leq?, the law
+;; functions) come from stdlib/typeclass-lattice.tur -- this spice consumes
+;; them rather than redeclaring them.  What is missing there is a
+;; value-combining map merge, and a fold over a Vec of lattice values.
+;;
+;; No inline C in this module, deliberately: tests/run-turi.sh PASS-skips any
+;; fixture whose program contains a user inline-C block, and a CRDT's join is
+;; exactly the thing worth exercising on both back ends.
+
+;; The lattice classes are not auto-loaded (per lattice-vocabulary-plan 3.5:
+;; the auto-load list is paid by every TU in every build).  Load them.
+(load "stdlib/typeclass-lattice.tur")
+
+(defmodule crdt/lattice
+  (export map-merge-with join-all)
+
+;;; __mmw-loop -- internal: fold b's entries into acc.
+(defn __mmw-loop [acc : int it : ptr<void> ^fat f : (fn [int int] int)] : int
+  (if (hamt/iter-advance! it)
+    (let [k   (hamt/iter-cur-key it)
+          v   (:: (hamt/iter-cur-val it) int)
+          has (map-has? (:: acc (Map Sym int)) (:: k Sym))
+          cur (map-get  (:: acc (Map Sym int)) (:: k Sym))
+          nv  (if has (f cur v) v)]
+      (__mmw-loop (:: (map-assoc (:: acc (Map Sym int)) (:: k Sym) nv) int) it f))
+    acc))
+
+;;; map-merge-with -- merge two maps, COMBINING values under a shared key.
+;;;
+;;; Parameters:
+;;;   a -- first map
+;;;   b -- second map
+;;;   f -- (fn [int int] int) applied to (a[k], b[k]) when both have k
+;;;
+;;; Returns:
+;;;   A new map holding every key of both, with f applied where they overlap.
+;;;
+;;; Example:
+;;;   (map-merge-with a b (fn [x : int y : int] : int (if (< x y) y x)))
+;;;
+;;; Since: crdt-spice-plan C1
+;;
+;; stdlib's `map-merge` documents its second argument as "wins on collision",
+;; which is the wrong merge for every CRDT: joining two replicas' states must
+;; combine the values under a shared key, not pick one.  There is no
+;; `map-merge-with` in stdlib -- see the plan's section 5 for why this lives
+;; here rather than there (its ownership semantics for owned value types have
+;; no stdlib caller to pin them down yet).
+(defn map-merge-with [a : int b : int ^fat f : (fn [int int] int)] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: b (Map Sym int))))
+        r  (__mmw-loop a it f)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __join-all-loop -- internal: fold v[i..n) into acc with join.
+(defn __join-all-loop [^JoinSemilattice A] [v : (Vec A) i : int n : int acc : A] : A
+  (if (>= i n)
+    acc
+    (__join-all-loop v (+ i 1) n (join acc (vec-get v i)))))
+
+;;; join-all -- join every element of a Vec, from bottom.
+;;;
+;;; Parameters:
+;;;   v -- Vec of lattice values
+;;;
+;;; Returns:
+;;;   bottom when v is empty, else every element joined together.
+;;;
+;;; Example:
+;;;   (join-all (vec-of (:: 1 MaxI) (:: 7 MaxI)))   ; => MaxI 7
+;;;
+;;; Since: crdt-spice-plan C1
+;;
+;; Order-independent by the class laws -- which is the entire point, and what
+;; the law functions in stdlib/typeclass-lattice.tur exist to check.  The
+;; stdlib `mconcat` is the Semigroup/Monoid spelling of the same fold; this is
+;; the JoinSemilattice/BoundedJoin one, and there is no superclass relating
+;; them.
+(defn join-all [^JoinSemilattice A ^BoundedJoin A] [v : (Vec A)] : A
+  (let [z : A (bottom)]
+    (__join-all-loop v 0 (vec-len v) z)))
+
+) ;; end defmodule crdt/lattice

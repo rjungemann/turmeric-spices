@@ -225,7 +225,14 @@ static double __qf_ts(double p,double d1,double d2){
       (- 1.0 (pt t df)))))
 
 (defn __p-chi2-sided [chi : float df : float alt : int] : float
-  (if (= alt 0) (* 2.0 (min (pchi2 chi df) (- 1.0 (pchi2 chi df))))
+  ;; `min` was an auto-loaded macro in stdlib/macros.tur; it is a constrained
+  ;; generic over Ord in stdlib/typeclass.tur now (lattice-vocabulary-plan
+  ;; L1), which this module does not load.  Inlined to exactly what the
+  ;; macro expanded to rather than adding the dependency.
+  (if (= alt 0)
+    (let [p1 (pchi2 chi df)
+          p2 (- 1.0 (pchi2 chi df))]
+      (* 2.0 (if (<= p1 p2) p1 p2)))
     (if (= alt 2) (- 1.0 (pchi2 chi df))
       (pchi2 chi df))))
 
