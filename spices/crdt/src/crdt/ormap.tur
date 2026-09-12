@@ -183,114 +183,6 @@
     (__subset-loop b it (and acc (ormap-has? b (:: (hamt/iter-cur-key it) Sym))))
     acc))
 
-;; The helpers below are defined BEFORE `ormap-merge-with`, which forwards its
-;; `f` into them.  That order is load-bearing, not style: forwarding a
-;; function-typed parameter to a defn defined LATER in the file emits an
-;; erasing `(void *)(intptr_t)` cast onto a `tur_poly_fn_t` and fails to
-;; compile.  See docs/reported/fn-typed-param-forwarded-to-a-later-defn-miscasts.md.
-;; Do not reorder these into caller-first order.
-
-;;; __put -- internal: bind k in a carrier-held map, staying a carrier.
-;;
-;; Not inlined into the `if` below: a `map-assoc` result used directly as one
-;; arm makes the two arms a `Map*` and an int64 carrier, and the emitter
-;; assigns one to the other (`-Wint-conversion`).  Forcing the ascription
-;; through a typed helper keeps both arms plain carriers.
-(defn __put [acc : int k : Sym v : int] : int
-  (:: (map-assoc (:: acc (Map Sym int)) k v) int))
-
-;;; __dot-of -- internal: a key's recorded dot counter, or 0.
-(defn __dot-of [d : int k : Sym] : int
-  (if (map-has? (:: d (Map Sym int)) k)
-    (map-get (:: d (Map Sym int)) k)
-    0))
-
-;;; __seen? -- internal: has the other side's context observed src's dot for k?
-;;
-;; dotctx-seen?'s test, inlined against the raw `seen` carrier.  A DotContext
-;; is unique, so threading the STRUCT through the fold would move it -- and
-;; each side's context is needed twice here (once per pass, once for the final
-;; join).  crdt/orset threads its contexts as carriers for the same reason.
-(defn __seen? [coth : int k : Sym dsrc : int rsrc : int] : bool
-  (if (and (map-has? (:: dsrc (Map Sym int)) k)
-           (map-has? (:: rsrc (Map Sym int)) k))
-    (let [r (:: (map-get (:: rsrc (Map Sym int)) k) Sym)
-          c (map-get (:: dsrc (Map Sym int)) k)]
-      ;; The context is keyed by REPLICA, not by key.
-      (if (map-has? (:: coth (Map Sym int)) r)
-        (>= (map-get (:: coth (Map Sym int)) r) c)
-        false))
-    false))
-
-;;; __dots-loop -- internal: keep the HIGHER of the two sides' dot counters.
-;;
-;; Higher, not either-one: the dot records how much of this key's history the
-;; merged map has observed, so taking the lower would let an already-delivered
-;; remove be replayed as an add.
-(defn __dots-loop [it : ptr<void> da : int db : int acc : int] : int
-  (if (hamt/iter-advance! it)
-    (let [k (:: (hamt/iter-cur-key it) Sym)
-          x (__dot-of da k)
-          y (__dot-of db k)]
-      (__dots-loop it da db (__put acc k (if (> x y) x y))))
-    acc))
-
-;;; __dots-for -- internal: the dot map for the surviving keys.
-(defn __dots-for [ents : int da : int db : int] : int
-  (let [it (hamt/iter-alloc (map-hamt (:: ents (Map Sym int))))
-        r  (__dots-loop it da db (:: (map-new) int))]
-    (hamt/iter-destroy! it)
-    r))
-
-;;; __reps-for -- internal: the replica map for the surviving keys.
-;;
-;; Paired with __dots-for: the dot that survives is the HIGHER counter, so the
-;; replica recorded must be the one that minted THAT dot, not the other side's.
-(defn __reps-for [ents : int ra : int rb : int da : int db : int] : int
-  (let [it (hamt/iter-alloc (map-hamt (:: ents (Map Sym int))))
-        r  (__reps-loop it ra rb da db (:: (map-new) int))]
-    (hamt/iter-destroy! it)
-    r))
-
-;;; __reps-loop -- internal.
-(defn __reps-loop [it : ptr<void> ra : int rb : int da : int db : int acc : int] : int
-  (if (hamt/iter-advance! it)
-    (let [k  (:: (hamt/iter-cur-key it) Sym)
-          ca (__dot-of da k)
-          cb (__dot-of db k)
-          ;; Whichever side holds the higher COUNTER is the side whose replica
-          ;; minted the surviving dot -- keep its replica, not merely the one
-          ;; that happens to be present.
-          rep (if (>= ca cb) (__dot-of ra k) (__dot-of rb k))]
-      (__reps-loop it ra rb da db (__put acc k rep)))
-    acc))
-
-;;; __side-loop -- internal.
-(defn __side-loop [f : (fn [int int] int) it : ptr<void> dsrc : int rsrc : int
-                   eoth : int coth : int acc : int first : bool] : int
-  (if (hamt/iter-advance! it)
-    (let [k       (:: (hamt/iter-cur-key it) Sym)
-          mine    (:: (hamt/iter-cur-val it) int)
-          shared  (map-has? (:: eoth (Map Sym int)) k)
-          skip    (and (not first) shared)   ;; see the note in ormap-merge-with
-          ;; Add-wins: a key only this side has survives unless the OTHER
-          ;; side's context has already seen its dot -- which is what
-          ;; distinguishes "not yet delivered" from "deliberately removed".
-          dropped (and (not shared) (__seen? coth k dsrc rsrc))
-          val     (if shared (f mine (map-get (:: eoth (Map Sym int)) k)) mine)]
-      (__side-loop f it dsrc rsrc eoth coth
-                   (if (or skip dropped) acc (__put acc k val))
-                   first))
-    acc))
-
-;;; __side -- internal: fold one side's live keys into the entry accumulator.
-(defn __side [f : (fn [int int] int) esrc : int dsrc : int rsrc : int
-              eoth : int coth : int acce : int first : bool] : int
-  (let [it (hamt/iter-alloc (map-hamt (:: esrc (Map Sym int))))
-        r  (__side-loop f it dsrc rsrc eoth coth acce first)]
-    (hamt/iter-destroy! it)
-    r))
-
 ;;; ormap-merge-with -- merge two maps, combining shared values with `f`.
 ;;;
 ;;; Parameters:
@@ -342,5 +234,106 @@
         dm  (__dots-for e2 da db)
         rm  (__reps-for e2 ra rb da db)]
     (ORMap e2 dm rm (join ca cb))))
+
+;;; __side -- internal: fold one side's live keys into the entry accumulator.
+(defn __side [f : (fn [int int] int) esrc : int dsrc : int rsrc : int
+              eoth : int coth : int acce : int first : bool] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: esrc (Map Sym int))))
+        r  (__side-loop f it dsrc rsrc eoth coth acce first)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __side-loop -- internal.
+(defn __side-loop [f : (fn [int int] int) it : ptr<void> dsrc : int rsrc : int
+                   eoth : int coth : int acc : int first : bool] : int
+  (if (hamt/iter-advance! it)
+    (let [k       (:: (hamt/iter-cur-key it) Sym)
+          mine    (:: (hamt/iter-cur-val it) int)
+          shared  (map-has? (:: eoth (Map Sym int)) k)
+          skip    (and (not first) shared)   ;; see the note in ormap-merge-with
+          ;; Add-wins: a key only this side has survives unless the OTHER
+          ;; side's context has already seen its dot -- which is what
+          ;; distinguishes "not yet delivered" from "deliberately removed".
+          dropped (and (not shared) (__seen? coth k dsrc rsrc))
+          val     (if shared (f mine (map-get (:: eoth (Map Sym int)) k)) mine)]
+      (__side-loop f it dsrc rsrc eoth coth
+                   (if (or skip dropped) acc (__put acc k val))
+                   first))
+    acc))
+
+;;; __dots-for -- internal: the dot map for the surviving keys.
+(defn __dots-for [ents : int da : int db : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: ents (Map Sym int))))
+        r  (__dots-loop it da db (:: (map-new) int))]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __dots-loop -- internal: keep the HIGHER of the two sides' dot counters.
+;;
+;; Higher, not either-one: the dot records how much of this key's history the
+;; merged map has observed, so taking the lower would let an already-delivered
+;; remove be replayed as an add.
+(defn __dots-loop [it : ptr<void> da : int db : int acc : int] : int
+  (if (hamt/iter-advance! it)
+    (let [k (:: (hamt/iter-cur-key it) Sym)
+          x (__dot-of da k)
+          y (__dot-of db k)]
+      (__dots-loop it da db (__put acc k (if (> x y) x y))))
+    acc))
+
+;;; __reps-for -- internal: the replica map for the surviving keys.
+;;
+;; Paired with __dots-for: the dot that survives is the HIGHER counter, so the
+;; replica recorded must be the one that minted THAT dot, not the other side's.
+(defn __reps-for [ents : int ra : int rb : int da : int db : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: ents (Map Sym int))))
+        r  (__reps-loop it ra rb da db (:: (map-new) int))]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __reps-loop -- internal.
+(defn __reps-loop [it : ptr<void> ra : int rb : int da : int db : int acc : int] : int
+  (if (hamt/iter-advance! it)
+    (let [k  (:: (hamt/iter-cur-key it) Sym)
+          ca (__dot-of da k)
+          cb (__dot-of db k)
+          ;; Whichever side holds the higher COUNTER is the side whose replica
+          ;; minted the surviving dot -- keep its replica, not merely the one
+          ;; that happens to be present.
+          rep (if (>= ca cb) (__dot-of ra k) (__dot-of rb k))]
+      (__reps-loop it ra rb da db (__put acc k rep)))
+    acc))
+
+;;; __seen? -- internal: has the other side's context observed src's dot for k?
+;;
+;; dotctx-seen?'s test, inlined against the raw `seen` carrier.  A DotContext
+;; is unique, so threading the STRUCT through the fold would move it -- and
+;; each side's context is needed twice here (once per pass, once for the final
+;; join).  crdt/orset threads its contexts as carriers for the same reason.
+(defn __seen? [coth : int k : Sym dsrc : int rsrc : int] : bool
+  (if (and (map-has? (:: dsrc (Map Sym int)) k)
+           (map-has? (:: rsrc (Map Sym int)) k))
+    (let [r (:: (map-get (:: rsrc (Map Sym int)) k) Sym)
+          c (map-get (:: dsrc (Map Sym int)) k)]
+      ;; The context is keyed by REPLICA, not by key.
+      (if (map-has? (:: coth (Map Sym int)) r)
+        (>= (map-get (:: coth (Map Sym int)) r) c)
+        false))
+    false))
+
+;;; __put -- internal: bind k in a carrier-held map, staying a carrier.
+;;
+;; Not inlined into the `if` below: a `map-assoc` result used directly as one
+;; arm makes the two arms a `Map*` and an int64 carrier, and the emitter
+;; assigns one to the other (`-Wint-conversion`).  Forcing the ascription
+;; through a typed helper keeps both arms plain carriers.
+(defn __put [acc : int k : Sym v : int] : int
+  (:: (map-assoc (:: acc (Map Sym int)) k v) int))
+
+;;; __dot-of -- internal: a key's recorded dot counter, or 0.
+(defn __dot-of [d : int k : Sym] : int
+  (if (map-has? (:: d (Map Sym int)) k)
+    (map-get (:: d (Map Sym int)) k)
+    0))
 
 ) ;; end defmodule crdt/ormap
