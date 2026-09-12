@@ -18,7 +18,7 @@
   (import crdt/lattice :refer [map-merge-with])
   (export Dot mk-dot dot-replica dot-counter
           DotContext dotctx-new dotctx-witness dotctx-seen? dotctx-next
-          dotctx-count dotctx-join)
+          dotctx-count)
 
 ;;; Dot -- one replica's n-th event.
 ;;;
@@ -172,30 +172,6 @@
 
 ;;; __imax -- internal: the larger of two ints.
 (defn __imax [x : int y : int] : int (if (< x y) y x))
-
-;;; dotctx-join -- merge two causal histories.
-;;;
-;;; Parameters:
-;;;   x -- first context
-;;;   y -- second context
-;;;
-;;; Returns:
-;;;   The pointwise maximum of the two version vectors.
-;;;
-;;; Example:
-;;;   (dotctx-join ca cb)
-;;;
-;;; Since: crdt-spice-plan C2
-;;
-;; Exists because a `definstance` is not dispatchable across a module boundary:
-;; `(join a b)` on a DotContext from ANOTHER module elaborates (tur check is
-;; clean) and then fails in cc with `call to undeclared function
-;; '__inst_JoinSemilattice_join_DotContext'` -- the instance method is never
-;; declared in the importing TU.  See
-;; docs/reported/definstance-not-dispatchable-across-modules.md in the turmeric
-;; repo.  Within THIS module `join` works, so this is a one-line forwarder.
-(defn dotctx-join [x : DotContext y : DotContext] : DotContext
-  (join x y))
 
 ;;; JoinSemilattice [DotContext] -- pointwise maximum of the version vectors.
 ;;

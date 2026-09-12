@@ -34,7 +34,7 @@
 
 (defmodule crdt/orset
   (import crdt/causal :refer [DotContext mk-dot dotctx-new dotctx-witness
-                              dotctx-next dot-counter dotctx-join])
+                              dotctx-next dot-counter])
   (export ORSet orset-new orset-add orset-remove orset-has? orset-count)
 
 ;;; ORSet -- observed-remove set of interned names.
@@ -242,7 +242,7 @@
           cb (:: (.seen (.ctx y)) int)
           r1 (__fold-side (:: (map-new) int) (.elems x) (.elems y) ca cb true)
           r2 (__fold-side r1 (.elems y) (.elems x) ca cb false)]
-      (ORSet r2 (dotctx-join (.ctx x) (.ctx y))))))
+      (ORSet r2 (join (.ctx x) (.ctx y))))))
 
 ;;; BoundedJoin [ORSet] -- the empty set is the least element.
 (definstance BoundedJoin [ORSet]
