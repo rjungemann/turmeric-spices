@@ -269,55 +269,14 @@
                    first))
     acc))
 
-;;; __side-loop-j -- internal: __side-loop with the value combine taken from
-;;; `V`'s own JoinSemilattice instance instead of a passed function.
+;;; __vjoin -- internal: combine two value carriers at `V`'s own instance.
 ;;
-;; Duplicated rather than shared with __side-loop because a constrained generic
-;; cannot be handed to the `f`-taking fold as a FUNCTION VALUE: a function value
-;; is a single address and carries no type argument, so every instantiation
-;; collapses onto one instance (measured -- both value types answered with
-;; whichever was declared last).  Only the `val` line differs.
-;;
-;; That collapse is a compiler defect, not a language rule:
-;; docs/reported/constrained-generic-as-fn-value-collapses.md measures the
-;; three layers involved and names the one still open (the `tur_poly_fn_t`
-;; literal resolves a single elaboration-time wrapper).  When it is closed
-;; these two folds become one.
-;;
-;; `w` is a TYPE WITNESS.  It is never read; it exists so that some parameter
-;; mentions `V`.  With every parameter a carrier, `V` appears solely in the
-;; constraint, nothing pins it, and the fold silently runs one arbitrary
-;; instance for every value type.  It must be the map itself rather than a field
-;; of one: reading `.ctx` off a phantom-parameterized struct unified `V` with
-;; `DotContext`.
-(defn __side-loop-j [V] [(JoinSemilattice V)]
-                    [it : ptr<void> dsrc : int rsrc : int
-                     eoth : int coth : int ^borrow w : (ORMap V)
-                     acc : int first : bool] : int
-  (if (hamt/iter-advance! it)
-    (let [k       (:: (hamt/iter-cur-key it) Sym)
-          mine    (:: (hamt/iter-cur-val it) int)
-          shared  (map-has? (:: eoth (Map Sym int)) k)
-          skip    (and (not first) shared)
-          dropped (and (not shared) (__seen? coth k dsrc rsrc))
-          val     (if shared
-                    (:: (join (:: mine V)
-                              (:: (map-get (:: eoth (Map Sym int)) k) V)) int)
-                    mine)]
-      (__side-loop-j it dsrc rsrc eoth coth w
-                     (if (or skip dropped) acc (__put acc k val))
-                     first))
-    acc))
-
-;;; __side-j -- internal: __side for the instance path.
-(defn __side-j [V] [(JoinSemilattice V)]
-               [esrc : int dsrc : int rsrc : int
-                eoth : int coth : int ^borrow w : (ORMap V)
-                acce : int first : bool] : int
-  (let [it (hamt/iter-alloc (map-hamt (:: esrc (Map Sym int))))
-        r  (__side-loop-j it dsrc rsrc eoth coth w acce first)]
-    (hamt/iter-destroy! it)
-    r))
+;; Passed to the ONE fold below as its `f`.  That works because a constrained
+;; generic used as a function value now gets a per-instantiation clone; before
+;; that, this module carried a second copy of the whole fold whose only
+;; difference was this line.
+(defn __vjoin [V] [(JoinSemilattice V)] [x : int y : int] : int
+  (:: (join (:: x V) (:: y V)) int))
 
 ;;; __dots-for -- internal: the dot map for the surviving keys.
 (defn __dots-for [ents : int da : int db : int] : int
@@ -417,8 +376,8 @@
         sa  (.seen ca)      sb (.seen cb)
         ea  (.entries a)    da (.dots a)   ra (.dotr a)
         eb  (.entries b)    db (.dots b)   rb (.dotr b)
-        e1  (__side-j ea da ra eb sb b (:: (map-new) int) true)
-        e2  (__side-j eb db rb ea sa a e1 false)
+        e1  (__side __vjoin ea da ra eb sb (:: (map-new) int) true)
+        e2  (__side __vjoin eb db rb ea sa e1 false)
         dm  (__dots-for e2 da db)
         rm  (__reps-for e2 ra rb da db)]
     (ORMap e2 dm rm (join ca cb))))
