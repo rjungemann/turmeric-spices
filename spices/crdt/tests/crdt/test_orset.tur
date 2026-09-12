@@ -1,0 +1,73 @@
+;; test_orset -- observed-remove semantics.
+;;
+;; The three scenarios that separate an OR-Set from a 2P-Set, and from a naive
+;; add-wins set:
+;;
+;;   1. A remove that CAUSALLY FOLLOWS an add propagates -- the element goes.
+;;   2. A remove CONCURRENT with an add does not eat the add -- add wins.
+;;   3. An element removed can be re-added later, which a 2P-Set can never do.
+;;
+;; The three are not redundant.  Measured by breaking the merge's "has the
+;; other side's context seen this dot" test two ways:
+;;
+;;   test removed (keep every dot)   -> 1 and 3 fail, 2 PASSES
+;;   test inverted (keep only seen)  -> 1, 2 and 3 all fail
+;;
+;; So 1 and 3 catch a merge that keeps too much, and 2 is the only one that
+;; catches a merge keeping the WRONG side -- one that eats concurrent adds.
+;; A suite with only scenario 2 would certify an implementation where removes
+;; never propagate; a suite without it would certify one where an OR-Set
+;; behaves like a remove-wins set.
+;;
+;; main returns the failure count so `tur test` reports a non-zero exit.
+
+(defmodule crdt/tests/test_orset
+  (import crdt/orset :refer [orset-new orset-add orset-remove orset-has?
+                             orset-count])
+
+(defn fail-if [cond : bool label : cstr] : int
+  (if cond (do (println label) 1) 0))
+
+(defn main [] : int
+  (let [alice (quote alice)
+        bob   (quote bob)
+        x     (quote x)
+
+        ;; --- 1. causal remove: A adds, B sees it, B removes, merge back.
+        a1 (orset-add (orset-new) x alice)
+        a1b (orset-add (orset-new) x alice)
+        b1 (join (orset-new) a1b)          ;; B observes A's add
+        b2 (orset-remove b1 x)             ;; ...and removes it
+        a1c (orset-add (orset-new) x alice)
+        m1 (join a1c b2)                   ;; expect: x GONE
+
+        ;; --- 2. concurrent remove vs add.
+        ;; B removes the add it observed; A concurrently adds x AGAIN, minting
+        ;; a dot B has never seen.
+        a2 (orset-add (orset-new) x alice)
+        b3 (join (orset-new) (orset-add (orset-new) x alice))
+        b4 (orset-remove b3 x)
+        a3 (orset-add a2 x alice)          ;; second add, new dot
+        m2 (join a3 b4)                    ;; expect: x PRESENT (add wins)
+
+        ;; --- 3. re-add after a fully-propagated remove.
+        a4 (orset-add (orset-new) x alice)
+        b5 (orset-remove (join (orset-new) (orset-add (orset-new) x alice)) x)
+        m3 (join (orset-add (orset-new) x alice) b5)   ;; gone, as in 1
+        ;; States are affine: `orset-add` consumes m3, so the assertion that
+        ;; m3 is empty needs its own copy.
+        b5b (orset-remove (join (orset-new) (orset-add (orset-new) x alice)) x)
+        m3b (join (orset-add (orset-new) x alice) b5b)
+        m4 (orset-add m3b x bob)                       ;; re-added by bob
+
+        fails
+        (+ (fail-if (not (orset-has? a1 x)) "add")
+           (fail-if (orset-has? m1 x) "causal remove did not propagate")
+           (fail-if (not (orset-has? m2 x)) "concurrent add lost to a remove")
+           (fail-if (orset-has? m3 x) "remove did not propagate (scenario 3)")
+           (fail-if (not (orset-has? m4 x)) "re-add after remove failed")
+           (fail-if (not (= (orset-count m4) 1)) "orset count"))]
+    (if (= fails 0) (println "test_orset: ok") (println "test_orset: FAILURES"))
+    fails))
+
+) ;; end defmodule
