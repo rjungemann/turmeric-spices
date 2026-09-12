@@ -1,0 +1,260 @@
+;; crdt/orset -- the observed-remove set.
+;;
+;; A 2P-Set buys removal by never forgetting a tombstone, so an element can
+;; never be re-added.  An OR-Set buys re-adding back, and the price is that
+;; every element carries the DOTS that added it.
+;;
+;; Removal here means "forget the dots I have OBSERVED", not "write a
+;; tombstone".  That is the whole idea: a concurrent add mints a dot the
+;; remover never saw, so the add survives the merge.  Add wins over a
+;; CONCURRENT remove; a remove that causally follows an add still removes it.
+;;
+;; Representation: elem -> (replica -> highest counter that added it), plus the
+;; DotContext of everything this replica has observed.  A replica's newer add
+;; supersedes its own older one, so one counter per (element, replica) is
+;; enough -- this is the "optimized" OR-Set rather than a literal set of dots.
+;; An element is PRESENT exactly when its inner map is non-empty.
+;;
+;; The merge is the part worth reading:
+;;
+;;   for each element in either side, and each replica in either dot map --
+;;     in both          -> keep the higher counter
+;;     only in A        -> keep it iff B's context has NOT seen it
+;;                         (B never saw this add, so it is new to B)
+;;     only in B        -> symmetric
+;;
+;; "B has not seen it" is what distinguishes a concurrent add from one B
+;; observed and then removed.  Drop that test and removes stop propagating;
+;; invert it and concurrent adds get eaten.
+;;
+;; No inline C (crdt-spice-plan 2.5).
+
+;; The lattice classes are not auto-loaded (lattice-vocabulary-plan 3.5).
+(load "stdlib/typeclass-lattice.tur")
+
+(defmodule crdt/orset
+  (import crdt/causal :refer [DotContext mk-dot dotctx-new dotctx-witness
+                              dotctx-next dot-counter])
+  (export ORSet orset-new orset-add orset-remove orset-has? orset-count)
+
+;;; ORSet -- observed-remove set of interned names.
+;;;
+;;; Since: crdt-spice-plan C2
+(defstruct ORSet [elems : int ctx : DotContext])
+
+;;; __ctr -- internal: a map's counter for r, or 0.
+;; NOTE every `(:: h (Map Sym int))` below is written INLINE rather than
+;; let-bound.  Binding one -- `(let [mm (:: m (Map Sym int))] ...)` -- emits
+;; `tur_adt_Map__sym__int *mm = m;` straight from the int64 handle with no
+;; bridge, which cc rejects (`-Wint-conversion`).  The inline form bridges
+;; correctly.  Verbose, but it is the spelling that compiles.
+(defn __ctr [m : int r : Sym] : int
+  (if (map-has? (:: m (Map Sym int)) r) (map-get (:: m (Map Sym int)) r) 0))
+
+;;; __put-kv -- internal: assoc into a Sym->int map, handle in, handle out.
+;;
+;; Same reason as __inner-of: written inline as
+;; `(if (= keep 0) acc (:: (map-assoc ...) int))`, the `if` unified on the
+;; map-assoc's Map POINTER rather than the ascribed `:int`, and the other arm
+;; then assigned an int64 into it.  A helper with a declared `: int` return
+;; makes both arms agree.
+(defn __put-kv [m : int k : Sym v : int] : int
+  (:: (map-assoc (:: m (Map Sym int)) k v) int))
+
+;;; __inner-of -- internal: element e's dot map, or a fresh empty one.
+;;
+;; A helper rather than an inline `if`, so BOTH arms are forced to the `:int`
+;; handle by the declared return type.  Written inline, the `if` unified a
+;; `map-get` result with `(map-new)` as a Map POINTER and then assigned an
+;; int64 into it -- `-Wint-conversion`, which cc rejects.
+(defn __inner-of [m : int e : Sym] : int
+  (if (map-has? (:: m (Map Sym int)) e)
+    (:: (map-get (:: m (Map Sym int)) e) int)
+    (:: (map-new) int)))
+
+;;; __imax -- internal.
+(defn __imax [x : int y : int] : int (if (< x y) y x))
+
+;;; __inner-a-loop -- internal: A's dots that survive the merge.
+(defn __inner-a-loop [acc : int it : ptr<void> ib : int ctxb : int] : int
+  (if (hamt/iter-advance! it)
+    (let [r  (:: (hamt/iter-cur-key it) Sym)
+          na (:: (hamt/iter-cur-val it) int)
+          keep (if (map-has? (:: ib (Map Sym int)) r)
+                 (__imax na (map-get (:: ib (Map Sym int)) r))
+                 (if (< (__ctr ctxb r) na) na 0))]
+      (__inner-a-loop
+        (if (= keep 0) acc (__put-kv acc r keep))
+        it ib ctxb))
+    acc))
+
+;;; __inner-b-loop -- internal: B's dots that A does not already account for.
+(defn __inner-b-loop [acc : int it : ptr<void> ia : int ctxa : int] : int
+  (if (hamt/iter-advance! it)
+    (let [r  (:: (hamt/iter-cur-key it) Sym)
+          nb (:: (hamt/iter-cur-val it) int)
+          keep (if (map-has? (:: ia (Map Sym int)) r)
+                 0                                  ;; handled by the A pass
+                 (if (< (__ctr ctxa r) nb) nb 0))]
+      (__inner-b-loop
+        (if (= keep 0) acc (__put-kv acc r keep))
+        it ia ctxa))
+    acc))
+
+;;; __inner-merge -- internal: merge one element's dot maps.
+;; Each iterator gets its own helper so the destroy can sit in the BODY: a
+;; `let` cannot bind a `:void` expression (TUR-E0023).
+(defn __inner-a [ia : int ib : int ctxb : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: ia (Map Sym int))))
+        r  (__inner-a-loop (:: (map-new) int) it ib ctxb)]
+    (hamt/iter-destroy! it)
+    r))
+
+(defn __inner-b [acc : int ib : int ia : int ctxa : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: ib (Map Sym int))))
+        r  (__inner-b-loop acc it ia ctxa)]
+    (hamt/iter-destroy! it)
+    r))
+
+(defn __inner-merge [ia : int ib : int ctxa : int ctxb : int] : int
+  (__inner-b (__inner-a ia ib ctxb) ib ia ctxa))
+
+;;; __outer-loop -- internal: merge every element of one side into acc.
+(defn __outer-loop [acc : int it : ptr<void> other : int ctxa : int ctxb : int
+                    a-side : bool] : int
+  (if (hamt/iter-advance! it)
+    (let [e   (:: (hamt/iter-cur-key it) Sym)
+          mine (:: (hamt/iter-cur-val it) int)
+          theirs (__inner-of other e)
+          merged (if a-side
+                   (__inner-merge mine theirs ctxa ctxb)
+                   (__inner-merge theirs mine ctxa ctxb))
+          ;; The A pass already placed every element both sides share.
+          skip (and (not a-side) (map-has? (:: acc (Map Sym int)) e))
+          keep (and (not skip) (> (map-count (:: merged (Map Sym int))) 0))]
+      (__outer-loop
+        (if keep (__put-kv acc e merged) acc)
+        it other ctxa ctxb a-side))
+    acc))
+
+;;; __fold-side -- internal: merge one side's elements into acc.
+(defn __fold-side [acc : int m : int other : int ctxa : int ctxb : int
+                   a-side : bool] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: m (Map Sym int))))
+        r  (__outer-loop acc it other ctxa ctxb a-side)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; orset-new -- an empty OR-Set.
+;;;
+;;; Returns:
+;;;   An OR-Set with no elements and an empty causal history.
+;;;
+;;; Example:
+;;;   (orset-new)
+;;;
+;;; Since: crdt-spice-plan C2
+(defn orset-new [] : ORSet
+  (ORSet (:: (map-new) int) (dotctx-new)))
+
+;;; orset-add -- add an element on behalf of a replica.
+;;;
+;;; Parameters:
+;;;   s -- the set
+;;;   e -- the element
+;;;   r -- the replica performing the add
+;;;
+;;; Returns:
+;;;   A new OR-Set in which e is present, tagged with a fresh dot for r.
+;;;
+;;; Example:
+;;;   (orset-add (orset-new) (quote apple) (quote alice))
+;;;
+;;; Since: crdt-spice-plan C2
+;;
+;; The dot is minted from this replica's own context, so it is one nobody else
+;; has seen -- which is exactly what lets it survive a concurrent remove.
+(defn orset-add [s : ORSet e : Sym r : Sym] : ORSet
+  (let [d   (dotctx-next (.ctx s) r)
+        n   (dot-counter d)
+        cur (__inner-of (.elems s) e)
+        nxt (:: (map-assoc (:: cur (Map Sym int)) r n) int)]
+    (ORSet (:: (map-assoc (:: (.elems s) (Map Sym int)) e nxt) int)
+           (dotctx-witness (.ctx s) (mk-dot r n)))))
+
+;;; orset-remove -- remove an element.
+;;;
+;;; Parameters:
+;;;   s -- the set
+;;;   e -- the element
+;;;
+;;; Returns:
+;;;   A new OR-Set without e.
+;;;
+;;; Example:
+;;;   (orset-remove s (quote apple))
+;;;
+;;; Since: crdt-spice-plan C2
+;;
+;; Forgets the dots this replica has OBSERVED for e.  The context keeps them,
+;; which is how the removal propagates; a concurrent add elsewhere carries a
+;; dot this context never saw and survives the merge.
+(defn orset-remove [s : ORSet e : Sym] : ORSet
+  (ORSet (:: (map-dissoc (:: (.elems s) (Map Sym int)) e) int) (.ctx s)))
+
+;;; orset-has? -- is e present?
+;;;
+;;; Parameters:
+;;;   s -- the set
+;;;   e -- the element
+;;;
+;;; Returns:
+;;;   true when e has at least one surviving dot.
+;;;
+;;; Example:
+;;;   (orset-has? s (quote apple))
+;;;
+;;; Since: crdt-spice-plan C2
+(defn orset-has? [^borrow s : ORSet e : Sym] : bool
+  (if (map-has? (:: (.elems s) (Map Sym int)) e)
+    (> (map-count (:: (map-get (:: (.elems s) (Map Sym int)) e) (Map Sym int))) 0)
+    false))
+
+;;; orset-count -- how many elements are present.
+;;;
+;;; Parameters:
+;;;   s -- the set
+;;;
+;;; Returns:
+;;;   The number of elements with at least one surviving dot.
+;;;
+;;; Example:
+;;;   (orset-count s)   ; => 2
+;;;
+;;; Since: crdt-spice-plan C2
+(defn orset-count [^borrow s : ORSet] : int
+  (map-count (:: (.elems s) (Map Sym int))))
+
+;;; JoinSemilattice [ORSet] -- add-wins merge, dot-aware.
+(definstance JoinSemilattice [ORSet]
+  (join [x y]
+    (let [ca (:: (.seen (.ctx x)) int)
+          cb (:: (.seen (.ctx y)) int)
+          r1 (__fold-side (:: (map-new) int) (.elems x) (.elems y) ca cb true)
+          r2 (__fold-side r1 (.elems y) (.elems x) ca cb false)]
+      (ORSet r2 (join (.ctx x) (.ctx y))))))
+
+;;; BoundedJoin [ORSet] -- the empty set is the least element.
+(definstance BoundedJoin [ORSet]
+  (bottom [] (orset-new)))
+
+;;; Eq [ORSet] -- same number of present elements.
+;;
+;; Size-only, like Eq [GSet], and for the same reason -- recorded rather than
+;; papered over.  The law functions are correspondingly weaker for ORSet, which
+;; is precisely why crdt-spice-plan puts a convergence FUZZER in this phase
+;; rather than trusting the three laws.
+(definstance Eq [ORSet]
+  (eq? [^borrow x ^borrow y] (= (orset-count x) (orset-count y))))
+
+) ;; end defmodule crdt/orset

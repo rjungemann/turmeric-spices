@@ -1,0 +1,235 @@
+;; crdt/counter -- G-Counter and PN-Counter, the two state-based counters.
+;;
+;; A G-Counter is a map from replica to that replica's own total.  Its JOIN is
+;; the pointwise maximum, which is associative, commutative and idempotent --
+;; so two replicas that have seen different subsets of the updates converge on
+;; merge, in any order, however many times.  The counter's VALUE is the sum of
+;; the entries, and is deliberately not part of the lattice: it is the query.
+;;
+;; A PN-Counter is two G-Counters, one counting increments and one decrements,
+;; with value P - N.  That is the standard trick for making a counter that can
+;; go down without breaking monotonicity: neither half ever decreases.
+
+;; The lattice classes are not auto-loaded (per lattice-vocabulary-plan 3.5:
+;; the auto-load list is paid by every TU in every build).  Load them.
+(load "stdlib/typeclass-lattice.tur")
+
+(defmodule crdt/counter
+  (import crdt/lattice :refer [map-merge-with])
+  ;; `ReplicaId` is a transparent alias, not a defn/defstruct, so it is not an
+  ;; exportable name -- callers spell the carrier (`Sym`) or use `replica`.
+  ;; Another reason the defopaque defect is worth fixing.
+  (export replica
+          GCounter gcounter-new gcounter-bump gcounter-value
+          PNCounter pncounter-new pncounter-inc pncounter-dec pncounter-value)
+
+;;; ReplicaId -- the identity of one replica.
+;;;
+;;; An interned symbol.  `Sym` is the right carrier and not a stand-in: a
+;;; replica id IS an interned name, which is what `Sym` means.
+;;;
+;;; Since: crdt-spice-plan C1
+;;
+;; The plan asked for `(defopaque ReplicaId :Sym)` -- a distinct type, so a
+;; ReplicaId could not be confused with any other symbol.  That does not
+;; compile: the opaque path stores the interned symbol POINTER into an int64
+;; slot and cc rejects it (`-Wint-conversion`, an error on clang >= 21).  Filed
+;; as docs/reported/defopaque-over-sym-skips-the-ptr-bridge.md in the turmeric
+;; repo.
+;;
+;; A one-field `(defstruct ReplicaId [name : Sym])` DOES compile, but then the
+;; map key is a by-value struct, which needs `MapKey` -- whose `mk-cmp` returns
+;; a comparator function pointer and can only be written in inline C.  That
+;; would cost this spice its interpreter coverage for the sake of a newtype.
+;;
+;; So: a transparent alias for now.  It names the concept without buying
+;; type-safety, and the trade is recorded rather than hidden.  Revisit when the
+;; defopaque defect lands -- the change is one line here.
+(defalias ReplicaId Sym)
+
+;;; replica -- name a replica.
+;;;
+;;; Parameters:
+;;;   s -- an interned symbol, e.g. (quote alice)
+;;;
+;;; Returns:
+;;;   The ReplicaId for that name.
+;;;
+;;; Example:
+;;;   (replica (quote alice))
+;;;
+;;; Since: crdt-spice-plan C1
+(defn replica [s : Sym] : ReplicaId s)
+
+;;; GCounter -- grow-only counter: per-replica totals.
+;;;
+;;; Since: crdt-spice-plan C1
+(defstruct GCounter [entries : int])
+
+;;; gcounter-new -- an empty G-Counter.
+;;;
+;;; Returns:
+;;;   A G-Counter with no replica entries; its value is 0.
+;;;
+;;; Example:
+;;;   (gcounter-new)
+;;;
+;;; Since: crdt-spice-plan C1
+(defn gcounter-new [] : GCounter
+  (GCounter (:: (map-new) int)))
+
+;;; gcounter-bump -- add to one replica's own total.
+;;;
+;;; Parameters:
+;;;   c -- the counter
+;;;   r -- the replica doing the increment
+;;;   n -- how much to add (non-negative; a G-Counter never decreases)
+;;;
+;;; Returns:
+;;;   A new G-Counter; the old one remains valid.
+;;;
+;;; Example:
+;;;   (gcounter-bump (gcounter-new) (replica (quote alice)) 3)
+;;;
+;;; Since: crdt-spice-plan C1
+;;
+;; Only the replica ITSELF may bump its slot.  That is what makes the pointwise
+;; max a correct merge: no two replicas ever write the same slot, so a
+;; disagreement about a slot is always "one of us has seen fewer updates", never
+;; a conflict.
+(defn gcounter-bump [c : GCounter r : ReplicaId n : int] : GCounter
+  (let [m   (:: (.entries c) (Map Sym int))
+        cur (if (map-has? m (:: r Sym)) (map-get m (:: r Sym)) 0)]
+    (GCounter (:: (map-assoc m (:: r Sym) (+ cur n)) int))))
+
+;;; gcounter-value -- the counter's reading.
+;;;
+;;; Parameters:
+;;;   c -- the counter
+;;;
+;;; Returns:
+;;;   The sum of every replica's total.
+;;;
+;;; Example:
+;;;   (gcounter-value c)   ; => 8
+;;;
+;;; Since: crdt-spice-plan C1
+;;
+;; NOT part of the lattice: join is how two states combine, and this is how one
+;; state is read.  Keeping them separate is why the join can stay idempotent.
+(defn gcounter-value [^borrow c : GCounter] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: (.entries c) (Map Sym int))))
+        s  (__sum-loop it 0)]
+    (hamt/iter-destroy! it)
+    s))
+
+;;; __sum-loop -- internal: sum the remaining iterator values into acc.
+(defn __sum-loop [it : ptr<void> acc : int] : int
+  (if (hamt/iter-advance! it)
+    (__sum-loop it (+ acc (:: (hamt/iter-cur-val it) int)))
+    acc))
+
+;;; __imax -- internal: the larger of two ints.
+(defn __imax [x : int y : int] : int (if (< x y) y x))
+
+;;; JoinSemilattice [GCounter] -- pointwise maximum.
+(definstance JoinSemilattice [GCounter]
+  (join [x y]
+    (GCounter (map-merge-with (.entries x) (.entries y) __imax))))
+
+;;; BoundedJoin [GCounter] -- the empty counter is the least element.
+(definstance BoundedJoin [GCounter]
+  (bottom [] (gcounter-new)))
+
+;;; Eq [GCounter] -- equal readings and equal entry counts.
+;;
+;; Structural on the observable state.  A law suite wired to pointer identity
+;; would pass on everything, which is the trap the lattice plan's section 5
+;; names.
+(definstance Eq [GCounter]
+  (eq? [^borrow x ^borrow y]
+    (and (= (gcounter-value x) (gcounter-value y))
+         (= (map-count (:: (.entries x) (Map Sym int)))
+            (map-count (:: (.entries y) (Map Sym int)))))))
+
+;;; PNCounter -- a counter that can decrease: increments and decrements apart.
+;;;
+;;; Since: crdt-spice-plan C1
+(defstruct PNCounter [pos : GCounter neg : GCounter])
+
+;;; pncounter-new -- an empty PN-Counter.
+;;;
+;;; Returns:
+;;;   A PN-Counter whose value is 0.
+;;;
+;;; Example:
+;;;   (pncounter-new)
+;;;
+;;; Since: crdt-spice-plan C1
+(defn pncounter-new [] : PNCounter
+  (PNCounter (gcounter-new) (gcounter-new)))
+
+;;; pncounter-inc -- increment on one replica.
+;;;
+;;; Parameters:
+;;;   c -- the counter
+;;;   r -- the replica
+;;;   n -- amount (non-negative)
+;;;
+;;; Returns:
+;;;   A new PN-Counter.
+;;;
+;;; Example:
+;;;   (pncounter-inc (pncounter-new) (replica (quote alice)) 5)
+;;;
+;;; Since: crdt-spice-plan C1
+(defn pncounter-inc [c : PNCounter r : ReplicaId n : int] : PNCounter
+  (PNCounter (gcounter-bump (.pos c) r n) (.neg c)))
+
+;;; pncounter-dec -- decrement on one replica.
+;;;
+;;; Parameters:
+;;;   c -- the counter
+;;;   r -- the replica
+;;;   n -- amount (non-negative; it is ADDED to the decrement half)
+;;;
+;;; Returns:
+;;;   A new PN-Counter.
+;;;
+;;; Example:
+;;;   (pncounter-dec (pncounter-new) (replica (quote bob)) 2)
+;;;
+;;; Since: crdt-spice-plan C1
+(defn pncounter-dec [c : PNCounter r : ReplicaId n : int] : PNCounter
+  (PNCounter (.pos c) (gcounter-bump (.neg c) r n)))
+
+;;; pncounter-value -- the counter's reading.
+;;;
+;;; Parameters:
+;;;   c -- the counter
+;;;
+;;; Returns:
+;;;   increments minus decrements.
+;;;
+;;; Example:
+;;;   (pncounter-value c)   ; => 3
+;;;
+;;; Since: crdt-spice-plan C1
+(defn pncounter-value [^borrow c : PNCounter] : int
+  (- (gcounter-value (.pos c)) (gcounter-value (.neg c))))
+
+;;; JoinSemilattice [PNCounter] -- join each half.
+(definstance JoinSemilattice [PNCounter]
+  (join [x y]
+    (PNCounter (join (.pos x) (.pos y)) (join (.neg x) (.neg y)))))
+
+;;; BoundedJoin [PNCounter] -- both halves empty.
+(definstance BoundedJoin [PNCounter]
+  (bottom [] (pncounter-new)))
+
+;;; Eq [PNCounter] -- equal on both halves.
+(definstance Eq [PNCounter]
+  (eq? [^borrow x ^borrow y]
+    (and (eq? (.pos x) (.pos y)) (eq? (.neg x) (.neg y)))))
+
+) ;; end defmodule crdt/counter
