@@ -19,6 +19,11 @@
 ;; main returns the failure count so `tur test` reports a non-zero exit.
 
 (defmodule crdt/tests/test_ormap
+;; `ORMap` is parametric now, and its value type is PHANTOM -- carried by no
+;; field -- so an empty map has nothing to infer it from and `(ormap-new)` needs
+;; an ascription.  Every other entry point takes or returns a value and infers
+;; it.  These tests use plain `int` values; test_ormap_join covers real CRDT
+;; value types through the JoinSemilattice instance.
   (import crdt/ormap :refer [ORMap ormap-new ormap-put ormap-get ormap-has?
                              ormap-remove ormap-count ormap-merge-with])
 
@@ -32,8 +37,8 @@
 
 ;; Disjoint keys: both survive, neither side having observed the other.
 (defn test-disjoint [] : int
-  (let [a (ormap-put (ormap-new) (quote alice) (quote x) 1)
-        b (ormap-put (ormap-new) (quote bob) (quote y) 2)
+  (let [a (ormap-put (:: (ormap-new) (ORMap int)) (quote alice) (quote x) 1)
+        b (ormap-put (:: (ormap-new) (ORMap int)) (quote bob) (quote y) 2)
         m (ormap-merge-with vmax a b)]
     (+ (fail-if (not (= (ormap-count m) 2)) "FAIL ormap: disjoint keys lost")
        (+ (fail-if (not (ormap-has? m (quote x))) "FAIL ormap: key x lost")
@@ -42,8 +47,8 @@
 ;; Shared key: the VALUES merge.  This is the case an overwrite passes for
 ;; convergence and fails for correctness.
 (defn test-shared-merges [] : int
-  (let [a (ormap-put (ormap-new) (quote alice) (quote k) 3)
-        b (ormap-put (ormap-new) (quote bob) (quote k) 9)
+  (let [a (ormap-put (:: (ormap-new) (ORMap int)) (quote alice) (quote k) 3)
+        b (ormap-put (:: (ormap-new) (ORMap int)) (quote bob) (quote k) 9)
         ab (ormap-get (ormap-merge-with vmax a b) (quote k))
         ba (ormap-get (ormap-merge-with vmax b a) (quote k))]
     (+ (fail-if (not (= ab 9)) "FAIL ormap: shared value not merged (a,b)")
@@ -58,16 +63,16 @@
 ;; so re-merging a shared key recomputes 12 rather than compounding, and the
 ;; whole suite stays green with the skip removed.
 (defn test-shared-applied-once [] : int
-  (let [a (ormap-put (ormap-new) (quote alice) (quote k) 3)
-        b (ormap-put (ormap-new) (quote bob) (quote k) 9)
+  (let [a (ormap-put (:: (ormap-new) (ORMap int)) (quote alice) (quote k) 3)
+        b (ormap-put (:: (ormap-new) (ORMap int)) (quote bob) (quote k) 9)
         v (ormap-get (ormap-merge-with vadd a b) (quote k))]
     (fail-if (not (= v 12)) "FAIL ormap: value merge applied more than once")))
 
 ;; A remove propagates: bob removes a key he has OBSERVED, so the merge must
 ;; drop it rather than resurrect it from alice's copy.
 (defn test-remove-propagates [] : int
-  (let [a  (ormap-put (ormap-new) (quote alice) (quote k) 1)
-        b  (ormap-merge-with vmax (ormap-new) a)   ;; bob receives it
+  (let [a  (ormap-put (:: (ormap-new) (ORMap int)) (quote alice) (quote k) 1)
+        b  (ormap-merge-with vmax (:: (ormap-new) (ORMap int)) a)   ;; bob receives it
         b2 (ormap-remove b (quote k))              ;; and removes it
         m  (ormap-merge-with vmax a b2)]
     (fail-if (ormap-has? m (quote k))
@@ -76,17 +81,17 @@
 ;; A concurrent add must NOT be dropped by that same rule: alice adds a key
 ;; bob has never seen, so bob's context cannot have observed its dot.
 (defn test-concurrent-add-survives [] : int
-  (let [a (ormap-put (ormap-new) (quote alice) (quote fresh) 1)
-        b (ormap-put (ormap-new) (quote bob) (quote other) 2)
+  (let [a (ormap-put (:: (ormap-new) (ORMap int)) (quote alice) (quote fresh) 1)
+        b (ormap-put (:: (ormap-new) (ORMap int)) (quote bob) (quote other) 2)
         m (ormap-merge-with vmax a b)]
     (fail-if (not (ormap-has? m (quote fresh)))
              "FAIL ormap: concurrent add dropped as if it were a remove")))
 
 ;; Idempotence and commutativity on a state with both shared and unique keys.
 (defn test-laws [] : int
-  (let [a  (ormap-put (ormap-put (ormap-new) (quote alice) (quote k) 3)
+  (let [a  (ormap-put (ormap-put (:: (ormap-new) (ORMap int)) (quote alice) (quote k) 3)
                       (quote alice) (quote onlya) 1)
-        b  (ormap-put (ormap-new) (quote bob) (quote k) 9)
+        b  (ormap-put (:: (ormap-new) (ORMap int)) (quote bob) (quote k) 9)
         ab (ormap-merge-with vmax a b)
         ba (ormap-merge-with vmax b a)]
     (+ (fail-if (not (= (ormap-count ab) (ormap-count ba)))
@@ -105,8 +110,8 @@
 ;; semantics without touching the map.  The plan wanted this dispatched by
 ;; typeclass; passing it is the same composition, checked at the call site.
 (defn test-nesting [] : int
-  (let [a  (ormap-put (ormap-new) (quote alice) (quote k) 3)
-        b  (ormap-put (ormap-new) (quote bob) (quote k) 9)
+  (let [a  (ormap-put (:: (ormap-new) (ORMap int)) (quote alice) (quote k) 3)
+        b  (ormap-put (:: (ormap-new) (ORMap int)) (quote bob) (quote k) 9)
         mx (ormap-get (ormap-merge-with vmax a b) (quote k))
         ad (ormap-get (ormap-merge-with vadd a b) (quote k))]
     (+ (fail-if (not (= mx 9))  "FAIL ormap: nested max-lattice merge wrong")
