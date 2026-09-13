@@ -22,9 +22,10 @@
 ;;; the handle by `^borrow`, and each GL object is unbound with a nullary
 ;;; `unbind-*` / `unuse-program` (you can no longer pass a bare `0`, which kept
 ;;; the borrow honest -- a borrow needs a real handle, not an int literal).
-;;; Under -Xsubstructural this turns leaked GPU objects (TUR-E0100) and
-;;; use-after-delete (TUR-E0101) into compile-time errors; the discipline is
-;;; inert in ordinary builds, so existing code keeps working.
+;;; A leaked GPU object (TUR-E0100) and a use-after-delete (TUR-E0101) are
+;;; compile-time errors. Substructural checking is on by default -- the old
+;;; `-Xsubstructural` opt-in is gone and passing it now warns (TUR-W0050) --
+;;; so these fire in an ordinary build, not only under a flag.
 ;;;
 ;;; Consuming peer for each handle:
 ;;;   Vao     -> delete-vao            Program -> delete-program
