@@ -31,21 +31,27 @@ import tempfile
 from pathlib import Path
 
 
+# Fences are 3-or-more backticks, and the closing fence must match the opening
+# one's length. A turmeric example whose body contains an inline ```c block has
+# to use a LONGER outer fence (````turmeric), or the inner fence would close the
+# outer block; pinning these to exactly three backticks made every such example
+# invisible here -- silently unchecked rather than reported.
 PAIR_RE = re.compile(
-    r'(?m)^```turmeric\n(.*?)^```\n\s*^```sweet-exp\n(.*?)^```',
+    r'(?m)^(?P<f1>`{3,})turmeric\n(?P<tur>.*?)^(?P=f1)\n'
+    r'\s*^(?P<f2>`{3,})sweet-exp\n(?P<sweet>.*?)^(?P=f2)',
     re.DOTALL | re.MULTILINE,
 )
 
-NO_CHECK_RE = re.compile(r'(?m)^```turmeric no-check\n')
+NO_CHECK_RE = re.compile(r'(?m)^`{3,}turmeric no-check\n')
 
 # Any turmeric block (with or without modifiers like "no-check"), captured so we
 # can identify ones that lack an adjacent sweet-exp sibling.
 TURMERIC_BLOCK_RE = re.compile(
-    r'(?m)^```turmeric(?P<mods>[^\n]*)\n(?P<body>.*?)^```',
+    r'(?m)^(?P<fence>`{3,})turmeric(?P<mods>[^\n]*)\n(?P<body>.*?)^(?P=fence)',
     re.DOTALL | re.MULTILINE,
 )
 
-SWEET_AFTER_RE = re.compile(r'\A\s*\n?```sweet-exp\n', re.MULTILINE)
+SWEET_AFTER_RE = re.compile(r'\A\s*\n?`{3,}sweet-exp\n', re.MULTILINE)
 
 SPICES_ROOT = Path('spices')
 
@@ -55,8 +61,8 @@ def find_pairs(text: str) -> list[tuple[str, str, int]]:
     pairs = []
     for m in PAIR_RE.finditer(text):
         line_no = text[:m.start()].count('\n') + 1
-        tur_src = m.group(1)
-        sweet_src = m.group(2)
+        tur_src = m.group('tur')
+        sweet_src = m.group('sweet')
         pairs.append((tur_src, sweet_src, line_no))
     return pairs
 
