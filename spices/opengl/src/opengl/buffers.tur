@@ -168,12 +168,16 @@
 ;;; upload-vertices -- stream a float array into the currently-bound VBO.
 ;;;
 ;;; Parameters:
-;;;   data  -- pointer to vertex data (opaque :int from float-array or malloc)
+;;;   data  -- pointer to packed vertex data; float-array-ptr on an
+;;;            opengl/arrays FloatArray, or your own malloc'd block
 ;;;   size  -- byte size of the data
 ;;;   usage -- draw usage keyword: :static-draw | :dynamic-draw | :stream-draw
 ;;;
 ;;; Example:
-;;;   (upload-vertices verts (* 9 4) ":static-draw")
+;;;   (with-float-array verts 9
+;;;     (float-array-set! verts 0 0.6)
+;;;     (upload-vertices (float-array-ptr verts)
+;;;                      (float-array-bytes verts) ":static-draw"))
 ;;;
 ;;; Since: v0.1.0
 (defn upload-vertices [data : int size : int usage : cstr] : void
