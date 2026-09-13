@@ -28,7 +28,7 @@
   (import crdt/causal :refer [DotContext dotctx-new dotctx-witness dotctx-seen?
                               dotctx-next dotctx-count])
   (export ORMap ormap-new ormap-put ormap-get ormap-has? ormap-remove
-          ormap-count ormap-merge-with ormap-keys-agree?)
+          ormap-count ormap-merge-with ormap-join ormap-keys-agree?)
 
 ;;; ORMap -- an observed-remove map from Sym keys to CRDT values.
 ;;;
@@ -43,7 +43,14 @@
 ;; `ctx` is the causal history.  Splitting the
 ;; dots out of the entries keeps the value carrier opaque to this module --
 ;; nothing here interprets it except by calling the caller's merge.
-(defstruct ORMap [entries : int dots : int dotr : int ctx : DotContext])
+;; `:heap` -- like stdlib's Map/Vec/Set.  A parametric struct that is NOT heap
+;; becomes a distinct by-value C aggregate per instantiation
+;; (`tur_adt_ORMap__Sum`), and the by-value monomorphization path types the
+;; function's result temp at the int64 carrier while the constructor returns the
+;; aggregate, so the emitted C does not compile.  A :heap struct carries as a
+;; pointer regardless of its element type, which is also what every parametric
+;; container in the stdlib does.
+(defstruct ORMap :heap [V] [entries : int dots : int dotr : int ctx : DotContext])
 
 ;;; ormap-new -- an empty map.
 ;;;
@@ -54,7 +61,7 @@
 ;;;   (ormap-new)
 ;;;
 ;;; Since: crdt-spice-plan C3
-(defn ormap-new [] : ORMap
+(defn ormap-new [V] [] : (ORMap V)
   (ORMap (:: (map-new) int) (:: (map-new) int) (:: (map-new) int) (dotctx-new)))
 
 ;;; ormap-put -- write a key, observing it in the causal context.
@@ -72,10 +79,10 @@
 ;;;   (ormap-put (ormap-new) (quote alice) (quote score) 5)
 ;;;
 ;;; Since: crdt-spice-plan C3
-(defn ormap-put [^borrow m : ORMap r : Sym k : Sym v : int] : ORMap
+(defn ormap-put [V] [^borrow m : (ORMap V) r : Sym k : Sym v : V] : (ORMap V)
   (let [d   (dotctx-next (.ctx m) r)
         ctx (dotctx-witness (.ctx m) d)]
-    (ORMap (:: (map-assoc (:: (.entries m) (Map Sym int)) k v) int)
+    (ORMap (:: (map-assoc (:: (.entries m) (Map Sym int)) k (:: v int)) int)
            (:: (map-assoc (:: (.dots m) (Map Sym int)) k (dot-ctr__om d)) int)
            (:: (map-assoc (:: (.dotr m) (Map Sym int)) k (:: r int)) int)
            ctx)))
@@ -96,10 +103,11 @@
 ;;;   (ormap-get m (quote score))   ; => 5
 ;;;
 ;;; Since: crdt-spice-plan C3
-(defn ormap-get [^borrow m : ORMap k : Sym] : int
-  (if (map-has? (:: (.entries m) (Map Sym int)) k)
-    (map-get (:: (.entries m) (Map Sym int)) k)
-    0))
+(defn ormap-get [V] [^borrow m : (ORMap V) k : Sym] : V
+  (:: (if (map-has? (:: (.entries m) (Map Sym int)) k)
+        (map-get (:: (.entries m) (Map Sym int)) k)
+        0)
+      V))
 
 ;;; ormap-has? -- is a key bound?
 ;;;
@@ -114,7 +122,7 @@
 ;;;   (ormap-has? m (quote score))   ; => true
 ;;;
 ;;; Since: crdt-spice-plan C3
-(defn ormap-has? [^borrow m : ORMap k : Sym] : bool
+(defn ormap-has? [V] [^borrow m : (ORMap V) k : Sym] : bool
   (map-has? (:: (.entries m) (Map Sym int)) k))
 
 ;;; ormap-remove -- drop a key that this replica has observed.
@@ -131,7 +139,7 @@
 ;;;   (ormap-remove m (quote score))
 ;;;
 ;;; Since: crdt-spice-plan C3
-(defn ormap-remove [^borrow m : ORMap k : Sym] : ORMap
+(defn ormap-remove [V] [^borrow m : (ORMap V) k : Sym] : (ORMap V)
   (ORMap (:: (map-dissoc (:: (.entries m) (Map Sym int)) k) int)
          (:: (map-dissoc (:: (.dots m) (Map Sym int)) k) int)
          (:: (map-dissoc (:: (.dotr m) (Map Sym int)) k) int)
@@ -149,7 +157,7 @@
 ;;;   (ormap-count m)   ; => 2
 ;;;
 ;;; Since: crdt-spice-plan C3
-(defn ormap-count [^borrow m : ORMap] : int
+(defn ormap-count [V] [^borrow m : (ORMap V)] : int
   (map-count (:: (.entries m) (Map Sym int))))
 
 ;;; ormap-keys-agree? -- do two maps bind exactly the same keys?
@@ -165,20 +173,20 @@
 ;;;   (ormap-keys-agree? x y)   ; => true
 ;;;
 ;;; Since: crdt-spice-plan C3
-(defn ormap-keys-agree? [^borrow a : ORMap ^borrow b : ORMap] : bool
+(defn ormap-keys-agree? [V] [^borrow a : (ORMap V) ^borrow b : (ORMap V)] : bool
   (if (= (ormap-count a) (ormap-count b))
     (__keys-subset? a b)
     false))
 
 ;;; __keys-subset? -- internal: every key of a is present in b.
-(defn __keys-subset? [^borrow a : ORMap ^borrow b : ORMap] : bool
+(defn __keys-subset? [V] [^borrow a : (ORMap V) ^borrow b : (ORMap V)] : bool
   (let [it (hamt/iter-alloc (map-hamt (:: (.entries a) (Map Sym int))))
         r  (__subset-loop b it true)]
     (hamt/iter-destroy! it)
     r))
 
 ;;; __subset-loop -- internal.
-(defn __subset-loop [^borrow b : ORMap it : ptr<void> acc : bool] : bool
+(defn __subset-loop [V] [^borrow b : (ORMap V) it : ptr<void> acc : bool] : bool
   (if (hamt/iter-advance! it)
     (__subset-loop b it (and acc (ormap-has? b (:: (hamt/iter-cur-key it) Sym))))
     acc))
@@ -211,7 +219,7 @@
 ;; Passing the struct into a recursive helper moves it -- `^borrow` on the
 ;; outer parameter does not make the onward pass a borrow -- and the second
 ;; pass then fails with TUR-E0005 use-after-move.
-(defn ormap-merge-with [f : (fn [int int] int) ^borrow a : ORMap ^borrow b : ORMap] : ORMap
+(defn ormap-merge-with [V] [f : (fn [int int] int) ^borrow a : (ORMap V) ^borrow b : (ORMap V)] : (ORMap V)
   (let [ca  (.ctx a)        cb (.ctx b)
         sa  (.seen ca)      sb (.seen cb)
         ea  (.entries a)    da (.dots a)
@@ -260,6 +268,15 @@
                    (if (or skip dropped) acc (__put acc k val))
                    first))
     acc))
+
+;;; __vjoin -- internal: combine two value carriers at `V`'s own instance.
+;;
+;; Passed to the ONE fold below as its `f`.  That works because a constrained
+;; generic used as a function value now gets a per-instantiation clone; before
+;; that, this module carried a second copy of the whole fold whose only
+;; difference was this line.
+(defn __vjoin [V] [(JoinSemilattice V)] [x : int y : int] : int
+  (:: (join (:: x V) (:: y V)) int))
 
 ;;; __dots-for -- internal: the dot map for the surviving keys.
 (defn __dots-for [ents : int da : int db : int] : int
@@ -335,5 +352,43 @@
   (if (map-has? (:: d (Map Sym int)) k)
     (map-get (:: d (Map Sym int)) k)
     0))
+
+;;; ormap-join -- merge two maps using `V`'s own JoinSemilattice instance.
+;;;
+;;; Parameters:
+;;;   a -- first map
+;;;   b -- second map
+;;;
+;;; Returns:
+;;;   The merged map.
+;;;
+;;; Example:
+;;;   (join alice bob)
+;;;
+;;; Since: crdt-spice-plan C3
+;;
+;; Same merge as ormap-merge-with, with the value combine coming from the
+;; element's instance instead of an argument -- crdt-spice-plan 2.3's design.
+;; An ORMap of PNCounters merges with no code specific to that pairing.
+(defn ormap-join [V] [(JoinSemilattice V)]
+                 [^borrow a : (ORMap V) ^borrow b : (ORMap V)] : (ORMap V)
+  (let [ca  (.ctx a)        cb (.ctx b)
+        sa  (.seen ca)      sb (.seen cb)
+        ea  (.entries a)    da (.dots a)   ra (.dotr a)
+        eb  (.entries b)    db (.dots b)   rb (.dotr b)
+        e1  (__side __vjoin ea da ra eb sb (:: (map-new) int) true)
+        e2  (__side __vjoin eb db rb ea sa e1 false)
+        dm  (__dots-for e2 da db)
+        rm  (__reps-for e2 ra rb da db)]
+    (ORMap e2 dm rm (join ca cb))))
+
+;;; JoinSemilattice [(ORMap V)] -- an ORMap is a lattice exactly when its values are.
+;;
+;; The constrained recursive instance crdt-spice-plan 2.3 asks for: it makes
+;; `join`, `join-all` and the lattice law helpers work on maps of any CRDT
+;; value, and it nests -- an ORMap of ORMaps merges by this same instance one
+;; level down.
+(definstance JoinSemilattice [(ORMap V)]
+  (join [x y] (ormap-join x y)))
 
 ) ;; end defmodule crdt/ormap

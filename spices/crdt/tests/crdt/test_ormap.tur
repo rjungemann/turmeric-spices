@@ -19,6 +19,11 @@
 ;; main returns the failure count so `tur test` reports a non-zero exit.
 
 (defmodule crdt/tests/test_ormap
+;; `ORMap` is parametric now, and its value type is PHANTOM -- carried by no
+;; field -- so an empty map has nothing to infer it from and `(ormap-new)` needs
+;; an ascription.  Every other entry point takes or returns a value and infers
+;; it.  These tests use plain `int` values; test_ormap_join covers real CRDT
+;; value types through the JoinSemilattice instance.
   (import crdt/ormap :refer [ORMap ormap-new ormap-put ormap-get ormap-has?
                              ormap-remove ormap-count ormap-merge-with])
 
