@@ -100,6 +100,42 @@ def extract_build_description(build_tur: Path) -> str:
     return m.group(1) if m else ''
 
 
+def _split_front_matter(text: str) -> tuple[dict, str]:
+    """Return (meta, body) after stripping a leading YAML front-matter block.
+
+    Guides that carry front matter used to leak the whole block into their
+    landing-page summary, because the extractor below only skips blank and
+    heading lines and a `---` fence is neither.
+    """
+    if not text.startswith('---\n'):
+        return {}, text
+    end = text.find('\n---', 4)
+    if end == -1:
+        return {}, text
+    rest = text.find('\n', end + 1)
+    body = text[rest + 1:] if rest != -1 else ''
+    meta: dict = {}
+    for line in text[4:end].splitlines():
+        k, _, v = line.partition(':')
+        k, v = k.strip(), v.strip()
+        if k and v:
+            meta[k] = v
+    return meta, body
+
+
+def _inline_md(text: str) -> str:
+    """Render a summary's inline markdown (bold, italic, code) to HTML.
+
+    Links are flattened to their anchor text on purpose: a guide's relative
+    target is written relative to the guide, not to the index page that embeds
+    the summary, so rendering it as an <a> would emit a broken link.
+    """
+    flat = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+    out = md_lib.markdown(flat).strip()
+    m = re.fullmatch(r'<p>(.*)</p>', out, re.S)
+    return m.group(1).strip() if m else out
+
+
 def _extract_guide_summary(text: str) -> str:
     """Pull the first meaningful sentence out of a guide's intro paragraph."""
     lines = text.splitlines()
@@ -149,7 +185,8 @@ def discover_guides(guides_dir: Path) -> list[dict]:
     for md in sorted(guides_dir.glob('*.md')):
         if md.stem == 'README':
             continue
-        text = md.read_text(encoding='utf-8', errors='replace')
+        meta, text = _split_front_matter(
+            md.read_text(encoding='utf-8', errors='replace'))
 
         title = md.stem.replace('-', ' ').title()
         m = re.search(r'^#\s+(.+?)\s*$', text, re.MULTILINE)
@@ -159,8 +196,8 @@ def discover_guides(guides_dir: Path) -> list[dict]:
 
         entries.append({
             'stem': md.stem,
-            'title': title,
-            'summary': _extract_guide_summary(text),
+            'title': meta.get('title') or title,
+            'summary': meta.get('description') or _extract_guide_summary(text),
         })
     return entries
 
@@ -315,7 +352,7 @@ def render_top_index(metas: list[SpiceMeta], out_dir: Path,
         for g in guides:
             stem = html_module.escape(g['stem'])
             title = html_module.escape(g['title'])
-            summary = html_module.escape(g['summary'])
+            summary = _inline_md(g['summary'])
             guide_rows.append(
                 '      <tr>'
                 f'<td><a href="guides/{stem}.html">{title}</a></td>'
