@@ -4,7 +4,7 @@
 ;; request struct from the POST body with `with-json-body` and replies with a
 ;; typed response struct via `json-ok`. The request goes through the `serve`
 ;; bridge + default pool dispatcher, same as handler_test, but the body is
-;; decoded/encoded through json's `Decode`/`Encode` typeclasses rather than
+;; decoded/encoded through json's `DecodeJson`/`EncodeJson` typeclasses rather than
 ;; hand-rolled inline-C.
 
 (defmodule httpd/tests/json_codec
@@ -13,7 +13,7 @@
   (import httpd/response :refer [bad-request])
   (import httpd/server   :refer [server-stop])
   (import httpd/types    :refer [Request Response])
-  ;; derive-json / Encode / Decode arrive transitively through httpd/handler.
+  ;; derive-json / EncodeJson / DecodeJson arrive transitively through httpd/handler.
   (import http/client    :refer [http-post])
   (import http/response  :refer [response-status response-body response-header])
   (import test/suite     :refer [describe it])

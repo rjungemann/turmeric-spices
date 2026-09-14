@@ -1,4 +1,4 @@
-;; json/decode.tur -- typed JSON deserialization via the Decode typeclass.
+;; json/decode.tur -- typed JSON deserialization via the DecodeJson typeclass.
 ;;
 ;; Backed by yyjson (https://github.com/ibireme/yyjson) via the spice's
 ;; :cmake-deps entry. The doc handle wraps a `yyjson_doc *`; value handles
@@ -16,7 +16,7 @@
 ;;   (let [doc  (unsafe (json-parse-doc "{\"x\":1}"))
 ;;         root (unsafe (json-doc-root doc))
 ;;         v    (unsafe (json-obj-get doc root "x"))]
-;;     (let [r (:: (decode doc v) (Result int cstr))]
+;;     (let [r (:: (decode-json doc v) (Result int cstr))]
 ;;       (unsafe (json-doc-free doc))
 ;;       r))
 
@@ -32,7 +32,7 @@
 ;; `yyjson_val *`, or 0 if the value is not an object or the key is absent.
 ;;
 ;; Lifetime: every value handle is borrowed from the owning doc -- they become
-;; dangling once `json-doc-free` runs. Decode [cstr] copies the string out so
+;; dangling once `json-doc-free` runs. DecodeJson [cstr] copies the string out so
 ;; the returned cstr survives the doc.
 ;; -----------------------------------------------------------------------------
 

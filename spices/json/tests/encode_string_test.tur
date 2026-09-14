@@ -1,13 +1,13 @@
-;; tests/encode_string_test.tur -- encode-string owned-String serializer.
+;; tests/encode_string_test.tur -- encode-json-string owned-String serializer.
 ;;
-;; encode-string is the owned-return counterpart of the Encode `encode` method:
+;; encode-json-string is the owned-return counterpart of the EncodeJson `encode-json` method:
 ;; it serializes any Encodable value to a String the caller releases, rather
 ;; than a malloc'd cstr the caller frees.
 (defmodule json/tests/encode-string
   (import test/suite  :refer [describe it])
   (import test/assert :refer [assert-true])
   (import test/runner :refer [run-all-status])
-  (import json/encode :refer [encode-string derive-json])
+  (import json/encode :refer [encode-json-string derive-json])
   (import json/ownstr :refer [String to-cstr release str-len])
 
 (defstruct Point [x : int  y : int])
@@ -21,13 +21,13 @@
 
 ;; encode an int to an owned String, compare, release.
 (defn int-enc-is? [x : int want : cstr] : bool
-  (let [s (encode-string x)
+  (let [s (encode-json-string x)
         r (seq? (to-cstr s) want)]
     (do (release s) r)))
 
 ;; encode a derived struct to an owned String, compare, release.
 (defn point-enc-is? [p : Point want : cstr] : bool
-  (let [s (encode-string p)
+  (let [s (encode-json-string p)
         r (seq? (to-cstr s) want)]
     (do (release s) r)))
 

@@ -51,14 +51,14 @@ let [r http-get("https://httpbin.org/get")]
 ## Typed JSON bodies
 
 `http/request` and `http/response` expose typed JSON codecs built on the json
-spice's `Encode`/`Decode` typeclasses, so a request/response body is a typed
+spice's `EncodeJson`/`DecodeJson` typeclasses, so a request/response body is a typed
 struct rather than a hand-walked document:
 
 - `(json-request method url x headers) : int` -- encode `x` as the request
   body and prepend `Content-Type: application/json` to `headers`. Generic over
-  any `Encode` instance.
+  any `EncodeJson` instance.
 - `(response-decode resp T) : (Result T cstr)` -- decode the response body
-  into `T` via its `Decode` instance, or `err` on a non-JSON body. The typed
+  into `T` via its `DecodeJson` instance, or `err` on a non-JSON body. The typed
   counterpart to `response-json` (which returns an untyped doc handle).
 
 ```turmeric

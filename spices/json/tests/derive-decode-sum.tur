@@ -1,5 +1,5 @@
 ;; derive-json-sum-decode reads the externally-tagged discriminator and
-;; dispatches to the matching constructor. Decode two different tags out of
+;; dispatches to the matching constructor. DecodeJson two different tags out of
 ;; their JSON encodings and confirm the constructor + payload survive.
 ;;
 ;; The `Expected:` output this used to print and never check is asserted
@@ -50,13 +50,13 @@
 (defn decode-event [s : cstr] : cstr
   (let [doc  (unsafe (json-parse-doc s))
         root (unsafe (json-doc-root doc))
-        e    (ok-val (:: (decode doc root) (Result Event cstr)))
+        e    (ok-val (:: (decode-json doc root) (Result Event cstr)))
         out  (show e)]
     (unsafe (json-doc-free doc))
     out))
 
 (defn main [] : int
-  (describe "json derive-json-sum -- Decode an externally tagged object"
+  (describe "json derive-json-sum -- DecodeJson an externally tagged object"
 
     (it "decodes a two-field variant"
       (assert-true (cstr-eq? "click x=3 y=4"

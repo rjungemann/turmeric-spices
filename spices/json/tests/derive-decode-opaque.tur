@@ -1,7 +1,7 @@
 ;; The `Expected:` output this used to print and never check is asserted
 ;; below; main returns run-all-status instead of a hardcoded 0.
-;; derive-json-opaque-decode emits a Decode instance for a defopaque newtype
-;; by delegating to the carrier's Decode.
+;; derive-json-opaque-decode emits a DecodeJson instance for a defopaque newtype
+;; by delegating to the carrier's DecodeJson.
 
 (defmodule derive_decode_opaque_test (export)
 
@@ -23,7 +23,7 @@
 (defn main [] : int
   (let [doc  (unsafe (json-parse-doc "42"))
         root (unsafe (json-doc-root doc))
-        uid  (ok-val (:: (decode doc root) (Result UserId cstr)))]
+        uid  (ok-val (:: (decode-json doc root) (Result UserId cstr)))]
     (describe "json derive-json-opaque-decode -- carrier delegation"
 
       (it "decodes a bare JSON int into the newtype"

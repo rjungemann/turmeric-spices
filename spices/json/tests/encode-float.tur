@@ -1,4 +1,4 @@
-;; Encode [float] -- mirror of Decode [float], closing the float
+;; EncodeJson [float] -- mirror of DecodeJson [float], closing the float
 ;; round-trip.  Finite doubles render as the shortest %g form that
 ;; re-parses to the same value; non-finite doubles (Infinity / NaN,
 ;; which JSON cannot represent) render as "null".
@@ -33,33 +33,33 @@
 (defn main [] : int
   (let [doc  (unsafe (json-parse-doc "{\"pi\":3.14}"))
         root (unsafe (json-doc-root doc))
-        pi   (ok-val (:: (decode doc (unsafe (json-obj-get doc root "pi")))
+        pi   (ok-val (:: (decode-json doc (unsafe (json-obj-get doc root "pi")))
                          (Result float cstr)))]
-    (describe "json Encode [float]"
+    (describe "json EncodeJson [float]"
 
       (it "encodes a fractional value"
-        (assert-true (cstr-eq? "3.14" (encode 3.14))))
+        (assert-true (cstr-eq? "3.14" (encode-json 3.14))))
 
       ;; A whole-valued double renders without a trailing ".0" -- shortest %g.
       (it "encodes a whole value without a decimal point"
-        (assert-true (cstr-eq? "2" (encode 2.0))))
+        (assert-true (cstr-eq? "2" (encode-json 2.0))))
 
       (it "encodes a negative value"
-        (assert-true (cstr-eq? "-0.5" (encode -0.5))))
+        (assert-true (cstr-eq? "-0.5" (encode-json -0.5))))
 
       (it "encodes a large value in full, not exponent form"
-        (assert-true (cstr-eq? "100000000" (encode 100000000.0))))
+        (assert-true (cstr-eq? "100000000" (encode-json 100000000.0))))
 
       ;; JSON has no Infinity or NaN, so both must degrade to null rather than
       ;; emitting something a parser would reject.
       (it "encodes Infinity as null"
-        (assert-true (cstr-eq? "null" (encode (unsafe (__inf))))))
+        (assert-true (cstr-eq? "null" (encode-json (unsafe (__inf))))))
 
       (it "encodes NaN as null"
-        (assert-true (cstr-eq? "null" (encode (unsafe (__nan))))))
+        (assert-true (cstr-eq? "null" (encode-json (unsafe (__nan))))))
 
       (it "round-trips a parsed float back to its source text"
-        (assert-true (cstr-eq? "3.14" (encode pi)))))
+        (assert-true (cstr-eq? "3.14" (encode-json pi)))))
 
     (unsafe (json-doc-free doc))
     (run-all-status))))

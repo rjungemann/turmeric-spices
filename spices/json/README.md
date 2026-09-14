@@ -55,9 +55,9 @@ let [r json-parse("{\"user\":{\"name\":\"Alice\",\"age\":30}}")]
 
 ## Typed encoding (`json/encode`)
 
-The `Encode` typeclass + `derive-json` macro give defstruct types a
+The `EncodeJson` typeclass + `derive-json` macro give defstruct types a
 JSON serializer without hand-writing per-type code. Primitive instances
-ship for `int`, `bool`, `cstr`, and `float` (mirroring the `Decode`
+ship for `int`, `bool`, `cstr`, and `float` (mirroring the `DecodeJson`
 primitives, so floats round-trip); the macro emits one for any
 `defstruct` product type whose fields you list explicitly:
 
@@ -67,7 +67,7 @@ primitives, so floats round-trip); the macro emits one for any
 (defstruct User [id : int  name : cstr  active : bool])
 (derive-json User (id int) (name cstr) (active bool))
 
-(println (encode (make-struct User 7 "alice" true)))
+(println (encode-json (make-struct User 7 "alice" true)))
 ;; => {"id":7,"name":"alice","active":true}
 ```
 
@@ -75,7 +75,7 @@ This is the **P2a minimal slice** of the spices type-features uplift
 plan (`docs/upcoming/spices-type-features-uplift-plan.md` in the
 turmeric repo). It deliberately does not yet ship:
 
-- `Decode` (read-side roundtrip).
+- `DecodeJson` (read-side roundtrip).
 - `derive-json` for `defdata` sum types.
 - `:as :carrier` opt-in for `defopaque` wire form.
 - `:rename-fields` / `:only` / `:skip` codec options.
@@ -84,29 +84,29 @@ The earlier 2-field cap (from a closure-codegen bug in the main
 turmeric compiler) was lifted 2026-06-12 in the same session that
 introduced this module; arbitrary field counts work today.
 
-## Typed decoding (`json/decode` + `Decode` typeclass)
+## Typed decoding (`json/decode` + `DecodeJson` typeclass)
 
 A self-contained tiny scanner (no yyjson dependency in this slice)
-parses a JSON cstr into an opaque doc handle; the `Decode` typeclass
+parses a JSON cstr into an opaque doc handle; the `DecodeJson` typeclass
 on top dispatches per-type via a return-type ascription:
 
 ```turmeric
 (import json/decode :refer [json-parse-doc json-doc-free json-doc-root json-obj-get])
-(import json/encode)  ;; Decode class lives here alongside derive-json
+(import json/encode)  ;; DecodeJson class lives here alongside derive-json
 
 (let [doc      (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
       root     (unsafe (json-doc-root doc))
-      id-r     (:: (decode doc (unsafe (json-obj-get doc root "id")))   (Result int  cstr))
-      name-r   (:: (decode doc (unsafe (json-obj-get doc root "name"))) (Result cstr cstr))]
+      id-r     (:: (decode-json doc (unsafe (json-obj-get doc root "id")))   (Result int  cstr))
+      name-r   (:: (decode-json doc (unsafe (json-obj-get doc root "name"))) (Result cstr cstr))]
   (println (ok-val name-r))
   (unsafe (json-doc-free doc)))
 ```
 
-Each call to `(decode doc val)` returns `(Result T cstr)` where `T` is
+Each call to `(decode-json doc val)` returns `(Result T cstr)` where `T` is
 pinned by the ascription; on success the Result is `(ok x)`, on a
-type/format error it carries a short static err message. `Decode`
+type/format error it carries a short static err message. `DecodeJson`
 instances ship for `int` and `cstr` (with `true`/`false` decoding
-through `Decode [int]` as `1`/`0`).
+through `DecodeJson [int]` as `1`/`0`).
 
 Scope (intentionally narrow for the minimal slice):
 
@@ -115,10 +115,10 @@ Scope (intentionally narrow for the minimal slice):
 - Strings handle the minimal escape set (`\"`, `\\`, `\b`, `\f`,
   `\n`, `\r`, `\t`, `\/`); `\uXXXX` is rejected.
 
-`derive-json` emits the Encode side for any defstruct. The matching
-`Decode [T]` side for a user-defined defstruct is hand-written today
+`derive-json` emits the EncodeJson side for any defstruct. The matching
+`DecodeJson [T]` side for a user-defined defstruct is hand-written today
 (inline-C that allocates the struct, fills it from the per-field
-Decode dispatches, and wraps via `tur_ok`) -- the macro-driven Decode
+DecodeJson dispatches, and wraps via `tur_ok`) -- the macro-driven DecodeJson
 side lands once the value-struct-to-carrier boxing helper is in
 place.
 

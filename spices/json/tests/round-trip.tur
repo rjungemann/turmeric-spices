@@ -1,5 +1,5 @@
 ;; P2a round-trip: decode primitive fields out of a JSON object via the
-;; Decode typeclass, then re-encode through derive-json's Encode side.
+;; DecodeJson typeclass, then re-encode through derive-json's EncodeJson side.
 ;;
 ;; The `Expected:` output this used to print and never check is asserted
 ;; below; main returns run-all-status instead of a hardcoded 0.
@@ -40,10 +40,10 @@
 (defn main [] : int
   (let [doc  (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
         root (unsafe (json-doc-root doc))
-        id   (ok-val (:: (decode doc (unsafe (json-obj-get doc root "id")))   (Result int  cstr)))
-        name (ok-val (:: (decode doc (unsafe (json-obj-get doc root "name"))) (Result cstr cstr)))
+        id   (ok-val (:: (decode-json doc (unsafe (json-obj-get doc root "id")))   (Result int  cstr)))
+        name (ok-val (:: (decode-json doc (unsafe (json-obj-get doc root "name"))) (Result cstr cstr)))
         user (make-struct User id name)]
-    (describe "json round-trip -- Decode primitives, then derive-json Encode"
+    (describe "json round-trip -- DecodeJson primitives, then derive-json EncodeJson"
 
       (it "decodes the int field"
         (assert-eq 42 id))
@@ -54,7 +54,7 @@
       ;; The two halves must be inverses: a struct assembled from decoded
       ;; fields has to re-encode to the bytes it came from.
       (it "re-encodes to the JSON it was decoded from"
-        (assert-true (cstr-eq? "{\"id\":42,\"name\":\"alice\"}" (encode user)))))
+        (assert-true (cstr-eq? "{\"id\":42,\"name\":\"alice\"}" (encode-json user)))))
 
     (unsafe (json-doc-free doc))
     (run-all-status))))
