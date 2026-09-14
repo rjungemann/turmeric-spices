@@ -80,7 +80,7 @@ the lower-level path.
 ## JSON body codecs
 
 `httpd/handler` also exposes helpers that decode a typed request body and
-encode a typed response body through the json spice's `Encode`/`Decode`
+encode a typed response body through the json spice's `EncodeJson`/`DecodeJson`
 typeclasses, so a JSON endpoint needs no inline-C body parsing:
 
 - `(with-json-body req T f)` -- decode the body into `T`; on success call

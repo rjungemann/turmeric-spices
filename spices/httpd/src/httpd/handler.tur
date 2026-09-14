@@ -35,7 +35,7 @@
                                  server-start-conn server-start-pool-conn])
   (import httpd/request  :refer [req-body])
   (import httpd/response :refer [resp-ok response bad-request])
-  ;; json/encode brings the Encode/Decode classes (and the `encode`/`decode`
+  ;; json/encode brings the EncodeJson/DecodeJson classes (and the `encode-json`/`decode-json`
   ;; methods) into scope; json/decode brings the yyjson document handles the
   ;; body codecs parse against. yyjson is re-declared in httpd's build.tur
   ;; :cmake-deps because a workspace-sibling's native deps are not propagated.
@@ -50,7 +50,7 @@
 ;;; The single method maps a parsed `Request` to a `Response`. The `self`
 ;;; argument is the instance witness (it selects the instance and carries no
 ;;; per-request state); dispatch is value-directed on its type, mirroring the
-;;; json `Encode`/`Decode` and ansi `Color` precedent.
+;;; json `EncodeJson`/`DecodeJson` and ansi `Color` precedent.
 ;;;
 ;;; Method:
 ;;;   respond : self -> Request -> Response
@@ -177,7 +177,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; JSON body codecs (P3): decode a typed request body and encode a typed
-;; response body through json's `Decode`/`Encode` typeclasses, so a JSON
+;; response body through json's `DecodeJson`/`EncodeJson` typeclasses, so a JSON
 ;; endpoint is a few lines instead of inline-C body parsing.
 ;;
 ;; The request type is decoded with `req-decode` (or the `with-json-body`
@@ -187,7 +187,7 @@
 ;; into a Response with `Content-Type: application/json`.
 ;; ---------------------------------------------------------------------------
 
-;;; __cstr-free -- release a malloc'd JSON fragment returned by `encode`.
+;;; __cstr-free -- release a malloc'd JSON fragment returned by `encode-json`.
 ;;; json's contract is caller-owns; the Response constructors copy the body,
 ;;; so the fragment is freed immediately after it is handed to `resp-ok` /
 ;;; `response`.
@@ -195,12 +195,12 @@
   ```c free((void *)(intptr_t)p); ```)
 
 ;;; req-decode -- parse a request body as JSON and decode it into `T` via the
-;;; json `Decode [T]` instance. Returns `(Result T cstr)`: `ok` with the
+;;; json `DecodeJson [T]` instance. Returns `(Result T cstr)`: `ok` with the
 ;;; decoded value, or `err` with a message when the body is not valid JSON.
 ;;;
 ;;; A macro (not a function) because the target type drives instance selection
 ;;; through the `(Result T cstr)` ascription, mirroring json's own decode
-;;; idiom. The yyjson document is freed before returning; json's `Decode`
+;;; idiom. The yyjson document is freed before returning; json's `DecodeJson`
 ;;; instances copy strings out, so the decoded value outlives the document.
 ;;;
 ;;; Syntax:
@@ -210,17 +210,17 @@
      (if (= __doc 0)
        (:: (err "req-decode: request body is not valid JSON") (Result ~type-name cstr))
        (let [__root (unsafe (json-doc-root __doc))
-             __res  (:: (decode __doc __root) (Result ~type-name cstr))]
+             __res  (:: (decode-json __doc __root) (Result ~type-name cstr))]
          (unsafe (json-doc-free __doc))
          __res))))
 
 ;;; json-ok -- a 200 response whose body is `x` encoded as JSON, with
-;;; `Content-Type: application/json`. Generic over any `Encode` instance.
+;;; `Content-Type: application/json`. Generic over any `EncodeJson` instance.
 ;;;
 ;;; Example:
 ;;;   (json-ok (make-struct EchoResp "hi" 2))
-(defn json-ok [^Encode T  x : T] : Response
-  (let [frag (encode x)
+(defn json-ok [^EncodeJson T  x : T] : Response
+  (let [frag (encode-json x)
         resp (resp-ok "application/json" frag)]
     (unsafe (__cstr-free frag))
     resp))
@@ -230,8 +230,8 @@
 ;;;
 ;;; Example:
 ;;;   (json-resp 201 (make-struct Created (.id row)))
-(defn json-resp [^Encode T  status : int  x : T] : Response
-  (let [frag (encode x)
+(defn json-resp [^EncodeJson T  status : int  x : T] : Response
+  (let [frag (encode-json x)
         resp (response status "application/json" frag)]
     (unsafe (__cstr-free frag))
     resp))

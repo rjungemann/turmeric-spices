@@ -1,9 +1,9 @@
-;; decode-checked.tur -- U3 object-shape validating decoder (derive-decoder).
+;; decode-json-checked.tur -- U3 object-shape validating decoder (derive-json-decoder).
 ;;
-;; Unlike the fail-fast `Decode` typeclass (which silently takes ok-val of a
-;; failed field), `derive-decoder` emits a `DecodeChecked` instance that checks
+;; Unlike the fail-fast `DecodeJson` typeclass (which silently takes ok-val of a
+;; failed field), `derive-json-decoder` emits a `DecodeJsonChecked` instance that checks
 ;; every declared field, ACCUMULATES all violations, and returns
-;; (Result T DecodeErrors). This test exercises: a clean decode, a missing key,
+;; (Result T JsonDecodeErrors). This test exercises: a clean decode, a missing key,
 ;; and a multi-field type mismatch where BOTH errors are reported.
 ;;
 ;; Expected:
@@ -13,10 +13,10 @@
 
 (defmodule decode_checked_test (export)
 
-(import json/encode :refer [derive-decoder DecodeErrors
-                            decode-errors-count decode-error-path
-                            decode-error-expected decode-error-got
-                            decode-errors-free])
+(import json/encode :refer [derive-json-decoder JsonDecodeErrors
+                            json-decode-errors-count json-decode-error-path
+                            json-decode-error-expected json-decode-error-got
+                            json-decode-errors-free])
 (import json/decode :refer [json-parse-doc json-doc-free json-doc-root])
 
 (defn p [s : cstr] #fx{Unsafe} : int ```c fputs((const char*)s, stdout); return 0; ```)
@@ -24,23 +24,23 @@
 (defn pint [n : int] #fx{Unsafe} : int ```c printf("%lld", (long long)n); return 0; ```)
 
 (defstruct Person [name : cstr  age : int])
-(derive-decoder Person (name cstr) (age int))
+(derive-json-decoder Person (name cstr) (age int))
 
 ;; Print " | <path> expected <expected> got <got>" for each accumulated error.
-(defn each-error [errs : DecodeErrors  i : int  n : int] : int
+(defn each-error [errs : JsonDecodeErrors  i : int  n : int] : int
   (if (>= i n)
     0
     (do
-      (unsafe (p " | ")) (unsafe (p (decode-error-path errs i)))
-      (unsafe (p " expected ")) (unsafe (p (decode-error-expected errs i)))
-      (unsafe (p " got ")) (unsafe (p (decode-error-got errs i)))
+      (unsafe (p " | ")) (unsafe (p (json-decode-error-path errs i)))
+      (unsafe (p " expected ")) (unsafe (p (json-decode-error-expected errs i)))
+      (unsafe (p " got ")) (unsafe (p (json-decode-error-got errs i)))
       (each-error errs (+ i 1) n))))
 
 ;; Run a checked decode of `json` and print either the ok struct or every error.
 (defn run [label : cstr  json : cstr] : int
   (let [doc  (unsafe (json-parse-doc json))
         root (unsafe (json-doc-root doc))
-        r    (:: (decode-checked doc root) (Result Person DecodeErrors))]
+        r    (:: (decode-json-checked doc root) (Result Person JsonDecodeErrors))]
     (do
       (unsafe (p label)) (unsafe (p ": "))
       (if (ok? r)
@@ -48,12 +48,12 @@
           (do (unsafe (p "name=")) (unsafe (p (.name person)))
               (unsafe (p " age=")) (unsafe (pint (.age person))) (unsafe (pln))))
         (let [errs (err-val r)
-              n    (decode-errors-count errs)]
+              n    (json-decode-errors-count errs)]
           (do
             (unsafe (pint n)) (unsafe (p (if (= n 1) " err" " errs")))
             (each-error errs 0 n)
             (unsafe (pln))
-            (decode-errors-free errs)
+            (json-decode-errors-free errs)
             0)))
       (unsafe (json-doc-free doc))
       0)))

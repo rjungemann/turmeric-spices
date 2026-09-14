@@ -1,6 +1,6 @@
-;; derive-json emits both Encode and Decode for a defstruct. Roundtrip a
-;; JSON object into a User struct via the macro-emitted Decode instance,
-;; then re-encode through the Encode side.
+;; derive-json emits both EncodeJson and DecodeJson for a defstruct. Roundtrip a
+;; JSON object into a User struct via the macro-emitted DecodeJson instance,
+;; then re-encode through the EncodeJson side.
 ;;
 ;; The `Expected:` output this used to print and never check is asserted
 ;; below; main returns run-all-status instead of a hardcoded 0.
@@ -41,8 +41,8 @@
 (defn main [] : int
   (let [doc  (unsafe (json-parse-doc "{\"id\":42,\"name\":\"alice\"}"))
         root (unsafe (json-doc-root doc))
-        user (ok-val (:: (decode doc root) (Result User cstr)))]
-    (describe "json derive-json -- Decode into a defstruct"
+        user (ok-val (:: (decode-json doc root) (Result User cstr)))]
+    (describe "json derive-json -- DecodeJson into a defstruct"
 
       (it "decodes the int field into the struct"
         (assert-eq 42 (.id user)))
@@ -53,7 +53,7 @@
       ;; Re-encoding must reproduce the input byte for byte, which is the
       ;; property that makes derive-json's two instances each other's inverse.
       (it "re-encodes to the JSON it was decoded from"
-        (assert-true (cstr-eq? "{\"id\":42,\"name\":\"alice\"}" (encode user)))))
+        (assert-true (cstr-eq? "{\"id\":42,\"name\":\"alice\"}" (encode-json user)))))
 
     (unsafe (json-doc-free doc))
     (run-all-status))))

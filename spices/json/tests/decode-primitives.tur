@@ -1,6 +1,6 @@
 ;; The `Expected:` output this used to print and never check is asserted
 ;; below; main returns run-all-status instead of a hardcoded 0.
-;; P2a Decode -- pull typed primitives out of a JSON object.
+;; P2a DecodeJson -- pull typed primitives out of a JSON object.
 
 (defmodule decode_primitives_test (export)
 
@@ -22,17 +22,17 @@
         id-off   (unsafe (json-obj-get doc root "id"))
         name-off (unsafe (json-obj-get doc root "name"))
         act-off  (unsafe (json-obj-get doc root "active"))]
-    (describe "json Decode -- primitives out of an object"
+    (describe "json DecodeJson -- primitives out of an object"
 
       (it "decodes an int field"
-        (assert-eq 42 (ok-val (:: (decode doc id-off) (Result int cstr)))))
+        (assert-eq 42 (ok-val (:: (decode-json doc id-off) (Result int cstr)))))
 
       (it "decodes a string field"
         (assert-true (cstr-eq? "alice"
-                               (ok-val (:: (decode doc name-off) (Result cstr cstr))))))
+                               (ok-val (:: (decode-json doc name-off) (Result cstr cstr))))))
 
       (it "decodes a bool field"
-        (assert-true (ok-val (:: (decode doc act-off) (Result bool cstr))))))
+        (assert-true (ok-val (:: (decode-json doc act-off) (Result bool cstr))))))
 
     (unsafe (json-doc-free doc))
     (run-all-status))))

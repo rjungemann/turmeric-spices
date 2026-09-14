@@ -1,10 +1,10 @@
-;; P2a Decode [bool] -- accept literal true/false; reject non-boolean
+;; P2a DecodeJson [bool] -- accept literal true/false; reject non-boolean
 ;; (numbers, strings) with an err.
 ;;
 ;; The Result helpers are inlined into each assertion (rather than threaded
 ;; through a typed helper fn) to avoid the open polymorphic-ok carrier/
 ;; by-value ABI bug -- this fixture is intentionally written to exercise
-;; only the Decode [bool] instance, not the surrounding ABI seam. That is
+;; only the DecodeJson [bool] instance, not the surrounding ABI seam. That is
 ;; also why `describe` sits inside the `let`: the doc handles have to stay in
 ;; scope without being passed across a function boundary.
 ;;
@@ -31,28 +31,28 @@
         b    (unsafe (json-obj-get doc root "b"))
         c    (unsafe (json-obj-get doc root "c"))
         d    (unsafe (json-obj-get doc root "d"))]
-    (describe "json Decode [bool]"
+    (describe "json DecodeJson [bool]"
 
       (it "decodes a literal true"
         (assert-true
-          (let [r (:: (decode doc a) (Result bool cstr))]
+          (let [r (:: (decode-json doc a) (Result bool cstr))]
             (and (ok? r) (ok-val r)))))
 
       (it "decodes a literal false"
         (assert-true
-          (let [r (:: (decode doc b) (Result bool cstr))]
+          (let [r (:: (decode-json doc b) (Result bool cstr))]
             (and (ok? r) (not (ok-val r))))))
 
       ;; A number is not a bool. JSON has a distinct boolean type, so 42 must
       ;; not decode as truthy the way it would in a coercing language.
       (it "rejects a number"
         (assert-true
-          (err? (:: (decode doc c) (Result bool cstr)))))
+          (err? (:: (decode-json doc c) (Result bool cstr)))))
 
       ;; Nor is the *string* "true" a bool.
       (it "rejects a string, even the string \"true\""
         (assert-true
-          (err? (:: (decode doc d) (Result bool cstr))))))
+          (err? (:: (decode-json doc d) (Result bool cstr))))))
 
     (unsafe (json-doc-free doc))
     (run-all-status))))

@@ -1,4 +1,4 @@
-;; Decode against the yyjson-backed reader: nested object lookup, a float
+;; DecodeJson against the yyjson-backed reader: nested object lookup, a float
 ;; field, and a \uXXXX escape that must arrive as real UTF-8.
 ;;
 ;; The `Expected:` output this used to print and never check is asserted
@@ -44,20 +44,20 @@
         inner (unsafe (json-obj-get doc outer "inner"))
         pi-v  (unsafe (json-obj-get doc root "pi"))
         u-v   (unsafe (json-obj-get doc root "u"))]
-    (describe "json Decode -- yyjson reader features"
+    (describe "json DecodeJson -- yyjson reader features"
 
       ;; json-obj-get applied to a nested handle, not just the root.
       (it "reads an int out of a nested object"
-        (assert-eq 99 (ok-val (:: (decode doc inner) (Result int cstr)))))
+        (assert-eq 99 (ok-val (:: (decode-json doc inner) (Result int cstr)))))
 
       (it "decodes a float field"
         (assert-true (unsafe (__float-near?
-                               (ok-val (:: (decode doc pi-v) (Result float cstr)))
+                               (ok-val (:: (decode-json doc pi-v) (Result float cstr)))
                                3.14 1e-12))))
 
       (it "decodes a \\uXXXX escape into UTF-8"
         (assert-true (unsafe (__is-snow?
-                               (ok-val (:: (decode doc u-v) (Result cstr cstr))))))))
+                               (ok-val (:: (decode-json doc u-v) (Result cstr cstr))))))))
 
     (unsafe (json-doc-free doc))
     (run-all-status))))

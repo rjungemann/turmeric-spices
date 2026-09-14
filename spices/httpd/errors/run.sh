@@ -83,8 +83,8 @@ expect_reject httpd-trequest-row-mismatch.tur TUR-E0001 \
   'expected (type-app TRequest #row{authorization : cstr}), got (type-app TRequest #row{accept : cstr})' \
   'a TRequest carrying the wrong header row is rejected'
 expect_reject req-decode-missing-decode-instance.tur "-" \
-  'no instance '\''Decode NoCodec'\''' \
-  'req-decode rejects a target type with no Decode instance'
+  'no instance '\''DecodeJson NoCodec'\''' \
+  'req-decode rejects a target type with no DecodeJson instance'
 
 echo "1..$n"
 if [ "$fail" -ne 0 ]; then

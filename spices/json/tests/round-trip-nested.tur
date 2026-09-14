@@ -1,6 +1,6 @@
 ;; U2 derive-json: nested struct composition. A derive-json'd struct whose
 ;; fields are themselves derive-json'd structs round-trips -- each field
-;; dispatches to the nested type's own Encode/Decode instance.
+;; dispatches to the nested type's own EncodeJson/DecodeJson instance.
 ;;   {"from":{"x":1,"y":2},"to":{"x":3,"y":4}} -> Line -> same JSON
 ;;
 ;; `check` gates `tur test` on real behavior via an inline-C fail counter.
@@ -37,15 +37,15 @@
 ;; decode a Line out of JSON and re-encode it.
 (defn rt-line [s : cstr] : cstr
   (let [doc (unsafe (json-parse-doc s)) root (unsafe (json-doc-root doc))
-        l   (ok-val (:: (decode doc root) (Result Line cstr)))
-        out (encode (:: l Line))]
+        l   (ok-val (:: (decode-json doc root) (Result Line cstr)))
+        out (encode-json (:: l Line))]
     (unsafe (json-doc-free doc)) out))
 
 ;; decode just a Point to confirm the leaf type round-trips on its own too.
 (defn rt-point [s : cstr] : cstr
   (let [doc (unsafe (json-parse-doc s)) root (unsafe (json-doc-root doc))
-        p   (ok-val (:: (decode doc root) (Result Point cstr)))
-        out (encode (:: p Point))]
+        p   (ok-val (:: (decode-json doc root) (Result Point cstr)))
+        out (encode-json (:: p Point))]
     (unsafe (json-doc-free doc)) out))
 
 (defn main [] : int

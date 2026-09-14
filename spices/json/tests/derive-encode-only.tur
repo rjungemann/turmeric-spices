@@ -1,4 +1,4 @@
-;; derive-json-encode emits only the Encode instance. Verifies the
+;; derive-json-encode emits only the EncodeJson instance. Verifies the
 ;; encode-only direction of the U2 :only [:encode] surface from the
 ;; spices-type-features uplift plan.
 ;;
@@ -20,10 +20,10 @@
 (defstruct LogEntry [level : cstr  msg : cstr])
 (derive-json-encode LogEntry (level cstr) (msg cstr))
 (defn main [] : int
-  (describe "json derive-json-encode -- Encode only"
+  (describe "json derive-json-encode -- EncodeJson only"
 
     (it "emits an object with both fields"
       (assert-true (cstr-eq? "{\"level\":\"info\",\"msg\":\"hi\"}"
-                             (encode (make-struct LogEntry "info" "hi"))))))
+                             (encode-json (make-struct LogEntry "info" "hi"))))))
   (run-all-status))
 )

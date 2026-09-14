@@ -25,8 +25,8 @@
 (defn round-trip [s : cstr] : cstr
   (let [doc  (unsafe (json-parse-doc s))
         root (unsafe (json-doc-root doc))
-        cmd  (ok-val (:: (decode doc root) (Result Cmd cstr)))
-        out  (encode cmd)]
+        cmd  (ok-val (:: (decode-json doc root) (Result Cmd cstr)))
+        out  (encode-json cmd)]
     (unsafe (json-doc-free doc))
     out))
 

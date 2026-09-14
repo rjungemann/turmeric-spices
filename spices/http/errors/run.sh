@@ -77,11 +77,11 @@ expect_reject() {
 echo "# the http compile-fail diagnostics"
 
 expect_reject json-request-missing-encode-instance.tur TUR-E0001 \
-  'no '\''Encode'\'' instance for '\''NoCodec'\'' in constrained call to '\''json-request'\''' \
-  'json-request rejects a payload type with no Encode instance'
+  'no '\''EncodeJson'\'' instance for '\''NoCodec'\'' in constrained call to '\''json-request'\''' \
+  'json-request rejects a payload type with no EncodeJson instance'
 expect_reject response-decode-missing-decode-instance.tur "-" \
-  'no instance '\''Decode NoCodec'\''' \
-  'response-decode rejects a target type with no Decode instance'
+  'no instance '\''DecodeJson NoCodec'\''' \
+  'response-decode rejects a target type with no DecodeJson instance'
 
 echo "1..$n"
 if [ "$fail" -ne 0 ]; then

@@ -1,6 +1,6 @@
 ;; The `Expected:` output this used to print and never check is asserted
 ;; below; main returns run-all-status instead of a hardcoded 0.
-;; P2a smoke: Encode primitive instances produce well-formed JSON fragments.
+;; P2a smoke: EncodeJson primitive instances produce well-formed JSON fragments.
 
 (defmodule encode_primitives_test (export)
 
@@ -16,17 +16,17 @@
   ```)
 
 (defn main [] : int
-  (describe "json Encode -- primitive instances"
+  (describe "json EncodeJson -- primitive instances"
 
     (it "encodes an int bare"
-      (assert-true (cstr-eq? "42" (encode 42))))
+      (assert-true (cstr-eq? "42" (encode-json 42))))
 
     (it "encodes a bool as a JSON literal, not 1/0"
-      (assert-true (cstr-eq? "true" (encode true))))
+      (assert-true (cstr-eq? "true" (encode-json true))))
 
     ;; The newline must come back as the two-character escape \n, quoted --
     ;; a raw newline inside a JSON string is invalid.
     (it "quotes a string and escapes control characters"
-      (assert-true (cstr-eq? "\"hello\\nworld\"" (encode "hello\nworld")))))
+      (assert-true (cstr-eq? "\"hello\\nworld\"" (encode-json "hello\nworld")))))
 
   (run-all-status)))

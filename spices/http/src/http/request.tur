@@ -43,7 +43,7 @@
   return (int64_t)(intptr_t)req;
   ```)
 
-;;; __cstr-free -- release a malloc'd JSON fragment returned by `encode`.
+;;; __cstr-free -- release a malloc'd JSON fragment returned by `encode-json`.
 ;;; `request` strdups the body, so the fragment is freed right after.
 (defn __cstr-free [p : cstr] #fx{Unsafe} : void
   ```c free((void *)(intptr_t)p); ```)
@@ -67,14 +67,14 @@
 
 ;;; json-request -- build an HTTP request whose body is `x` encoded as JSON,
 ;;; with `Content-Type: application/json` prepended to `headers`. Generic over
-;;; any `Encode` instance; the encoded fragment is freed after `request`
+;;; any `EncodeJson` instance; the encoded fragment is freed after `request`
 ;;; copies it. Returns the opaque request handle (pass to `http-request`).
 ;;;
 ;;; Example:
 ;;;   (let [req (json-request "POST" url (make-struct User 1 "ann") (nil-value))]
 ;;;     (http-request req))
-(defn json-request [^Encode T  method : cstr  url : cstr  x : T  headers : int] : int
-  (let [frag (encode x)
+(defn json-request [^EncodeJson T  method : cstr  url : cstr  x : T  headers : int] : int
+  (let [frag (encode-json x)
         hdrs (unsafe (__hdr-cons "Content-Type" "application/json" headers))
         req  (request method url frag hdrs)]
     (unsafe (__cstr-free frag))
