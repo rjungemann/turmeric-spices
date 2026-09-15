@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Dropped two of the three compiler workarounds now that their upstream reports
+  are fixed. `decode-mp-list` / `__mp-arr-decode` call `unwrap` directly again
+  instead of routing through the concrete `__mp-arr-len` / `__mp-arr-node`
+  shims (`generic-unwrap-specializes-by-the-enclosing-type-argument`), and
+  `tests/container-round-trip.tur` drops the eight outer `(:: ... Buf)`
+  ascriptions from its `@Cons`-pinned `encode-mp` calls
+  (`pinned-instance-dispatch-loses-an-opaque-return-type`).
+- The four primitive `DecodeMp` instances stay carrier-shaped inline C. The
+  generic half of what forced them is fixed, but a second, distinct defect
+  still blocks the revert: a return-dispatched method called from inside
+  another instance body of the same class is specialized with the ENCLOSING
+  instance's result type. Their `WORKAROUND` comment now names that instead of
+  the archived report.
+
 ## 0.1.0
 
 Initial release: MessagePack binary serialization, the binary twin of tur-json.
@@ -46,4 +64,5 @@ Initial release: MessagePack binary serialization, the binary twin of tur-json.
   truncation of a document corpus plus 200k random inputs.
 - Three compiler defects were worked around to ship this; each is filed
   upstream and each workaround is marked `WORKAROUND` in place, naming the
-  report and what to delete when it lands.
+  report and what to delete when it lands. (Two are gone as of Unreleased,
+  above.)

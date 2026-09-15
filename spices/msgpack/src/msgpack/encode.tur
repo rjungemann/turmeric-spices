@@ -266,15 +266,27 @@
 ;; They are inline C building the Result with the carrier-level `tur_box_ok` /
 ;; `tur_box_err` instead, to keep every instance of this class carrier-shaped.
 ;;
-;; The moment a VALUE-STRUCT instance of the same class exists -- and
-;; `derive-msgpack` emits one for every defstruct -- the class's method flips to
-;; the by-value `(Result int cstr)` representation, while the `ok-val` inside
-;; `decode-mp-list`'s constrained generic stays at the carrier. cc then rejects
-;; the program: "passing 'tur_adt_Result__int__cstr' to parameter of
-;; incompatible type 'int64_t'". It is NOT about how these bodies are written --
-;; an inline `(ok ...)` fails identically; boxing to the carrier is what dodges
-;; it. Reported upstream as
-;; struct-instance-makes-generic-ok-val-see-a-byvalue-result.
+;; The generic half of this is fixed: `decode-mp-list`'s constrained generic no
+;; longer adopts a by-value spec for its `ok-val`
+;; (struct-instance-makes-generic-ok-val-see-a-byvalue-result, archived). What
+;; still bites is the DERIVE half. A `derive-msgpack` struct instance decodes
+;; each field with
+;;
+;;   (ok-val (:: (decode-mp tree (__mp-field-node tree node "x")) (Result int cstr)))
+;;
+;; and the nested `decode-mp` -- a return-dispatched method of the same class --
+;; is specialized with the ENCLOSING instance's result type instead of its own
+;; ascription, emitting
+;;
+;;   __inst_DecodeMp_decode_mp_int__spec__tur_adt_Result__Pt__cstr_...
+;;
+;; whose body returns `Result int cstr`. cc then rejects the program. The sibling
+;; `ok-val` on the same line keys correctly, so it is the callee's result type
+;; that is captured, not the whole expression. The by-value representation is
+;; what exposes it: an explicit `(:: (mp-get-int ...) (Result int cstr))` fails
+;; identically, and boxing to the carrier is the only spelling that dodges it.
+;; Reported upstream as
+;; instance-method-call-inside-an-instance-body-takes-the-enclosing-result-type.
 ;;
 ;; json is exposed to exactly the same defect and compiles only because its
 ;; primitive instances are already carrier-shaped inline C.
@@ -354,39 +366,13 @@
       (ok (:: (none) (Option A)))
       (ok (some (ok-val (:: (decode-mp tree node) (Result A cstr))))))))
 
-;;; __mp-arr-len -- internal: element count of an array node, 0 for a non-array.
-;;;
-;;; WORKAROUND (remove when the upstream report below is fixed): this exists
-;;; only to keep `unwrap` OUT of the constrained generics further down, which
-;;; would otherwise write `(unwrap (mp-arr-size tree node))` inline.
-;;;
-;;; Inside a `defn` parameterized by `A`, `unwrap` is specialized by the
-;;; ENCLOSING type argument rather than by its own argument's type, so at
-;;; `A = float` an `(Option int)` is handed to
-;;; `unwrap__spec__double_tur_adt_Option__float` and cc rejects the program. It
-;;; works at `A = int`, where right and wrong coincide, which is what makes it
-;;; easy to miss. Reported upstream as
-;;; generic-unwrap-specializes-by-the-enclosing-type-argument.
-(defn __mp-arr-len [tree : MpTree node : MpNode] : int
-  (let [o (mp-arr-size tree node)]
-    (if (some? o)
-      (unwrap o)
-      0)))
-
-;;; __mp-arr-node -- internal: the i-th element, or the absent node.
-;;; Concrete for the same reason as __mp-arr-len.
-(defn __mp-arr-node [tree : MpTree node : MpNode i : int] : MpNode
-  (let [o (mp-arr-get tree node i)]
-    (if (some? o)
-      (unwrap o)
-      (:: -1 MpNode))))
-
 ;; Decode array elements [i, n) into a (Cons A), head to tail, each through its
-;; own (DecodeMp A) instance.
+;; own (DecodeMp A) instance. `i < n <= (mp-arr-size tree arr)`, so the
+;; `mp-arr-get` is always `some`.
 (defn __mp-arr-decode [A] [(DecodeMp A)] [tree : MpTree  arr : MpNode  i : int  n : int] : (Cons A)
   (if (>= i n)
     (:: (tnil) (Cons A))
-    (tcons-of (ok-val (:: (decode-mp tree (__mp-arr-node tree arr i)) (Result A cstr)))
+    (tcons-of (ok-val (:: (decode-mp tree (unwrap (mp-arr-get tree arr i))) (Result A cstr)))
               (:: (__mp-arr-decode tree arr (+ i 1) n) :int))))
 
 ;;; decode-mp-list -- decode a msgpack array into a `(Cons A)`, the mirror of
@@ -413,7 +399,7 @@
 ;;; Since: Phase MP2
 (defn decode-mp-list [A] [(DecodeMp A)] [tree : MpTree  node : MpNode] : (Cons A)
   (if (mp-arr? tree node)
-    (__mp-arr-decode tree node 0 (__mp-arr-len tree node))
+    (__mp-arr-decode tree node 0 (unwrap (mp-arr-size tree node)))
     (:: (tnil) (Cons A))))
 
 ;;; __mp-field-node -- internal: the value node for `key`, or the absent node.

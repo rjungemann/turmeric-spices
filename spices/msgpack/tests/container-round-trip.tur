@@ -5,13 +5,6 @@
 ;; so a bare (encode-mp xs) is an ambiguous dispatch. The call sites pin the
 ;; instance with `@Cons`, exactly as the json spice's list tests do.
 ;;
-;; WORKAROUND: every pinned call below is additionally wrapped in
-;; `(:: ... Buf)`. A `@T`-pinned call whose method returns a defopaque reports
-;; its result as `<adt>`, so the ascription is what makes it typecheck; json's
-;; equivalent test needs none because its method returns `cstr`. Reported
-;; upstream as pinned-instance-dispatch-loses-an-opaque-return-type -- drop the
-;; eight outer `(:: ... Buf)` wrappers when that is fixed.
-;;
 ;; Expected hex cross-generated with CPython's `msgpack` 1.2.2.
 
 (defmodule container_round_trip_test (export)
@@ -50,37 +43,37 @@
 (defn rt-ints [h : cstr] : Buf
   (let [t  (parse (hex->buf h))
         xs (:: (decode-mp-list t (mp-tree-root t)) (Cons int))
-        out (:: (encode-mp @Cons (:: xs (Cons int))) Buf)]
+        out (encode-mp @Cons (:: xs (Cons int)))]
     (mp-tree-free t)
     out))
 
 (defn rt-floats [h : cstr] : Buf
   (let [t  (parse (hex->buf h))
         xs (:: (decode-mp-list t (mp-tree-root t)) (Cons float))
-        out (:: (encode-mp @Cons (:: xs (Cons float))) Buf)]
+        out (encode-mp @Cons (:: xs (Cons float)))]
     (mp-tree-free t)
     out))
 
 (defn rt-strs [h : cstr] : Buf
   (let [t  (parse (hex->buf h))
         xs (:: (decode-mp-list t (mp-tree-root t)) (Cons cstr))
-        out (:: (encode-mp @Cons (:: xs (Cons cstr))) Buf)]
+        out (encode-mp @Cons (:: xs (Cons cstr)))]
     (mp-tree-free t)
     out))
 
 (defn __list-tests [] : void
   (describe "msgpack EncodeMp [Cons] -- a list is a msgpack array"
     (it "an int list is a fixarray"
-      (assert-true (hex=? (:: (encode-mp @Cons (:: (list 1 2 3) (Cons int))) Buf) "93010203")))
+      (assert-true (hex=? (encode-mp @Cons (:: (list 1 2 3) (Cons int))) "93010203")))
     (it "a singleton"
-      (assert-true (hex=? (:: (encode-mp @Cons (:: (list 42) (Cons int))) Buf) "912a")))
+      (assert-true (hex=? (encode-mp @Cons (:: (list 42) (Cons int))) "912a")))
     (it "the empty list is a bare 0x90"
-      (assert-true (hex=? (:: (encode-mp @Cons (:: (tnil) (Cons int))) Buf) "90")))
+      (assert-true (hex=? (encode-mp @Cons (:: (tnil) (Cons int))) "90")))
     (it "a float list keeps each element a float64"
-      (assert-true (hex=? (:: (encode-mp @Cons (:: (list 7.1 2.5) (Cons float))) Buf)
+      (assert-true (hex=? (encode-mp @Cons (:: (list 7.1 2.5) (Cons float)))
                           "92cb401c666666666666cb4004000000000000")))
     (it "a string list"
-      (assert-true (hex=? (:: (encode-mp @Cons (:: (list "a" "bb") (Cons cstr))) Buf)
+      (assert-true (hex=? (encode-mp @Cons (:: (list "a" "bb") (Cons cstr)))
                           "92a161a26262")))))
 
 (defn __list-round-trip-tests [] : void
