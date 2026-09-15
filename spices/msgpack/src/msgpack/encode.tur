@@ -257,95 +257,25 @@
 ;;; Since: Phase MP2
 (defclass DecodeMp [a] (decode-mp [tree : MpTree  node : MpNode] : (Result a cstr)))
 
-;; WORKAROUND (remove when the upstream report below is fixed). These four
-;; would read better as one-line forwards to the typed reads msgpack/decode
-;; already exports, which is what they were:
-;;
-;;   (definstance DecodeMp [int] (decode-mp [tree node] (mp-get-int tree node)))
-;;
-;; They are inline C building the Result with the carrier-level `tur_box_ok` /
-;; `tur_box_err` instead, to keep every instance of this class carrier-shaped.
-;;
-;; The generic half of this is fixed: `decode-mp-list`'s constrained generic no
-;; longer adopts a by-value spec for its `ok-val`
-;; (struct-instance-makes-generic-ok-val-see-a-byvalue-result, archived). What
-;; still bites is the DERIVE half. A `derive-msgpack` struct instance decodes
-;; each field with
-;;
-;;   (ok-val (:: (decode-mp tree (__mp-field-node tree node "x")) (Result int cstr)))
-;;
-;; and the nested `decode-mp` -- a return-dispatched method of the same class --
-;; is specialized with the ENCLOSING instance's result type instead of its own
-;; ascription, emitting
-;;
-;;   __inst_DecodeMp_decode_mp_int__spec__tur_adt_Result__Pt__cstr_...
-;;
-;; whose body returns `Result int cstr`. cc then rejects the program. The sibling
-;; `ok-val` on the same line keys correctly, so it is the callee's result type
-;; that is captured, not the whole expression. The by-value representation is
-;; what exposes it: an explicit `(:: (mp-get-int ...) (Result int cstr))` fails
-;; identically, and boxing to the carrier is the only spelling that dodges it.
-;; Reported upstream as
-;; instance-method-call-inside-an-instance-body-takes-the-enclosing-result-type.
-;;
-;; json is exposed to exactly the same defect and compiles only because its
-;; primitive instances are already carrier-shaped inline C.
-;;
-;; `mp-get-int` / `mp-get-bool` / `mp-get-float` / `mp-get-str` remain the
-;; non-dispatch API for callers who want a typed read without the class.
+;; The four primitive instances are one-line forwards to the typed reads
+;; `msgpack/decode` already exports. Those remain the non-dispatch API for
+;; callers who want a typed read without the class.
 
 ;;; DecodeMp [int] -- every integer format; rejects floats, strings, bools,
 ;;; nil, and a missing field. A uint64 above INT64_MAX is an error rather than
 ;;; a wrapped negative.
-(definstance DecodeMp [int] (decode-mp [tree node]
-  ```c
-  extern int64_t mp_int_status(const void *, int64_t);
-  extern int64_t mp_int_value(const void *, int64_t);
-  const void *__t = (const void *)(intptr_t)tree;
-  int64_t __st = mp_int_status(__t, (int64_t)node);
-  if (__st == -2)
-    return tur_box_err((int64_t)(intptr_t)"decode-mp int: value is outside the int64 range");
-  if (__st != 0)
-    return tur_box_err((int64_t)(intptr_t)"decode-mp int: not an integer");
-  return tur_box_ok(mp_int_value(__t, (int64_t)node));
-  ```))
+(definstance DecodeMp [int]   (decode-mp [tree node] (mp-get-int   tree node)))
 
 ;;; DecodeMp [cstr] -- a msgpack `str`, copied out of the tree so the result
 ;;; survives `mp-tree-free`. The caller owns the copy. A `bin` is not a string.
-(definstance DecodeMp [cstr] (decode-mp [tree node]
-  ```c
-  extern char *mp_get_str_copy(const void *, int64_t);
-  char *__s = mp_get_str_copy((const void *)(intptr_t)tree, (int64_t)node);
-  if (!__s) return tur_box_err((int64_t)(intptr_t)"decode-mp cstr: not a string");
-  return tur_box_ok((int64_t)(intptr_t)__s);
-  ```))
+(definstance DecodeMp [cstr]  (decode-mp [tree node] (mp-get-str   tree node)))
 
 ;;; DecodeMp [bool] -- `true` / `false` only.
-(definstance DecodeMp [bool] (decode-mp [tree node]
-  ```c
-  extern int mp_is_bool(const void *, int64_t);
-  extern int64_t mp_bool_value(const void *, int64_t);
-  const void *__t = (const void *)(intptr_t)tree;
-  if (!mp_is_bool(__t, (int64_t)node))
-    return tur_box_err((int64_t)(intptr_t)"decode-mp bool: not a boolean");
-  return tur_box_ok(mp_bool_value(__t, (int64_t)node));
-  ```))
+(definstance DecodeMp [bool]  (decode-mp [tree node] (mp-get-bool  tree node)))
 
 ;;; DecodeMp [float] -- float32 / float64, and the integer formats widened, so
 ;;; an encoder that wrote `1` rather than `1.0` still decodes.
-(definstance DecodeMp [float] (decode-mp [tree node]
-  ```c
-  #include <string.h>
-  extern int mp_is_num(const void *, int64_t);
-  extern double mp_double_value(const void *, int64_t);
-  const void *__t = (const void *)(intptr_t)tree;
-  if (!mp_is_num(__t, (int64_t)node))
-    return tur_box_err((int64_t)(intptr_t)"decode-mp float: not a number");
-  double __d = mp_double_value(__t, (int64_t)node);
-  int64_t __bits;
-  memcpy(&__bits, &__d, sizeof(__bits));
-  return tur_box_ok(__bits);
-  ```))
+(definstance DecodeMp [float] (decode-mp [tree node] (mp-get-float tree node)))
 
 ;;; __mp-missing? -- internal: true when a slot is absent (no such key) or an
 ;;; explicit msgpack `nil`. Both decode to `none` for an optional field.

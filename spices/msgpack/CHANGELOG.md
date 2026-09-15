@@ -11,12 +11,17 @@
   `tests/container-round-trip.tur` drops the eight outer `(:: ... Buf)`
   ascriptions from its `@Cons`-pinned `encode-mp` calls
   (`pinned-instance-dispatch-loses-an-opaque-return-type`).
-- The four primitive `DecodeMp` instances stay carrier-shaped inline C. The
-  generic half of what forced them is fixed, but a second, distinct defect
-  still blocks the revert: a return-dispatched method called from inside
-  another instance body of the same class is specialized with the ENCLOSING
-  instance's result type. Their `WORKAROUND` comment now names that instead of
-  the archived report.
+- The four primitive `DecodeMp` instances are one-line forwards to
+  `mp-get-int` / `mp-get-str` / `mp-get-bool` / `mp-get-float` again, replacing
+  ~70 lines of hand-written carrier-shaped inline C and its duplicated error
+  strings. This needed a second compiler fix beyond the one filed: restoring
+  the forwards exposed
+  `instance-method-call-inside-an-instance-body-takes-the-enclosing-result-type`
+  (rjungemann/turmeric#874), where a method called from inside another instance
+  body of the same class was specialized with the ENCLOSING instance's result
+  type. **Requires a `tur` at or after that fix.**
+
+  With all three gone, the spice carries no compiler workarounds.
 
 ## 0.1.0
 
@@ -64,5 +69,5 @@ Initial release: MessagePack binary serialization, the binary twin of tur-json.
   truncation of a document corpus plus 200k random inputs.
 - Three compiler defects were worked around to ship this; each is filed
   upstream and each workaround is marked `WORKAROUND` in place, naming the
-  report and what to delete when it lands. (Two are gone as of Unreleased,
-  above.)
+  report and what to delete when it lands. (All three are gone as of
+  Unreleased, above.)
