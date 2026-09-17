@@ -80,6 +80,50 @@
         true
         (send-until-received? tx rx msg expect (- tries 1))))))
 
+;; both-received? -- the fan-out form of the same mitigation.
+;;
+;; `send-until-received?` is NOT enough for a two-peer broadcast, and the
+;; difference is a race rather than a detail: that loop stops the instant the
+;; FIRST peer's pipe is up, which on a loaded runner can be a round or more
+;; before the second peer's. The second peer's single receive then finds an
+;; empty queue and the case fails with nothing wrong with the product -- which
+;; is exactly how this one failed on CI after passing locally. Both peers have
+;; to be satisfied by the same loop.
+;;
+;; `or` short-circuits, so a peer that has already received is not asked again
+;; and costs no further timeout.
+(defn both-received? [^borrow hub : Socket ^borrow b : Socket ^borrow c : Socket
+                      msg : cstr got-b : bool got-c : bool tries : int] : bool
+  (if (and got-b got-c)
+    true
+    (if (<= tries 0)
+      false
+      (do
+        (send-str hub msg)
+        (both-received? hub b c msg
+                        (or got-b (recv-str=? b msg))
+                        (or got-c (recv-str=? c msg))
+                        (- tries 1))))))
+
+;; survey-round? -- one full survey exchange, re-run as a WHOLE on failure.
+;;
+;; Not a per-step retry, because a surveyor that re-asks CANCELS its previous
+;; survey: an answer to the superseded question is discarded by the surveyor,
+;; so a round that half-completed cannot be rescued from either end. Ask,
+;; answer, hear -- or start over.
+(defn survey-round? [^borrow srv : Socket ^borrow rsp : Socket tries : int] : bool
+  (if (<= tries 0)
+    false
+    (do
+      (send-str srv "are-you-there")
+      (if (recv-str=? rsp "are-you-there")
+        (do
+          (send-str rsp "yes")
+          (if (recv-str=? srv "yes")
+            true
+            (survey-round? srv rsp (- tries 1))))
+        (survey-round? srv rsp (- tries 1))))))
+
 (defn __all-tests [] : void
   (describe "nng/msg -- pub / sub"
 
@@ -107,29 +151,48 @@
         (close pub)
         r))
 
+    ;; The two negative cases below each carry a POSITIVE control on the same
+    ;; publisher, and that is not belt-and-braces: without one, "nothing
+    ;; arrived" is satisfied just as well by a subscriber whose pipe was never
+    ;; up as by the topic filter doing its job, so the case passes for the
+    ;; wrong reason on exactly the loaded runner where it matters. Proving the
+    ;; publisher is live AND delivering matching traffic first is what makes
+    ;; the silence mean something.
+
     (it "withholds a message from a subscriber whose topic does not match"
       (let [pub  (ok-val (pub-open))
+            mine (ok-val (sub-open))
             them (ok-val (sub-open))
             _    (listen pub "inproc://ng3-disjoint")
+            _    (dial mine "inproc://ng3-disjoint")
             _    (dial them "inproc://ng3-disjoint")
+            _    (sub-subscribe mine "temp:")
             _    (sub-subscribe them "hum:")
+            _    (set-recv-timeout-ms mine poll-ms)
             _    (set-recv-timeout-ms them poll-ms)
-            _    (send-str pub "temp:20")
-            _    (send-str pub "temp:21")
-            r    (assert-true (timed-out-on-recv? them))]
+            ;; the control: this publisher is live and "temp:20" is going out
+            got  (send-until-received? pub mine "temp:20" "temp:20" attempts)
+            ;; the assertion: and "hum:" still saw none of it
+            r    (assert-true (and got (timed-out-on-recv? them)))]
         (close them)
+        (close mine)
         (close pub)
         r))
 
     (it "delivers nothing at all to a subscriber with no subscription"
-      (let [pub (ok-val (pub-open))
-            sub (ok-val (sub-open))
-            _   (listen pub "inproc://ng3-nosub")
-            _   (dial sub "inproc://ng3-nosub")
-            _   (set-recv-timeout-ms sub poll-ms)
-            _   (send-str pub "anything")
-            r   (assert-true (timed-out-on-recv? sub))]
+      (let [pub  (ok-val (pub-open))
+            mine (ok-val (sub-open))
+            sub  (ok-val (sub-open))
+            _    (listen pub "inproc://ng3-nosub")
+            _    (dial mine "inproc://ng3-nosub")
+            _    (dial sub "inproc://ng3-nosub")
+            _    (sub-subscribe mine "")
+            _    (set-recv-timeout-ms mine poll-ms)
+            _    (set-recv-timeout-ms sub poll-ms)
+            got  (send-until-received? pub mine "anything" "anything" attempts)
+            r    (assert-true (and got (timed-out-on-recv? sub)))]
         (close sub)
+        (close mine)
         (close pub)
         r))
 
@@ -171,9 +234,8 @@
             _   (dial c "inproc://ng3-bus")
             _   (set-recv-timeout-ms b poll-ms)
             _   (set-recv-timeout-ms c poll-ms)
-            gb  (send-until-received? hub b "broadcast" "broadcast" attempts)
-            gc  (recv-str=? c "broadcast")
-            r   (assert-true (and gb gc))]
+            r   (assert-true (both-received? hub b c "broadcast"
+                                             false false attempts))]
         (close c)
         (close b)
         (close hub)
@@ -188,10 +250,7 @@
             _   (dial rsp "inproc://ng3-survey")
             _   (set-recv-timeout-ms srv poll-ms)
             _   (set-recv-timeout-ms rsp poll-ms)
-            asked (send-until-received? srv rsp "are-you-there" "are-you-there" attempts)
-            _     (send-str rsp "yes")
-            heard (recv-str=? srv "yes")
-            r     (assert-true (and asked heard))]
+            r   (assert-true (survey-round? srv rsp attempts))]
         (close rsp)
         (close srv)
         r))))
