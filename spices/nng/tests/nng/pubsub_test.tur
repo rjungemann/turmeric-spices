@@ -1,0 +1,200 @@
+;; NG3: pub/sub topic filters, bus fan-out, and surveyor/respondent.
+;;
+;; These three protocols all have a slow-joiner problem that req/rep and
+;; push/pull do not: a message broadcast before a peer's pipe is fully up is
+;; simply dropped, not queued. Every case here therefore re-sends and re-tries
+;; rather than sending once and asserting -- see `send-until-received?`. That
+;; is the standard mitigation, not a workaround for a defect in the spice.
+;;
+;; Distinct inproc names per case, for the same reason socket_test.tur uses
+;; them: one process, and a live listen owns its address.
+
+(defmodule nng/tests/pubsub (export)
+
+(import nng/socket :refer [Socket
+                           pub-open sub-open bus-open pair-open
+                           surveyor-open respondent-open
+                           dial listen close
+                           set-recv-timeout-ms timed-out?])
+(import nng/msg    :refer [send-str recv-str sub-subscribe sub-unsubscribe])
+(import test/suite  :refer [describe it])
+(import test/assert :refer [assert-true assert-false])
+(import test/runner :refer [run-all-status])
+
+;; Per-attempt receive budget. Small, because the point is to retry quickly;
+;; `attempts` below is what bounds the total wait.
+(def poll-ms 50)
+
+;; 40 x 50ms = 2s of headroom before a case gives up, which is the same budget
+;; msg_test.tur gives a single blocking receive.
+(def attempts 40)
+
+(defn cstr-eq? [a : cstr b : cstr] : bool
+  ```c
+  #include <string.h>
+  return strcmp((const char *)a, (const char *)b) == 0;
+  ```)
+
+(defn cstr-free [p : cstr] : nil
+  ```c
+  free((void *)(intptr_t)p);
+  ```)
+
+;; recv-str=? -- receive one message and compare it, freeing it either way.
+;; False on any error, including a timeout.
+(defn recv-str=? [^borrow s : Socket expect : cstr] : bool
+  (let [r (recv-str s)]
+    (if (ok? r)
+      (let [got (ok-val r)
+            eq  (cstr-eq? expect got)]
+        (cstr-free got)
+        eq)
+      false)))
+
+;; timed-out-on-recv? -- did a receive fail specifically because the deadline
+;; expired? The assertion a "this peer must NOT see that message" case wants:
+;; it distinguishes "nothing arrived" from "the socket is broken".
+(defn timed-out-on-recv? [^borrow s : Socket] : bool
+  (let [r (recv-str s)]
+    (if (ok? r)
+      (do (cstr-free (ok-val r)) false)
+      (timed-out? (err-val r)))))
+
+;; send-until-received? -- the slow-joiner mitigation. Re-send `msg` on `tx`
+;; and re-try a short receive on `rx` until one lands or `tries` runs out.
+;;
+;; The receive is delegated to `recv-str=?` rather than written inline, and
+;; that is load-bearing: this function is self-tail-recursive, and a `let` that
+;; binds a carrier-returning Result INSIDE a tail-recursive body is emitted
+;; without its carrier-to-by-value bridge, which fails the C compile. See
+;; https://github.com/rjungemann/turmeric/blob/main/docs/reported/tail-recursive-let-drops-carrier-bridge.md
+(defn send-until-received? [^borrow tx : Socket ^borrow rx : Socket
+                            msg : cstr expect : cstr tries : int] : bool
+  (if (<= tries 0)
+    false
+    (do
+      (send-str tx msg)
+      (if (recv-str=? rx expect)
+        true
+        (send-until-received? tx rx msg expect (- tries 1))))))
+
+(defn __all-tests [] : void
+  (describe "nng/msg -- pub / sub"
+
+    (it "delivers a published message to a subscriber taking everything"
+      (let [pub (ok-val (pub-open))
+            sub (ok-val (sub-open))
+            _   (listen pub "inproc://ng3-all")
+            _   (dial sub "inproc://ng3-all")
+            _   (sub-subscribe sub "")
+            _   (set-recv-timeout-ms sub poll-ms)
+            r   (assert-true (send-until-received? pub sub "tick" "tick" attempts))]
+        (close sub)
+        (close pub)
+        r))
+
+    (it "delivers to a subscriber whose topic prefix matches"
+      (let [pub (ok-val (pub-open))
+            sub (ok-val (sub-open))
+            _   (listen pub "inproc://ng3-match")
+            _   (dial sub "inproc://ng3-match")
+            _   (sub-subscribe sub "temp:")
+            _   (set-recv-timeout-ms sub poll-ms)
+            r   (assert-true (send-until-received? pub sub "temp:20" "temp:20" attempts))]
+        (close sub)
+        (close pub)
+        r))
+
+    (it "withholds a message from a subscriber whose topic does not match"
+      (let [pub  (ok-val (pub-open))
+            them (ok-val (sub-open))
+            _    (listen pub "inproc://ng3-disjoint")
+            _    (dial them "inproc://ng3-disjoint")
+            _    (sub-subscribe them "hum:")
+            _    (set-recv-timeout-ms them poll-ms)
+            _    (send-str pub "temp:20")
+            _    (send-str pub "temp:21")
+            r    (assert-true (timed-out-on-recv? them))]
+        (close them)
+        (close pub)
+        r))
+
+    (it "delivers nothing at all to a subscriber with no subscription"
+      (let [pub (ok-val (pub-open))
+            sub (ok-val (sub-open))
+            _   (listen pub "inproc://ng3-nosub")
+            _   (dial sub "inproc://ng3-nosub")
+            _   (set-recv-timeout-ms sub poll-ms)
+            _   (send-str pub "anything")
+            r   (assert-true (timed-out-on-recv? sub))]
+        (close sub)
+        (close pub)
+        r))
+
+    (it "stops delivering after the subscription is dropped"
+      (let [pub (ok-val (pub-open))
+            sub (ok-val (sub-open))
+            _   (listen pub "inproc://ng3-unsub")
+            _   (dial sub "inproc://ng3-unsub")
+            _   (sub-subscribe sub "temp:")
+            _   (set-recv-timeout-ms sub poll-ms)
+            got (send-until-received? pub sub "temp:20" "temp:20" attempts)
+            _   (sub-unsubscribe sub "temp:")
+            _   (send-str pub "temp:21")
+            r   (assert-true (and got (timed-out-on-recv? sub)))]
+        (close sub)
+        (close pub)
+        r))
+
+    (it "refuses a subscription on a socket that is not a SUB socket"
+      (let [s (ok-val (pair-open))
+            r (assert-false (ok? (sub-subscribe s "temp:")))]
+        (close s)
+        r))
+
+    (it "refuses to drop a subscription that was never added"
+      (let [s (ok-val (sub-open))
+            r (assert-false (ok? (sub-unsubscribe s "never-added")))]
+        (close s)
+        r)))
+
+  (describe "nng/socket -- bus"
+
+    (it "fans one message out to every directly connected peer"
+      (let [hub (ok-val (bus-open))
+            b   (ok-val (bus-open))
+            c   (ok-val (bus-open))
+            _   (listen hub "inproc://ng3-bus")
+            _   (dial b "inproc://ng3-bus")
+            _   (dial c "inproc://ng3-bus")
+            _   (set-recv-timeout-ms b poll-ms)
+            _   (set-recv-timeout-ms c poll-ms)
+            gb  (send-until-received? hub b "broadcast" "broadcast" attempts)
+            gc  (recv-str=? c "broadcast")
+            r   (assert-true (and gb gc))]
+        (close c)
+        (close b)
+        (close hub)
+        r)))
+
+  (describe "nng/socket -- surveyor / respondent"
+
+    (it "collects a response to a survey"
+      (let [srv (ok-val (surveyor-open))
+            rsp (ok-val (respondent-open))
+            _   (listen srv "inproc://ng3-survey")
+            _   (dial rsp "inproc://ng3-survey")
+            _   (set-recv-timeout-ms srv poll-ms)
+            _   (set-recv-timeout-ms rsp poll-ms)
+            asked (send-until-received? srv rsp "are-you-there" "are-you-there" attempts)
+            _     (send-str rsp "yes")
+            heard (recv-str=? srv "yes")
+            r     (assert-true (and asked heard))]
+        (close rsp)
+        (close srv)
+        r))))
+
+(defn main [] : int
+  (__all-tests)
+  (run-all-status))
+)

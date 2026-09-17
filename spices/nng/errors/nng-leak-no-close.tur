@@ -1,0 +1,20 @@
+;; Negative fixture: a :linear Socket must be consumed exactly once. Opening one
+;; and walking away leaks an OS resource, so it must be rejected.
+;;
+;; Verify: tur check errors/nng-leak-no-close.tur
+;;   => error [TUR-E0100]: linear value 's' dropped without being consumed
+;;
+;; Compile-FAIL fixture (see nng-double-close.tur for the placement note).
+
+(defmodule nng_leak_no_close_test
+  (export)
+
+(import nng/socket :refer [Socket pair-open listen])
+
+(defn leak-no-close [] : int
+  (let [s (ok-val (pair-open))]   ;; ERROR TUR-E0100: never consumed
+    (do
+      (listen s "inproc://leaked")
+      0)))
+
+) ;; end defmodule nng_leak_no_close_test

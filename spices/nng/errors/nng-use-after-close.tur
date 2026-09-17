@@ -1,0 +1,21 @@
+;; Negative fixture: every operation borrows the Socket, so reaching for one
+;; after `close` has consumed it must be rejected.
+;;
+;; Verify: tur check errors/nng-use-after-close.tur
+;;   => error [TUR-E0101]: linear value 's' used after being consumed
+;;
+;; Compile-FAIL fixture (see nng-double-close.tur for the placement note).
+
+(defmodule nng_use_after_close_test
+  (export)
+
+(import nng/socket :refer [Socket pair-open listen close])
+
+(defn use-after-close [] : int
+  (let [s (ok-val (pair-open))]
+    (do
+      (close s)                          ;; the single legal consumption
+      (listen s "inproc://after-close")  ;; ERROR TUR-E0101: use after consume
+      0)))
+
+) ;; end defmodule nng_use_after_close_test

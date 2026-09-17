@@ -42,6 +42,7 @@ Tiers: **1** = pure Turmeric, **2** = inline-C, **3** = cmake-dep
 | [`tur-rtmidi`](spices/rtmidi/) | Cross-platform MIDI I/O via RtMidi | 3 -- cmake-dep | RtMidi 6.0.0 |
 | [`tur-sdf-raylib`](spices/sdf-raylib/) | SDF-based solid modeling with raylib rendering and colored mesh export | 3 -- cmake-dep | raylib 5.5 |
 | [`tur-valkey`](spices/valkey/) | Valkey/Redis client via hiredis | 3 -- cmake-dep | hiredis 1.2.0 |
+| [`tur-nng`](spices/nng/) | nanomsg-next-generation scalability protocols (req/rep, pub/sub, pipeline, pair, bus, survey) | 3 -- cmake-dep | nng 1.12.4 |
 | [`tur-wav`](spices/wav/) | WAV and PCM audio file read/write via libsndfile | 3 -- cmake-dep | libsndfile 1.2.2 |
 
 ---
