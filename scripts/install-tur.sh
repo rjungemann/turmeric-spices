@@ -12,14 +12,31 @@
 #   - Public release, no auth needed. Uses curl + tar + shasum, plus jq if
 #     present (falls back to a grep parser otherwise).
 #   - Supported targets: linux-x86_64, linux-aarch64, macos-arm64.
-#   - Tarball layout (from turmeric's release.yml): ./tur, ./libturi.a,
-#     ./include/turi/*.h, ./stdlib/. The stdlib must stay next to `tur`.
+#   - Tarball layout (from turmeric's release.yml) has two shapes. Releases
+#     through v0.48.0 were flat: ./tur, ./libturi.a, ./include/turi/*.h,
+#     ./stdlib/. From v0.49.0 it is FHS: ./bin/tur, ./lib/*.a,
+#     ./include/turi/*.h, ./share/turmeric/stdlib/. Either way the stdlib
+#     must stay where it lands relative to `tur` -- do not move them apart.
 
 set -euo pipefail
 
 REPO="rjungemann/turmeric"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/vendor/tur"
+
+# Echo the path of the extracted `tur`, honouring both tarball layouts (see
+# the note above). Returns non-zero if neither is present, so a half-extracted
+# or newly-reshaped tree fails loudly instead of exporting a path that is not
+# there.
+tur_bin_path() {
+  if [ -f "$DEST/bin/tur" ]; then
+    echo "$DEST/bin/tur"
+  elif [ -f "$DEST/tur" ]; then
+    echo "$DEST/tur"
+  else
+    return 1
+  fi
+}
 FORCE=0
 for arg in "$@"; do
   case "$arg" in
@@ -66,9 +83,10 @@ else
 fi
 
 stamp="$DEST/.version"
-if [ "$FORCE" -eq 0 ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$TAG/$TARGET" ]; then
+if [ "$FORCE" -eq 0 ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$TAG/$TARGET" ] \
+   && cached_bin="$(tur_bin_path)"; then
   echo "already installed: $TAG ($TARGET) at $DEST" >&2
-  echo "export TUR_BIN=\"$DEST/tur\""
+  echo "export TUR_BIN=\"$cached_bin\""
   exit 0
 fi
 
@@ -98,10 +116,16 @@ fi
 rm -rf "$DEST"
 mkdir -p "$DEST"
 tar -xzf "$tmp/$archive" -C "$DEST"
-chmod +x "$DEST/tur"
+if ! bin="$(tur_bin_path)"; then
+  echo "no tur binary in $archive: expected $DEST/bin/tur or $DEST/tur" >&2
+  echo "extracted:" >&2
+  ls -1 "$DEST" >&2
+  exit 1
+fi
+chmod +x "$bin"
 echo "$TAG/$TARGET" > "$stamp"
 
 echo "installed $TAG ($TARGET) to $DEST" >&2
-"$DEST/tur" --version >&2 || true
+"$bin" --version >&2 || true
 echo
-echo "export TUR_BIN=\"$DEST/tur\""
+echo "export TUR_BIN=\"$bin\""
