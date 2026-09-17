@@ -234,19 +234,20 @@ The discipline is inert in ordinary builds, so call sites compile unchanged.
 `errors/` holds one rejected fixture per row, and `errors/run.sh` asserts each
 one fails for its own reason.
 
-## The `Ack` payload
+## Operations with no result value
 
 `dial`, `listen`, `sub-subscribe`, and the timeout setters return
-`(Result Ack int)`. There is nothing to read out of an `Ack` -- inspect these
-with `ok?` / `err?` alone.
+`(Result nil int)`. `nil` is the ok payload that says "it worked and carries
+nothing", so inspect these with `ok?` / `err?` alone -- there is no value to
+read out, and the type says so.
 
-The type that says "worked, carries nothing" is `(Result nil int)`, which is
-what this spice's plan specifies. A `nil` ok payload lowers to a C `void` struct
-field today and the emitted monomorph does not compile, so `Ack` is a real named
-type standing in until that is fixed --
-[the report](https://github.com/rjungemann/turmeric/blob/main/docs/archive/result-nil-ok-payload-emits-void-field.md)
-tracks it. The alternative, `(Result int int)` with an "ok carries 0"
-convention, is the `:int` stand-in the house rules exist to prevent.
+This is what the spice's plan specified from the start. It briefly shipped a
+`(defopaque Ack :int)` stand-in instead, because a `nil` ok payload emitted a
+`void` union member and the monomorph would not compile
+([report](https://github.com/rjungemann/turmeric/blob/main/docs/archive/result-nil-ok-payload-emits-void-field.md),
+fixed upstream). The alternative it avoided -- `(Result int int)` with an
+"ok carries 0" convention -- is the `:int` stand-in the house rules exist to
+prevent.
 
 ## Not in v0
 

@@ -24,7 +24,7 @@
 ;; Socket lifecycle for the nng scalability protocols.
 
 (defmodule nng/socket
-  (export Socket Ack
+  (export Socket
           req-open rep-open pub-open sub-open
           push-open pull-open pair-open bus-open
           surveyor-open respondent-open
@@ -41,26 +41,6 @@
 ;;;
 ;;; Since: Phase NG1
 (defopaque Socket :int :linear)
-
-;;; Ack -- the "it worked, there is nothing to hand back" ok payload.
-;;;
-;;; `dial`, `listen` and the setters have no result value: what a caller wants
-;;; from them is the ok/err split alone. The type that says exactly that is
-;;; `(Result nil int)`, which is what this spice's plan specifies -- but a
-;;; `nil` ok payload lowers to a C `void` struct field today and the emitted
-;;; monomorph does not compile (see
-;;; https://github.com/rjungemann/turmeric/blob/main/docs/archive/result-nil-ok-payload-emits-void-field.md).
-;;; `Ack` is a real named type standing in until that lands, rather than the
-;;; `:int` a caller would have to learn a convention for. Inspect these results
-;;; with `ok?` / `err?`; there is nothing worth reading out of an `Ack`.
-;;;
-;;; The compiler fix is written and archived; this spice has NOT switched yet,
-;;; because its CI builds turmeric `main` and the two cannot land together.
-;;; When that change is on `main`, every `(Result Ack int)` here becomes
-;;; `(Result nil int)` and this opaque goes away.
-;;;
-;;; Since: Phase NG1
-(defopaque Ack :int)
 
 ;; -------------------------------------------------------------------------
 ;; Protocol constructors
@@ -331,13 +311,13 @@
 ;;;   url -- e.g. "inproc://jobs", "ipc:///tmp/x.sock", "tcp://host:5555"
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (dial s "inproc://jobs")
 ;;;
 ;;; Since: Phase NG1
-(defn dial [^borrow s : Socket url : cstr] #fx{Net} : (Result Ack int)
+(defn dial [^borrow s : Socket url : cstr] #fx{Net} : (Result nil int)
   ```c
   #include <nng/nng.h>
   nng_socket sk;
@@ -360,13 +340,13 @@
 ;;;   url -- e.g. "inproc://jobs", "ipc:///tmp/x.sock", "tcp://0.0.0.0:5555"
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (listen s "inproc://jobs")
 ;;;
 ;;; Since: Phase NG1
-(defn listen [^borrow s : Socket url : cstr] #fx{Net} : (Result Ack int)
+(defn listen [^borrow s : Socket url : cstr] #fx{Net} : (Result nil int)
   ```c
   #include <nng/nng.h>
   nng_socket sk;
@@ -413,13 +393,13 @@
 ;;;   ms -- milliseconds, or a negative value for "wait forever"
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (set-recv-timeout-ms s 100)
 ;;;
 ;;; Since: Phase NG1
-(defn set-recv-timeout-ms [^borrow s : Socket ms : int] : (Result Ack int)
+(defn set-recv-timeout-ms [^borrow s : Socket ms : int] : (Result nil int)
   ```c
   #include <nng/nng.h>
   nng_socket sk;
@@ -439,13 +419,13 @@
 ;;;   ms -- milliseconds, or a negative value for "wait forever"
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (set-send-timeout-ms s 100)
 ;;;
 ;;; Since: Phase NG1
-(defn set-send-timeout-ms [^borrow s : Socket ms : int] : (Result Ack int)
+(defn set-send-timeout-ms [^borrow s : Socket ms : int] : (Result nil int)
   ```c
   #include <nng/nng.h>
   nng_socket sk;

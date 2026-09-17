@@ -63,13 +63,15 @@
 ;; send-until-received? -- the slow-joiner mitigation. Re-send `msg` on `tx`
 ;; and re-try a short receive on `rx` until one lands or `tries` runs out.
 ;;
-;; The receive is delegated to `recv-str=?` rather than written inline, and
-;; that is load-bearing: this function is self-tail-recursive, and a `let` that
-;; binds a carrier-returning Result INSIDE a tail-recursive body is emitted
-;; without its carrier-to-by-value bridge, which fails the C compile. The
-;; compiler fix is written and archived, but this spice's CI builds turmeric
-;; `main`, so the delegation stays until that change lands. See
-;; https://github.com/rjungemann/turmeric/blob/main/docs/archive/tail-recursive-let-drops-carrier-bridge.md
+;; The receive goes through `recv-str=?` because twelve call sites across this
+;; file and msg_test.tur want exactly that receive-compare-free sequence -- not,
+;; any longer, to dodge a compiler defect. Writing the `let` inline here used to
+;; fail the C compile, because a `let` binding a carrier-returning Result inside
+;; a SELF-TAIL-RECURSIVE body was emitted without its carrier-to-by-value
+;; bridge; that is fixed upstream and pinned by
+;; `tests/fixtures/tail-recursive-let-carrier-bridge`, which is the right home
+;; for that regression. Inlining it back here would duplicate a twelve-caller
+;; helper to re-prove something a fixture already covers.
 (defn send-until-received? [^borrow tx : Socket ^borrow rx : Socket
                             msg : cstr expect : cstr tries : int] : bool
   (if (<= tries 0)

@@ -21,7 +21,7 @@
 ;; Blocking message send/receive for nng sockets.
 
 (defmodule nng/msg
-  (import nng/socket :refer [Socket Ack])
+  (import nng/socket :refer [Socket])
   (import nng/payload    :refer [Payload])
   (export send-str recv-str
           send-payload recv-payload
@@ -41,13 +41,13 @@
 ;;;   msg -- the payload (borrowed; the caller keeps ownership)
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (send-str s "job:42")
 ;;;
 ;;; Since: Phase NG2
-(defn send-str [^borrow s : Socket msg : cstr] #fx{Net} : (Result Ack int)
+(defn send-str [^borrow s : Socket msg : cstr] #fx{Net} : (Result nil int)
   ```c
   #include <nng/nng.h>
   nng_socket sk;
@@ -117,7 +117,7 @@
 ;;;   b -- the payload (borrowed)
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (let [b (payload-of-cstr "job:42")]
@@ -125,7 +125,7 @@
 ;;;     (payload-free b))
 ;;;
 ;;; Since: Phase NG2
-(defn send-payload [^borrow s : Socket b : Payload] #fx{Net} : (Result Ack int)
+(defn send-payload [^borrow s : Socket b : Payload] #fx{Net} : (Result nil int)
   ```c
   #include <nng/nng.h>
   extern int64_t turnng_payload_len(const void *);
@@ -199,13 +199,13 @@
 ;;;   topic -- the byte prefix to accept; "" accepts every message
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (sub-subscribe s "temp:")
 ;;;
 ;;; Since: Phase NG3
-(defn sub-subscribe [^borrow s : Socket topic : cstr] : (Result Ack int)
+(defn sub-subscribe [^borrow s : Socket topic : cstr] : (Result nil int)
   ```c
   #include <nng/nng.h>
   #include <nng/protocol/pubsub0/sub.h>
@@ -228,13 +228,13 @@
 ;;;   topic -- the exact prefix passed to `sub-subscribe`
 ;;;
 ;;; Returns:
-;;;   (Result Ack int) -- err carries the nng error code.
+;;;   (Result nil int) -- err carries the nng error code.
 ;;;
 ;;; Example:
 ;;;   (sub-unsubscribe s "temp:")
 ;;;
 ;;; Since: Phase NG3
-(defn sub-unsubscribe [^borrow s : Socket topic : cstr] : (Result Ack int)
+(defn sub-unsubscribe [^borrow s : Socket topic : cstr] : (Result nil int)
   ```c
   #include <nng/nng.h>
   #include <nng/protocol/pubsub0/sub.h>
