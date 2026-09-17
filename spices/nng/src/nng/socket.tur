@@ -49,10 +49,15 @@
 ;;; `(Result nil int)`, which is what this spice's plan specifies -- but a
 ;;; `nil` ok payload lowers to a C `void` struct field today and the emitted
 ;;; monomorph does not compile (see
-;;; https://github.com/rjungemann/turmeric/blob/main/docs/reported/result-nil-ok-payload-emits-void-field.md).
+;;; https://github.com/rjungemann/turmeric/blob/main/docs/archive/result-nil-ok-payload-emits-void-field.md).
 ;;; `Ack` is a real named type standing in until that lands, rather than the
 ;;; `:int` a caller would have to learn a convention for. Inspect these results
 ;;; with `ok?` / `err?`; there is nothing worth reading out of an `Ack`.
+;;;
+;;; The compiler fix is written and archived; this spice has NOT switched yet,
+;;; because its CI builds turmeric `main` and the two cannot land together.
+;;; When that change is on `main`, every `(Result Ack int)` here becomes
+;;; `(Result nil int)` and this opaque goes away.
 ;;;
 ;;; Since: Phase NG1
 (defopaque Ack :int)

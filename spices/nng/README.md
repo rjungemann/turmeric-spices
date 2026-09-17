@@ -244,7 +244,7 @@ The type that says "worked, carries nothing" is `(Result nil int)`, which is
 what this spice's plan specifies. A `nil` ok payload lowers to a C `void` struct
 field today and the emitted monomorph does not compile, so `Ack` is a real named
 type standing in until that is fixed --
-[the report](https://github.com/rjungemann/turmeric/blob/main/docs/reported/result-nil-ok-payload-emits-void-field.md)
+[the report](https://github.com/rjungemann/turmeric/blob/main/docs/archive/result-nil-ok-payload-emits-void-field.md)
 tracks it. The alternative, `(Result int int)` with an "ok carries 0"
 convention, is the `:int` stand-in the house rules exist to prevent.
 
