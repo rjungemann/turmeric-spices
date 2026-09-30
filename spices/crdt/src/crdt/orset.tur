@@ -34,8 +34,16 @@
 
 (defmodule crdt/orset
   (import crdt/causal :refer [DotContext mk-dot dotctx-new dotctx-witness
-                              dotctx-next dot-counter])
-  (export ORSet orset-new orset-add orset-remove orset-has? orset-count)
+                              dotctx-next dot-counter dotctx-count dotctx-seen?
+                              DotSet dotset-new dotset-add
+                              dotset-count dotset-union])
+  ;; Imported for the ambient DeltaCRDT methods (C4); a defclass is not an
+  ;; exportable name, so the import anchor is `join-all`.
+  (import crdt/lattice :refer [join-all])
+  (export ORSet orset-new orset-add orset-remove orset-has? orset-count
+          orset-dots orset-ctx-size
+          OrsetDelta orset-delta-new orset-delta-add orset-delta-remove
+          orset-delta-dots orset-delta-retracts orset-apply)
 
 ;;; ORSet -- observed-remove set of interned names.
 ;;;
@@ -72,8 +80,8 @@
     (:: (map-get (:: m (Map Sym int)) e) int)
     (:: (map-new) int)))
 
-;;; __imax -- internal.
-(defn __imax [x : int y : int] : int (if (< x y) y x))
+;;; __imax__os -- internal.
+(defn __imax__os [x : int y : int] : int (if (< x y) y x))
 
 ;;; __inner-a-loop -- internal: A's dots that survive the merge.
 (defn __inner-a-loop [acc : int it : ptr<void> ib : int ctxb : int] : int
@@ -81,7 +89,7 @@
     (let [r  (:: (hamt/iter-cur-key it) Sym)
           na (:: (hamt/iter-cur-val it) int)
           keep (if (map-has? (:: ib (Map Sym int)) r)
-                 (__imax na (map-get (:: ib (Map Sym int)) r))
+                 (__imax__os na (map-get (:: ib (Map Sym int)) r))
                  (if (< (__ctr ctxb r) na) na 0))]
       (__inner-a-loop
         (if (= keep 0) acc (__put-kv acc r keep))
@@ -235,6 +243,249 @@
 (defn orset-count [^borrow s : ORSet] : int
   (map-count (:: (.elems s) (Map Sym int))))
 
+;;; orset-dots -- how many (element, replica) dots the set is carrying.
+;;;
+;;; Parameters:
+;;;   s -- the set
+;;;
+;;; Returns:
+;;;   The total size of the dot store, summed over every element.
+;;;
+;;; Example:
+;;;   (orset-dots s)   ; => 3
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; `orset-count` is the reading; this is the state's SIZE, and the two differ
+;; whenever an element carries concurrent adds from several replicas.  C4's
+;; claim is about this number.
+(defn orset-dots [^borrow s : ORSet] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: (.elems s) (Map Sym int))))
+        r  (__dots-count-loop it 0)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __dots-count-loop -- internal.
+(defn __dots-count-loop [it : ptr<void> acc : int] : int
+  (if (hamt/iter-advance! it)
+    (__dots-count-loop
+      it (+ acc (map-count (:: (:: (hamt/iter-cur-val it) int) (Map Sym int)))))
+    acc))
+
+;;; orset-ctx-size -- how many replicas the causal context has heard from.
+;;;
+;;; Parameters:
+;;;   s -- the set
+;;;
+;;; Returns:
+;;;   The width of the version vector.
+;;;
+;;; Example:
+;;;   (orset-ctx-size s)   ; => 2
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; The second half of what a full-state send costs.  A delta's context is a
+;; causal FRAGMENT -- one replica wide for an add -- and this is what makes
+;; that visible to a test.
+(defn orset-ctx-size [^borrow s : ORSet] : int (dotctx-count (.ctx s)))
+
+;;; OrsetDelta -- a dot-store fragment plus the EXACT dots it retracts.
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; crdt-spice-plan 2.4's "a genuinely different type from the set itself", and
+;; it has to be different -- see the measurement in crdt/lattice's DeltaCRDT
+;; note.  The short version: an ORSet's context is a compacted version vector,
+;; and a delta that carried one would claim to have observed every dot below
+;; the ones it mentions, so the receiver would read its own untouched elements
+;; as deliberately removed and silently drop them.
+;;
+;; `adds` has the same shape as an ORSet's `elems` -- element -> replica ->
+;; highest counter -- and holds only what this delta asserts.  `rms` is an
+;; EXACT DotSet: the dots this delta withdraws, and nothing below them.
+(defstruct OrsetDelta :heap [adds : int rms : DotSet])
+
+;;; orset-delta-new -- the empty delta.
+;;;
+;;; Returns:
+;;;   A delta that adds nothing and retracts nothing; applying it is a no-op.
+;;;
+;;; Example:
+;;;   (orset-delta-new)
+;;;
+;;; Since: crdt-spice-plan C4
+(defn orset-delta-new [] : OrsetDelta
+  (OrsetDelta (:: (map-new) int) (dotset-new)))
+
+;;; orset-delta-dots -- how many (element, replica) dots the delta asserts.
+;;;
+;;; Parameters:
+;;;   d -- the delta
+;;;
+;;; Returns:
+;;;   The size of its dot store.
+;;;
+;;; Example:
+;;;   (orset-delta-dots d)   ; => 1
+;;;
+;;; Since: crdt-spice-plan C4
+(defn orset-delta-dots [^borrow d : OrsetDelta] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: (.adds d) (Map Sym int))))
+        r  (__dots-count-loop it 0)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; orset-delta-retracts -- how many dots the delta withdraws.
+;;;
+;;; Parameters:
+;;;   d -- the delta
+;;;
+;;; Returns:
+;;;   The size of its retraction set.
+;;;
+;;; Example:
+;;;   (orset-delta-retracts d)   ; => 1
+;;;
+;;; Since: crdt-spice-plan C4
+(defn orset-delta-retracts [^borrow d : OrsetDelta] : int
+  (dotset-count (.rms d)))
+
+;;; orset-delta-add -- the DELTA of adding an element on behalf of a replica.
+;;;
+;;; Parameters:
+;;;   s -- the set, read for the replica's next dot
+;;;   e -- the element
+;;;   r -- the replica performing the add
+;;;
+;;; Returns:
+;;;   A delta asserting exactly one dot on e, retracting nothing.
+;;;
+;;; Example:
+;;;   (orset-delta-add s (quote apple) (quote alice))
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; This is the case the delta formulation is FOR: the full state carries a dot
+;; store over every element and a version vector over every replica, and the
+;; delta of one add carries one dot.
+;;
+;; The dot is minted from `s`, not from nothing, so the replica must bump its
+;; own state with the SAME operation -- two deltas minted from one state would
+;; collide on the counter:
+;;
+;;   (let [d  (orset-delta-add s (quote apple) r)
+;;         s2 (orset-add s (quote apple) r)] ...)
+(defn orset-delta-add [^borrow s : ORSet e : Sym r : Sym] : OrsetDelta
+  (let [d (dotctx-next (.ctx s) r)
+        n (dot-counter d)]
+    (OrsetDelta
+      (:: (map-assoc (:: (map-new) (Map Sym int)) e
+                     (:: (map-assoc (:: (map-new) (Map Sym int)) r n) int)) int)
+      (dotset-new))))
+
+;;; orset-delta-remove -- the DELTA of removing an element.
+;;;
+;;; Parameters:
+;;;   s -- the set, read for the dots currently on e
+;;;   e -- the element
+;;;
+;;; Returns:
+;;;   A delta asserting nothing and retracting exactly the dots this replica
+;;;   has observed for e.
+;;;
+;;; Example:
+;;;   (orset-delta-remove s (quote apple))
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; "I have seen these dots and I am withdrawing them" is what a removal IS in
+;; this design.  A concurrent add elsewhere carries a dot this delta never
+;; names, so it survives -- add-wins holding through the delta channel rather
+;; than only through full states.
+;;
+;; A remove delta for an element this replica does not hold retracts nothing,
+;; which is `bottom` and applies as a no-op.  That is the right answer: you
+;; cannot withdraw what you have not observed.
+(defn orset-delta-remove [^borrow s : ORSet e : Sym] : OrsetDelta
+  (let [rms (__dots-of-elem (__inner-of (.elems s) e))]
+    (OrsetDelta (:: (map-new) int) rms)))
+
+;;; __dots-of-elem -- internal: one element's dot map as an exact DotSet.
+(defn __dots-of-elem [inner : int] : DotSet
+  (let [it (hamt/iter-alloc (map-hamt (:: inner (Map Sym int))))
+        r  (__dots-of-loop it (dotset-new))]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __dots-of-loop -- internal.
+(defn __dots-of-loop [it : ptr<void> acc : DotSet] : DotSet
+  (if (hamt/iter-advance! it)
+    (__dots-of-loop
+      it (dotset-add acc (mk-dot (:: (hamt/iter-cur-key it) Sym)
+                                 (:: (hamt/iter-cur-val it) int))))
+    acc))
+
+;;; JoinSemilattice [OrsetDelta] -- assert both sides, retract both sides.
+;;
+;; What lets a sender buffer deltas before a send, and a relay that holds no
+;; state at all combine them with `join-all`.  The two halves are independent
+;; lattices -- pointwise max on the dot store, union on the retractions -- and
+;; the interaction between them is resolved when the delta is APPLIED, not
+;; when two deltas are joined: a later add of a dot a buffered remove never
+;; named is not cancelled by it.
+(definstance JoinSemilattice [OrsetDelta]
+  (join [x y]
+    (OrsetDelta (__merge-adds (.adds x) (.adds y))
+                (dotset-union (.rms x) (.rms y)))))
+
+;;; BoundedJoin [OrsetDelta] -- the empty delta is the least element.
+(definstance BoundedJoin [OrsetDelta]
+  (bottom [] (orset-delta-new)))
+
+;;; Eq [OrsetDelta] -- same number of asserted and retracted dots.
+;;
+;; Size-only, like Eq [ORSet] and for the same reason.
+(definstance Eq [OrsetDelta]
+  (eq? [^borrow x ^borrow y]
+    (and (= (orset-delta-dots x) (orset-delta-dots y))
+         (= (orset-delta-retracts x) (orset-delta-retracts y)))))
+
+;;; __merge-adds -- internal: pointwise max over element -> replica -> counter.
+;;
+;; No causal test: two deltas are both assertions, so neither can be evidence
+;; that the other's dot was removed.  That is the difference from the STATE
+;; merge below, which has contexts to compare and must use them.
+(defn __merge-adds [a : int b : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: b (Map Sym int))))
+        r  (__merge-adds-loop a it)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __merge-adds-loop -- internal.
+(defn __merge-adds-loop [acc : int it : ptr<void>] : int
+  (if (hamt/iter-advance! it)
+    (let [e  (:: (hamt/iter-cur-key it) Sym)
+          bi (:: (hamt/iter-cur-val it) int)
+          m  (__max-inner (__inner-of acc e) bi)]
+      (__merge-adds-loop (__put-kv acc e m) it))
+    acc))
+
+;;; __max-inner -- internal: pointwise max of two replica -> counter maps.
+(defn __max-inner [a : int b : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: b (Map Sym int))))
+        r  (__max-inner-loop a it)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __max-inner-loop -- internal.
+(defn __max-inner-loop [acc : int it : ptr<void>] : int
+  (if (hamt/iter-advance! it)
+    (let [r (:: (hamt/iter-cur-key it) Sym)
+          n (:: (hamt/iter-cur-val it) int)]
+      (__max-inner-loop (__put-kv acc r (__imax__os (__ctr acc r) n)) it))
+    acc))
+
 ;;; JoinSemilattice [ORSet] -- add-wins merge, dot-aware.
 (definstance JoinSemilattice [ORSet]
   (join [x y]
@@ -256,5 +507,201 @@
 ;; rather than trusting the three laws.
 (definstance Eq [ORSet]
   (eq? [^borrow x ^borrow y] (= (orset-count x) (orset-count y))))
+
+;;; orset-apply -- fold a delta into a set.
+;;;
+;;; Parameters:
+;;;   s -- the set
+;;;   d -- the delta
+;;;
+;;; Returns:
+;;;   The set with d's assertions added and d's retractions withdrawn.
+;;;
+;;; Example:
+;;;   (orset-apply s (orset-delta-add other (quote apple) (quote alice)))
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; ASSERTIONS FIRST, then retractions.  The order matters and only in one
+;; direction: a buffered delta group can hold an add of e@5 and a retraction
+;; of e@3, and applying adds first lets the retraction miss e@5 (it names @3
+;; exactly) so the newer add survives.  Retracting first would drop e@3 and
+;; then re-add e@5, same answer; retracting a dot the group also asserts is
+;; the case that differs, and that cannot arise because a dot is minted once.
+;;
+;; An assertion the receiver's context has ALREADY SEEN is skipped rather than
+;; applied, which is what makes `apply-delta` idempotent under duplicate
+;; delivery: re-delivering the add of an element the receiver has since
+;; removed must not resurrect it.  That test is the delta channel's version of
+;; the state merge's add-wins rule, and dropping it is the same silent bug --
+;; a re-sent add undoes a remove, and nothing errors.
+(defn orset-apply [s : ORSet ^borrow d : OrsetDelta] : ORSet
+  ;; `rms` is threaded as the raw `dots` CARRIER rather than as the DotSet
+  ;; struct: a DotSet holds a Map handle and is therefore affine, so passing
+  ;; the struct into the fold would move it and the second pass would fail
+  ;; with TUR-E0005.  crdt/ormap's merge threads its contexts the same way,
+  ;; and for the same reason.
+  (let [ctx0  (.ctx s)
+        c0    (:: (.seen ctx0) int)
+        rms   (.dots (.rms d))
+        added (__apply-adds (.elems s) (.adds d) c0)
+        kept  (__retract added rms)
+        ctx1  (__witness-rms ctx0 rms)
+        ctx2  (__witness-adds ctx1 (.adds d))]
+    (ORSet kept ctx2)))
+
+;;; __witness-rms -- internal: witness a retraction carrier's dots.
+;;
+;; `dotctx-witness-set`'s body against the raw carrier -- same reason as the
+;; note above.  The context COMPACTS here (witnessing alice@3 marks 1 and 2
+;; seen), which is exact under causal delivery; see crdt/causal.
+(defn __witness-rms [ctx : DotContext rms : int] : DotContext
+  (let [it (hamt/iter-alloc (map-hamt (:: rms (Map Sym int))))
+        r  (__witness-rms-loop ctx it)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __witness-rms-loop -- internal.
+(defn __witness-rms-loop [acc : DotContext it : ptr<void>] : DotContext
+  (if (hamt/iter-advance! it)
+    (let [r (:: (hamt/iter-cur-key it) Sym)
+          n (__max-ctr-of (:: (hamt/iter-cur-val it) int))
+          w (dotctx-witness acc (mk-dot r n))]
+      (__witness-rms-loop w it))
+    acc))
+
+;;; __max-ctr-of -- internal: the highest counter in a counter set.
+(defn __max-ctr-of [m : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: m (Map int int))))
+        r  (__max-ctr-loop it 0)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __max-ctr-loop -- internal.
+(defn __max-ctr-loop [it : ptr<void> acc : int] : int
+  (if (hamt/iter-advance! it)
+    (__max-ctr-loop it (__imax__os acc (:: (hamt/iter-cur-key it) int)))
+    acc))
+
+;;; __rms-has? -- internal: is this exact dot in a retraction carrier?
+(defn __rms-has? [rms : int r : Sym n : int] : bool
+  (if (map-has? (:: rms (Map Sym int)) r)
+    (map-has? (:: (:: (map-get (:: rms (Map Sym int)) r) int) (Map int int)) n)
+    false))
+
+;;; __apply-adds -- internal: fold a delta's assertions into the dot store.
+(defn __apply-adds [elems : int adds : int seen : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: adds (Map Sym int))))
+        r  (__apply-adds-loop elems it seen)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __apply-adds-loop -- internal.
+(defn __apply-adds-loop [acc : int it : ptr<void> seen : int] : int
+  (if (hamt/iter-advance! it)
+    (let [e   (:: (hamt/iter-cur-key it) Sym)
+          new (:: (hamt/iter-cur-val it) int)
+          cur (__inner-of acc e)
+          m   (__absorb-inner cur new seen)]
+      (__apply-adds-loop
+        (if (> (map-count (:: m (Map Sym int))) 0) (__put-kv acc e m) acc)
+        it seen))
+    acc))
+
+;;; __absorb-inner -- internal: take the delta's dots the receiver may still take.
+(defn __absorb-inner [cur : int new : int seen : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: new (Map Sym int))))
+        r  (__absorb-loop cur it seen)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __absorb-loop -- internal.
+(defn __absorb-loop [acc : int it : ptr<void> seen : int] : int
+  (if (hamt/iter-advance! it)
+    (let [r    (:: (hamt/iter-cur-key it) Sym)
+          n    (:: (hamt/iter-cur-val it) int)
+          held (__ctr acc r)
+          ;; Already at or past it: nothing to do.  Otherwise take it unless
+          ;; the receiver's context has seen it, which means this assertion is
+          ;; a duplicate of one already delivered and since withdrawn.
+          keep (if (>= held n) held (if (< (__ctr seen r) n) n held))]
+      (__absorb-loop (if (= keep 0) acc (__put-kv acc r keep)) it seen))
+    acc))
+
+;;; __retract -- internal: drop every dot the delta withdraws.
+(defn __retract [elems : int rms : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: elems (Map Sym int))))
+        r  (__retract-loop (:: (map-new) int) it rms)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __retract-loop -- internal.
+(defn __retract-loop [acc : int it : ptr<void> rms : int] : int
+  (if (hamt/iter-advance! it)
+    (let [e (:: (hamt/iter-cur-key it) Sym)
+          m (__retract-inner (:: (hamt/iter-cur-val it) int) rms)]
+      (__retract-loop
+        (if (> (map-count (:: m (Map Sym int))) 0) (__put-kv acc e m) acc)
+        it rms))
+    acc))
+
+;;; __retract-inner -- internal: one element's surviving dots.
+;;
+;; EXACT match, not "counter at or below": the retraction set names the dots
+;; one element carried, and a lower counter for the same replica belongs to a
+;; DIFFERENT element's add.  Matching by <= would withdraw that too, which is
+;; the same over-reach that rules a version vector out as a delta's context.
+(defn __retract-inner [inner : int rms : int] : int
+  (let [it (hamt/iter-alloc (map-hamt (:: inner (Map Sym int))))
+        r  (__retract-inner-loop (:: (map-new) int) it rms)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __retract-inner-loop -- internal.
+(defn __retract-inner-loop [acc : int it : ptr<void> rms : int] : int
+  (if (hamt/iter-advance! it)
+    (let [r (:: (hamt/iter-cur-key it) Sym)
+          n (:: (hamt/iter-cur-val it) int)]
+      (__retract-inner-loop
+        (if (__rms-has? rms r n) acc (__put-kv acc r n))
+        it rms))
+    acc))
+
+;;; __witness-adds -- internal: record a delta's asserted dots in the context.
+(defn __witness-adds [ctx : DotContext adds : int] : DotContext
+  (let [it (hamt/iter-alloc (map-hamt (:: adds (Map Sym int))))
+        r  (__witness-adds-loop ctx it)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __witness-adds-loop -- internal.
+(defn __witness-adds-loop [acc : DotContext it : ptr<void>] : DotContext
+  (if (hamt/iter-advance! it)
+    (let [inner (:: (hamt/iter-cur-val it) int)
+          w     (__witness-inner acc inner)]
+      (__witness-adds-loop w it))
+    acc))
+
+;;; __witness-inner -- internal: witness one element's asserted dots.
+(defn __witness-inner [acc : DotContext inner : int] : DotContext
+  (let [it (hamt/iter-alloc (map-hamt (:: inner (Map Sym int))))
+        r  (__witness-inner-loop acc it)]
+    (hamt/iter-destroy! it)
+    r))
+
+;;; __witness-inner-loop -- internal.
+(defn __witness-inner-loop [acc : DotContext it : ptr<void>] : DotContext
+  (if (hamt/iter-advance! it)
+    (let [w (dotctx-witness acc (mk-dot (:: (hamt/iter-cur-key it) Sym)
+                                        (:: (hamt/iter-cur-val it) int)))]
+      (__witness-inner-loop w it))
+    acc))
+
+;;; DeltaCRDT [ORSet] -- the delta is a dot-store fragment plus exact retractions.
+(definstance DeltaCRDT [ORSet]
+  (type Delta = OrsetDelta)
+  (delta-bottom [x] (orset-delta-new))
+  (delta-join   [x d e] (join d e))
+  (apply-delta  [x d] (orset-apply x d)))
 
 ) ;; end defmodule crdt/orset
