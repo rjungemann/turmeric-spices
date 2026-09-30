@@ -5,6 +5,15 @@
 ;; them rather than redeclaring them.  What is missing there is a
 ;; value-combining map merge, and a fold over a Vec of lattice values.
 ;;
+;; It also holds the DeltaCRDT class (C4).  A defclass is NOT an exportable
+;; name -- neither the class nor its methods can appear in an (export ...) list
+;; -- but its methods are AMBIENT once the defining module is in the build, so
+;; importing this module for `map-merge-with` or `join-all` is what brings
+;; `apply-delta` into scope.  That is also why the class lives here rather than
+;; in a `crdt/delta` module of its own: such a module would have nothing real
+;; to export, and an export-only-to-be-imported anchor is worse than putting
+;; the class beside the rest of the lattice vocabulary.
+;;
 ;; No inline C in this module, deliberately: tests/run-turi.sh PASS-skips any
 ;; fixture whose program contains a user inline-C block, and a CRDT's join is
 ;; exactly the thing worth exercising on both back ends.
@@ -81,5 +90,86 @@
 (defn join-all [^JoinSemilattice A ^BoundedJoin A] [v : (Vec A)] : A
   (let [z : A (bottom)]
     (__join-all-loop v 0 (vec-len v) z)))
+
+
+;;; DeltaCRDT -- the delta-state channel, with the delta type per instance.
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; Shipping the full state on every change is what makes naive state-based
+;; CRDTs unusable over a link.  The delta-state formulation (Almeida, Shoker,
+;; Baquero) has each mutator return a small value from the SAME lattice, which
+;; the receiver joins -- so `apply-delta` is `join` wherever `Delta` is `a`,
+;; and the saving is in what crosses the wire, not in the merge.
+;;
+;; `Delta` is an ASSOCIATED type rather than `a` itself, and the split is real
+;; rather than decorative.  It falls exactly along whether a type has a causal
+;; context:
+;;
+;;   NO context -- GCounter, PNCounter, GSet, TwoPSet, LwwRegister, MvRegister,
+;;     Rga.  `Delta = a`, and the delta is simply a state with fewer entries.
+;;     Joining it in is the ordinary join.
+;;
+;;   CAUSAL -- ORSet, ORMap.  `Delta` is a DIFFERENT type, and it has to be.
+;;     Their state carries a DotContext, which is a compacted VERSION VECTOR:
+;;     `alice -> 3` means "I have seen alice's dots 1, 2 and 3", because the
+;;     compaction assumes causal delivery.  That is exactly right for a state
+;;     and exactly wrong for a delta, and the failure is silent: an add-delta
+;;     from alice@3 carrying the version vector `{alice: 3}` claims to have
+;;     seen alice@1 and alice@2 as well, so the receiver's merge reads every
+;;     element it holds under those dots as DELIBERATELY REMOVED and drops
+;;     them.  Measured on the first attempt here: delivering one add-delta to
+;;     a replica holding two elements left it holding one.
+;;
+;;     A delta must therefore assert an EXACT set of dots, not a downward
+;;     closure -- `crdt/causal`'s `DotSet` -- and the delta type is the
+;;     dot-store fragment plus that set.  That is crdt-spice-plan 2.4's claim
+;;     ("a genuinely different type from the set itself"), and it is the thing
+;;     the associated type buys: an implementation that forced `Delta = a`
+;;     would have to ship the whole context and lose the compression, and one
+;;     that erased the delta to bytes would not be checked at all.
+;;
+;; Deltas here require CAUSAL DELIVERY, which is the assumption `crdt/causal`
+;; already documents for its version-vector compaction.  Applying a delta folds
+;; its exact dots into the receiver's version vector, and that is only lossless
+;; while each replica's dots arrive without gaps.  C6's sync layer is where
+;; that gets paid for; an exception-cloud DotContext is the alternative and
+;; costs every state operation.
+;;
+;; TWO SHAPES FROM THE PLAN DO NOT COMPILE, both measured against v0.56.3:
+;;
+;;   1. `(delta-bottom [] : Delta)` -- a nullary method whose only mention of
+;;      the class variable is through the associated type.  Dispatch is on the
+;;      first parameter, so there is nothing to dispatch on; the method is not
+;;      even registered ("unknown function or operator 'delta-bottom'"), and an
+;;      annotated binding at the call site does not rescue it.  Hence the
+;;      `^borrow x : a` WITNESS parameter on `delta-bottom` and `delta-join`:
+;;      they need a value of `a` to pick the instance, not because they read it.
+;;
+;;   2. `(Delta A)` projected at a type VARIABLE -- `(defn f [A] [(DeltaCRDT A)]
+;;      [x : A d : (Delta A)] : A ...)` is rejected with "no instance binding
+;;      for associated type 'Delta' at this type".  Projection at a CONCRETE
+;;      type works.  So the class cannot be used generically: every caller of
+;;      `apply-delta` names a concrete state type.  That is the single biggest
+;;      limitation of C4 as shipped, and it is why there is no generic
+;;      `apply-all-deltas` here.
+;;
+;; A two-parameter class with a functional dependency (`[a d] | (a -> d)`) was
+;; probed as the alternative and fails the same way: dispatch reads the FIRST
+;; class variable only, so `delta-join [p : d q : d] : d` looks for a
+;; `DeltaCRDT` instance at the DELTA type and finds none.
+(defclass DeltaCRDT [a]
+  (type Delta : Type)
+  ;;; delta-bottom -- the empty delta for this state type.
+  ;;; `x` is a WITNESS: it picks the instance and is not read.
+  (delta-bottom [^borrow x : a] : Delta)
+  ;;; delta-join -- combine two deltas into one, for buffering before a send.
+  ;;; `x` is a WITNESS, as above.  Where `Delta` is `a` -- which is every
+  ;;; instance in this spice -- plain `join` does the same thing and needs no
+  ;;; witness, so a relay that buffers deltas without holding a state should
+  ;;; use `join` / `join-all` instead.
+  (delta-join [^borrow x : a d : Delta e : Delta] : Delta)
+  ;;; apply-delta -- fold a delta into a state.
+  (apply-delta [x : a d : Delta] : a))
 
 ) ;; end defmodule crdt/lattice

@@ -25,9 +25,13 @@
 (load "stdlib/typeclass-lattice.tur")
 
 (defmodule crdt/register
-  (import crdt/hlc :refer [Hlc hlc-zero hlc-tick hlc-after? hlc-later])
-  (export LwwRegister lww-new lww-set lww-value lww-stamp
-          MvRegister mv-new mv-set mv-values mv-count)
+  (import crdt/hlc :refer [Hlc hlc-zero hlc-tick hlc-after? hlc-later
+                           hlc-replica])
+  ;; Imported for the ambient DeltaCRDT methods (C4); a defclass is not an
+  ;; exportable name, so the import anchor is `join-all`.
+  (import crdt/lattice :refer [join-all])
+  (export LwwRegister lww-new lww-set lww-value lww-stamp lww-delta-set
+          MvRegister mv-new mv-set mv-values mv-count mv-delta-set)
 
 ;;; LwwRegister -- one value, last writer wins by HLC stamp.
 ;;;
@@ -120,6 +124,43 @@
     (and (= (.value x) (.value y))
          (and (not (hlc-after? (.stamp x) (.stamp y)))
               (not (hlc-after? (.stamp y) (.stamp x)))))))
+
+;;; lww-delta-set -- the DELTA of a write.
+;;;
+;;; Parameters:
+;;;   g   -- the register
+;;;   v   -- the new value
+;;;   now -- current wall time
+;;;
+;;; Returns:
+;;;   A register holding v, stamped strictly after g -- which is exactly the
+;;;   new state.
+;;;
+;;; Example:
+;;;   (lww-delta-set g 42 1000)
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; Identical to `lww-set`, and that is the honest answer rather than a
+;; placeholder: an LWW register's whole state is one value and one stamp, so
+;; there is nothing a delta could leave out.  The delta formulation saves
+;; nothing here and costs nothing either, and having the name means a caller
+;; can drive every type in this spice through the same `apply-delta` channel
+;; without special-casing the two registers.
+;;
+;; `Delta = LwwRegister` for the same reason: the register carries no causal
+;; context, so there is no downward-closed history for a delta to over-claim
+;; -- the trap that forces ORSet's delta to be a different type does not exist
+;; here.
+(defn lww-delta-set [^borrow g : LwwRegister v : int now : int] : LwwRegister
+  (lww-set g v now))
+
+;;; DeltaCRDT [LwwRegister] -- the delta is the register itself.
+(definstance DeltaCRDT [LwwRegister]
+  (type Delta = LwwRegister)
+  (delta-bottom [x] (lww-new (hlc-replica (.stamp x))))
+  (delta-join   [x d e] (join d e))
+  (apply-delta  [x d] (join x d)))
 
 ;;; MvRegister -- every concurrent value, for the caller to resolve.
 ;;;
@@ -220,5 +261,39 @@
 ;;; Eq [MvRegister] -- same number of values.
 (definstance Eq [MvRegister]
   (eq? [^borrow x ^borrow y] (= (mv-values x) (mv-values y))))
+
+;;; mv-delta-set -- the DELTA of a write.
+;;;
+;;; Parameters:
+;;;   g   -- the register
+;;;   v   -- the new value
+;;;   now -- current wall time
+;;;
+;;; Returns:
+;;;   A register holding only v.
+;;;
+;;; Example:
+;;;   (mv-delta-set g 42 1000)
+;;;
+;;; Since: crdt-spice-plan C4
+;;
+;; Identical to `mv-set`, and genuinely so: a write already replaces
+;; everything this replica observed, so the value it produces is as small as
+;; the state gets.
+;;
+;; The register's join is UNION, which is why this is not the whole story for
+;; the multi-value case: applying a write-delta to a replica that has since
+;; written something else concurrently leaves both values, exactly as merging
+;; the two full states would.  That is the type doing its job, not the delta
+;; channel losing information.
+(defn mv-delta-set [^borrow g : MvRegister v : int now : int] : MvRegister
+  (mv-set g v now))
+
+;;; DeltaCRDT [MvRegister] -- the delta is the register itself.
+(definstance DeltaCRDT [MvRegister]
+  (type Delta = MvRegister)
+  (delta-bottom [x] (mv-new (hlc-replica (.stamp x))))
+  (delta-join   [x d e] (join d e))
+  (apply-delta  [x d] (join x d)))
 
 ) ;; end defmodule crdt/register
