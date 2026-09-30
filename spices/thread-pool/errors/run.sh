@@ -83,7 +83,7 @@ expect_reject double-stop.tur TUR-E0101 \
   'linear value '\''p'\'' used after being consumed' \
   'stopping a pool twice is a use-after-consume'
 expect_reject wrong-item-type.tur TUR-E0001 \
-  'function '\''pool-submit'\'' arg 2: expected tyvar, got cstr' \
+  'function '\''pool-submit'\'' arg 2: expected int, got cstr' \
   'pool-submit rejects an item of the wrong type'
 
 echo "1..$n"

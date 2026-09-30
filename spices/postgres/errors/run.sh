@@ -89,7 +89,7 @@ expect_reject postgres-rows-use-after-free.tur TUR-E0101 \
   'linear value '\''rows'\'' used after being consumed' \
   'reading a freed result set is a use-after-consume'
 expect_reject postgres-trows-row-mismatch.tur TUR-E0001 \
-  'expected (type-app TRows #row{id : int name : cstr}), got (type-app TRows #row{id : int age : int})' \
+  'expected (TRows #row{id : int name : cstr}), got (TRows #row{id : int age : int})' \
   'TRows carrying the wrong column row is rejected'
 
 echo "1..$n"

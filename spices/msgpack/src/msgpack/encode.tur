@@ -150,8 +150,8 @@
 ;; Cons cell are read with the element ABI -- the same reason json's
 ;; `__json-arr-frags` is not inlined into its instance.
 (defn __mp-arr-frags [A] [(EncodeMp A)] [cell : (Cons A)] : int
-  (if (tnil? (:: cell :int))
-    (tnil)
+  (if (tnil? cell)
+    0
     (cons (encode-mp (.head cell))
           (__mp-arr-frags (:: (.tail cell) (Cons A))))))
 
@@ -303,7 +303,7 @@
   (if (>= i n)
     (:: (tnil) (Cons A))
     (tcons-of (ok-val (:: (decode-mp tree (unwrap (mp-arr-get tree arr i))) (Result A cstr)))
-              (:: (__mp-arr-decode tree arr (+ i 1) n) :int))))
+              (__mp-arr-decode tree arr (+ i 1) n))))
 
 ;;; decode-mp-list -- decode a msgpack array into a `(Cons A)`, the mirror of
 ;;; `EncodeMp [Cons]`. A non-array decodes to the empty list.
