@@ -12,38 +12,85 @@ Official monorepo of first-party spices for the [Turmeric](https://github.com/rj
 
 Tiers: **1** = pure Turmeric, **2** = inline-C, **3** = cmake-dep
 
-| Spice | Description | Tier | C dep |
-|-------|-------------|------|-------|
-| [`tur-test`](spices/test/) | Testing framework utilities | 1 -- pure Turmeric | -- |
-| [`tur-math`](spices/math/) | 2D/3D vector and matrix math | 1 -- pure Turmeric | -- |
-| [`tur-c-dsl`](spices/c-dsl/) | Lisp-syntax DSL that compiles to C99 source | 1 -- pure Turmeric | -- |
-| [`tur-glsl`](spices/glsl/) | Lisp-syntax DSL that compiles to GLSL shader source | 1 -- pure Turmeric | -- |
-| [`tur-signal`](spices/signal/) | Arrow-based signal processing (SF, DSP, ADSR, synth) | 1 -- pure Turmeric | -- |
-| [`tur-frame`](spices/frame/) | In-memory dataframe (Arrow-compatible columnar) | 1 -- pure Turmeric | -- |
-| [`tur-plot`](spices/plot/) | 2D data visualization (functions, points, histograms, contours) | 1 -- pure Turmeric | tur-plutovg |
-| [`tur-linalg`](spices/linalg/) | Dense float linear algebra: matrices, vectors, Cholesky/LU/QR solvers, mat4 graphics helpers | 2 -- inline-C | -- |
-| [`tur-scscm`](spices/scscm/) | scscm s-expression -> sclang compiler + scsynth/hcsynth OSC client | 2 -- inline-C | tur-osc (optional, server module only) |
-| [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 2 -- inline-C | -- |
-| [`tur-stats`](spices/stats/) | Statistical analysis on dataframes (summary, distributions, hypothesis tests, OLS, resampling) | 2 -- inline-C | -- |
-| [`tur-ansi`](spices/ansi/) | ANSI terminal control, raw-mode key input, color, style, inline images (Kitty/iTerm2/sixel) | 2 -- inline-C | -- |
-| [`tur-tourist-session`](spices/tourist-session/) | Swappable-store session middleware for tur-tourist (memory + file stores) | 2 -- inline-C | tur-tourist, tur-httpd |
-| [`tur-opengl`](spices/opengl/) | OpenGL 3.3 Core + GLFW + GLAD bindings | 3 -- cmake-dep | glfw 3.4, glad v2.0.6 |
-| [`tur-sqlite`](spices/sqlite/) | SQLite3 database bindings | 3 -- cmake-dep | sqlite 3.47.2 |
-| [`tur-raylib`](spices/raylib/) | Raylib 5.5 graphics and input | 3 -- cmake-dep | raylib 5.5 |
-| [`tur-plutovg`](spices/plutovg/) | 2D vector graphics rendering via plutovg | 3 -- cmake-dep | plutovg 1.3 |
-| [`tur-json`](spices/json/) | JSON parsing and serialization | 3 -- cmake-dep | yyjson 0.10.0 |
-| [`tur-http`](spices/http/) | HTTP/HTTPS client | 3 -- cmake-dep | mbedTLS 3.6.2 |
-| [`tur-regex`](spices/regex/) | PCRE2 regex bindings | 3 -- cmake-dep | PCRE2 10.44 |
-| [`tur-notebook`](spices/notebook/) | Literate `.tur.md` notebooks with TUI, HTML export, and cell execution | 3 -- cmake-dep | libturi (linked against turmeric build) |
-| [`tur-osc`](spices/osc/) | Open Sound Control (OSC) messaging via liblo | 3 -- cmake-dep | liblo 0.32 |
-| [`tur-png`](spices/png/) | PNG image read/write via libpng | 3 -- cmake-dep | libpng 1.6.43 |
-| [`tur-postgres`](spices/postgres/) | PostgreSQL client via libpq | 3 -- cmake-dep | libpq (system) |
-| [`tur-rtaudio`](spices/rtaudio/) | Cross-platform audio I/O via RtAudio | 3 -- cmake-dep | RtAudio 6.0.1 |
-| [`tur-rtmidi`](spices/rtmidi/) | Cross-platform MIDI I/O via RtMidi | 3 -- cmake-dep | RtMidi 6.0.0 |
-| [`tur-sdf-raylib`](spices/sdf-raylib/) | SDF-based solid modeling with raylib rendering and colored mesh export | 3 -- cmake-dep | raylib 5.5 |
-| [`tur-valkey`](spices/valkey/) | Valkey/Redis client via hiredis | 3 -- cmake-dep | hiredis 1.2.0 |
-| [`tur-nng`](spices/nng/) | nanomsg-next-generation scalability protocols (req/rep, pub/sub, pipeline, pair, bus, survey) | 3 -- cmake-dep | nng 1.12.4 |
-| [`tur-wav`](spices/wav/) | WAV and PCM audio file read/write via libsndfile | 3 -- cmake-dep | libsndfile 1.2.2 |
+Platforms: ✅ works · ⚠️ partial, see the notes below · ❌ not usable · ? unaudited
+
+**macOS and Linux are measured.** CI builds and runs the test suite for every
+spice on both legs of every push, and the badge above is that run.
+**Windows (MSYS2/UCRT64) and WASM (Emscripten) have no CI leg**, so those two
+columns record what each spice's own C surface and its upstream dependency
+support -- a derived read, not a tested result. The WASM column follows
+turmeric's [Emscripten spice audit](https://github.com/rjungemann/turmeric/blob/main/docs/upcoming/hold/wasm-spices-plan.md#9-per-spice-emscripten-compatibility-matrix).
+
+| Spice | Description | Tier | macOS | Linux | Windows | WASM | C dep |
+|-------|-------------|------|-------|-------|---------|------|-------|
+| [`tur-test`](spices/test/) | Testing framework utilities | 1 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-math`](spices/math/) | 2D/3D vector and matrix math | 1 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-c-dsl`](spices/c-dsl/) | Lisp-syntax DSL that compiles to C99 source | 1 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-glsl`](spices/glsl/) | Lisp-syntax DSL that compiles to GLSL shader source | 1 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-signal`](spices/signal/) | Arrow-based signal processing (SF, DSP, ADSR, synth) | 1 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-frame`](spices/frame/) | In-memory dataframe (Arrow-compatible columnar) | 1 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-plot`](spices/plot/) | 2D data visualization (functions, points, histograms, contours) | 1 | ✅ | ✅ | ✅ | ✅ | tur-plutovg |
+| [`tur-linalg`](spices/linalg/) | Dense float linear algebra: matrices, vectors, Cholesky/LU/QR solvers, mat4 graphics helpers | 2 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-scscm`](spices/scscm/) | scscm s-expression -> sclang compiler + scsynth/hcsynth OSC client | 2 | ✅ | ✅ | ⚠️ | ⚠️ | tur-osc (optional, server module only) |
+| [`tur-tidal`](spices/tidal/) | Tidal-like mini-notation -> Pbind/event text | 2 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-stats`](spices/stats/) | Statistical analysis on dataframes (summary, distributions, hypothesis tests, OLS, resampling) | 2 | ✅ | ✅ | ✅ | ✅ | -- |
+| [`tur-ansi`](spices/ansi/) | ANSI terminal control, raw-mode key input, color, style, inline images (Kitty/iTerm2/sixel) | 2 | ✅ | ✅ | ⚠️ | ⚠️ | -- |
+| [`tur-tourist-session`](spices/tourist-session/) | Swappable-store session middleware for tur-tourist (memory + file stores) | 2 | ✅ | ✅ | ❌ | ❌ | tur-tourist, tur-httpd |
+| [`tur-opengl`](spices/opengl/) | OpenGL 3.3 Core + GLFW + GLAD bindings | 3 | ✅ | ✅ | ✅ | ⚠️ | glfw 3.4, glad v2.0.6 |
+| [`tur-sqlite`](spices/sqlite/) | SQLite3 database bindings | 3 | ✅ | ✅ | ✅ | ✅ | sqlite 3.47.2 |
+| [`tur-raylib`](spices/raylib/) | Raylib 5.5 graphics and input | 3 | ✅ | ✅ | ✅ | ✅ | raylib 5.5 |
+| [`tur-plutovg`](spices/plutovg/) | 2D vector graphics rendering via plutovg | 3 | ✅ | ✅ | ✅ | ✅ | plutovg 1.3 |
+| [`tur-json`](spices/json/) | JSON parsing and serialization | 3 | ✅ | ✅ | ✅ | ✅ | yyjson 0.10.0 |
+| [`tur-http`](spices/http/) | HTTP/HTTPS client | 3 | ✅ | ✅ | ❌ | ❌ | mbedTLS 3.6.2 |
+| [`tur-regex`](spices/regex/) | PCRE2 regex bindings | 3 | ✅ | ✅ | ✅ | ✅ | PCRE2 10.44 |
+| [`tur-notebook`](spices/notebook/) | Literate `.tur.md` notebooks with TUI, HTML export, and cell execution | 3 | ✅ | ✅ | ❌ | ❌ | libturi (linked against turmeric build) |
+| [`tur-osc`](spices/osc/) | Open Sound Control (OSC) messaging via liblo | 3 | ✅ | ✅ | ? | ❌ | liblo 0.32 |
+| [`tur-png`](spices/png/) | PNG image read/write via libpng | 3 | ✅ | ✅ | ✅ | ✅ | libpng 1.6.43 |
+| [`tur-postgres`](spices/postgres/) | PostgreSQL client via libpq | 3 | ✅ | ✅ | ✅ | ❌ | libpq (system) |
+| [`tur-rtaudio`](spices/rtaudio/) | Cross-platform audio I/O via RtAudio | 3 | ✅ | ✅ | ✅ | ❌ | RtAudio 6.0.1 |
+| [`tur-rtmidi`](spices/rtmidi/) | Cross-platform MIDI I/O via RtMidi | 3 | ✅ | ✅ | ✅ | ❌ | RtMidi 6.0.0 |
+| [`tur-sdf-raylib`](spices/sdf-raylib/) | SDF-based solid modeling with raylib rendering and colored mesh export | 3 | ✅ | ✅ | ✅ | ⚠️ | raylib 5.5 |
+| [`tur-valkey`](spices/valkey/) | Valkey/Redis client via hiredis | 3 | ✅ | ✅ | ✅ | ❌ | hiredis 1.2.0 |
+| [`tur-nng`](spices/nng/) | nanomsg-next-generation scalability protocols (req/rep, pub/sub, pipeline, pair, bus, survey) | 3 | ✅ | ✅ | ✅ | ❌ | nng 1.12.4 |
+| [`tur-wav`](spices/wav/) | WAV and PCM audio file read/write via libsndfile | 3 | ✅ | ✅ | ✅ | ✅ | libsndfile 1.2.2 |
+
+### Platform notes
+
+- **Browser file I/O.** Emscripten gives a program a virtual filesystem, so
+  anything a spice reads or writes by path (`tur-frame` CSVs, `tur-plot`'s TTF
+  font, `tur-png`/`tur-wav` files, a `tur-sqlite` database) has to be embedded
+  or preloaded into the page. `tur-sqlite` is in memory by default; durable
+  storage needs IDBFS.
+- **`tur-ansi`** is portable except for `ansi/term`, which is `termios` +
+  `sys/ioctl` + `sys/select` for raw mode, terminal size and resize signals.
+  Windows needs a Console-API port of that one module; a browser has no tty.
+- **`tur-scscm`**'s s-expression -> sclang compiler is pure text
+  transformation and portable; only its OSC client module inherits the
+  `tur-osc` limits below.
+- **`tur-opengl`** reaches the browser through Emscripten's GLFW port
+  (`-sUSE_GLFW=3`) restricted to the GLES 3.0 / WebGL2 subset. Nothing in the
+  manifest wires that up yet.
+- **`tur-raylib`** is first-class on the web: its `build.tur` carries
+  `:wasm-options` (`PLATFORM=Web`, `GRAPHICS_API_OPENGL_ES3`) and `raylib/web`
+  supplies the frame-callback loop a browser requires instead of a blocking
+  `while` loop. **`tur-sdf-raylib`** inherits that dependency, but its
+  `raylib/integration` preview windows drive a blocking
+  `while (!WindowShouldClose())` loop from inline C, which a browser cannot run
+  without Asyncify.
+- **Socket clients and servers.** `tur-http` calls BSD sockets
+  (`sys/socket.h`, `netdb.h`) directly, and `tur-tourist-session` builds on
+  `tur-httpd`, whose server is BSD sockets + pthreads. Both need a Winsock
+  port for Windows. No browser offers raw TCP or UDP, so `tur-http` would have
+  to be remapped onto `fetch()`, and `tur-osc`, `tur-postgres`, `tur-valkey`
+  and `tur-nng` have no browser story at all.
+- **`tur-osc`** is the one unaudited cell: liblo's own Windows support is
+  partial, and the spice links a system liblo rather than building it from
+  source (see the CI notes on why). Neither half has been tried on MinGW.
+- **`tur-notebook`** drives a `termios`/`sys/ioctl` TUI and links `libturi` out
+  of a turmeric build; neither part has a Windows or browser path today.
+- **`tur-rtaudio` and `tur-rtmidi`** support Windows upstream (WASAPI, WinMM).
+  In a browser they would need Web Audio (`AudioWorklet`) and Web MIDI
+  backends respectively; neither exists yet.
 
 ---
 
