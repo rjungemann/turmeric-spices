@@ -80,7 +80,7 @@ expect_reject handler-non-response-return.tur TUR-E0001 \
   'instance method '\''respond'\'' declares return type '\''Response'\'' but its body returns Other' \
   'a Handler whose respond returns a non-Response does not elaborate'
 expect_reject httpd-trequest-row-mismatch.tur TUR-E0001 \
-  'expected (type-app TRequest #row{authorization : cstr}), got (type-app TRequest #row{accept : cstr})' \
+  'expected (TRequest #row{authorization : cstr}), got (TRequest #row{accept : cstr})' \
   'a TRequest carrying the wrong header row is rejected'
 expect_reject req-decode-missing-decode-instance.tur "-" \
   'no instance '\''DecodeJson NoCodec'\''' \

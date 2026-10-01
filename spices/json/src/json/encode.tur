@@ -229,8 +229,8 @@
 ;; `encode-json` dispatches on the real A and the `.head`/`.tail` of the `:heap`
 ;; Cons cell are read with the element ABI (turmeric main #475 + #479).
 (defn __json-arr-frags [A] [(EncodeJson A)] [cell : (Cons A)] : int
-  (if (tnil? (:: cell :int))
-    (tnil)
+  (if (tnil? cell)
+    0
     (cons (encode-json (.head cell))
           (__json-arr-frags (:: (.tail cell) (Cons A))))))
 
@@ -494,7 +494,7 @@
   (if (>= i size)
     (:: (tnil) (Cons A))
     (tcons-of (ok-val (:: (decode-json doc (unsafe (__json-arr-get arr i))) (Result A cstr)))
-              (:: (__json-arr-decode doc arr (+ i 1) size) :int))))
+              (__json-arr-decode doc arr (+ i 1) size))))
 
 ;;; decode-json-list -- decode a JSON array into a `(Cons A)`, the mirror of
 ;;; `EncodeJson [Cons]`. A non-array decodes to the empty list. Like the other

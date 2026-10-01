@@ -83,7 +83,7 @@ expect_reject cap-double-use.tur TUR-E0101 \
   "used after being consumed" \
   "a WriteCap consumed twice is a compile error"
 expect_reject cap-mint-wrong-component.tur TUR-E0001 \
-  "expected (type-app WriteCap Pos), got (type-app WriteCap Vel)" \
+  "expected (WriteCap Pos), got (WriteCap Vel)" \
   "a WriteCap<Vel> cannot stand in for a WriteCap<Pos>"
 
 # --- :writes enforcement: writing a component you did not declare -----
@@ -105,10 +105,10 @@ expect_reject set-without-cap.tur TUR-E0001 \
   "function 'set-Pos!' arg 2: expected GameWorld, got Slot" \
   "set-Pos! with the cap argument omitted does not elaborate"
 expect_reject set-wrong-component.tur TUR-E0001 \
-  "expected (type-app WriteCap Pos), got (type-app WriteCap Vel)" \
+  "expected (WriteCap Pos), got (WriteCap Vel)" \
   "set-Pos! rejects a WriteCap for the wrong component"
 expect_reject xworld-wrong-world-cap.tur TUR-E0001 \
-  "expected (type-app (type-app XWriteCap RenderWorld) Pos)" \
+  "expected (XWriteCap RenderWorld Pos), got (XWriteCap SimWorld Pos)" \
   "set-Pos! rejects an XWriteCap minted against the wrong world"
 
 # --- cross-world system declaration validation -------------------------
