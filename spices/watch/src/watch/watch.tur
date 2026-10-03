@@ -107,10 +107,19 @@ typedef struct {
   int cap;
 } TurDirSnapshot;
 
-typedef struct __tur_cons_s {
+/* A cons cell, under a name of this spice's own.  NOT `__tur_cons_cell`:
+   the compiler emits a typedef of that exact name into the preamble of any
+   module that declares a variadic (the AR8 rest-list helper), and this block
+   is hoisted verbatim into every translation unit that imports tur-watch --
+   including modules that do have variadics.  Two typedefs of one name whose
+   underlying types differ (the preamble's is an anonymous struct, this one
+   was tagged) is a hard error on gcc and a -Wtypedef-redefinition warning on
+   clang, which is why it failed on Linux and only warned on macOS.
+   The layout is the same either way; only the name has to be ours. */
+typedef struct tur_watch_cons_s {
   int64_t head;
   int64_t tail;
-} __tur_cons_cell;
+} tur_watch_cons_cell;
 
 static TurDirSnapshot *tur_snap_take(const char *dir) {
   DIR *dh = opendir(dir);
@@ -1044,10 +1053,12 @@ static int tur_inotify_kind(unsigned int mask) {
   (defn __watch-make-cons [head : int] #fx{Unsafe} : int
     ```c
     /* Project-mode emit may place this defn before the file-scope-c-block,
-       so redeclare the cons-cell type locally. */
-    typedef struct __tur_cons_s_local { int64_t head; int64_t tail; } __tur_cons_cell_local;
+       so redeclare the cons-cell type locally.  Function-scoped, so it never
+       collides with anything -- but it keeps out of the `__tur_` namespace
+       for the same reason the file-scope type above does. */
+    typedef struct tur_watch_cons_local_s { int64_t head; int64_t tail; } tur_watch_cons_local;
     if (head == 0) return 0;
-    __tur_cons_cell_local *cell = (__tur_cons_cell_local *)calloc(1, sizeof(*cell));
+    tur_watch_cons_local *cell = (tur_watch_cons_local *)calloc(1, sizeof(*cell));
     if (!cell) return 0;
     cell->head = head;
     cell->tail = 0;

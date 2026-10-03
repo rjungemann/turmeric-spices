@@ -133,10 +133,9 @@
   ;; Walk a cons-list of watch events and push each one into batch, then free the cells.
   (defn __drain-cons-into-batch [batch : int ev : int] #fx{Unsafe} : int
     ```c
-    typedef struct __tur_cons_s __tur_cons_cell;
-    __tur_cons_cell *cell = (__tur_cons_cell *)(intptr_t)ev;
+    tur_watch_cons_cell *cell = (tur_watch_cons_cell *)(intptr_t)ev;
     while (cell) {
-      __tur_cons_cell *next = (__tur_cons_cell *)(intptr_t)cell->tail;
+      tur_watch_cons_cell *next = (tur_watch_cons_cell *)(intptr_t)cell->tail;
       if (cell->head) watch__debounce__debounce_hybatch_hypush(batch, cell->head);
       free(cell);
       cell = next;
