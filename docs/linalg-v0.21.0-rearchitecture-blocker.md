@@ -179,7 +179,7 @@ alone.
    the mechanical migration above and the paren fixes. Largest, cleanest.
 2. **turmeric-side compatibility decision** — if `sizeof` and/or accessor-function
    generation are intended to survive (other spices may rely on them), that is a
-   compiler conversation to have in `rjungemann/turmeric`, not here.
+   compiler conversation to have in `turmeric-lang/turmeric`, not here.
 3. **Defer** — leave linalg as-is (it is already red and unimported); revisit when
    U4 (sized linalg: `Vec n`/`Mat m n`) is actually scheduled, since that phase
    will rewrite these signatures anyway.

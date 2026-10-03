@@ -19,7 +19,7 @@ in Turmeric services.
 
 ```turmeric no-check
 :spices {
-  "valkey" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "valkey" {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "valkey-v0.1.0"
             :subdir "spices/valkey"}
 }
@@ -96,4 +96,4 @@ unchanged. See `errors/` for the rejected cases.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/valkey>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/valkey>

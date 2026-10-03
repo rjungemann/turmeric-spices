@@ -4,7 +4,7 @@ category: Spice-uplift blocker assessment (Track C / U3)
 status: UNBLOCKED -- every compiler prerequisite verified present. Targets 1-3 shipped except the `http` CLIENT half; target 4 (json) is moot.
 verified-on: turmeric main @ 99cc8b32 (post #479/#480/#481/#482/#483; built from source)
 verified-by: turmeric-spices Claude (Track C, branch claude/track-c-u3-turmeric-cgmo6u)
-plan: rjungemann/turmeric docs/upcoming/spices-type-features-uplift-plan.md (Phase U3)
+plan: turmeric-lang/turmeric docs/upcoming/spices-type-features-uplift-plan.md (Phase U3)
 ---
 
 # U3 — row-typed schemas: unblocked as of turmeric main @ 99cc8b32

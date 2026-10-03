@@ -17,7 +17,7 @@ HTTP integration that does not need full async or HTTP/2.
 
 ```turmeric no-check
 :spices {
-  "http" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "http" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "http-v0.1.0"
           :subdir "spices/http"}
 }
@@ -88,4 +88,4 @@ is now a first-class part of the typed codec path.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/http>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/http>

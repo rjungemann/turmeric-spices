@@ -17,7 +17,7 @@ and any real-time audio program.
 
 ```turmeric no-check
 :spices {
-  "rtaudio" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "rtaudio" {:url    "https://github.com/turmeric-lang/turmeric-spices"
              :ref    "rtaudio-v0.1.0"
              :subdir "spices/rtaudio"}
 }
@@ -57,4 +57,4 @@ let [r audio-new(":core-audio")]
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/rtaudio>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/rtaudio>

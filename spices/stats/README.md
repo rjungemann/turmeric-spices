@@ -28,7 +28,7 @@ and sampling
 
 ```turmeric no-check
 :spices {
-  "stats" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "stats" {:url    "https://github.com/turmeric-lang/turmeric-spices"
            :ref    "stats-v0.1.0"
            :subdir "spices/stats"}
 }
@@ -100,4 +100,4 @@ let [a frame("x" list(1.0 2.0 3.0))
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/stats>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/stats>

@@ -1,10 +1,10 @@
 # turmeric-spices
 
-[![CI](https://github.com/rjungemann/turmeric-spices/actions/workflows/ci.yml/badge.svg)](https://github.com/rjungemann/turmeric-spices/actions/workflows/ci.yml)
+[![CI](https://github.com/turmeric-lang/turmeric-spices/actions/workflows/ci.yml/badge.svg)](https://github.com/turmeric-lang/turmeric-spices/actions/workflows/ci.yml)
 
-Official monorepo of first-party spices for the [Turmeric](https://github.com/rjungemann/turmeric) ecosystem. The badge above is aggregate across **all** spices on both Linux and macOS — it turns red if any matrix leg fails.
+Official monorepo of first-party spices for the [Turmeric](https://github.com/turmeric-lang/turmeric) ecosystem. The badge above is aggregate across **all** spices on both Linux and macOS — it turns red if any matrix leg fails.
 
-**Canonical repo:** https://github.com/rjungemann/turmeric-spices
+**Canonical repo:** https://github.com/turmeric-lang/turmeric-spices
 
 ---
 
@@ -19,7 +19,7 @@ spice on both legs of every push, and the badge above is that run.
 **Windows (MSYS2/UCRT64) and WASM (Emscripten) have no CI leg**, so those two
 columns record what each spice's own C surface and its upstream dependency
 support -- a derived read, not a tested result. The WASM column follows
-turmeric's [Emscripten spice audit](https://github.com/rjungemann/turmeric/blob/main/docs/upcoming/hold/wasm-spices-plan.md#9-per-spice-emscripten-compatibility-matrix).
+turmeric's [Emscripten spice audit](https://github.com/turmeric-lang/turmeric/blob/main/docs/upcoming/hold/wasm-spices-plan.md#9-per-spice-emscripten-compatibility-matrix).
 
 | Spice | Description | Tier | macOS | Linux | Windows | WASM | C dep |
 |-------|-------------|------|-------|-------|---------|------|-------|
@@ -101,14 +101,14 @@ key in your `build.tur`:
 
 ```turmeric
 :spices {
-  "test"   {:url    "https://github.com/rjungemann/turmeric-spices"
+  "test"   {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "test-v0.1.0"
             :subdir "spices/test"
             :optional true}
-  "math"   {:url    "https://github.com/rjungemann/turmeric-spices"
+  "math"   {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "math-v0.1.0"
             :subdir "spices/math"}
-  "sqlite" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "sqlite" {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "sqlite-v0.1.0"
             :subdir "spices/sqlite"}
 }
@@ -117,7 +117,7 @@ key in your `build.tur`:
 Or use `tur add` from the command line:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref test-v0.1.0 --subdir spices/test --name test
 ```
 
@@ -139,7 +139,7 @@ tur add https://github.com/rjungemann/turmeric-spices \
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref test-v0.1.0 --subdir spices/test --name test
 ```
 
@@ -160,7 +160,7 @@ Exports: `math/vec2`, `math/vec3`, `math/mat4`
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref math-v0.1.0 --subdir spices/math --name math
 ```
 
@@ -198,7 +198,7 @@ Write C99 code using Lisp syntax and compile it to a source string:
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref c-dsl-v0.1.0 --subdir spices/c-dsl --name c-dsl
 ```
 
@@ -237,7 +237,7 @@ Write GLSL vertex and fragment shaders using Lisp syntax and compile them to sou
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref glsl-v0.1.0 --subdir spices/glsl --name glsl
 ```
 
@@ -287,7 +287,7 @@ vertex and fragment shaders in Turmeric syntax.
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref opengl-v0.1.0 --subdir spices/opengl --name opengl
 ```
 
@@ -313,7 +313,7 @@ Exports: `sqlite/db`, `sqlite/stmt`, `sqlite/row`
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref sqlite-v0.1.0 --subdir spices/sqlite --name sqlite
 ```
 
@@ -345,7 +345,7 @@ Exports: `raylib/core`, `raylib/shapes`, `raylib/textures`, `raylib/text`,
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref raylib-v0.1.0 --subdir spices/raylib --name raylib
 ```
 
@@ -383,7 +383,7 @@ For the full tour (paths, gradients, fonts, image composition) see
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref plutovg-v0.1.0 --subdir spices/plutovg --name plutovg
 ```
 
@@ -409,7 +409,7 @@ Exports: `json/parse`, `json/emit`, `json/patch`
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref json-v0.1.0 --subdir spices/json --name json
 ```
 
@@ -433,7 +433,7 @@ Exports: `http/client`, `http/request`, `http/response`, `http/error`
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref http-v0.1.0 --subdir spices/http --name http
 ```
 
@@ -460,7 +460,7 @@ Exports: `regex/regex`, `regex/capture`, `regex/error`
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref regex-v0.1.0 --subdir spices/regex --name regex
 ```
 
@@ -500,7 +500,7 @@ reshaping, and Arrow interop).
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref frame-v0.1.0 --subdir spices/frame --name frame
 ```
 
@@ -534,7 +534,7 @@ Exports: `stats/mathx`, `stats/rng`, `stats/summary`, `stats/cov`,
 Add to your project:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref stats-v0.1.0 --subdir spices/stats --name stats
 ```
 

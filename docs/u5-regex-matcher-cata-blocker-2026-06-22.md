@@ -4,7 +4,7 @@ category: Spice-uplift feasibility analysis (Track C / U5)
 status: UNBLOCKED -- the function-typed-carrier segfault is gone. A narrower emitter defect survives (arm-order-dependent carrier typing) and has a one-line source workaround.
 verified-on: turmeric v0.46.0 (`tur --version` -> 0.46.0)
 verified-by: turmeric-spices docs accuracy sweep, 2026-09-09
-plan: rjungemann/turmeric docs/upcoming/spices-type-features-uplift-plan.md (Phase U5)
+plan: turmeric-lang/turmeric docs/upcoming/spices-type-features-uplift-plan.md (Phase U5)
 ---
 
 # U5 regex matcher: can it become one `cata`?

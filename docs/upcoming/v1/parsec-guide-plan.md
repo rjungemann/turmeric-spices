@@ -67,7 +67,7 @@ The Scheme-style char literal `#\A` must desugar to `(char-lit 65)` so the
 guide can write `(pchar #\A)` instead of `(pchar (int->char 65))`.
 
 **Tasks**
-- File a tracking issue against `rjungemann/turmeric` referencing this plan.
+- File a tracking issue against `turmeric-lang/turmeric` referencing this plan.
   This repo cannot implement it; it lands in a tagged `tur` release.
 - Required escapes: `#\space`, `#\newline`, `#\tab`, `#\\`, `#\)`.
 - Required range: at least printable ASCII (32–126).

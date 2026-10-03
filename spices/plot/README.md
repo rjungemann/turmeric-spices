@@ -17,7 +17,7 @@ plots into a larger image.
 
 ```turmeric no-check
 :spices {
-  "plot" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "plot" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "plot-v0.3.0"
           :subdir "spices/plot"}
 }
@@ -75,5 +75,5 @@ without forcing every caller to crank the count globally.
 
 ## See also
 
-- [Guide](https://github.com/rjungemann/turmeric-spices/blob/main/spices/plot/docs/guides/plot-guide.md)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/plot>
+- [Guide](https://github.com/turmeric-lang/turmeric-spices/blob/main/spices/plot/docs/guides/plot-guide.md)
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/plot>

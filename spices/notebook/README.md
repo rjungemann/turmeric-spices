@@ -20,7 +20,7 @@ embedded CSS in `src/notebook/render-html.tur` in sync.
 Install the notebook spice globally with `tur install`:
 
 ```sh
-tur install https://github.com/rjungemann/turmeric-spices.git --subdir spices/notebook
+tur install https://github.com/turmeric-lang/turmeric-spices.git --subdir spices/notebook
 ```
 
 This registers the spice so that `nb` is available as a `tur` subcommand.
@@ -36,7 +36,7 @@ To use notebook in an existing Turmeric project, add it as a dependency in
 your `build.tur`:
 
 ```turmeric
-(spice notebook "https://github.com/rjungemann/turmeric-spices.git"
+(spice notebook "https://github.com/turmeric-lang/turmeric-spices.git"
   :subdir "spices/notebook")
 ```
 

@@ -19,7 +19,7 @@ CSV I/O, printing, and Arrow interop.
 
 ```turmeric no-check
 :spices {
-  "frame" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "frame" {:url    "https://github.com/turmeric-lang/turmeric-spices"
            :ref    "frame-v0.2.0"
            :subdir "spices/frame"}
 }
@@ -64,4 +64,4 @@ let [f       read-csv-string("g,v\nA,10\nB,20\nA,30\n" 0 0 1 0 "")
 
 - [Guide](https://turmeric-lang.com/docs/html/guides/frame-guide.html)
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/frame>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/frame>

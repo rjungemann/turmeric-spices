@@ -17,7 +17,7 @@ used alongside `tur-opengl`, `tur-raylib`, and the GLSL DSL without surprises.
 
 ```turmeric no-check
 :spices {
-  "math" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "math" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "math-v0.1.0"
           :subdir "spices/math"}
 }
@@ -45,4 +45,4 @@ let [a vec3(1.0 0.0 0.0)
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/math>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/math>

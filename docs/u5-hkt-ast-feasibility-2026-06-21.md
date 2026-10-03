@@ -22,7 +22,7 @@ reason: the spice is yyjson-backed and has no Turmeric-level recursive IR
 to collapse.
 
 U5 plan reference:
-`rjungemann/turmeric:docs/upcoming/spices-type-features-uplift-plan.md`
+`turmeric-lang/turmeric:docs/upcoming/spices-type-features-uplift-plan.md`
 § "Phase U5 -- HKT recursion for ASTs" (targets: json, c-dsl, glsl,
 scscm, regex, template).
 
@@ -165,7 +165,7 @@ wanted.
   results; `cstr`-carrier segfault) — **RESOLVED**: tracked as gap G6, fixed by
   #487 (spec-selection by result type + per-carrier cloning of the recursive
   `fmap` closure). Report archived at
-  `rjungemann/turmeric:docs/archive/hkt-fmap-cata-carrier-miscompile.md`.
+  `turmeric-lang/turmeric:docs/archive/hkt-fmap-cata-carrier-miscompile.md`.
 - The closure-capture codegen gap (returned closure capturing `let`-bound
   folded closures) — **RESOLVED** alongside G6.
 - **NEW, narrow:** `re-cata` does not thread a function-typed carrier `B` (see

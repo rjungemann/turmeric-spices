@@ -19,7 +19,7 @@ to the rasterized result.
 
 ```turmeric no-check
 :spices {
-  "plutovg" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "plutovg" {:url    "https://github.com/turmeric-lang/turmeric-spices"
              :ref    "plutovg-v0.1.0"
              :subdir "spices/plutovg"}
 }
@@ -63,4 +63,4 @@ let [s ok-val(surface-create(256 256))
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/plutovg>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/plutovg>

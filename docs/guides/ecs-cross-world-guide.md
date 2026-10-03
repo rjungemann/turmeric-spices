@@ -4,7 +4,7 @@ This guide covers the **cross-world** ECS surface: a single system that
 reads from one typed world and writes to another, with the scheduler
 proving non-conflict per *(world, component)* pair. It is the post-v1
 follow-up to single-world `defsystem`, implementing
-[`docs/upcoming/ecs-cross-world-systems-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/upcoming/ecs-cross-world-systems-plan.md)
+[`docs/upcoming/ecs-cross-world-systems-plan.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/upcoming/ecs-cross-world-systems-plan.md)
 (phases X1–X4) in the turmeric repo.
 
 ## When you want it
