@@ -74,25 +74,23 @@
 
   (defn cons-len [c : int] #fx{Unsafe} : int
     ```c
-    /* __tur_include__: struct __tur_cons_s; */
-    /* __tur_include__: typedef struct __tur_cons_s __tur_cons_cell; */
-    __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
+    tur_watch_cons_cell *p = (tur_watch_cons_cell *)(intptr_t)c;
     int n = 0;
-    while (p) { n++; p = (__tur_cons_cell *)(intptr_t)p->tail; }
+    while (p) { n++; p = (tur_watch_cons_cell *)(intptr_t)p->tail; }
     return n;
     ```)
 
   (defn cons-head [c : int] #fx{Unsafe} : int
     ```c
-    __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
+    tur_watch_cons_cell *p = (tur_watch_cons_cell *)(intptr_t)c;
     return p ? p->head : 0;
     ```)
 
   (defn cons-free-shallow [c : int] #fx{Unsafe} : void
     ```c
-    __tur_cons_cell *p = (__tur_cons_cell *)(intptr_t)c;
+    tur_watch_cons_cell *p = (tur_watch_cons_cell *)(intptr_t)c;
     while (p) {
-      __tur_cons_cell *next = (__tur_cons_cell *)(intptr_t)p->tail;
+      tur_watch_cons_cell *next = (tur_watch_cons_cell *)(intptr_t)p->tail;
       free(p);
       p = next;
     }
