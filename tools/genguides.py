@@ -14,6 +14,11 @@ from pathlib import Path
 
 import markdown as md_lib
 
+# Topbar and sidebar globals come from the one chrome module, so the guides,
+# the spice front pages and the API trees all name the same set of places --
+# and name them the way the main site does.  See tools/sitechrome.py.
+from sitechrome import build_page_header, build_sidebar
+
 
 def parse_front_matter(text: str) -> tuple[dict, str]:
     """Return (meta_dict, body) after stripping YAML front matter (--- blocks)."""
@@ -52,41 +57,7 @@ def build_categories_from_meta(meta_by_stem: dict, all_stems: set) -> list:
 
 STYLE_REL = '/styles/style.css'
 
-SIDEBAR_GLOBALS = '''\
-      <hr class="sidebar-divider">
-      <h3>Spices</h3>
-      <ul>
-        <li><a href="/">Index</a></li>
-        <li><a href="/guides/">Guides</a></li>
-      </ul>
-      <h3>Turmeric</h3>
-      <ul>
-        <li><a href="https://turmeric-lang.com">Home</a></li>
-        <li><a href="https://turmeric-lang.com/docs/html/guides/">Guides</a></li>
-        <li><a href="https://turmeric-lang.com/docs/html/api/">API Docs</a></li>
-        <li><a href="https://turmeric-lang.com/try">Try It</a></li>
-      </ul>
-      <h3>Community</h3>
-      <ul>
-        <li><a href="https://github.com/turmeric-lang/turmeric-spices">GitHub</a></li>
-      </ul>'''
-
-PAGE_HEADER = '''\
-  <header class="site-header">
-    <button class="hamburger" aria-label="Toggle navigation">
-      <span></span><span></span><span></span>
-    </button>
-    <a class="nav-logo" href="https://turmeric-lang.com">
-      <img src="/logo-icon.svg" width="28" height="28" alt="">
-      <img src="/logo.svg" width="101" height="28" alt="Turmeric">
-    </a>
-    <nav>
-      <a href="/guides/" class="active">Guides</a>
-      <a href="/">Spices</a>
-      <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
-      <a href="https://turmeric-lang.com/try">Try It</a>
-    </nav>
-  </header>'''
+PAGE_HEADER = build_page_header(active='Spices')
 
 SIDEBAR_TOGGLE_JS = '''\
   <div class="sidebar-overlay"></div>
@@ -331,17 +302,11 @@ def render_guide(stem: str, src: Path, out: Path, all_stems: set, meta: dict | N
         title = title_match.group(1) if title_match else stem.replace('-', ' ').title()
 
     sidebar_items = toc_tokens_to_sidebar(toc_tokens)
-    sidebar_html = f'''\
-      <div style="margin-bottom:0.5rem">
-        <a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a>
-      </div>
-      <div style="margin-bottom:1.25rem">
-        <a href="index.html" style="font-size:0.8rem;color:var(--text-sec)">← All Guides</a>
-      </div>
-      <hr class="sidebar-divider">
-      <h3>On this page</h3>
-      <ul>{sidebar_items}</ul>
-{SIDEBAR_GLOBALS}'''
+    sidebar_html = build_sidebar(
+        toc=f'      <h3>On this page</h3>\n      <ul>{sidebar_items}</ul>',
+        uplinks=[('index.html', 'All Guides')],
+        extra_titles={'index.html': 'Every spice guide, grouped by category'},
+    )
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -433,6 +398,8 @@ def render_index(categories: list[dict], all_stems: set[str], out_dir: Path) -> 
         f'<li><a href="#{re.sub(r" +", "-", c["name"].lower())}">{c["name"]}</a></li>'
         for c in categories if any(g['stem'] in all_stems for g in c['guides'])
     )
+    index_sidebar = build_sidebar(
+        toc=f'      <h3>Categories</h3>\n      <ul>{sidebar_cats}</ul>')
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -458,13 +425,7 @@ def render_index(categories: list[dict], all_stems: set[str], out_dir: Path) -> 
 {SIDEBAR_TOGGLE_JS}
   <div class="page-layout">
     <div class="sidebar">
-      <div style="margin-bottom:1.25rem">
-        <a href="/" style="font-size:0.8rem;color:var(--text-sec)">← Home</a>
-      </div>
-      <hr class="sidebar-divider">
-      <h3>Categories</h3>
-      <ul>{sidebar_cats}</ul>
-{SIDEBAR_GLOBALS}
+{index_sidebar}
     </div>
     <div class="content">
       <div class="module-heading">
