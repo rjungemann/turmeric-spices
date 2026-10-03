@@ -29,6 +29,12 @@
   --syn-str:       #D9735A;
   --syn-type:      #7AC4B8;
   --syn-num:       #A8C98A;
+
+  /* Secondary accent -- gold leads, green answers it. Same pairing the home
+     page uses, so emphasis reads the same across the whole site. */
+  --green:         #A8C98A;
+  --green-subtle:  rgba(168,201,138,0.10);
+  --green-line:    rgba(168,201,138,0.25);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -45,6 +51,10 @@ body {
 
 a { color: var(--gold-bright); text-decoration: none; }
 a:hover { text-decoration: underline; }
+
+/* Emphasis is green here for the same reason it is green on the home page:
+   gold is the site's primary, and prose emphasis wants the second voice. */
+em { color: var(--green); font-style: italic; }
 
 /* Header */
 .site-header {
@@ -69,15 +79,51 @@ a:hover { text-decoration: underline; }
   text-decoration: none;
 }
 .site-header .nav-logo:hover { text-decoration: none; }
-.site-header nav { display: flex; gap: 2px; font-size: 0.875rem; }
-.site-header nav a {
+.site-header .nav-links { display: flex; gap: 2px; font-size: 0.875rem; }
+.site-header .nav-links a {
   color: var(--text-sec);
   padding: 6px 12px;
   border-radius: 6px;
   transition: color 0.12s, background 0.12s;
+  white-space: nowrap;
 }
-.site-header nav a:hover { color: var(--text-primary); background: var(--bg-hover); text-decoration: none; }
-.site-header nav a.active { color: var(--gold-bright); }
+.site-header .nav-links a:hover { color: var(--text-primary); background: var(--bg-hover); text-decoration: none; }
+.site-header .nav-links a.active { color: var(--gold-bright); }
+
+/* Right-hand cluster -- same GitHub / Try it pair the hand-written pages show */
+.site-header .nav-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+/* When a page has a filter box, that box takes the free space and the button
+   cluster tucks in beside it instead of fighting it for the same auto margin. */
+.site-header .search-wrap + .nav-right { margin-left: 0; }
+
+.btn-ghost, .btn-gold {
+  font-family: inherit;
+  font-size: 0.84rem;
+  padding: 7px 14px;
+  border-radius: 7px;
+  white-space: nowrap;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.btn-ghost {
+  color: var(--text-sec);
+  border: 1px solid var(--border-str);
+  background: transparent;
+}
+.btn-ghost:hover { color: var(--text-primary); background: var(--bg-hover); text-decoration: none; }
+.btn-gold {
+  font-weight: 500;
+  color: #000;
+  padding: 7px 18px;
+  border: 1px solid var(--gold);
+  background: var(--gold);
+}
+.btn-gold:hover { background: var(--gold-bright); border-color: var(--gold-bright); text-decoration: none; }
 
 /* Search */
 .search-wrap { margin-left: auto; }
@@ -113,6 +159,9 @@ a:hover { text-decoration: underline; }
 
 /* Sidebar */
 .sidebar {
+  /* One face for the whole rail, set on the container so every descendant --
+     headings, nav links, definition links, uplinks -- resolves to the same
+     stack rather than half inheriting the body's. */
   font-family: 'DM Sans', sans-serif;
   padding: 1.5rem 1rem;
   border-right: 1px solid var(--border);
@@ -133,10 +182,35 @@ a:hover { text-decoration: underline; }
 .sidebar h3:first-child { margin-top: 0; }
 .sidebar ul { list-style: none; }
 .sidebar li { margin: 0.15rem 0; }
-/* Sidebars are navigation chrome, not code: one sans-serif face across the
-   spices site, the turmeric main site, the guides and the API reference. */
+/* Every sidebar on every turmeric surface is sans-serif -- nav labels and
+   definition links alike.  A sidebar is navigation chrome, not code: the one
+   face keeps the rail consistent across the main site, the guides, the API
+   reference and the spices site. */
 .sidebar a { font-size: 0.825rem; color: var(--text-sec); font-family: 'DM Sans', sans-serif; }
+.sidebar a.sidebar-def, .sidebar code { font-family: 'DM Sans', sans-serif; }
 .sidebar a:hover { color: var(--gold-bright); text-decoration: none; }
+/* An ordinary link, not a button: nothing here submits or toggles, it just
+   navigates like every other entry in the rail. Selector carries the `a` so it
+   outranks the `.sidebar a` colour rule below it. */
+.sidebar a.sidebar-back {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  margin-bottom: 1rem;
+  transition: color 0.12s;
+}
+.sidebar a.sidebar-back:hover { color: var(--gold-bright); text-decoration: none; }
+/* "Up" links -- All Guides / All Modules / All Spices. One row, directly under
+   the Home button, so every page offers the same two steps back out of itself. */
+.sidebar-uplinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  margin-bottom: 1.25rem;
+}
+.sidebar-uplinks a { font-size: 0.8rem; color: var(--green); }
+.sidebar-uplinks a:hover { color: var(--gold-bright); text-decoration: none; }
 .sidebar-divider {
   border: none;
   border-top: 1px solid var(--border);
@@ -239,11 +313,13 @@ a:hover { text-decoration: underline; }
 }
 
 .def-section { margin-top: 0.75rem; }
+/* Parameters / Returns / Example -- structure inside a card, so the secondary
+   accent rather than the gold that marks the definition itself. */
 .def-section-label {
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-dim);
+  color: var(--green);
   margin-bottom: 0.4rem;
   font-weight: 500;
 }
@@ -279,7 +355,7 @@ a:hover { text-decoration: underline; }
   padding: 1rem 1.25rem;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--gold);
+  border-left: 3px solid var(--green);
   border-radius: 6px;
 }
 .module-doc-summary {
@@ -393,20 +469,24 @@ details.internal-section summary {
 .sidebar-overlay.is-open { display: block; }
 
 /* Responsive */
+@media (max-width: 1080px) {
+  /* Six nav links plus two buttons stop fitting before the drawer breakpoint;
+     drop the buttons first -- both are reachable from the sidebar groups. */
+  .site-header .nav-right { display: none; }
+}
 @media (max-width: 768px) {
   .hamburger { display: block; }
   .site-header { padding: 0 1rem; }
-  .site-header nav { display: none; }
-  .search-input { width: 140px; }
-  .search-input:focus { width: 180px; }
+  .site-header .nav-links { display: none; }
+  .search-wrap { display: none; }
   .page-layout { grid-template-columns: 1fr; }
   .sidebar {
     display: none;
     position: fixed;
-    top: 0;
+    top: 60px;
     left: 0;
     width: 280px;
-    height: 100vh;
+    height: calc(100vh - 60px);
     z-index: 100;
     background: var(--bg-surface);
     border-right: 1px solid var(--border);

@@ -23,29 +23,17 @@ import markdown as md_lib
 
 sys.path.insert(0, str(Path(__file__).parent))
 from genguides import (SIDEBAR_TOGGLE_JS, SYNTAX_TOGGLE_JS,
-                       TURMERIC_HIGHLIGHT_JS, GUIDE_CSS, SIDEBAR_GLOBALS,
+                       TURMERIC_HIGHLIGHT_JS, GUIDE_CSS,
                        inject_syntax_toggles, toc_tokens_to_sidebar)
 from gendocs import render_tree, collect_doc_entries
+from sitechrome import GITHUB_URL, build_page_header, build_sidebar
 
-GITHUB_BASE = 'https://github.com/turmeric-lang/turmeric-spices'
+# Same repo URL the chrome's GitHub link uses -- one constant, so a transfer
+# does not leave half the page pointing at the old owner.
+GITHUB_BASE = GITHUB_URL
 SPICES_REPO = Path('.')
 
-PAGE_HEADER = '''\
-  <header class="site-header">
-    <button class="hamburger" aria-label="Toggle navigation">
-      <span></span><span></span><span></span>
-    </button>
-    <a class="nav-logo" href="https://turmeric-lang.com">
-      <img src="/logo-icon.svg" width="28" height="28" alt="">
-      <img src="/logo.svg" width="101" height="28" alt="Turmeric">
-    </a>
-    <nav>
-      <a href="/guides/">Guides</a>
-      <a href="/" class="active">Spices</a>
-      <a href="https://turmeric-lang.com/docs/html/api/">API Docs</a>
-      <a href="https://turmeric-lang.com/try">Try It</a>
-    </nav>
-  </header>'''
+PAGE_HEADER = build_page_header(active='Spices')
 
 
 # ---------------------------------------------------------------------------
@@ -258,19 +246,14 @@ def render_front_page(meta: SpiceMeta, out_dir: Path, style_rel: str) -> None:
     toc_tokens = getattr(conv, 'toc_tokens', [])
 
     sidebar_items = toc_tokens_to_sidebar(toc_tokens)
-    sidebar_html = (
-        '<div style="margin-bottom:0.5rem">'
-        '<a href="https://turmeric-lang.com" style="font-size:0.8rem;color:var(--text-sec)">&larr; turmeric-lang.com</a>'
-        '</div>\n      '
-        '<div style="margin-bottom:1.25rem">'
-        '<a href="../index.html" style="font-size:0.8rem;color:var(--text-sec)">&larr; All Spices</a>'
-        '</div>\n      '
-        '<div style="margin-bottom:1.25rem">'
-        '<a href="api/" style="font-size:0.85rem;color:var(--gold-bright)">API reference &rarr;</a>'
-        '</div>\n      '
-        '<hr class="sidebar-divider">\n      '
-        f'<h3>On this page</h3>\n      <ul>{sidebar_items}</ul>\n'
-        f'{SIDEBAR_GLOBALS}'
+    sidebar_html = build_sidebar(
+        toc=f'      <h3>On this page</h3>\n      <ul>{sidebar_items}</ul>',
+        uplinks=[('api/', 'API reference'),
+                 ('../index.html', 'All Spices')],
+        extra_titles={
+            'api/': f'Generated API reference for tur-{meta["name"]}',
+            '../index.html': 'Every first-party spice, with tier and C dependency',
+        },
     )
 
     title = f'tur-{meta["name"]} | Turmeric Spices'
@@ -417,14 +400,7 @@ def render_top_index(metas: list[SpiceMeta], out_dir: Path,
             '      </ul>\n'
         )
 
-    sidebar_html = (
-        '<div style="margin-bottom:1.25rem">'
-        '<a href="https://turmeric-lang.com" style="font-size:0.8rem;color:var(--text-sec)">&larr; turmeric-lang.com</a>'
-        '</div>\n      '
-        '<hr class="sidebar-divider">\n'
-        f'{sidebar_links}'
-        f'{SIDEBAR_GLOBALS}'
-    )
+    sidebar_html = build_sidebar(toc=sidebar_links.rstrip())
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
