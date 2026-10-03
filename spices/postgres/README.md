@@ -17,7 +17,7 @@ that react to row changes without polling.
 
 ```turmeric no-check
 :spices {
-  "postgres" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "postgres" {:url    "https://github.com/turmeric-lang/turmeric-spices"
               :ref    "postgres-v0.1.0"
               :subdir "spices/postgres"}
 }
@@ -72,4 +72,4 @@ track.) See `errors/` for the rejected cases.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/postgres>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/postgres>

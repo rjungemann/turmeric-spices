@@ -18,7 +18,7 @@ defaults.
 
 ```turmeric no-check
 :spices {
-  "sqlite" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "sqlite" {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "sqlite-v0.1.0"
             :subdir "spices/sqlite"}
 }
@@ -71,4 +71,4 @@ finalize.)
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/sqlite>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/sqlite>

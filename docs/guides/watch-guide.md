@@ -23,7 +23,7 @@ In your project's `build.tur`:
 
 ```turmeric
 :spices #{
-  "watch" #{:url    "https://github.com/rjungemann/turmeric-spices"
+  "watch" #{:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "main"
             :subdir "spices/watch"}
 }
@@ -222,5 +222,5 @@ is the recommended pattern.
 ## See also
 
 - [tur-watch front page](https://spices.turmeric-lang.com/watch/) -- module map and module-level docs
-- [docs/notebook-watch-semantics.md](https://github.com/rjungemann/turmeric-spices/blob/main/docs/notebook-watch-semantics.md) -- the contract tur-watch v0.1.0
+- [docs/notebook-watch-semantics.md](https://github.com/turmeric-lang/turmeric-spices/blob/main/docs/notebook-watch-semantics.md) -- the contract tur-watch v0.1.0
   preserves from the original notebook watcher

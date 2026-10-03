@@ -33,7 +33,7 @@ jobs:
       - name: Checkout turmeric (compiler)
         uses: actions/checkout@v4
         with:
-          repository: rjungemann/turmeric
+          repository: turmeric-lang/turmeric
           ref: ${{ needs.discover-spices.outputs.turmeric-sha }}
           path: turmeric
 
@@ -352,7 +352,7 @@ jobs:
       turmeric-sha: ${{ steps.turmeric.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
-      # Resolve rjungemann/turmeric's main to ONE commit for this whole run.
+      # Resolve turmeric-lang/turmeric's main to ONE commit for this whole run.
       #
       # Every leg used to check out `main` by name, at whatever moment that
       # leg happened to start.  The matrix is ~90 jobs and the runner pool
@@ -370,9 +370,9 @@ jobs:
       - id: turmeric
         name: Resolve turmeric main to one SHA for this run
         run: |
-          sha=$(git ls-remote https://github.com/rjungemann/turmeric.git refs/heads/main | cut -f1)
+          sha=$(git ls-remote https://github.com/turmeric-lang/turmeric.git refs/heads/main | cut -f1)
           if [ -z "$sha" ]; then
-            echo "could not resolve rjungemann/turmeric main" >&2
+            echo "could not resolve turmeric-lang/turmeric main" >&2
             exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
@@ -401,7 +401,7 @@ jobs:
       - name: Checkout turmeric (compiler)
         uses: actions/checkout@v4
         with:
-          repository: rjungemann/turmeric
+          repository: turmeric-lang/turmeric
           ref: ${{ needs.discover-spices.outputs.turmeric-sha }}
           path: turmeric
 

@@ -17,7 +17,7 @@ code where raylib's "batteries-included" model is a better fit than raw GL.
 
 ```turmeric no-check
 :spices {
-  "raylib" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "raylib" {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "raylib-v0.1.0"
             :subdir "spices/raylib"}
 }
@@ -79,4 +79,4 @@ linear cases.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/raylib>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/raylib>

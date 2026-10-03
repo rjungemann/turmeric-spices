@@ -46,7 +46,7 @@ Two consequences for this repo:
    yet removable.** The "Fetch C dependencies" step moves the root `build.tur`
    aside so the directory stops looking like a workspace, precisely to stop the
    compiler pulling in all 17 native libs. The job checks out
-   `rjungemann/turmeric` with no `ref:`, i.e. **the default branch**, so the
+   `turmeric-lang/turmeric` with no `ref:`, i.e. **the default branch**, so the
    hack cannot come out until the scoping fix is on turmeric `main` -- a merged
    PR elsewhere is not enough. Left in place with the removal condition and a
    verification recipe recorded in the comment. Its original comment is the

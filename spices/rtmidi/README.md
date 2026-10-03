@@ -17,7 +17,7 @@ pair with `tur-rtaudio` for a complete real-time setup.
 
 ```turmeric no-check
 :spices {
-  "rtmidi" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "rtmidi" {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "rtmidi-v0.2.0"
             :subdir "spices/rtmidi"}
 }
@@ -68,4 +68,4 @@ let [r midi-out-new(":core-midi")]
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/rtmidi>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/rtmidi>

@@ -17,7 +17,7 @@ small Turmeric modules:
   TLS hook table. Calling `tls-httpd-init` once flips an httpd server
   from `httpd-new` to `httpd-new-tls`.
 
-The primary consumer is [`stdlib/httpd`](https://github.com/rjungemann/turmeric/blob/main/stdlib/httpd.tur)
+The primary consumer is [`stdlib/httpd`](https://github.com/turmeric-lang/turmeric/blob/main/stdlib/httpd.tur)
 (milestone H5), but `tls/conn` is general enough to layer over any
 byte-stream socket -- SMTP, IMAP, custom protocols, etc.
 
@@ -34,9 +34,9 @@ opt-in.
 | `tls/conn`    | Shipped (v0.1.0, T3) |
 | `tls/httpd`   | Shipped (v0.1.0, T5) |
 
-See [`docs/tur-tls-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/tur-tls-plan.md)
+See [`docs/tur-tls-plan.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/tur-tls-plan.md)
 for the full roadmap. For the httpd integration story, see
-[`docs/guides/httpd-tls-guide.md`](https://github.com/rjungemann/turmeric/blob/main/docs/guides/httpd-tls-guide.md).
+[`docs/guides/httpd-tls-guide.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/guides/httpd-tls-guide.md).
 
 ## Install
 
@@ -58,7 +58,7 @@ Add to your project's `build.tur`:
 
 ```turmeric no-check
 :spices #{
-  "tls" #{:url    "https://github.com/rjungemann/turmeric-spices"
+  "tls" #{:url    "https://github.com/turmeric-lang/turmeric-spices"
          :ref    "tls-v0.1.0"
          :subdir "spices/tls"}
 }
@@ -149,7 +149,7 @@ The H5 milestone of stdlib/httpd makes the integration one-line:
 ```
 
 See the full guide at
-[`docs/guides/httpd-tls-guide.md`](https://github.com/rjungemann/turmeric/blob/main/docs/guides/httpd-tls-guide.md)
+[`docs/guides/httpd-tls-guide.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/guides/httpd-tls-guide.md)
 for migration steps, what happens under the hood, and how to verify a
 running server with `curl` / `openssl s_client`.
 
@@ -166,7 +166,7 @@ These are explicitly punted to follow-ups so the v1 API stays small.
 
 ## See also
 
-- [tur-tls plan](https://github.com/rjungemann/turmeric/blob/main/docs/tur-tls-plan.md)
-- [tur-httpd plan](https://github.com/rjungemann/turmeric/blob/main/docs/tur-httpd-plan.md) (H5 = tls integration)
-- [httpd-tls integration guide](https://github.com/rjungemann/turmeric/blob/main/docs/guides/httpd-tls-guide.md)
+- [tur-tls plan](https://github.com/turmeric-lang/turmeric/blob/main/docs/tur-tls-plan.md)
+- [tur-httpd plan](https://github.com/turmeric-lang/turmeric/blob/main/docs/tur-httpd-plan.md) (H5 = tls integration)
+- [httpd-tls integration guide](https://github.com/turmeric-lang/turmeric/blob/main/docs/guides/httpd-tls-guide.md)
 - mbedTLS: <https://tls.mbed.org/>

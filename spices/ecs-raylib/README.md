@@ -1,11 +1,11 @@
 # tur-ecs-raylib
 
-Raylib 5.5 companion to [`tur-ecs`](https://github.com/rjungemann/turmeric-spices/blob/main/spices/ecs/README.md): standard 2D
+Raylib 5.5 companion to [`tur-ecs`](https://github.com/turmeric-lang/turmeric-spices/blob/main/spices/ecs/README.md): standard 2D
 components, integration / rendering systems, and a `with-game-loop`
 macro for ECS-driven games.
 
 This is **E3** in the ECS spice plan
-([`docs/archive/ecs-spice-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/ecs-spice-plan.md)).
+([`docs/archive/ecs-spice-plan.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/archive/ecs-spice-plan.md)).
 
 ## Status
 
@@ -79,7 +79,7 @@ This is **E3** in the ECS spice plan
 
 ```turmeric no-check
 :spices {
-  "ecs-raylib" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "ecs-raylib" {:url    "https://github.com/turmeric-lang/turmeric-spices"
                 :ref    "ecs-raylib-v0.1.0"
                 :subdir "spices/ecs-raylib"}
 }
@@ -115,9 +115,9 @@ velocity-flip system to demonstrate the typical mix.
 - [`docs/guides/ecs-guide.md`](../../../turmeric/docs/guides/ecs-guide.md) --
   end-to-end walkthrough of components, queries, systems, and the
   game loop.
-- [`docs/archive/ecs-spice-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/ecs-spice-plan.md) --
+- [`docs/archive/ecs-spice-plan.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/archive/ecs-spice-plan.md) --
   the long-form plan and v2 roadmap.
-- [`tur-ecs`](https://github.com/rjungemann/turmeric-spices/blob/main/spices/ecs/README.md) -- the upstream
+- [`tur-ecs`](https://github.com/turmeric-lang/turmeric-spices/blob/main/spices/ecs/README.md) -- the upstream
   ECS spice's release notes and known limitations.
 
 ## License

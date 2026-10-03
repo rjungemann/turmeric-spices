@@ -18,7 +18,7 @@ want yyjson's speed without dropping to inline C.
 
 ```turmeric no-check
 :spices {
-  "json" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "json" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "json-v0.1.0"
           :subdir "spices/json"}
 }
@@ -125,4 +125,4 @@ place.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/json>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/json>

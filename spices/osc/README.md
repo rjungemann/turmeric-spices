@@ -18,7 +18,7 @@ Pairs naturally with `tur-scscm` for SuperCollider synthesis.
 
 ```turmeric no-check
 :spices {
-  "osc" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "osc" {:url    "https://github.com/turmeric-lang/turmeric-spices"
          :ref    "osc-v0.1.0"
          :subdir "spices/osc"}
 }
@@ -60,4 +60,4 @@ let [r client-new("127.0.0.1" "57110" "udp")]
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/osc>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/osc>

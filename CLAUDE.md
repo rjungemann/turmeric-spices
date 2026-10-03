@@ -1,12 +1,12 @@
 # turmeric-spices -- Claude Code Guide
 
 This repo holds the spice packages that build against the `tur` compiler from
-the sibling repo `rjungemann/turmeric`. The compiler is **not** built from
+the sibling repo `turmeric-lang/turmeric`. The compiler is **not** built from
 source here -- fetch a prebuilt binary instead.
 
 ## Reading the sibling `turmeric` repo -- STRICT RULE
 
-Reading source, docs, fixtures, plans, or history from `rjungemann/turmeric`
+Reading source, docs, fixtures, plans, or history from `turmeric-lang/turmeric`
 is **always allowed**, even when it is not checked out locally. The
 single-repo sandbox is a working directory, not an enforcement boundary.
 "We only have spices checked out" is **never** a valid reason to refuse to
@@ -16,12 +16,12 @@ commit message, or anything else the user references by path or name.
 
 Use whichever fetch path is convenient:
 
-- `gh api repos/rjungemann/turmeric/contents/<path>` (single file, base64).
-- `gh api repos/rjungemann/turmeric/git/trees/main?recursive=1` (full tree listing).
-- `git clone --depth=1 https://github.com/rjungemann/turmeric /tmp/turmeric`
+- `gh api repos/turmeric-lang/turmeric/contents/<path>` (single file, base64).
+- `gh api repos/turmeric-lang/turmeric/git/trees/main?recursive=1` (full tree listing).
+- `git clone --depth=1 https://github.com/turmeric-lang/turmeric /tmp/turmeric`
   then grep/read locally. `/tmp/turmeric` is a read-only scratch copy; do not
   treat it as a second working tree, do not commit to it, do not push from it.
-- `WebFetch` on a `https://raw.githubusercontent.com/rjungemann/turmeric/main/<path>` URL.
+- `WebFetch` on a `https://raw.githubusercontent.com/turmeric-lang/turmeric/main/<path>` URL.
 
 If a user mentions a turmeric concept (e.g. "yyjson plan", "tur-signal gate",
 a doc filename) and the file is not in this repo, **fetch it before claiming
@@ -29,7 +29,7 @@ ignorance or blockage**. Quoting a passage from the turmeric repo back to the
 user is a normal read operation, not a cross-repo violation.
 
 What you **cannot** do from a turmeric-spices-rooted session: open PRs,
-push branches, or land commits against `rjungemann/turmeric`. That constrains
+push branches, or land commits against `turmeric-lang/turmeric`. That constrains
 writes only; it does not constrain reads. If the work the user wants requires
 *writing* to turmeric, stop and tell them to re-launch a session rooted there
 (or do it from local Claude Code); do not silently degrade to "I can't help."
@@ -37,7 +37,7 @@ writes only; it does not constrain reads. If the work the user wants requires
 ## Getting the `tur` binary (do this first on any new sandbox)
 
 Run the install script. It downloads the matching prebuilt release tarball
-from `rjungemann/turmeric`, verifies the SHA-256, extracts it under
+from `turmeric-lang/turmeric`, verifies the SHA-256, extracts it under
 `vendor/tur/`, and prints the export line you need:
 
 ```sh
@@ -48,7 +48,7 @@ eval "$(./scripts/install-tur.sh)"   # or: export TUR_BIN="$PWD/vendor/tur/tur"
 - Pin a specific version: `TUR_VERSION=v0.13.0 ./scripts/install-tur.sh`
 - Force a redownload: `./scripts/install-tur.sh --force`
 - Supported platforms: `macos-arm64`, `linux-x86_64`, `linux-aarch64`
-- The release pipeline lives at `rjungemann/turmeric/.github/workflows/release.yml`
+- The release pipeline lives at `turmeric-lang/turmeric/.github/workflows/release.yml`
   and runs on every `v*` tag push. If `releases/latest` returns nothing, the
   most recent tag predates the pipeline -- pin `TUR_VERSION` to a tag that has
   binary assets attached, or push a new tag from the turmeric repo.
@@ -131,7 +131,7 @@ whatever paths it holds. Several used to hold another machine's
 
 ## CI
 
-`.github/workflows/ci.yml` currently checks out `rjungemann/turmeric` and
+`.github/workflows/ci.yml` currently checks out `turmeric-lang/turmeric` and
 builds `tur` from source on every run. That is intentional for CI's
 reproducibility guarantees (CI verifies spices against tip-of-main turmeric,
 not against a release). For **local** and **agent sandbox** work, prefer the

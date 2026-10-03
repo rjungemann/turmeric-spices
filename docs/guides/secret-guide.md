@@ -13,7 +13,7 @@ more than usual here, because most of the value in a spice like this is in
 choices you cannot see from the API.
 
 Design plan:
-[`docs/upcoming/secret-spice-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/upcoming/secret-spice-plan.md)
+[`docs/upcoming/secret-spice-plan.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/upcoming/secret-spice-plan.md)
 in the turmeric repo.
 
 ## Why it exists
@@ -369,7 +369,7 @@ carrier, and the box-to-struct conversion used to be silently dropped in any
 function the CPS transform touches -- which is every caller of a higher-order
 function like `with-secret` -- producing a wall of C type errors with no
 `.tur` attribution. That is **fixed** as of turmeric `65024bca`
-([`cps-result-unbox-dropped.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/cps-result-unbox-dropped.md)),
+([`cps-result-unbox-dropped.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/archive/cps-result-unbox-dropped.md)),
 so it is no longer forced.
 
 The split is kept anyway, because it is the better factoring on its own
@@ -463,7 +463,7 @@ stdlib and the spices. Inline-C bodies call siblings through
 that macro's expansion, producing a call to a function that does not exist
 (or, with a hyphen in the name, a phantom `alloc__` from the C tokenizer
 reading the hyphen as a minus). That is **fixed** as of turmeric `490172c6`
-([`tur-cname-macro-breaks-on-leading-underscores.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/tur-cname-macro-breaks-on-leading-underscores.md)),
+([`tur-cname-macro-breaks-on-leading-underscores.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/archive/tur-cname-macro-breaks-on-leading-underscores.md)),
 so either spelling works now.
 
 The `-raw` suffix is kept regardless: privacy comes from not exporting these,

@@ -19,7 +19,7 @@ use `tur-plutovg`; `tur-png` is the I/O layer.
 
 ```turmeric no-check
 :spices {
-  "png" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "png" {:url    "https://github.com/turmeric-lang/turmeric-spices"
          :ref    "png-v0.1.0"
          :subdir "spices/png"}
 }
@@ -55,4 +55,4 @@ let [r png-read("input.png")]
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/png>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/png>

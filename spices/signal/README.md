@@ -1,6 +1,6 @@
 # tur-signal
 
-Typed Signal Function (SF) library for [Turmeric](https://github.com/rjungemann/turmeric):
+Typed Signal Function (SF) library for [Turmeric](https://github.com/turmeric-lang/turmeric):
 oscillators, filters, shapers, ADSR envelopes, and SF-pipeline composition.
 
 ---
@@ -158,7 +158,7 @@ In your `build.tur` `:spices` block:
 ```turmeric
 (defpackage my-app
   :spices #{
-    "signal" #{:url    "https://github.com/rjungemann/turmeric-spices"
+    "signal" #{:url    "https://github.com/turmeric-lang/turmeric-spices"
                :ref    "signal-v0.1.0"
                :subdir "spices/signal"}
   })

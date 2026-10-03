@@ -38,7 +38,7 @@ guarantees ARE the inline C.
 | C6 | `crdt-sync` -- transport, delta buffering, anti-entropy | not started, separate spice |
 
 Design plan:
-[`docs/upcoming/crdt-spice-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/upcoming/crdt-spice-plan.md)
+[`docs/upcoming/crdt-spice-plan.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/upcoming/crdt-spice-plan.md)
 in the compiler repo. Eleven test suites, including two seeded convergence
 fuzzers.
 

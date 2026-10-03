@@ -21,7 +21,7 @@ Key features:
 
 ```turmeric
 :spices {
-  "linalg" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "linalg" {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "linalg-v0.1.0"
             :subdir "spices/linalg"}
 }
@@ -30,7 +30,7 @@ Key features:
 Or use `tur add`:
 
 ```sh
-tur add https://github.com/rjungemann/turmeric-spices \
+tur add https://github.com/turmeric-lang/turmeric-spices \
   --ref linalg-v0.1.0 --subdir spices/linalg --name linalg
 ```
 
@@ -71,4 +71,4 @@ column-major storage to match OpenGL conventions.
 
 ## See also
 
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/linalg>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/linalg>

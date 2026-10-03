@@ -17,7 +17,7 @@ string concatenation would be error-prone.
 
 ```turmeric no-check
 :spices {
-  "c-dsl" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "c-dsl" {:url    "https://github.com/turmeric-lang/turmeric-spices"
            :ref    "c-dsl-v0.2.0"
            :subdir "spices/c-dsl"}
 }
@@ -77,4 +77,4 @@ rather than two).
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/c-dsl>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/c-dsl>

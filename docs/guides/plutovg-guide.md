@@ -22,7 +22,7 @@ In your project's `build.tur`:
 
 ```turmeric
 :spices #{
-  "plutovg" #{:url    "https://github.com/rjungemann/turmeric-spices"
+  "plutovg" #{:url    "https://github.com/turmeric-lang/turmeric-spices"
               :ref    "plutovg-v0.1.0"
               :subdir "spices/plutovg"}
 }

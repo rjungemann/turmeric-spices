@@ -18,7 +18,7 @@ validation, etc.
 
 ```turmeric no-check
 :spices {
-  "regex" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "regex" {:url    "https://github.com/turmeric-lang/turmeric-spices"
            :ref    "regex-v0.1.0"
            :subdir "spices/regex"}
 }
@@ -58,4 +58,4 @@ let [r regex-compile("(?P<year>\\d{4})-(?P<month>\\d{2})" 0)]
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/regex>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/regex>

@@ -18,7 +18,7 @@ or use it stand-alone to bake GLSL strings at build time.
 
 ```turmeric no-check
 :spices {
-  "glsl" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "glsl" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "glsl-v0.2.0"
           :subdir "spices/glsl"}
 }
@@ -81,4 +81,4 @@ rather than two, carried over from the c-dsl prototype's memo).
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/glsl>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/glsl>

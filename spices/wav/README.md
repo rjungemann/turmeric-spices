@@ -17,7 +17,7 @@ batch-process audio offline.
 
 ```turmeric no-check
 :spices {
-  "wav" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "wav" {:url    "https://github.com/turmeric-lang/turmeric-spices"
          :ref    "wav-v0.1.0"
          :subdir "spices/wav"}
 }
@@ -51,4 +51,4 @@ let [r wav-open-read("in.wav")]
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/wav>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/wav>

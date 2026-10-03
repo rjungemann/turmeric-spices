@@ -18,7 +18,7 @@ including the WebAssembly build.
 
 ```turmeric no-check
 :spices {
-  "test" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "test" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "test-v0.1.0"
           :subdir "spices/test"}
 }
@@ -48,4 +48,4 @@ run-tests()
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/test>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/test>

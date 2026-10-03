@@ -18,7 +18,7 @@ upgraded `WsConn` for the lifetime of the session.
 
 ```turmeric no-check
 :spices {
-  "tourist-ws" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "tourist-ws" {:url    "https://github.com/turmeric-lang/turmeric-spices"
                 :ref    "tourist-ws-v0.1.0"
                 :subdir "spices/tourist-ws"}
 }

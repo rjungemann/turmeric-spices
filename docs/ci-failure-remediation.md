@@ -527,7 +527,7 @@ error: incompatible types when returning type 'Pair__int__int' but 'int64_t' was
 
 The `signal/arrow_tests.tur` test triggers a codegen bug where a function
 returning `Pair<int, int>` is emitted with an `int64_t` return type. This is
-likely a compiler-side issue (report upstream to `rjungemann/turmeric`) but
+likely a compiler-side issue (report upstream to `turmeric-lang/turmeric`) but
 the test file or the spice source may be able to work around it by choosing
 a struct type that the current emitter handles cleanly.
 

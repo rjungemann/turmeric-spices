@@ -18,7 +18,7 @@ games-of-modest-size that want direct GL access.
 
 ```turmeric no-check
 :spices {
-  "opengl" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "opengl" {:url    "https://github.com/turmeric-lang/turmeric-spices"
             :ref    "opengl-v0.1.0"
             :subdir "spices/opengl"}
 }
@@ -258,4 +258,4 @@ after linking is a use-after-delete rather than a second link.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/opengl>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/opengl>

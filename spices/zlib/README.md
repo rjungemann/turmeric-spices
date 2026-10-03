@@ -30,7 +30,7 @@ through `strlen`.
 
 ```turmeric no-check
 :spices {
-  "zlib" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "zlib" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "zlib-v0.1.0"
           :subdir "spices/zlib"}
 }
@@ -79,5 +79,5 @@ length.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/zlib>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/zlib>
 - Upstream zlib: <https://github.com/madler/zlib>

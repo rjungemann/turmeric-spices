@@ -27,7 +27,7 @@ the same code moves to `tcp://` by changing a string.
 
 ```turmeric no-check
 :spices {
-  "nng" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "nng" {:url    "https://github.com/turmeric-lang/turmeric-spices"
          :ref    "nng-v0.1.0"
          :subdir "spices/nng"}
 }
@@ -244,7 +244,7 @@ read out, and the type says so.
 This is what the spice's plan specified from the start. It briefly shipped a
 `(defopaque Ack :int)` stand-in instead, because a `nil` ok payload emitted a
 `void` union member and the monomorph would not compile
-([report](https://github.com/rjungemann/turmeric/blob/main/docs/archive/result-nil-ok-payload-emits-void-field.md),
+([report](https://github.com/turmeric-lang/turmeric/blob/main/docs/archive/result-nil-ok-payload-emits-void-field.md),
 fixed upstream). The alternative it avoided -- `(Result int int)` with an
 "ok carries 0" convention -- is the `:int` stand-in the house rules exist to
 prevent.
@@ -281,7 +281,7 @@ errors/run.sh           # the three compile-fail linear fixtures
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/nng>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/nng>
 - [`tur-msgpack`](../msgpack/) -- the binary codec whose buffer layout this
   spice shares
 - [`tur-valkey`](../valkey/) -- the structural model for this spice

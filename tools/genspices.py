@@ -27,7 +27,7 @@ from genguides import (SIDEBAR_TOGGLE_JS, SYNTAX_TOGGLE_JS,
                        inject_syntax_toggles, toc_tokens_to_sidebar)
 from gendocs import render_tree, collect_doc_entries
 
-GITHUB_BASE = 'https://github.com/rjungemann/turmeric-spices'
+GITHUB_BASE = 'https://github.com/turmeric-lang/turmeric-spices'
 SPICES_REPO = Path('.')
 
 PAGE_HEADER = '''\

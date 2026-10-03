@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch a prebuilt `tur` binary from the rjungemann/turmeric GitHub Release
+# Fetch a prebuilt `tur` binary from the turmeric-lang/turmeric GitHub Release
 # matching this host's platform, extract it to vendor/tur/, and print the
 # export commands the caller needs.
 #
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-REPO="rjungemann/turmeric"
+REPO="turmeric-lang/turmeric"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/vendor/tur"
 

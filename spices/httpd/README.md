@@ -24,7 +24,7 @@ The three are deliberately separate so any layer can be used independently.
 
 ```turmeric no-check
 :spices {
-  "httpd" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "httpd" {:url    "https://github.com/turmeric-lang/turmeric-spices"
            :ref    "httpd-v0.1.0"
            :subdir "spices/httpd"}
 }
@@ -135,10 +135,10 @@ TLS is opt-in: only programs that import `httpd/tls` link mbedTLS. The plaintext
 ## Status
 
 Early in development. See
-[`docs/archive/history/tur-httpd-plan.md`](https://github.com/rjungemann/turmeric/blob/main/docs/archive/history/tur-httpd-plan.md) in the
+[`docs/archive/history/tur-httpd-plan.md`](https://github.com/turmeric-lang/turmeric/blob/main/docs/archive/history/tur-httpd-plan.md) in the
 turmeric repo for the full roadmap.
 
 ## See also
 
 - [API reference](api/) (generated)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/httpd>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/httpd>

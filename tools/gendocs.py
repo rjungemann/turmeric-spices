@@ -1012,7 +1012,7 @@ SIDEBAR_GLOBALS = """\
   </ul>
   <h3>Community</h3>
   <ul>
-    <li><a href="https://github.com/rjungemann/turmeric-spices">GitHub</a></li>
+    <li><a href="https://github.com/turmeric-lang/turmeric-spices">GitHub</a></li>
   </ul>
 """
 

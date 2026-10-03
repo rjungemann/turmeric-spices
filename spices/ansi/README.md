@@ -26,7 +26,7 @@ The spice is split into focused modules so you only import what you use:
 
 ```turmeric no-check
 :spices {
-  "ansi" {:url    "https://github.com/rjungemann/turmeric-spices"
+  "ansi" {:url    "https://github.com/turmeric-lang/turmeric-spices"
           :ref    "ansi-v0.1.3"
           :subdir "spices/ansi"}
 }
@@ -343,4 +343,4 @@ tty, so the key-reading and key-name test suites run safely in CI.
 ## See also
 
 - [API reference](api/)
-- Source: <https://github.com/rjungemann/turmeric-spices/tree/main/spices/ansi>
+- Source: <https://github.com/turmeric-lang/turmeric-spices/tree/main/spices/ansi>
